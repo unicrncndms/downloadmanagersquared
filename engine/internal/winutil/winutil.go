@@ -46,7 +46,8 @@ func DownloadsFolder() string {
 	return filepath.Join(home, "Downloads")
 }
 
-func hidden(cmd *exec.Cmd) *exec.Cmd {
+// Hidden makes a child process run without a console window.
+func Hidden(cmd *exec.Cmd) *exec.Cmd {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 	return cmd
 }
@@ -60,7 +61,7 @@ $x = $t.GetElementsByTagName('text')
 $x.Item(0).AppendChild($t.CreateTextNode($env:DMS_TITLE)) > $null
 $x.Item(1).AppendChild($t.CreateTextNode($env:DMS_MSG)) > $null
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($t))`
-	cmd := hidden(exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script))
+	cmd := Hidden(exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script))
 	cmd.Env = append(os.Environ(), "DMS_TITLE="+title, "DMS_MSG="+msg)
 	if cmd.Start() == nil {
 		go cmd.Wait()
@@ -76,7 +77,7 @@ func ShowInFolder(path string) error {
 
 // LaunchFirefox starts Firefox through its App Paths registration.
 func LaunchFirefox() error {
-	return hidden(exec.Command("cmd.exe", "/c", "start", "", "firefox")).Start()
+	return Hidden(exec.Command("cmd.exe", "/c", "start", "", "firefox")).Start()
 }
 
 func Autostart() bool {

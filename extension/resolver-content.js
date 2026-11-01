@@ -9,6 +9,7 @@
 
   const CLICKABLE = "a,button,input[type=submit],input[type=button],input[type=image],[role=button],[onclick]";
   const FIND_TIMEOUT = 10000;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // Widgets of the common captcha services, plus generic captcha markers.
   const CAPTCHA = [
     "iframe[src*='recaptcha']", "iframe[src*='hcaptcha']", "iframe[src*='challenges.cloudflare.com']",
@@ -101,7 +102,7 @@
   setInterval(watchCaptcha, 700);
 
   async function untilNoCaptcha() {
-    while (captchaPending()) await new Promise((r) => setTimeout(r, 500));
+    while (captchaPending()) await sleep(500);
   }
 
   async function replay(step, index) {
@@ -109,13 +110,13 @@
     const start = Date.now();
     let el = null;
     while (!(el = find(step)) && Date.now() - start < FIND_TIMEOUT) {
-      await new Promise((r) => setTimeout(r, 300));
+      await sleep(300);
     }
     if (!el) {
       browser.runtime.sendMessage({ resolver: true, type: "notFound", index });
       return;
     }
-    await new Promise((r) => setTimeout(r, 400 + Math.random() * 600));
+    await sleep(400 + Math.random() * 600);
     await untilNoCaptcha();
     el.scrollIntoView({ block: "center" });
     browser.runtime.sendMessage({ resolver: true, type: "clicked", index });

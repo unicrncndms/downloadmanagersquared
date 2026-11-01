@@ -12,6 +12,14 @@ function connectUI(onUpdate) {
   return port;
 }
 
+// Engine connection badge in the page header.
+function renderConn(m, connectedText) {
+  const conn = $("conn");
+  conn.textContent = m.connected ? connectedText : "Engine offline";
+  conn.className = "badge " + (m.connected ? "ok" : "bad");
+  conn.title = m.error || "";
+}
+
 function fmtBytes(n) {
   if (!(n >= 0)) return "?";
   const u = ["B", "KB", "MB", "GB", "TB"];

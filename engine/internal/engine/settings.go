@@ -55,6 +55,11 @@ func (s *Settings) normalize() {
 		s.DefaultConnections = d.DefaultConnections
 	}
 	s.DefaultConnections = min(s.DefaultConnections, 32)
+	for _, is := range s.Interfaces {
+		if is.Connections != 0 { // 0 = use DefaultConnections
+			is.Connections = min(max(is.Connections, 1), 32)
+		}
+	}
 }
 
 func loadSettings(path string) Settings {

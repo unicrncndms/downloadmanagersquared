@@ -100,10 +100,7 @@ function renderRecipes(recipes) {
 // --- wiring ---
 
 connectUI((m) => {
-  const conn = $("conn");
-  conn.textContent = m.connected ? "Engine connected" : "Engine offline";
-  conn.className = "badge " + (m.connected ? "ok" : "bad");
-  conn.title = m.error || "";
+  renderConn(m, "Engine connected");
   if (!m.state || !m.settings) return;
   renderIfaces(m.state, m.settings);
   renderRecipes(m.recipes);

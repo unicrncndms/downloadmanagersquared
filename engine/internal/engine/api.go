@@ -212,7 +212,7 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 				is.Enabled = &v
 			}
 			if p.Connections != nil {
-				is.Connections = min(max(*p.Connections, 1), 32)
+				is.Connections = *p.Connections
 			}
 		}), nil
 	case "refreshInterfaces":

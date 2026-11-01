@@ -177,8 +177,7 @@ type Download struct {
 	meter    rate.Meter
 	total    rate.EWMA
 	speed    float64
-	eta      float64
-	etaAt    time.Time
+	eta      rate.ETA
 	lastTick time.Time
 	lastSave time.Time
 	lastDisk time.Time
@@ -251,7 +250,7 @@ func (d *Download) Start() {
 	d.st.Status, d.st.Error = StatusRunning, ""
 	d.workers, d.ifs, d.probing = map[*worker]struct{}{}, map[string]*ifaceRun{}, map[string]bool{}
 	d.meter = rate.Meter{Window: d.env.ETAWindow()}
-	d.total, d.speed, d.eta, d.etaAt = rate.EWMA{}, 0, -1, time.Time{}
+	d.total, d.speed, d.eta = rate.EWMA{}, 0, rate.ETA{}
 	d.lastTick = time.Now()
 	for _, l := range d.st.Links {
 		if l.Status == LinkFailed && l.retryAt.IsZero() && strings.HasPrefix(l.Error, "unreachable") {
@@ -377,7 +376,8 @@ func (d *Download) run(ctx context.Context) {
 	default:
 		d.st.Status, d.st.Finished, d.st.Remaining, finished = StatusCompleted, time.Now(), nil, true
 	}
-	d.speed, d.eta = 0, -1
+	d.speed = 0
+	d.eta.Clear()
 	d.running = false
 	close(d.done)
 	d.mu.Unlock()
@@ -542,13 +542,10 @@ func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
 func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err error) {
 	if err != nil {
 		log.Printf("download %s probe via %s: %s", d.st.ID, ifaceID, shortErr(err))
-	} else {
-		log.Printf("download %s probe via %s: HTTP %d, size %d, ranges %v, page %v", d.st.ID, ifaceID, r.status, r.size, r.rangeOK, r.isPage)
-	}
-	if err != nil {
 		l.Status, l.Error, l.retryAt = LinkFailed, "unreachable: "+shortErr(err), time.Now().Add(30*time.Second)
 		return
 	}
+	log.Printf("download %s probe via %s: HTTP %d, size %d, ranges %v, page %v", d.st.ID, ifaceID, r.status, r.size, r.rangeOK, r.isPage)
 	if r.rejected() {
 		if r.isPage && d.st.PageURL == "" && l.URL == d.st.URL {
 			// Either the link is a landing page, or it is the file link and this
@@ -642,7 +639,7 @@ func (d *Download) openFileLocked() error {
 		return err
 	}
 	if !d.st.Allocated {
-		d.st.Filename = uniqueName(d.st.Dir, d.st.Filename)
+		d.st.Filename = uniqueName(d.st.Dir, d.st.Filename, "", partSuffix)
 	}
 	path := d.partPath()
 
@@ -687,11 +684,7 @@ func (d *Download) openFileLocked() error {
 			f.Close()
 			return fmt.Errorf("partial file %s has the wrong size", path)
 		}
-		var rem int64
-		for _, r := range d.st.Remaining {
-			rem += r.End - r.Start
-		}
-		if err := checkSpace(d.st.Dir, rem); err != nil {
+		if err := checkSpace(d.st.Dir, d.remainingLocked()); err != nil {
 			f.Close()
 			return err
 		}
@@ -783,13 +776,25 @@ func (d *Download) doneLocked() int64 {
 	return d.st.Size - d.remainingLocked()
 }
 
-func (d *Download) spawnLocked(ctx context.Context, ifc Iface, l Link, seg *segment) {
+// newWorkerLocked registers a worker; the caller starts its goroutine.
+func (d *Download) newWorkerLocked(ctx context.Context, ifc Iface, l Link) (*worker, context.Context) {
 	wctx, cancel := context.WithCancel(ctx)
 	w := &worker{d: d, iface: ifc.ID, client: ifc.Client, link: l, ir: d.ifRun(ifc.ID), cancel: cancel}
-	seg.owner = w
 	d.workers[w] = struct{}{}
-	d.ifRun(ifc.ID).active++
+	w.ir.active++
 	d.wg.Add(1)
+	return w, wctx
+}
+
+// dropWorkerLocked undoes newWorkerLocked once the worker is done.
+func (d *Download) dropWorkerLocked(w *worker) {
+	delete(d.workers, w)
+	w.ir.active--
+}
+
+func (d *Download) spawnLocked(ctx context.Context, ifc Iface, l Link, seg *segment) {
+	w, wctx := d.newWorkerLocked(ctx, ifc, l)
+	seg.owner = w
 	go w.run(wctx, seg)
 }
 
@@ -797,7 +802,7 @@ func (d *Download) spawnLocked(ctx context.Context, ifc Iface, l Link, seg *segm
 // A backoff pause only stops new connections; working ones carry on.
 func (d *Download) nextLocked(w *worker) *segment {
 	l := d.st.Links[w.iface]
-	ir := d.ifRun(w.iface)
+	ir := w.ir
 	if l == nil || l.Status != LinkReady || l.URL != w.link.URL || ir.active > ir.target() {
 		return nil
 	}
@@ -806,7 +811,7 @@ func (d *Download) nextLocked(w *worker) *segment {
 
 func (d *Download) workerFailedLocked(w *worker, err error) {
 	now := time.Now()
-	ir := d.ifRun(w.iface)
+	ir := w.ir
 	l := d.st.Links[w.iface]
 	var fe *fetchError
 	if !errors.As(err, &fe) {
@@ -862,14 +867,13 @@ func (w *worker) run(ctx context.Context, seg *segment) {
 			d.workerFailedLocked(w, err)
 			seg = nil
 		default:
-			d.ifRun(w.iface).netFails = 0
+			w.ir.netFails = 0
 			if seg = d.nextLocked(w); seg != nil {
 				seg.owner = w
 			}
 		}
 		if seg == nil {
-			delete(d.workers, w)
-			d.ifRun(w.iface).active--
+			d.dropWorkerLocked(w)
 		}
 		d.mu.Unlock()
 	}
@@ -957,11 +961,7 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 }
 
 func (d *Download) spawnStreamLocked(ctx context.Context, ifc Iface, l Link) {
-	wctx, cancel := context.WithCancel(ctx)
-	w := &worker{d: d, iface: ifc.ID, client: ifc.Client, link: l, ir: d.ifRun(ifc.ID), cancel: cancel}
-	d.workers[w] = struct{}{}
-	d.ifRun(ifc.ID).active++
-	d.wg.Add(1)
+	w, wctx := d.newWorkerLocked(ctx, ifc, l)
 	go w.stream(wctx)
 }
 
@@ -977,10 +977,9 @@ func (w *worker) stream(ctx context.Context) {
 	} else if ctx.Err() == nil {
 		d.streamPos = 0
 		d.workerFailedLocked(w, err)
-		d.ifRun(w.iface).pausedUntil = time.Now().Add(10 * time.Second)
+		w.ir.pausedUntil = time.Now().Add(10 * time.Second)
 	}
-	delete(d.workers, w)
-	d.ifRun(w.iface).active--
+	d.dropWorkerLocked(w)
 	d.mu.Unlock()
 }
 
@@ -1065,13 +1064,11 @@ func (d *Download) statsLocked(now time.Time) {
 	done := d.doneLocked()
 	d.meter.Add(now, done)
 	d.speed = d.total.Update(done, dt)
-	// The estimate uses the long window and only moves every 5 seconds.
-	if now.Sub(d.etaAt) >= 5*time.Second {
-		d.etaAt = now
-		d.eta = -1
-		if r := d.meter.Rate(); r > 0 && d.st.Size > 0 {
-			d.eta = float64(d.st.Size-done) / r
-		}
+	// The estimate uses the long window.
+	if d.st.Size > 0 {
+		d.eta.Update(now, d.st.Size-done, d.meter.Rate())
+	} else {
+		d.eta.Update(now, -1, 0)
 	}
 }
 
@@ -1101,7 +1098,7 @@ func (d *Download) complete(ctx context.Context) error {
 			return err
 		}
 	}
-	final := filepath.Join(dir, uniqueFinal(dir, name))
+	final := filepath.Join(dir, uniqueName(dir, name, ""))
 	if err := os.Rename(part, final); err != nil {
 		return fmt.Errorf("could not rename finished file: %w", err)
 	}
@@ -1161,18 +1158,18 @@ func numbered(name string, i int) string {
 	return fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(name, ext), i, ext)
 }
 
-// uniqueName picks a name whose final file and part file are both unused.
-func uniqueName(dir, name string) string {
-	cand := name
-	for i := 1; exists(filepath.Join(dir, cand)) || exists(filepath.Join(dir, cand+partSuffix)); i++ {
-		cand = numbered(name, i)
+// uniqueName picks a name that is unused with each of the given suffixes.
+func uniqueName(dir, name string, suffixes ...string) string {
+	taken := func(cand string) bool {
+		for _, s := range suffixes {
+			if exists(filepath.Join(dir, cand+s)) {
+				return true
+			}
+		}
+		return false
 	}
-	return cand
-}
-
-func uniqueFinal(dir, name string) string {
 	cand := name
-	for i := 1; exists(filepath.Join(dir, cand)); i++ {
+	for i := 1; taken(cand); i++ {
 		cand = numbered(name, i)
 	}
 	return cand
@@ -1246,7 +1243,7 @@ func (d *Download) Summary() Summary {
 		Added: d.st.Added, Finished: d.st.Finished,
 	}
 	if d.running {
-		s.ETA = d.eta
+		s.ETA = d.eta.Seconds()
 	}
 	for id, l := range d.st.Links {
 		ls := LinkSummary{Status: l.Status, Error: l.Error, Resolved: l.URL != d.st.URL, NeedsPage: l.NeedsPage}

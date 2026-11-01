@@ -54,8 +54,6 @@ func NewBinding(iface Interface) *Binding {
 	return b
 }
 
-func (b *Binding) Interface() Interface { return b.iface }
-
 // HTTPClient returns a client whose connections all leave through this interface.
 func (b *Binding) HTTPClient() *http.Client { return b.client }
 

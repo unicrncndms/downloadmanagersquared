@@ -44,15 +44,29 @@ func (c *Conn) send(v any) error {
 	if err != nil {
 		return err
 	}
+	return c.WriteRaw(append(b, '\n'))
+}
+
+// WriteRaw sends an already encoded line, e.g. from EncodeEvent.
+func (c *Conn) WriteRaw(line []byte) error {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
 	c.c.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_, err = c.c.Write(append(b, '\n'))
+	_, err := c.c.Write(line)
 	return err
 }
 
 // Emit pushes an event to this client.
 func (c *Conn) Emit(name string, data any) error { return c.send(event{name, data}) }
+
+// EncodeEvent encodes an event once so it can be written to many clients.
+func EncodeEvent(name string, data any) ([]byte, error) {
+	b, err := json.Marshal(event{name, data})
+	if err != nil {
+		return nil, err
+	}
+	return append(b, '\n'), nil
+}
 
 type Handler interface {
 	Connected(c *Conn)

@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -69,8 +70,7 @@ type Engine struct {
 
 	cum      float64 // bytes moved since start, integrated from speed (for the global ETA)
 	meter    rate.Meter
-	eta      float64
-	etaAt    time.Time
+	eta      rate.ETA
 	snapshot StateEvent
 
 	quit     chan struct{}
@@ -100,10 +100,8 @@ func New() (*Engine, error) {
 		dirty:     map[string]bool{},
 		clients:   map[*ipc.Conn]*client{},
 		resolves:  map[string]resolveReq{},
-		eta:       -1,
 		quit:      make(chan struct{}),
 	}
-	e.meter.Window = time.Duration(e.settings.ETAWindowSec) * time.Second
 	e.loadDownloads()
 	e.refreshInterfaces()
 	e.updateSnapshot(0)
@@ -274,7 +272,7 @@ func (e *Engine) refreshInterfaces() {
 			e.ifaces[i.ID] = ent
 			log.Printf("interface %s (%s) %s, socks port %d", i.Name, i.Description, i.IPv4, srv.Port())
 		}
-		if ent.binding == nil || !ent.info.IPv4.Equal(i.IPv4) || ent.info.Index != i.Index || fmt.Sprint(ent.info.DNS) != fmt.Sprint(i.DNS) {
+		if ent.binding == nil || !ent.info.IPv4.Equal(i.IPv4) || ent.info.Index != i.Index || !slices.EqualFunc(ent.info.DNS, i.DNS, net.IP.Equal) {
 			if ent.binding != nil {
 				ent.binding.Close()
 			}
@@ -426,8 +424,15 @@ func (e *Engine) broadcast(name string, data any) {
 		cs = append(cs, c)
 	}
 	e.mu.Unlock()
+	if len(cs) == 0 {
+		return
+	}
+	b, err := ipc.EncodeEvent(name, data)
+	if err != nil {
+		return
+	}
 	for _, c := range cs {
-		c.Emit(name, data)
+		c.WriteRaw(b)
 	}
 }
 
@@ -520,12 +525,7 @@ func (e *Engine) Remove(id string, deleteFile bool) error {
 			delete(e.resolves, k)
 		}
 	}
-	for i, x := range e.order {
-		if x == id {
-			e.order = append(e.order[:i], e.order[i+1:]...)
-			break
-		}
-	}
+	e.order = slices.DeleteFunc(e.order, func(x string) bool { return x == id })
 	e.mu.Unlock()
 	os.Remove(e.statePath(id))
 	return nil
@@ -585,13 +585,9 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	e.meter.Add(now, int64(e.cum))
 	if active == 0 {
 		e.meter.Reset()
-		e.eta = -1
-	} else if now.Sub(e.etaAt) >= 5*time.Second {
-		e.etaAt = now
-		e.eta = -1
-		if r := e.meter.Rate(); r > 0 && remaining > 0 {
-			e.eta = float64(remaining) / r
-		}
+		e.eta.Clear()
+	} else {
+		e.eta.Update(now, remaining, e.meter.Rate())
 	}
 
 	mainID := e.mainIDLocked()
@@ -610,7 +606,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		}
 		return views[i].Name < views[j].Name
 	})
-	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, Speed: total, ETA: e.eta, Active: active}
+	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, Speed: total, ETA: e.eta.Seconds(), Active: active}
 }
 
 func (e *Engine) Snapshot() StateEvent {

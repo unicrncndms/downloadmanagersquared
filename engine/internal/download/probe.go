@@ -22,12 +22,15 @@ type probeResult struct {
 }
 
 // rejected means this link is no good for this IP (expired, IP-bound or a landing page).
-func (r probeResult) rejected() bool {
-	switch r.status {
+func (r probeResult) rejected() bool { return linkRejected(r.status) || r.isPage }
+
+// linkRejected: statuses that mean the link itself is not valid for this IP.
+func linkRejected(status int) bool {
+	switch status {
 	case 401, 403, 404, 410:
 		return true
 	}
-	return r.isPage
+	return false
 }
 
 func newRequest(ctx context.Context, l Link, ua string) (*http.Request, error) {
@@ -161,9 +164,10 @@ type fetchError struct {
 func (e *fetchError) Error() string { return e.msg }
 
 func statusError(resp *http.Response) *fetchError {
-	switch resp.StatusCode {
-	case 401, 403, 404, 410:
+	if linkRejected(resp.StatusCode) {
 		return &fetchError{kind: kindExpired, msg: "link rejected: " + resp.Status}
+	}
+	switch resp.StatusCode {
 	case 429, 503:
 		ra := 15 * time.Second
 		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {

@@ -52,6 +52,18 @@ function siteOf(url) {
   return hostOf(url).split(".").slice(-2).join(".");
 }
 
+function isHttp(url) {
+  return /^https?:/.test(url || "");
+}
+
+// Cancels a Firefox download and removes it from the list.
+async function discardDownload(id) {
+  try {
+    await browser.downloads.cancel(id);
+    await browser.downloads.erase({ id });
+  } catch (e) { /* already gone */ }
+}
+
 function hostOf(url) {
   try { return new URL(url).hostname; } catch (e) { return ""; }
 }

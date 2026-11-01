@@ -103,6 +103,25 @@ const Resolver = {
     return this.launch(job, "record");
   },
 
+  // Without an explicit size Firefox gives these windows odd shapes (very wide and
+  // short), both when opening one and when restoring one that started minimized.
+  shownBounds() {
+    const width = Math.min(1280, Math.round(screen.availWidth * 0.8));
+    const height = Math.min(1000, Math.round(screen.availHeight * 0.85));
+    return {
+      state: "normal", width, height,
+      left: (screen.availLeft || 0) + Math.round((screen.availWidth - width) / 2),
+      top: (screen.availTop || 0) + Math.round((screen.availHeight - height) / 2),
+    };
+  },
+
+  async show(job, extra) {
+    try {
+      await browser.windows.update(job.windowId, { state: "normal" });
+      await browser.windows.update(job.windowId, { ...this.shownBounds(), focused: true, ...extra });
+    } catch (e) { /* window already closed */ }
+  },
+
   async launch(job, mode) {
     let store;
     try {
@@ -117,7 +136,7 @@ const Resolver = {
     const visible = mode === "record";
     let win;
     try {
-      win = await browser.windows.create({ url: job.pageUrl, cookieStoreId: store, state: visible ? "normal" : "minimized" });
+      win = await browser.windows.create({ url: job.pageUrl, cookieStoreId: store, ...(visible ? this.shownBounds() : { state: "minimized" }) });
     } catch (e) {
       return this.fail(job, "could not open the page: " + e.message);
     }
@@ -199,7 +218,7 @@ const Resolver = {
     job.captcha = true;
     clearTimeout(job.timers.wait);
     this.setTimer(job, "overall", this.RECORD_TIMEOUT, () => this.fail(job, "the captcha wasn't solved in time"));
-    browser.windows.update(job.windowId, { state: "normal", focused: true, drawAttention: true }).catch(() => {});
+    this.show(job, { drawAttention: true });
     notify("DMS² needs you to solve a captcha", `${job.host} asks for a captcha on ${job.ifaceName}. The window is open; DMS² continues once it's solved.`);
   },
 
@@ -237,7 +256,7 @@ const Resolver = {
     job.recordFrom = fromIndex;
     job.recorded = [];
     this.clearTimers(job);
-    browser.windows.update(job.windowId, { state: "normal", focused: true }).catch(() => {});
+    this.show(job);
     notify("DMS² needs a hand", `${why} on ${job.host} (${job.ifaceName}). Please click through; your clicks will be remembered.`);
     this.sendRecord(job);
     this.setTimer(job, "overall", this.RECORD_TIMEOUT, () => this.fail(job, "nobody clicked through the page in time"));
@@ -309,10 +328,7 @@ const Resolver = {
 
   async onDownload(item) {
     const job = this.jobForStore(item.cookieStoreId, -1);
-    try {
-      await browser.downloads.cancel(item.id);
-      await browser.downloads.erase({ id: item.id });
-    } catch (e) { /* already gone */ }
+    await discardDownload(item.id);
     if (job) this.finish(job, item.finalUrl || item.url);
   },
 
@@ -320,7 +336,7 @@ const Resolver = {
     if (job.done) return;
     job.done = true;
     this.clearTimers(job);
-    if (job.startUrl && job.startUrl !== job.pageUrl && /^https?:/.test(job.startUrl)) this.correctPage(job);
+    if (job.startUrl && job.startUrl !== job.pageUrl && isHttp(job.startUrl)) this.correctPage(job);
     if (job.mode === "record") this.saveRecipe(job);
     const cookie = await cookieHeader(url, this.containers[job.iface]);
     try {

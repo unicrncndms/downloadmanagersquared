@@ -175,10 +175,7 @@ function renderDownloads(state) {
 
 connectUI((m) => {
   latest = m;
-  const conn = $("conn");
-  conn.textContent = m.connected ? "Connected" : "Engine offline";
-  conn.className = "badge " + (m.connected ? "ok" : "bad");
-  conn.title = m.error || "";
+  renderConn(m, "Connected");
   if (!m.connected || !m.state) {
     $("list").replaceChildren(el("div", { class: "offline" },
       "The download engine isn't reachable. Make sure it's running in the tray, or reinstall it (installer\\install.ps1).",

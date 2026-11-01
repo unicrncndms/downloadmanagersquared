@@ -18,7 +18,7 @@ const Capture = {
     // Every page a tab shows, including ones served from cache, Back/Forward and
     // in-page navigation; network responses alone miss those.
     const onNav = (d) => {
-      if (d.frameId === 0 && /^https?:/.test(d.url)) this.recordPage(d.tabId, d.url);
+      if (d.frameId === 0 && isHttp(d.url)) this.recordPage(d.tabId, d.url);
     };
     browser.webNavigation.onCommitted.addListener(onNav);
     browser.webNavigation.onHistoryStateUpdated.addListener(onNav);
@@ -26,13 +26,13 @@ const Capture = {
     // even if it was loaded before the extension started.
     browser.webRequest.onBeforeSendHeaders.addListener((d) => {
       const ref = (d.requestHeaders || []).find((x) => x.name.toLowerCase() === "referer");
-      if (!ref || !/^https?:/.test(ref.value)) return;
+      if (!ref || !isHttp(ref.value)) return;
       this.referers.set(d.url, ref.value);
       if (this.referers.size > 300) this.referers.delete(this.referers.keys().next().value);
     }, { urls: ["<all_urls>"], types: ["main_frame"] }, ["requestHeaders"]);
     // Pages already open when the extension starts.
     browser.tabs.query({}).then((tabs) => {
-      for (const t of tabs) if (/^https?:/.test(t.url || "") && !this.history.has(t.id)) this.recordPage(t.id, t.url);
+      for (const t of tabs) if (isHttp(t.url) && !this.history.has(t.id)) this.recordPage(t.id, t.url);
     });
     browser.tabs.onRemoved.addListener((id) => this.history.delete(id));
     // A tab opened from another one (downloads often open in a new tab) inherits its history.
@@ -86,10 +86,7 @@ const Capture = {
     if (this.bypass.delete(item.url)) return;
     const size = item.totalBytes > 0 ? item.totalBytes : item.fileSize;
     if (!(size >= Engine.settings.thresholdBytes)) return;
-    try {
-      await browser.downloads.cancel(item.id);
-      await browser.downloads.erase({ id: item.id });
-    } catch (e) { /* already gone */ }
+    await discardDownload(item.id);
     this.handOff({
       url: item.finalUrl || item.url,
       pages: this.pagesFor(-1, item.finalUrl || item.url, [item.referrer]),
@@ -118,7 +115,7 @@ const Capture = {
       if (!ref || pages.includes(ref)) break;
       pages.unshift(ref);
     }
-    return pages.filter((u) => u && u !== downloadUrl && /^https?:/.test(u));
+    return pages.filter((u) => u && u !== downloadUrl && isHttp(u));
   },
 
   // The landing page: the page that started the download is usually generated for

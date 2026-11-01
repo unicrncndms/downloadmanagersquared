@@ -9,11 +9,12 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"downloadmanagersquared/engine/internal/winutil"
 )
 
 // Interface is one adapter with its own route to the internet.
@@ -150,8 +151,7 @@ func meteredAdapters() map[string]bool {
 foreach ($p in [Windows.Networking.Connectivity.NetworkInformation]::GetConnectionProfiles()) {
   if ($p.NetworkAdapter) { '{0}|{1}' -f $p.NetworkAdapter.NetworkAdapterId, $p.GetConnectionCost().NetworkCostType }
 }`
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	cmd := winutil.Hidden(exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script))
 	ids := map[string]bool{}
 	if out, err := cmd.Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {

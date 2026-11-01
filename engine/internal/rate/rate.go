@@ -59,3 +59,33 @@ func (e *EWMA) Update(total int64, dt time.Duration) float64 {
 }
 
 func (e *EWMA) Value() float64 { return e.value }
+
+// ETA is a time-left estimate that only moves every 5 seconds, so it doesn't jitter.
+type ETA struct {
+	secs float64
+	ok   bool
+	at   time.Time
+}
+
+// Update recomputes the estimate from the bytes left and the current rate, at most every 5s.
+func (e *ETA) Update(now time.Time, remaining int64, rate float64) {
+	if now.Sub(e.at) < 5*time.Second {
+		return
+	}
+	e.at = now
+	e.ok = remaining > 0 && rate > 0
+	if e.ok {
+		e.secs = float64(remaining) / rate
+	}
+}
+
+// Clear makes the estimate unknown until the next Update.
+func (e *ETA) Clear() { e.ok = false }
+
+// Seconds is the estimate, -1 when unknown.
+func (e *ETA) Seconds() float64 {
+	if !e.ok {
+		return -1
+	}
+	return e.secs
+}
