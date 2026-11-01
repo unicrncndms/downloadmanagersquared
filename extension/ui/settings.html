@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DMS² Settings</title>
+  <link rel="icon" href="../icons/icon.svg">
+  <link rel="stylesheet" href="ui.css">
+  <style>
+    header {
+      position: sticky; top: 0; z-index: 2;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+      padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--line);
+    }
+    header h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 8px; }
+    header h1 img { width: 22px; height: 22px; }
+    header nav { margin-left: auto; display: flex; gap: 4px; }
+    header nav a { padding: 4px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; }
+    header nav a:hover { color: var(--accent); background: var(--accent-soft); }
+    main { max-width: 960px; margin: 0 auto; padding: 20px 24px 60px; }
+    section { scroll-margin-top: 70px; }
+    h2 { font-size: 15px; margin: 0 0 4px; }
+    .lead { margin: 0 0 12px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; font-weight: 500; color: var(--muted); padding: 4px 8px 4px 0; }
+    td { padding: 6px 8px 6px 0; border-top: 1px solid var(--line); vertical-align: middle; }
+    .table-wrap { overflow-x: auto; }
+    .settings { display: grid; grid-template-columns: 280px 1fr; gap: 12px 16px; align-items: center; }
+    .settings .hint { grid-column: 2; margin-top: -8px; font-size: 12px; }
+    .row-actions { display: flex; gap: 8px; margin-top: 16px; }
+    .toast { bottom: 16px; }
+    @media (max-width: 700px) {
+      header, main { padding-left: 16px; padding-right: 16px; }
+      header nav { margin-left: 0; }
+      .settings { grid-template-columns: 1fr; }
+      .settings .hint { grid-column: 1; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><img src="../icons/icon.svg" alt="">DMS² settings</h1>
+    <span id="conn" class="badge dim">…</span>
+    <nav>
+      <a href="#connections">Connections</a>
+      <a href="#general">Settings</a>
+      <a href="#sites">Learned sites</a>
+    </nav>
+  </header>
+  <main>
+    <section id="connections" class="panel">
+      <h2>Network connections</h2>
+      <p class="lead muted">Downloads are split across every enabled connection. Metered and VPN connections start disabled.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Connection</th><th>IP</th><th></th><th>Use</th><th>Parallel connections</th><th>Main</th><th>Speed</th></tr></thead>
+          <tbody id="ifaces"></tbody>
+        </table>
+      </div>
+      <div class="row-actions"><button id="refreshIfaces">Look for connections again</button></div>
+    </section>
+
+    <section id="general" class="panel">
+      <h2 style="margin-bottom:12px">Settings</h2>
+      <form class="settings" id="settingsForm">
+        <label for="sThreshold">Capture downloads from (GB)</label>
+        <input type="number" id="sThreshold" min="0.001" step="any">
+        <span class="hint muted">Smaller files stay with Firefox. Right-click a link to send any file.</span>
+
+        <label for="sDir">Save to folder</label>
+        <input type="text" id="sDir">
+
+        <label for="sParallel">Downloads at the same time</label>
+        <input type="number" id="sParallel" min="1" max="16">
+
+        <label for="sConns">Default connections per interface</label>
+        <input type="number" id="sConns" min="1" max="32">
+
+        <label for="sEta">Time-left averaging window (seconds)</label>
+        <input type="number" id="sEta" min="5" max="3600">
+
+        <label for="sBack">Landing page: pages before the download</label>
+        <input type="number" id="sBack" min="0" max="5">
+        <span class="hint muted">Where other connections start to get their own link. 1 = the page before the one that started the download (that one is often only valid for the first connection).</span>
+
+        <label for="sAuto">Start with Windows</label>
+        <span><input type="checkbox" id="sAuto"></span>
+      </form>
+      <div class="row-actions"><button class="primary" id="saveSettings">Save</button></div>
+    </section>
+
+    <section id="sites" class="panel">
+      <h2>Learned sites</h2>
+      <p class="lead muted">Clicks remembered for getting a fresh link per connection. Forget a site to teach it again.</p>
+      <div id="recipes"></div>
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+  <script src="common.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

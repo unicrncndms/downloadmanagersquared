@@ -1,0 +1,46 @@
+{
+  "manifest_version": 2,
+  "name": "downloadmanagersquared",
+  "short_name": "DMS²",
+  "version": "0.2.0",
+  "description": "Downloads large files over all your network connections at once, including sites that give each IP its own link.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "downloadmanagersquared@dms",
+      "strict_min_version": "115.0"
+    }
+  },
+  "permissions": [
+    "nativeMessaging",
+    "downloads",
+    "webRequest",
+    "webRequestBlocking",
+    "webNavigation",
+    "proxy",
+    "contextualIdentities",
+    "cookies",
+    "tabs",
+    "storage",
+    "contextMenus",
+    "notifications",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": [
+      "background/util.js",
+      "background/engine.js",
+      "background/resolver.js",
+      "background/capture.js",
+      "background/main.js"
+    ]
+  },
+  "browser_action": {
+    "default_title": "downloadmanagersquared",
+    "default_popup": "ui/popup.html",
+    "default_icon": "icons/icon.svg"
+  },
+  "icons": {
+    "48": "icons/icon.svg",
+    "96": "icons/icon.svg"
+  }
+}

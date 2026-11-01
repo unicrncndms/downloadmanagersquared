@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DMS² Downloads</title>
+  <link rel="icon" href="../icons/icon.svg">
+  <link rel="stylesheet" href="ui.css">
+  <style>
+    html, body { height: 100%; }
+    body { width: 480px; max-height: 600px; display: flex; flex-direction: column; }
+    body.windowed { width: auto; max-height: none; }
+    header { padding: 10px 14px 8px; border-bottom: 1px solid var(--line); background: var(--panel); }
+    .head { display: flex; align-items: center; gap: 8px; }
+    .head h1 { font-size: 15px; margin: 0; display: flex; align-items: center; gap: 6px; }
+    .head h1 img { width: 18px; height: 18px; }
+    .head .total { margin-left: auto; font-weight: 600; }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: 12px; }
+    .tools { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+    .tools .spacer { flex: 1; }
+    #addBox { margin-top: 8px; display: grid; gap: 6px; }
+    #addBox[hidden] { display: none; }
+    main { flex: 1; overflow-y: auto; padding: 10px 14px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+    .card .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .card .name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card .meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 5px; font-size: 12px; }
+    .card .err { color: var(--bad); font-size: 12px; margin-top: 4px; }
+    .card .actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .conns { margin-top: 6px; display: grid; grid-template-columns: minmax(70px, auto) 1fr auto auto; gap: 3px 8px; align-items: center; font-size: 12px; }
+    .conns .why { grid-column: 1 / -1; margin-top: -2px; color: var(--muted); font-size: 11px; }
+    details { margin-top: 6px; font-size: 12px; }
+    summary { cursor: pointer; color: var(--muted); }
+    .form { display: grid; grid-template-columns: 1fr auto; gap: 4px 6px; margin-top: 6px; }
+    .form label { grid-column: 1 / -1; color: var(--muted); margin-top: 4px; }
+    .form input { min-width: 0; }
+    footer { padding: 8px 14px 10px; border-top: 1px solid var(--line); background: var(--panel); display: flex; }
+    footer button { flex: 1; }
+    .offline { padding: 12px; border-radius: 6px; background: var(--accent-soft); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="head">
+      <h1><img src="../icons/icon.svg" alt="">DMS²</h1>
+      <span id="conn" class="badge dim">…</span>
+      <span class="total num" id="total"></span>
+    </div>
+    <div class="chips num muted" id="chips"></div>
+    <div class="tools">
+      <button class="small" id="toggleAdd">+ Add download</button>
+      <span class="spacer"></span>
+      <button class="small" id="pauseAll">Pause all</button>
+      <button class="small" id="resumeAll">Resume all</button>
+    </div>
+    <form id="addBox" hidden>
+      <input type="url" id="addUrl" placeholder="File link (or a landing page)" required>
+      <input type="url" id="addPage" placeholder="Landing page (optional)">
+      <button class="primary">Add</button>
+    </form>
+  </header>
+  <main id="list"></main>
+  <footer><button id="openSettings">Connections &amp; settings</button></footer>
+  <div class="toast" id="toast"></div>
+  <script src="common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

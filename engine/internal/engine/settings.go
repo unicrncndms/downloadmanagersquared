@@ -1,0 +1,83 @@
+package engine
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+
+	"downloadmanagersquared/engine/internal/winutil"
+)
+
+type IfaceSettings struct {
+	Name        string `json:"name,omitempty"`    // last seen name, for display while absent
+	Enabled     *bool  `json:"enabled,omitempty"` // nil: default (on unless metered or VPN)
+	Connections int    `json:"connections,omitempty"`
+}
+
+type Settings struct {
+	Interfaces         map[string]*IfaceSettings `json:"interfaces"`
+	MainInterface      string                    `json:"mainInterface"` // "" = Windows default route
+	ThresholdBytes     int64                     `json:"thresholdBytes"`
+	SaveDir            string                    `json:"saveDir"`
+	MaxParallel        int                       `json:"maxParallel"`
+	ETAWindowSec       int                       `json:"etaWindowSec"`
+	DefaultConnections int                       `json:"defaultConnections"`
+}
+
+func defaultSettings() Settings {
+	return Settings{
+		Interfaces:         map[string]*IfaceSettings{},
+		ThresholdBytes:     30_000_000_000, // 30 GB, as shown in the settings page
+		SaveDir:            winutil.DownloadsFolder(),
+		MaxParallel:        1,
+		ETAWindowSec:       60,
+		DefaultConnections: 4,
+	}
+}
+
+func (s *Settings) normalize() {
+	d := defaultSettings()
+	if s.Interfaces == nil {
+		s.Interfaces = map[string]*IfaceSettings{}
+	}
+	if s.ThresholdBytes <= 0 {
+		s.ThresholdBytes = d.ThresholdBytes
+	}
+	if s.SaveDir == "" {
+		s.SaveDir = d.SaveDir
+	}
+	s.MaxParallel = min(max(s.MaxParallel, 1), 16)
+	if s.ETAWindowSec < 5 {
+		s.ETAWindowSec = d.ETAWindowSec
+	}
+	s.ETAWindowSec = min(s.ETAWindowSec, 3600)
+	if s.DefaultConnections < 1 {
+		s.DefaultConnections = d.DefaultConnections
+	}
+	s.DefaultConnections = min(s.DefaultConnections, 32)
+}
+
+func loadSettings(path string) Settings {
+	s := defaultSettings()
+	if b, err := os.ReadFile(path); err == nil {
+		json.Unmarshal(b, &s)
+	}
+	s.normalize()
+	return s
+}
+
+// writeJSON saves atomically, so a crash never leaves a half-written file.
+func writeJSON(path string, v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}

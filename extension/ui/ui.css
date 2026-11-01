@@ -1,0 +1,82 @@
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --text: #16181d;
+  --muted: #646b78;
+  --line: #e2e5ea;
+  --accent: #2563eb;
+  --accent-soft: #e6eefe;
+  --ok: #15803d;
+  --warn: #b45309;
+  --bad: #b91c1c;
+  --bar: #dfe3ea;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171b;
+    --panel: #1d2026;
+    --text: #e8eaee;
+    --muted: #9aa1ad;
+    --line: #2c3038;
+    --accent: #5b8cff;
+    --accent-soft: #1f2a44;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --bar: #2c3038;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 system-ui, "Segoe UI", sans-serif;
+}
+button, input, select { font: inherit; color: inherit; }
+button {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.small { padding: 2px 8px; font-size: 12px; }
+input[type=text], input[type=number], input[type=url], select {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.muted { color: var(--muted); }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
+.num { font-variant-numeric: tabular-nums; }
+.bar { height: 6px; border-radius: 3px; background: var(--bar); overflow: hidden; }
+.bar > div { height: 100%; background: var(--accent); transition: width .4s; }
+.badge {
+  display: inline-block;
+  padding: 0 7px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+  white-space: nowrap;
+}
+.badge.ok { color: var(--ok); }
+.badge.warn { color: var(--warn); }
+.badge.bad { color: var(--bad); }
+.badge.dim { color: var(--muted); background: transparent; border: 1px solid var(--line); }
+.empty { padding: 24px; text-align: center; color: var(--muted); }
+.toast {
+  position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%);
+  background: var(--text); color: var(--bg); padding: 6px 12px; border-radius: 6px;
+  opacity: 0; transition: opacity .2s; pointer-events: none; font-size: 13px; z-index: 10;
+}
+.toast.show { opacity: 1; }
