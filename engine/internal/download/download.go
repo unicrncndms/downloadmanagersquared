@@ -13,7 +13,6 @@ import (
 	"hash"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -118,13 +117,6 @@ type Env interface {
 	Finished(d *Download)
 }
 
-type segment struct {
-	pos     int64 // next byte to fetch (claimed)
-	written int64 // bytes before this are on disk
-	end     int64
-	owner   *worker
-}
-
 type ifaceRun struct {
 	conns        int
 	throttle     int // connections removed after the server pushed back
@@ -166,13 +158,11 @@ type Download struct {
 	fatal   chan error
 	wg      sync.WaitGroup
 
-	file       *os.File
-	segs       []*segment
-	streamDone bool
-	streamPos  int64
-	workers    map[*worker]struct{}
-	ifs        map[string]*ifaceRun
-	probing    map[string]bool
+	file    *os.File
+	plan    *plan // nil unless running with the file open
+	workers map[*worker]struct{}
+	ifs     map[string]*ifaceRun
+	probing map[string]bool
 
 	meter    rate.Meter
 	total    rate.EWMA
@@ -225,16 +215,9 @@ func (d *Download) State() State {
 }
 
 func (d *Download) syncRemainingLocked() {
-	if d.segs == nil || !d.st.RangeOK {
-		return
+	if d.plan != nil && d.plan.splittable {
+		d.st.Remaining = d.plan.ranges()
 	}
-	var rem []Range
-	for _, s := range d.segs {
-		if s.written < s.end {
-			rem = append(rem, Range{s.written, s.end})
-		}
-	}
-	d.st.Remaining = rem
 }
 
 // Start begins (or resumes) downloading.
@@ -363,7 +346,7 @@ func (d *Download) run(ctx context.Context) {
 		d.file.Close()
 		d.file = nil
 	}
-	d.segs = nil
+	d.plan = nil
 	var pe *pauseError
 	finished := false
 	switch {
@@ -463,32 +446,26 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 		}
 	}
 
-	if d.st.RangeOK {
-		for _, ifc := range usable {
-			l := d.st.Links[ifc.ID]
-			if l.Status != LinkReady {
-				continue
-			}
-			ir := d.ifRun(ifc.ID)
-			ir.conns = ifc.Conns
-			if ir.throttle > 0 && now.Sub(ir.lastThrottle) > 2*time.Minute {
-				ir.throttle--
-				ir.lastThrottle = now
-			}
-			if now.Before(ir.pausedUntil) {
-				continue
-			}
-			for ir.active < ir.target() {
-				seg := d.claimLocked(ifc.ID)
-				if seg == nil {
-					break
-				}
-				d.spawnLocked(ctx, ifc, *l, seg)
-			}
+	for _, ifc := range usable {
+		l := d.st.Links[ifc.ID]
+		if l.Status != LinkReady || !d.plan.splittable && ifc.ID != mainID {
+			continue
 		}
-	} else if len(d.workers) == 0 && !d.streamDone {
-		if ifc, ok := byID[mainID]; ok && d.st.Links[mainID].Status == LinkReady {
-			d.spawnStreamLocked(ctx, ifc, *d.st.Links[mainID])
+		ir := d.ifRun(ifc.ID)
+		ir.conns = ifc.Conns
+		if ir.throttle > 0 && now.Sub(ir.lastThrottle) > 2*time.Minute {
+			ir.throttle--
+			ir.lastThrottle = now
+		}
+		if now.Before(ir.pausedUntil) {
+			continue
+		}
+		for ir.active < ir.target() {
+			seg := d.claimLocked(ifc.ID)
+			if seg == nil {
+				break
+			}
+			d.spawnLocked(ctx, ifc, *l, seg)
 		}
 	}
 
@@ -505,10 +482,7 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 		}
 	}
 
-	if d.st.RangeOK {
-		return d.remainingLocked() == 0 && len(d.workers) == 0, nil
-	}
-	return d.streamDone && len(d.workers) == 0, nil
+	return d.plan.remaining() == 0 && len(d.workers) == 0, nil
 }
 
 func (d *Download) ifRun(id string) *ifaceRun {
@@ -655,7 +629,8 @@ func (d *Download) openFileLocked() error {
 				return err
 			}
 		}
-		d.file, d.st.Allocated, d.streamDone, d.streamPos = f, true, false, 0
+		d.file, d.st.Allocated = f, true
+		d.plan = newPlan(d.st.Size, false, nil)
 		return nil
 	}
 
@@ -690,10 +665,7 @@ func (d *Download) openFileLocked() error {
 		}
 		d.file = f
 	}
-	d.segs = nil
-	for _, r := range d.st.Remaining {
-		d.segs = append(d.segs, &segment{pos: r.Start, written: r.Start, end: r.End})
-	}
+	d.plan = newPlan(d.st.Size, true, d.st.Remaining)
 	return nil
 }
 
@@ -708,58 +680,23 @@ func checkSpace(dir string, need int64) error {
 	return nil
 }
 
-// claimLocked hands out work: a free chunk if there is one, otherwise the far
-// end of the chunk that would take longest to finish.
+// claimLocked gets work from the plan, sized to how fast this interface's
+// connections have been.
 func (d *Download) claimLocked(ifaceID string) *segment {
-	var free *segment
-	for _, s := range d.segs {
-		if s.owner == nil && s.written < s.end && (free == nil || s.written < free.written) {
-			free = s
-		}
+	var perConn float64
+	if ir := d.ifs[ifaceID]; ir != nil && ir.active > 0 {
+		perConn = ir.ewma.Value() / float64(ir.active)
 	}
-	if free != nil {
-		free.pos = free.written
-		return free
-	}
-
-	var victim *segment
-	var worst float64
-	for _, s := range d.segs {
-		if s.owner == nil || s.end-s.pos < 2*minSplit {
-			continue
-		}
-		if t := float64(s.end-s.pos) / math.Max(s.owner.speed, 1); t > worst {
-			worst, victim = t, s
-		}
-	}
-	if victim == nil || worst < 3 {
-		return nil
-	}
-	vs := math.Max(victim.owner.speed, 1)
-	vn := vs
-	if ir := d.ifs[ifaceID]; ir != nil && ir.active > 0 && ir.ewma.Value() > 0 {
-		vn = ir.ewma.Value() / float64(ir.active)
-	}
-	// Split so both halves should finish at about the same time.
-	cut := victim.pos + int64(float64(victim.end-victim.pos)*vs/(vs+vn))
-	cut = min(max(cut, victim.pos+minSplit), victim.end-minSplit)
-	ns := &segment{pos: cut, written: cut, end: victim.end}
-	victim.end = cut
-	d.segs = append(d.segs, ns)
-	return ns
+	return d.plan.claim(perConn)
 }
 
 func (d *Download) remainingLocked() int64 {
-	if d.segs == nil {
-		var n int64
-		for _, r := range d.st.Remaining {
-			n += r.End - r.Start
-		}
-		return n
+	if d.plan != nil {
+		return d.plan.remaining()
 	}
 	var n int64
-	for _, s := range d.segs {
-		n += s.end - s.written
+	for _, r := range d.st.Remaining {
+		n += r.End - r.Start
 	}
 	return n
 }
@@ -770,31 +707,21 @@ func (d *Download) doneLocked() int64 {
 		return d.st.Size
 	case !d.st.Allocated:
 		return 0
+	case d.plan != nil:
+		return d.plan.done()
 	case !d.st.RangeOK:
-		return d.streamPos
+		return 0 // the next attempt starts over
 	}
 	return d.st.Size - d.remainingLocked()
 }
 
-// newWorkerLocked registers a worker; the caller starts its goroutine.
-func (d *Download) newWorkerLocked(ctx context.Context, ifc Iface, l Link) (*worker, context.Context) {
+func (d *Download) spawnLocked(ctx context.Context, ifc Iface, l Link, seg *segment) {
 	wctx, cancel := context.WithCancel(ctx)
 	w := &worker{d: d, iface: ifc.ID, client: ifc.Client, link: l, ir: d.ifRun(ifc.ID), cancel: cancel}
+	seg.owner = w
 	d.workers[w] = struct{}{}
 	w.ir.active++
 	d.wg.Add(1)
-	return w, wctx
-}
-
-// dropWorkerLocked undoes newWorkerLocked once the worker is done.
-func (d *Download) dropWorkerLocked(w *worker) {
-	delete(d.workers, w)
-	w.ir.active--
-}
-
-func (d *Download) spawnLocked(ctx context.Context, ifc Iface, l Link, seg *segment) {
-	w, wctx := d.newWorkerLocked(ctx, ifc, l)
-	seg.owner = w
 	go w.run(wctx, seg)
 }
 
@@ -858,8 +785,7 @@ func (w *worker) run(ctx context.Context, seg *segment) {
 	for seg != nil {
 		err := w.fetch(ctx, seg, buf)
 		d.mu.Lock()
-		seg.owner = nil
-		seg.pos = seg.written
+		d.plan.release(seg)
 		switch {
 		case ctx.Err() != nil:
 			seg = nil
@@ -873,7 +799,8 @@ func (w *worker) run(ctx context.Context, seg *segment) {
 			}
 		}
 		if seg == nil {
-			d.dropWorkerLocked(w)
+			delete(d.workers, w)
+			w.ir.active--
 		}
 		d.mu.Unlock()
 	}
@@ -882,10 +809,16 @@ func (w *worker) run(ctx context.Context, seg *segment) {
 func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 	d := w.d
 	d.mu.Lock()
-	start, end := seg.pos, seg.end
+	start, end, ranged := seg.pos, seg.end, d.plan.splittable
 	d.mu.Unlock()
 	if start >= end {
 		return nil
+	}
+	if !ranged {
+		// Without ranges every attempt fetches the whole file again.
+		if err := d.file.Truncate(0); err != nil {
+			return &fetchError{kind: kindDisk, msg: err.Error()}
+		}
 	}
 
 	rctx, cancel := context.WithCancel(ctx)
@@ -897,7 +830,9 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 	if err != nil {
 		return &fetchError{kind: kindRange, msg: err.Error()}
 	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end-1))
+	if ranged {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end-1))
+	}
 	resp, err := w.client.Do(req)
 	if err != nil {
 		return err
@@ -906,11 +841,13 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 	if fe := statusError(resp); fe != nil {
 		return fe
 	}
-	if resp.StatusCode != http.StatusPartialContent {
-		return &fetchError{kind: kindRange, msg: "server ignored the range request (" + resp.Status + ")"}
-	}
-	if cs, _, ok := parseContentRange(resp.Header.Get("Content-Range")); !ok || cs != start {
-		return &fetchError{kind: kindRange, msg: "server sent the wrong part of the file"}
+	if ranged {
+		if resp.StatusCode != http.StatusPartialContent {
+			return &fetchError{kind: kindRange, msg: "server ignored the range request (" + resp.Status + ")"}
+		}
+		if cs, _, ok := parseContentRange(resp.Header.Get("Content-Range")); !ok || cs != start {
+			return &fetchError{kind: kindRange, msg: "server sent the wrong part of the file"}
+		}
 	}
 
 	ir := w.ir
@@ -953,87 +890,13 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 				return &fetchError{kind: kindNet, msg: "no data for 30s"}
 			}
 			if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
+				if end == unknownEnd {
+					d.mu.Lock()
+					d.plan.endHere(seg)
+					d.mu.Unlock()
+					return nil
+				}
 				return &fetchError{kind: kindNet, msg: "connection closed early"}
-			}
-			return rerr
-		}
-	}
-}
-
-func (d *Download) spawnStreamLocked(ctx context.Context, ifc Iface, l Link) {
-	w, wctx := d.newWorkerLocked(ctx, ifc, l)
-	go w.stream(wctx)
-}
-
-// stream downloads in one piece, for servers without range support.
-func (w *worker) stream(ctx context.Context) {
-	d := w.d
-	defer d.wg.Done()
-	defer w.cancel()
-	err := w.streamOnce(ctx)
-	d.mu.Lock()
-	if err == nil {
-		d.streamDone = true
-	} else if ctx.Err() == nil {
-		d.streamPos = 0
-		d.workerFailedLocked(w, err)
-		w.ir.pausedUntil = time.Now().Add(10 * time.Second)
-	}
-	d.dropWorkerLocked(w)
-	d.mu.Unlock()
-}
-
-func (w *worker) streamOnce(ctx context.Context) error {
-	d := w.d
-	if err := d.file.Truncate(0); err != nil {
-		return &fetchError{kind: kindDisk, msg: err.Error()}
-	}
-	d.mu.Lock()
-	d.streamPos = 0
-	d.mu.Unlock()
-
-	rctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	stall := time.AfterFunc(stallTimeout, cancel)
-	defer stall.Stop()
-	req, err := newRequest(rctx, w.link, d.st.UserAgent)
-	if err != nil {
-		return err
-	}
-	resp, err := w.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if fe := statusError(resp); fe != nil {
-		return fe
-	}
-	ir := w.ir
-	buf := make([]byte, bufSize)
-	var pos int64
-	for {
-		n, rerr := resp.Body.Read(buf)
-		if n > 0 {
-			stall.Reset(stallTimeout)
-			if _, err := d.file.WriteAt(buf[:n], pos); err != nil {
-				return &fetchError{kind: kindDisk, msg: err.Error()}
-			}
-			pos += int64(n)
-			w.bytes.Add(int64(n))
-			ir.bytes.Add(int64(n))
-			d.mu.Lock()
-			d.streamPos = pos
-			d.mu.Unlock()
-		}
-		if rerr == io.EOF {
-			if d.st.Size >= 0 && pos != d.st.Size {
-				return &fetchError{kind: kindNet, msg: "connection closed early"}
-			}
-			return nil
-		}
-		if rerr != nil {
-			if rctx.Err() != nil && ctx.Err() == nil {
-				return &fetchError{kind: kindNet, msg: "no data for 30s"}
 			}
 			return rerr
 		}
@@ -1052,14 +915,7 @@ func (d *Download) statsLocked(now time.Time) {
 	for _, ir := range d.ifs {
 		ir.ewma.Update(ir.bytes.Load(), dt)
 	}
-	// Prune finished chunks so the list stays short.
-	kept := d.segs[:0]
-	for _, s := range d.segs {
-		if s.owner != nil || s.written < s.end {
-			kept = append(kept, s)
-		}
-	}
-	d.segs = kept
+	d.plan.prune()
 
 	done := d.doneLocked()
 	d.meter.Add(now, done)

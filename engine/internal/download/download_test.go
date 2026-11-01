@@ -257,6 +257,27 @@ func TestNoRangeUsesMainOnly(t *testing.T) {
 	checkFile(t, filepath.Join(dir, "thing.iso"), data)
 }
 
+func TestUnknownSizeEndsWithTheResponse(t *testing.T) {
+	data := randomData(3<<20 + 123)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Flushing before the end means no Content-Length: the size is unknown until EOF.
+		for b := data; len(b) > 0; {
+			n := min(len(b), 64<<10)
+			w.Write(b[:n])
+			w.(http.Flusher).Flush()
+			b = b[n:]
+		}
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	env := &testEnv{ifaces: []Iface{iface("eth", 4, 0)}, main: "eth"}
+	d := runToEnd(t, env, State{ID: "t9", URL: srv.URL + "/stream.bin", Dir: dir, Size: -1})
+	if s := d.Summary(); s.Status != StatusCompleted || s.RangeOK || s.Size != -1 {
+		t.Fatalf("status %s rangeOk %v size %d: %s", s.Status, s.RangeOK, s.Size, s.Error)
+	}
+	checkFile(t, filepath.Join(dir, "stream.bin"), data)
+}
+
 func TestPauseAndResume(t *testing.T) {
 	data := randomData(24 << 20)
 	srv := fileServer(t, data, nil)
