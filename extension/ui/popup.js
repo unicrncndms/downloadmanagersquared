@@ -37,7 +37,14 @@ function makeCard(id) {
   const pause = el("button", { class: "small", onclick: () => act("pause", { id }) }, "Pause");
   const resume = el("button", { class: "small", onclick: () => act("resume", { id }) }, "Resume");
   const folder = el("button", { class: "small", onclick: () => act("showInFolder", { id }) }, "Show in folder");
-  const remove = el("button", { class: "small", onclick: () => removeDownload(id, remove) }, "Remove");
+  const remove = el("button", { class: "small", onclick: () => removeDownload(id, actions, ask) }, "Remove");
+  // Popups can't show confirm dialogs, so removing an unfinished download asks inline.
+  const ask = el("div", { class: "actions ask", hidden: true },
+    el("span", { class: "muted" }, "Remove this download?"),
+    el("button", { class: "small primary", onclick: () => act("remove", { id, deleteFile: true }, "Removed, partial file deleted") }, "Delete partial file"),
+    el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, "Removed from list (partial file kept)") }, "Keep partial file"),
+    el("button", { class: "small", onclick: () => { ask.hidden = true; actions.hidden = false; } }, "Cancel"));
+  const actions = el("div", { class: "actions" }, pause, resume, folder, remove);
 
   const page = el("input", { type: "url" });
   const sha = el("input", { type: "text", class: "mono", placeholder: "optional" });
@@ -57,7 +64,7 @@ function makeCard(id) {
     el("div", { class: "bar" }, fill),
     el("div", { class: "meta" }, sizeText, speedText),
     err, conns,
-    el("div", { class: "actions" }, pause, resume, folder, remove),
+    actions, ask,
     details);
 
   const rows = new Map();
@@ -132,20 +139,12 @@ function makeCard(id) {
   return { root, update };
 }
 
-// Popups can't show confirm dialogs, so removing unfinished data takes a second click.
-function removeDownload(id, button) {
+function removeDownload(id, actions, ask) {
   const d = (latest.state.downloads || []).find((x) => x.id === id);
   if (!d) return;
   if (d.status === "completed") return act("remove", { id, deleteFile: false }, "Removed from list (file kept)");
-  if (button.dataset.armed) return act("remove", { id, deleteFile: true }, "Removed");
-  button.dataset.armed = "1";
-  button.textContent = "Delete partial data?";
-  button.classList.add("primary");
-  setTimeout(() => {
-    delete button.dataset.armed;
-    button.textContent = "Remove";
-    button.classList.remove("primary");
-  }, 4000);
+  actions.hidden = true;
+  ask.hidden = false;
 }
 
 function renderDownloads(state) {
