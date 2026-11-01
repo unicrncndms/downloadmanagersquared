@@ -107,20 +107,19 @@ function makeCard(id) {
       r.name.textContent = ifaceName(ifc, latest.state, latest.settings);
       let label = LINK_TEXT[l.status] || l.status;
       if (l.status === "ready" && d.status === "running" && l.conns > 0) label = "Downloading";
-      if (l.needsPage) label = "Needs landing page";
       r.state.replaceChildren(...[
-        el("span", { class: "badge " + (l.needsPage ? "warn" : LINK_CLASS[l.status] || "dim") }, label),
+        el("span", { class: "badge " + (LINK_CLASS[l.status] || "dim") }, label),
         l.resolved ? el("span", { class: "muted" }, " own link") : null,
       ].filter(Boolean));
       r.info.textContent = l.conns ? `${l.conns}×` : "";
       r.speed.textContent = l.speed > 0 ? fmtSpeed(l.speed) : "";
-      const canRetry = !l.needsPage && (l.status === "failed" || l.status === "mismatch");
+      const canRetry = ["retrying", "failed", "mismatch"].includes(l.status);
       r.why.hidden = !l.error && !canRetry;
       r.whyText.textContent = l.error || "";
       r.retry.hidden = !canRetry;
     }
     // Point straight at the field that fixes it.
-    const needsPage = ids.some((ifc) => d.links[ifc].needsPage);
+    const needsPage = ids.some((ifc) => d.links[ifc].status === "needs-page");
     if (needsPage && !shownPageHint) {
       details.open = true;
       page.placeholder = "Paste the page you started the download from";

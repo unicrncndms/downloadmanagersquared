@@ -397,10 +397,10 @@ func TestHTMLErrorPageDoesNotMakeFileLinkTheLandingPage(t *testing.T) {
 	d.Start()
 
 	deadline := time.Now().Add(10 * time.Second)
-	for !d.Summary().Links["wifi"].NeedsPage && time.Now().Before(deadline) {
+	for d.Summary().Links["wifi"].Status != LinkNeedsPage && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !d.Summary().Links["wifi"].NeedsPage {
+	if d.Summary().Links["wifi"].Status != LinkNeedsPage {
 		t.Fatalf("wifi should wait for a landing page, got %+v", d.Summary().Links["wifi"])
 	}
 	mu.Lock()
@@ -457,4 +457,102 @@ func TestLandingPageAsLinkResolvesEverywhere(t *testing.T) {
 	if s := d.Summary(); s.Status != StatusCompleted {
 		t.Errorf("status %s: %s", s.Status, s.Error)
 	}
+}
+
+// Wi-Fi gets a web page for the source URL while Ethernet is still answering.
+// Until Ethernet has answered nobody knows what that page means, so Wi-Fi's link
+// is still probing, not failed.
+func TestUndecidedWebPageIsStillProbing(t *testing.T) {
+	data := randomData(4 << 20)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Iface") != "eth" {
+			w.Header().Set("Content-Type", "text/html")
+			io.WriteString(w, "<html>not for your IP</html>")
+			return
+		}
+		time.Sleep(time.Second)
+		http.ServeContent(w, r, "big.bin", time.Time{}, bytes.NewReader(data))
+	}))
+	defer srv.Close()
+	env := &testEnv{ifaces: []Iface{iface("eth", 2, 0), iface("wifi", 2, 0)}, main: "eth"}
+	env.finished = make(chan struct{})
+	d := New(env, State{ID: "t9", URL: srv.URL + "/file", Dir: t.TempDir(), Size: -1})
+	d.Start()
+
+	time.Sleep(600 * time.Millisecond)
+	if l := d.Summary().Links["wifi"]; l.Status != LinkProbing {
+		t.Errorf("before Ethernet answered, wifi is %+v, want probing", l)
+	}
+	select {
+	case <-env.finished:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("timeout: %+v", d.Summary())
+	}
+	if l := d.Summary().Links["wifi"]; l.Status != LinkNeedsPage {
+		t.Errorf("once Ethernet got the file, wifi is %+v, want needs-page", l)
+	}
+}
+
+// Every interface needs its own link and the browser can't get one: there is
+// nothing left to try, so the download pauses. Resuming tries again.
+func TestPausesWhenNoInterfaceCanReachTheFile(t *testing.T) {
+	srv := htmlForOtherIPs(randomData(1 << 20))
+	defer srv.Close()
+	env := &testEnv{ifaces: []Iface{iface("eth", 2, 0), iface("wifi", 2, 0)}, main: "eth"}
+	var resolves atomic.Int32
+	var d *Download
+	env.resolve = func(id, ifc, page string) {
+		resolves.Add(1)
+		d.ResolveFailed(ifc, "no download button found")
+	}
+	d = New(env, State{ID: "t10", URL: srv.URL + "/file", PageURL: srv.URL + "/page", Dir: t.TempDir(), Size: -1})
+	waitPaused := func() {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for (d.Running() || d.Status() != StatusPaused) && time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+		}
+		if s := d.Summary(); s.Status != StatusPaused || !strings.Contains(s.Error, "no connection can reach the file") {
+			t.Fatalf("status %s (%q), want paused because no connection can reach the file", s.Status, s.Error)
+		}
+	}
+	d.Start()
+	waitPaused()
+	if n := resolves.Load(); n != 2 {
+		t.Fatalf("%d resolves, want one per interface", n)
+	}
+	d.Start()
+	waitPaused()
+	if n := resolves.Load(); n != 4 {
+		t.Fatalf("%d resolves after resuming, want each interface tried again", n)
+	}
+}
+
+// A hotel Wi-Fi serves something else and answers first. The main interface's
+// answer still decides what the file is, so Wi-Fi is the mismatch.
+func TestMainInterfaceDecidesWhatTheFileIs(t *testing.T) {
+	data := randomData(4 << 20)
+	wrong := randomData(1 << 20)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Iface") == "wifi" {
+			http.ServeContent(w, r, "portal.bin", time.Time{}, bytes.NewReader(wrong))
+			return
+		}
+		if r.Header.Get("Range") == "bytes=0-0" {
+			time.Sleep(300 * time.Millisecond)
+		}
+		http.ServeContent(w, r, "big.bin", time.Time{}, bytes.NewReader(data))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	env := &testEnv{ifaces: []Iface{iface("eth", 2, 0), iface("wifi", 2, 0)}, main: "eth"}
+	d := runToEnd(t, env, State{ID: "t11", URL: srv.URL + "/big.bin", Filename: "big.bin", Dir: dir, Size: -1})
+	s := d.Summary()
+	if s.Status != StatusCompleted {
+		t.Fatalf("status %s: %s", s.Status, s.Error)
+	}
+	if s.Links["wifi"].Status != LinkMismatch || s.Links["eth"].Status != LinkReady {
+		t.Errorf("eth %+v, wifi %+v: wifi should be the mismatch", s.Links["eth"], s.Links["wifi"])
+	}
+	checkFile(t, filepath.Join(dir, "big.bin"), data)
 }

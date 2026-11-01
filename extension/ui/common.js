@@ -59,9 +59,9 @@ const STATUS_CLASS = { completed: "ok", failed: "bad", paused: "dim", queued: "d
 
 const LINK_TEXT = {
   pending: "Waiting", probing: "Checking link", ready: "Ready", resolving: "Getting link in browser",
-  failed: "Failed", mismatch: "Different file: excluded",
+  "needs-page": "Needs landing page", retrying: "Retrying soon", failed: "Failed", mismatch: "Different file: excluded",
 };
-const LINK_CLASS = { failed: "bad", mismatch: "bad", resolving: "warn", ready: "ok" };
+const LINK_CLASS = { failed: "bad", mismatch: "bad", resolving: "warn", "needs-page": "warn", retrying: "warn", ready: "ok" };
 
 function percent(d) {
   return d.size > 0 ? Math.min(100, (d.done / d.size) * 100) : 0;

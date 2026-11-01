@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,7 +31,6 @@ const (
 	minSplit     = 4 << 20   // never create a chunk smaller than this by splitting
 	bufSize      = 256 << 10 // read/write unit per connection
 	stallTimeout = 30 * time.Second
-	maxResolves  = 3
 	diskReserve  = 256 << 20 // pause when free space falls below this
 	partSuffix   = ".dms.part"
 )
@@ -45,31 +45,6 @@ const (
 	StatusCompleted Status = "completed"
 	StatusFailed    Status = "failed"
 )
-
-type LinkStatus string
-
-const (
-	LinkPending   LinkStatus = "pending" // has a URL that still needs probing
-	LinkProbing   LinkStatus = "probing"
-	LinkReady     LinkStatus = "ready"
-	LinkResolving LinkStatus = "resolving" // waiting for the browser to fetch a link via this interface
-	LinkFailed    LinkStatus = "failed"
-	LinkMismatch  LinkStatus = "mismatch" // serves a different file; excluded from this download
-)
-
-// Link is one interface's way to the file.
-type Link struct {
-	URL      string     `json:"url,omitempty"`
-	Cookie   string     `json:"cookie,omitempty"`
-	Referer  string     `json:"referer,omitempty"`
-	Status   LinkStatus `json:"status"`
-	Error    string     `json:"error,omitempty"`
-	Resolves int        `json:"resolves,omitempty"`
-	// NeedsPage: this connection needs its own link but no landing page is known yet.
-	NeedsPage bool `json:"needsPage,omitempty"`
-	retryAt   time.Time
-	pageHit   bool // got an HTML page for the original link; meaning decided once all connections answered
-}
 
 type Range struct {
 	Start int64 `json:"start"`
@@ -90,6 +65,7 @@ type State struct {
 	Size       int64            `json:"size"`
 	RangeOK    bool             `json:"rangeOk"`
 	Probed     bool             `json:"probed"`
+	Stuck      bool             `json:"stuck,omitempty"` // paused because no connection could reach the file
 	Allocated  bool             `json:"allocated"`
 	SHA256     string           `json:"sha256,omitempty"`
 	MD5        string           `json:"md5,omitempty"`
@@ -142,7 +118,10 @@ type worker struct {
 	speed  float64
 }
 
-type pauseError struct{ msg string }
+type pauseError struct {
+	msg   string
+	stuck bool // no connection can reach the file
+}
 
 func (e *pauseError) Error() string { return e.msg }
 
@@ -178,9 +157,7 @@ func New(env Env, st State) *Download {
 		st.Links = map[string]*Link{}
 	}
 	for _, l := range st.Links {
-		if l.Status == LinkProbing {
-			l.Status = LinkPending
-		}
+		l.restored()
 	}
 	return &Download{env: env, st: st}
 }
@@ -236,10 +213,9 @@ func (d *Download) Start() {
 	d.total, d.speed, d.eta = rate.EWMA{}, 0, rate.ETA{}
 	d.lastTick = time.Now()
 	for _, l := range d.st.Links {
-		if l.Status == LinkFailed && l.retryAt.IsZero() && strings.HasPrefix(l.Error, "unreachable") {
-			l.Status = LinkPending
-		}
+		l.resume(d.st.Stuck)
 	}
+	d.st.Stuck = false
 	go d.run(ctx)
 }
 
@@ -268,16 +244,15 @@ func (d *Download) SetResolved(ifaceID, url, cookie, referer string) {
 		l = &Link{}
 		d.st.Links[ifaceID] = l
 	}
-	l.URL, l.Cookie, l.Referer = url, cookie, referer
-	l.Status, l.Error, l.retryAt = LinkPending, "", time.Time{}
+	l.resolved(url, cookie, referer)
 	d.mu.Unlock()
 	d.env.Changed(d)
 }
 
 func (d *Download) ResolveFailed(ifaceID, msg string) {
 	d.mu.Lock()
-	if l := d.st.Links[ifaceID]; l != nil && l.Status == LinkResolving {
-		l.Status, l.Error, l.retryAt = LinkFailed, "browser: "+msg, time.Time{}
+	if l := d.st.Links[ifaceID]; l != nil {
+		l.resolveFailed(msg)
 	}
 	d.mu.Unlock()
 	d.env.Changed(d)
@@ -286,8 +261,8 @@ func (d *Download) ResolveFailed(ifaceID, msg string) {
 // RetryLink gives a failed or mismatched interface another chance.
 func (d *Download) RetryLink(ifaceID string) {
 	d.mu.Lock()
-	if l := d.st.Links[ifaceID]; l != nil && l.Status != LinkProbing {
-		l.Status, l.Error, l.Resolves, l.retryAt = LinkPending, "", 0, time.Time{}
+	if l := d.st.Links[ifaceID]; l != nil {
+		l.retry()
 	}
 	d.mu.Unlock()
 	d.env.Changed(d)
@@ -300,15 +275,13 @@ func (d *Download) SetHashes(sha, md string) {
 	d.env.Changed(d)
 }
 
-// SetPageURL sets the landing page and retries connections that were waiting for one.
+// SetPageURL sets the landing page and retries interfaces that were waiting for one.
 func (d *Download) SetPageURL(u string) {
 	d.mu.Lock()
 	d.st.PageURL = strings.TrimSpace(u)
 	if d.st.PageURL != "" {
 		for _, l := range d.st.Links {
-			if l.NeedsPage && l.Status == LinkFailed {
-				l.Status, l.Error, l.Resolves, l.NeedsPage = LinkPending, "", 0, false
-			}
+			l.pageKnown()
 		}
 	}
 	d.mu.Unlock()
@@ -353,7 +326,7 @@ func (d *Download) run(ctx context.Context) {
 	case d.stopAs != "":
 		d.st.Status = d.stopAs
 	case errors.As(err, &pe):
-		d.st.Status, d.st.Error = StatusPaused, pe.msg
+		d.st.Status, d.st.Error, d.st.Stuck = StatusPaused, pe.msg, pe.stuck
 	case err != nil:
 		d.st.Status, d.st.Error, finished = StatusFailed, err.Error(), true
 	default:
@@ -412,21 +385,28 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 			d.st.Links[ifc.ID] = l
 			changed = true
 		}
-		if l.Status == LinkFailed && !l.retryAt.IsZero() && now.After(l.retryAt) {
-			l.Status, l.Error, l.retryAt = LinkPending, "", time.Time{}
-		}
+		l.wake(now)
 		if l.Status != LinkPending || d.probing[ifc.ID] {
 			continue
 		}
-		// Without range support only the main connection is used, so don't touch the others.
-		if d.st.Probed && !d.st.RangeOK && ifc.ID != mainID {
-			continue
+		if d.mainOnlyLocked(ifc.ID, mainID) {
+			continue // don't touch the others
 		}
 		d.probing[ifc.ID] = true
-		l.Status = LinkProbing
+		l.probing()
 		go d.probe(ctx, ifc, *l)
 	}
 	d.decidePageHitsLocked(byID)
+	d.settleHeldLocked(byID, mainID)
+	if d.nothingLeftLocked(byID, mainID) {
+		msg := "Paused: no connection can reach the file; resume to try them again"
+		for _, l := range d.st.Links {
+			if l.Status == LinkNeedsPage {
+				msg = "Paused: no connection can reach the file; enter the landing page under Details, then resume"
+			}
+		}
+		return false, &pauseError{msg: msg, stuck: true}
+	}
 
 	if !d.st.Probed {
 		return false, nil
@@ -478,11 +458,35 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 	if now.Sub(d.lastDisk) >= 30*time.Second {
 		d.lastDisk = now
 		if free, err := winutil.FreeSpace(d.st.Dir); err == nil && free < diskReserve && d.remainingLocked() > 0 {
-			return false, &pauseError{fmt.Sprintf("Paused: disk almost full (%s free)", human(free))}
+			return false, &pauseError{msg: fmt.Sprintf("Paused: disk almost full (%s free)", human(free))}
 		}
 	}
 
 	return d.plan.remaining() == 0 && len(d.workers) == 0, nil
+}
+
+// nothingLeftLocked: every link the download could use has been given up on,
+// so it would sit at 0 B/s forever.
+func (d *Download) nothingLeftLocked(usable map[string]Iface, mainID string) bool {
+	if len(d.workers) > 0 || len(d.probing) > 0 {
+		return false
+	}
+	seen := false
+	for id := range usable {
+		if d.mainOnlyLocked(id, mainID) {
+			continue
+		}
+		if l := d.st.Links[id]; l == nil || !l.stuck() {
+			return false
+		}
+		seen = true
+	}
+	return seen
+}
+
+// mainOnlyLocked: without range support only the main interface is used.
+func (d *Download) mainOnlyLocked(id, mainID string) bool {
+	return d.st.Probed && !d.st.RangeOK && id != mainID
 }
 
 func (d *Download) ifRun(id string) *ifaceRun {
@@ -496,6 +500,11 @@ func (d *Download) ifRun(id string) *ifaceRun {
 
 func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
 	res, err := probeLink(ctx, ifc.Client, l, d.st.UserAgent)
+	usable := map[string]Iface{}
+	for _, u := range d.env.Usable() {
+		usable[u.ID] = u
+	}
+	mainID := d.env.MainID()
 	d.mu.Lock()
 	delete(d.probing, ifc.ID)
 	cur := d.st.Links[ifc.ID]
@@ -504,11 +513,15 @@ func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
 		return
 	}
 	if ctx.Err() != nil {
-		cur.Status = LinkPending
+		cur.requeue()
 		d.mu.Unlock()
 		return
 	}
-	d.applyProbeLocked(ifc.ID, cur, res, err)
+	if err == nil && !res.rejected() && res.status < 400 && ifc.ID != mainID && d.mainMayAnswerLocked(usable, mainID) {
+		cur.hold(time.Now(), res) // the main interface decides what the file is
+	} else {
+		d.applyProbeLocked(ifc.ID, cur, res, err)
+	}
 	d.mu.Unlock()
 	d.env.Changed(d)
 }
@@ -516,15 +529,15 @@ func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
 func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err error) {
 	if err != nil {
 		log.Printf("download %s probe via %s: %s", d.st.ID, ifaceID, shortErr(err))
-		l.Status, l.Error, l.retryAt = LinkFailed, "unreachable: "+shortErr(err), time.Now().Add(30*time.Second)
+		l.unreachable(time.Now(), shortErr(err))
 		return
 	}
 	log.Printf("download %s probe via %s: HTTP %d, size %d, ranges %v, page %v", d.st.ID, ifaceID, r.status, r.size, r.rangeOK, r.isPage)
 	if r.rejected() {
 		if r.isPage && d.st.PageURL == "" && l.URL == d.st.URL {
 			// Either the link is a landing page, or it is the file link and this
-			// connection got an error page for it. Decide once every connection has answered.
-			l.Status, l.Error, l.pageHit = LinkFailed, "got a web page instead of the file", true
+			// interface got an error page for it. Decide once every interface has answered.
+			l.webPage()
 			return
 		}
 		reason := fmt.Sprintf("link not valid on this connection (HTTP %d)", r.status)
@@ -535,7 +548,7 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 		return
 	}
 	if r.status >= 400 {
-		l.Status, l.Error, l.retryAt = LinkFailed, fmt.Sprintf("HTTP %d", r.status), time.Now().Add(60*time.Second)
+		l.httpError(time.Now(), fmt.Sprintf("HTTP %d", r.status))
 		return
 	}
 	if !d.st.Probed {
@@ -548,24 +561,24 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 		}
 	} else {
 		if r.size != d.st.Size {
-			l.Status, l.Error = LinkMismatch, fmt.Sprintf("different file size (%d vs %d bytes)", r.size, d.st.Size)
+			l.mismatch(fmt.Sprintf("different file size (%d vs %d bytes)", r.size, d.st.Size))
 			return
 		}
 		if d.st.RemoteName != "" && r.name != "" && !strings.EqualFold(r.name, d.st.RemoteName) {
-			l.Status, l.Error = LinkMismatch, fmt.Sprintf("different file name (%q vs %q)", r.name, d.st.RemoteName)
+			l.mismatch(fmt.Sprintf("different file name (%q vs %q)", r.name, d.st.RemoteName))
 			return
 		}
 		if d.st.RangeOK && !r.rangeOK {
-			l.Status, l.Error = LinkFailed, "this link does not allow split downloading"
+			l.fail("this link does not allow split downloading")
 			return
 		}
 	}
-	l.Status, l.Error, l.Resolves, l.retryAt = LinkReady, "", 0, time.Time{}
+	l.ready()
 }
 
-// decidePageHitsLocked settles connections that got a web page for the original link.
-// If another connection got the file, the link is the file and those connections
-// need their own link from the landing page. Only if no connection got the file is
+// decidePageHitsLocked settles interfaces that got a web page for the source URL.
+// If another interface got the file, the link is the file and those interfaces
+// need their own link from the landing page. Only if no interface got the file is
 // the link itself the landing page.
 func (d *Download) decidePageHitsLocked(usable map[string]Iface) {
 	var hits []string
@@ -579,33 +592,55 @@ func (d *Download) decidePageHitsLocked(usable map[string]Iface) {
 	}
 	if !d.st.Probed && d.st.PageURL == "" {
 		for id := range usable {
-			if l := d.st.Links[id]; l == nil || !l.pageHit && l.Status != LinkFailed {
-				return // still waiting on a connection that might get the file
+			if l := d.st.Links[id]; l == nil || l.answering() {
+				return // still waiting on an interface that might get the file
 			}
 		}
 		d.st.PageURL = d.st.URL
 	}
 	for _, id := range hits {
 		l := d.st.Links[id]
-		l.pageHit = false
 		d.needResolveLocked(id, l, "this connection gets a web page instead of the file")
 	}
 }
 
+// mainMayAnswerLocked: the main interface's probe is still to come, so answers
+// from the other interfaces wait for it.
+func (d *Download) mainMayAnswerLocked(usable map[string]Iface, mainID string) bool {
+	if d.st.Probed {
+		return false
+	}
+	if _, ok := usable[mainID]; !ok {
+		return false
+	}
+	l := d.st.Links[mainID]
+	return l == nil || l.answering()
+}
+
+// settleHeldLocked applies held answers once the main interface has decided the
+// file, or can't. In the second case the earliest answer decides it.
+func (d *Download) settleHeldLocked(usable map[string]Iface, mainID string) {
+	if d.mainMayAnswerLocked(usable, mainID) {
+		return
+	}
+	var ids []string
+	for id, l := range d.st.Links {
+		if l.held != nil {
+			ids = append(ids, id)
+		}
+	}
+	slices.SortFunc(ids, func(a, b string) int { return d.st.Links[a].heldAt.Compare(d.st.Links[b].heldAt) })
+	for _, id := range ids {
+		l := d.st.Links[id]
+		d.applyProbeLocked(id, l, *l.takeHeld(), nil)
+	}
+}
+
 func (d *Download) needResolveLocked(ifaceID string, l *Link, reason string) {
-	if d.st.PageURL == "" {
-		l.Status, l.NeedsPage = LinkFailed, true
-		l.Error = reason + ". It needs its own link, but the page the download came from is unknown: enter it under Details as the landing page"
-		return
+	if l.needResolve(d.st.PageURL != "", reason) {
+		id, page := d.st.ID, d.st.PageURL
+		go d.env.RequestResolve(id, ifaceID, page)
 	}
-	if l.Resolves >= maxResolves {
-		l.Status, l.Error = LinkFailed, fmt.Sprintf("%s; gave up after %d new links", reason, maxResolves)
-		return
-	}
-	l.Resolves++
-	l.Status, l.Error, l.NeedsPage = LinkResolving, reason, false
-	id, page := d.st.ID, d.st.PageURL
-	go d.env.RequestResolve(id, ifaceID, page)
 }
 
 func (d *Download) openFileLocked() error {
@@ -675,7 +710,7 @@ func checkSpace(dir string, need int64) error {
 		return nil
 	}
 	if free < need+diskReserve {
-		return &pauseError{fmt.Sprintf("Paused: not enough disk space (need %s, %s free)", human(need), human(free))}
+		return &pauseError{msg: fmt.Sprintf("Paused: not enough disk space (need %s, %s free)", human(need), human(free))}
 	}
 	return nil
 }
@@ -753,14 +788,14 @@ func (d *Download) workerFailedLocked(w *worker, err error) {
 	switch fe.kind {
 	case kindExpired:
 		if l != nil && l.URL == w.link.URL && l.Status == LinkReady {
-			l.Status, l.Error = LinkPending, fe.msg
+			l.expired(fe.msg)
 		}
 	case kindThrottle:
 		ir.throttle = min(ir.throttle+1, max(ir.conns-1, 0))
 		ir.lastThrottle, ir.pausedUntil = now, now.Add(fe.retryAfter)
 	case kindRange:
 		if l != nil && l.URL == w.link.URL {
-			l.Status, l.Error = LinkFailed, fe.msg
+			l.fail(fe.msg)
 		}
 	case kindDisk:
 		select {
@@ -772,7 +807,7 @@ func (d *Download) workerFailedLocked(w *worker, err error) {
 		ir.pausedUntil = now.Add(2 * time.Second)
 		if ir.netFails >= 3 && l != nil && l.Status == LinkReady {
 			ir.netFails = 0
-			l.Status, l.Error, l.retryAt = LinkFailed, "unreachable: "+fe.msg, now.Add(30*time.Second)
+			l.unreachable(now, fe.msg)
 		}
 	}
 }
@@ -1058,12 +1093,11 @@ func human(n int64) string {
 }
 
 type LinkSummary struct {
-	Status    LinkStatus `json:"status"`
-	Error     string     `json:"error,omitempty"`
-	Speed     float64    `json:"speed"`
-	Conns     int        `json:"conns"`
-	Resolved  bool       `json:"resolved"` // fetched by the browser for this interface
-	NeedsPage bool       `json:"needsPage,omitempty"`
+	Status   LinkStatus `json:"status"`
+	Error    string     `json:"error,omitempty"`
+	Speed    float64    `json:"speed"`
+	Conns    int        `json:"conns"`
+	Resolved bool       `json:"resolved"` // fetched by the browser for this interface
 }
 
 // Summary is what the UI shows for a download.
@@ -1102,7 +1136,7 @@ func (d *Download) Summary() Summary {
 		s.ETA = d.eta.Seconds()
 	}
 	for id, l := range d.st.Links {
-		ls := LinkSummary{Status: l.Status, Error: l.Error, Resolved: l.URL != d.st.URL, NeedsPage: l.NeedsPage}
+		ls := LinkSummary{Status: l.Status, Error: l.Error, Resolved: l.URL != d.st.URL}
 		if ir := d.ifs[id]; ir != nil && d.running {
 			ls.Speed, ls.Conns = ir.ewma.Value(), ir.active
 		}

@@ -349,7 +349,7 @@ func (e *Engine) MainID() string {
 	return e.mainIDLocked()
 }
 
-// mainIDLocked: the chosen main connection, else the Windows default route, else any usable one.
+// mainIDLocked: the chosen main interface, else the Windows default route, else any usable one.
 func (e *Engine) mainIDLocked() string {
 	if ent := e.ifaces[e.settings.MainInterface]; ent != nil && ent.present && e.enabledLocked(ent) {
 		return e.settings.MainInterface
