@@ -206,3 +206,16 @@ func TestPortForwardingSignsThenBinds(t *testing.T) {
 		t.Fatal("a refused signature request succeeded")
 	}
 }
+
+func TestFailedRequestsDontRevealTheToken(t *testing.T) {
+	api := API{CA: x509.NewCertPool(), KeyPort: 1, PFPort: 1}
+	dead := Server{IP: "127.0.0.1", CN: "example.com"} // nothing listens on port 1
+	_, pub, _ := tunnel.GenerateKey()
+	_, err1 := api.AddKey(t.Context(), dial, dead, "SECRETTOKEN", pub)
+	_, err2 := api.Signature(t.Context(), dial, dead, "SECRETTOKEN")
+	for _, err := range []error{err1, err2} {
+		if err == nil || strings.Contains(err.Error(), "SECRETTOKEN") {
+			t.Fatalf("error %v carries the token (these end up in the engine log)", err)
+		}
+	}
+}

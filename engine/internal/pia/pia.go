@@ -238,6 +238,14 @@ func (a API) get(ctx context.Context, c *http.Client, u string, into any) error 
 	}
 	resp, err := c.Do(req)
 	if err != nil {
+		// The query holds the login token, and errors end up in the log.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			if u, perr := url.Parse(ue.URL); perr == nil {
+				u.RawQuery = ""
+				ue.URL = u.String()
+			}
+		}
 		return err
 	}
 	defer resp.Body.Close()
