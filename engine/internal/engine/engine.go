@@ -524,10 +524,17 @@ func (e *Engine) refreshPortMaps(now time.Time) {
 		gw portmap.Gateway
 	}
 	var jobs []job
+	// Only the no-VPN session listens on the interfaces, and only while one of
+	// its torrents is in the swarm: otherwise there is nothing to open a port for.
+	live := e.session(download.VPNOff).Live()
 	e.mu.Lock()
 	port := e.settings.TorrentPort
 	for id, ent := range e.ifaces {
 		in := &ent.incoming
+		if !live {
+			*in = incoming{}
+			continue
+		}
 		if !ent.present || !e.enabledLocked(ent) {
 			continue
 		}

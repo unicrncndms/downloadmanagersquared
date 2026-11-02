@@ -59,6 +59,7 @@ type Torrent struct {
 	stor    storage.ClientImplCloser
 	cancel  context.CancelFunc
 	active  bool  // in the swarm, in any phase
+	held    bool  // holds the session's client (acquire, matched by release)
 	slot    bool  // checking or downloading after the queue started it: holds a queue slot
 	upBase  int64 // st.Uploaded when this run joined the swarm
 	speed   rate.EWMA
@@ -197,22 +198,30 @@ func (t *Torrent) join(ctx context.Context) (*atorrent.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
+	cl, err := t.s.acquire() // the session's sockets open now, if no other torrent opened them
+	if err != nil {
+		return nil, err
+	}
 	spec.Trackers = resolveUDPTrackers(ctx, spec.Trackers, t.s.lookupFirst)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if ctx.Err() != nil {
+		t.s.release()
 		return nil, ctx.Err()
 	}
+	t.held = true
 	spec.InfoBytes = t.st.Info
 	t.stor = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: t.st.Dir, PieceCompletion: storage.NewMapPieceCompletion(),
 		Logger: slog.New(slog.DiscardHandler),
 	})
 	spec.Storage = t.stor
-	at, _, err := t.s.cl.AddTorrentSpec(spec)
+	at, _, err := cl.AddTorrentSpec(spec)
 	if err != nil {
 		t.stor.Close()
 		t.stor = nil
+		t.held = false
+		t.s.release()
 		return nil, err
 	}
 	t.t, t.upBase = at, t.st.Uploaded
@@ -544,6 +553,10 @@ func (t *Torrent) dropLocked() {
 	}
 	t.t, t.stor, t.active, t.slot = nil, nil, false, false
 	t.speed, t.upSpeed = rate.EWMA{}, rate.EWMA{}
+	if t.held {
+		t.held = false
+		t.s.release() // the last torrent out closes the session's sockets
+	}
 }
 
 func (t *Torrent) changed() {

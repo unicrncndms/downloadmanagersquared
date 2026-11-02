@@ -197,8 +197,9 @@ func TestPIATunnelForwardsAPortAndTakesPeersOnIt(t *testing.T) {
 		t.Fatalf("tunnel with a forwarded port shown as %q", v.Incoming)
 	}
 	// The VPN-only session listens on the forwarded port inside the tunnel,
-	// where PIA sends incoming peers.
+	// where PIA sends incoming peers, while one of its torrents is in the swarm.
 	e.syncTorrentIfaces()
+	vpnTorrentInSwarm(t, e)
 	if ifs := e.torrentIfacesFor(download.VPNOnly); len(ifs) != 1 || ifs[0].Port != 47000 {
 		t.Fatalf("VPN-only torrents listen on %+v, want port 47000", ifs)
 	}
@@ -222,6 +223,17 @@ func TestPIATunnelForwardsAPortAndTakesPeersOnIt(t *testing.T) {
 	if v := ifaceView(t, e, tunnelPath("lo")); v.Incoming != "reachable" {
 		t.Fatalf("after an hour the tunnel is %q", v.Incoming)
 	}
+}
+
+func vpnTorrentInSwarm(t *testing.T, e *Engine) {
+	t.Helper()
+	tor, err := e.session(download.VPNOnly).Add(torrentState(fmt.Sprintf("magnet:?xt=urn:btih:%040x", 77), download.VPNOnly, t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	t.Cleanup(func() { tor.Stop(download.StatusPaused) })
+	waitFor(t, "the VPN-only session to go live", 5*time.Second, e.session(download.VPNOnly).Live)
 }
 
 func TestPIARegionWithoutForwardingIsOutgoingOnly(t *testing.T) {

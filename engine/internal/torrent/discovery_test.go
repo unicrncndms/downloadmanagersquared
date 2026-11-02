@@ -128,6 +128,7 @@ func TestInterfaceListensOnItsOwnForwardedPort(t *testing.T) {
 	}
 	ifc.Port = freePort(t) // the port PIA forwards to this tunnel
 	s.SetIfaces([]Iface{ifc})
+	inSwarm(t, s, sw)
 	first := ifc.Port
 	ifc.Port = freePort(t) // a new forwarded port after the tunnel came back
 	s.SetIfaces([]Iface{ifc})

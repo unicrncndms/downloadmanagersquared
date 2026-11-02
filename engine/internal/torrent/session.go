@@ -64,16 +64,21 @@ type dialing struct {
 	n  int
 }
 
+// Session runs the torrents of one VPN mode. Its client, and with it every
+// socket (peers, DHT, listeners), exists only while a torrent is in the swarm,
+// so a session with nothing to do shows nothing on the network.
 type Session struct {
-	cfg  Config
-	cl   *atorrent.Client
-	stor storage.ClientImplCloser
+	cfg Config
 
-	setMu sync.Mutex // one SetIfaces at a time
-
-	done chan struct{} // closed by Close
+	setMu  sync.Mutex // one change of interfaces, or start or stop of the client, at a time
+	want   []Iface    // the interfaces to use whenever the client runs
+	users  int        // torrents in the swarm
+	closed bool
 
 	mu      sync.Mutex
+	cl      *atorrent.Client // nil while no torrent is in the swarm
+	stor    storage.ClientImplCloser
+	clDone  chan struct{}   // closed once the current client has stopped
 	ifs     []*ifaceSockets // the first carries trackers and web seeds
 	dialing map[string]*dialing
 	peerAt  map[string][]*ifaceSockets // peer address -> interfaces of its open peers
@@ -81,7 +86,11 @@ type Session struct {
 }
 
 func NewSession(cfg Config) (*Session, error) {
-	s := &Session{cfg: cfg, done: make(chan struct{}), dialing: map[string]*dialing{}, peerAt: map[string][]*ifaceSockets{}}
+	return &Session{cfg: cfg, dialing: map[string]*dialing{}, peerAt: map[string][]*ifaceSockets{}}, nil
+}
+
+// newClient makes the client, which opens no socket of its own.
+func (s *Session) newClient() (*atorrent.Client, storage.ClientImplCloser, error) {
 	c := atorrent.NewDefaultClientConfig()
 	// No built-in sockets: everything below is added per interface.
 	c.DisableTCP = true
@@ -120,34 +129,98 @@ func NewSession(cfg Config) (*Session, error) {
 	}
 	// Each torrent gets its own storage; this only keeps the client from creating
 	// a piece database in the working directory.
-	s.stor = storage.NewFileOpts(storage.NewFileClientOpts{
+	stor := storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: os.TempDir(), PieceCompletion: storage.NewMapPieceCompletion(),
 		Logger: slog.New(slog.DiscardHandler),
 	})
-	c.DefaultStorage = s.stor
+	c.DefaultStorage = stor
 	c.Logger = alog.Default.WithFilterLevel(alog.Critical)
 	c.Slogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	cl, err := atorrent.NewClient(c)
 	if err != nil {
-		s.stor.Close()
-		return nil, err
+		stor.Close()
+		return nil, nil, err
 	}
-	s.cl = cl
 	cl.AddDialer(peerDialer{s, "tcp4"})
 	cl.AddDialer(peerDialer{s, "udp4"})
-	return s, nil
+	return cl, stor, nil
+}
+
+var errClosed = errors.New("the torrent session is closed")
+
+// acquire is a torrent joining the swarm: it starts the client, on the
+// interfaces SetIfaces gave, if no other torrent has. Every acquire is
+// matched by one release.
+func (s *Session) acquire() (*atorrent.Client, error) {
+	s.setMu.Lock()
+	defer s.setMu.Unlock()
+	if s.closed {
+		return nil, errClosed
+	}
+	if s.cl == nil {
+		cl, stor, err := s.newClient()
+		if err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		s.cl, s.stor, s.clDone = cl, stor, make(chan struct{})
+		s.mu.Unlock()
+		s.applyLocked(s.want)
+	}
+	s.users++
+	return s.cl, nil
+}
+
+// release is a torrent leaving the swarm; the last one stops the client and
+// closes every socket.
+func (s *Session) release() {
+	s.setMu.Lock()
+	defer s.setMu.Unlock()
+	if s.users--; s.users == 0 && s.cl != nil {
+		s.stopClientLocked()
+	}
+}
+
+func (s *Session) stopClientLocked() {
+	s.mu.Lock()
+	cl, stor, done, ifs := s.cl, s.stor, s.clDone, s.ifs
+	s.cl, s.stor, s.ifs = nil, nil, nil
+	s.dialing, s.peerAt = map[string]*dialing{}, map[string][]*ifaceSockets{}
+	s.mu.Unlock()
+	// The client first: its accept loops end on a closed client, not on closed sockets.
+	cl.Close()
+	stor.Close()
+	close(done)
+	for _, is := range ifs {
+		is.close()
+	}
+}
+
+// Live is whether the session is on the network: a torrent is in the swarm.
+func (s *Session) Live() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cl != nil
 }
 
 var errNoIface = errors.New("no usable interface")
 
 // SetIfaces makes ifaces the interfaces torrents use, in that order (the first
-// carries trackers and web seeds). Matched by ID: new ones get their sockets,
-// ones no longer listed close their peers and sockets, and the rest switch
-// upload on their open peers. The client can't forget a DHT server, so a
-// removed interface's closed server stays in its list and fails its announces.
+// carries trackers and web seeds). While the client runs they are matched by
+// ID: new ones get their sockets, ones no longer listed close their peers and
+// sockets, and the rest switch upload on their open peers. The client can't
+// forget a DHT server, so a removed interface's closed server stays in its list
+// and fails its announces.
 func (s *Session) SetIfaces(ifaces []Iface) {
 	s.setMu.Lock()
 	defer s.setMu.Unlock()
+	s.want = ifaces
+	if s.cl != nil {
+		s.applyLocked(ifaces)
+	}
+}
+
+func (s *Session) applyLocked(ifaces []Iface) {
 	want := map[string]Iface{}
 	for _, ifc := range ifaces {
 		want[ifc.ID] = ifc
@@ -230,9 +303,10 @@ func (s *Session) addIface(ifc Iface) error {
 			incoming = false
 		}
 	}
+	cl := s.cl // set while setMu is held
 	s.mu.Lock()
 	s.setup = is
-	ds, err := s.cl.NewAnacrolixDhtServer(us)
+	ds, err := cl.NewAnacrolixDhtServer(us)
 	s.setup = nil
 	if err == nil {
 		is.dht = ds
@@ -246,11 +320,11 @@ func (s *Session) addIface(ifc Iface) error {
 		}
 		return err
 	}
-	s.cl.AddDhtServer(atorrent.AnacrolixDhtServerWrapper{Server: ds})
+	cl.AddDhtServer(atorrent.AnacrolixDhtServerWrapper{Server: ds})
 	if incoming {
 		is.port = port
-		s.cl.AddListener(&peerListener{s: s, is: is, l: is.tcp})
-		s.cl.AddListener(&peerListener{s: s, is: is, l: us})
+		cl.AddListener(&peerListener{s: s, is: is, l: is.tcp, done: s.clDone})
+		cl.AddListener(&peerListener{s: s, is: is, l: us, done: s.clDone})
 	}
 	return nil
 }
@@ -284,9 +358,10 @@ func (s *Session) Port() int { return s.cfg.Port }
 
 // peerListener takes peers connecting in on one interface.
 type peerListener struct {
-	s  *Session
-	is *ifaceSockets
-	l  interface {
+	s    *Session
+	is   *ifaceSockets
+	done chan struct{} // its client's
+	l    interface {
 		Accept() (net.Conn, error)
 		Addr() net.Addr
 	}
@@ -301,7 +376,7 @@ func (l *peerListener) Accept() (net.Conn, error) {
 		case <-l.is.gone:
 			// The client can't drop a listener and retries a failed accept at once:
 			// park it until the client closes.
-			<-l.s.done
+			<-l.done
 		default:
 		}
 		return nil, err
@@ -533,13 +608,10 @@ func (s *Session) peersByIface(at *atorrent.Torrent) map[string]int {
 
 // Close stops every torrent and closes every socket.
 func (s *Session) Close() {
-	close(s.done)
-	s.cl.Close()
-	s.stor.Close()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, is := range s.ifs {
-		is.close()
+	s.setMu.Lock()
+	defer s.setMu.Unlock()
+	s.closed = true
+	if s.cl != nil {
+		s.stopClientLocked()
 	}
-	s.ifs = nil
 }

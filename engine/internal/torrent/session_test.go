@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -162,6 +163,18 @@ func (s *swarm) iface(id string, peers *atomic.Int32) Iface {
 			return nil, errors.New("no DNS in tests")
 		},
 	}
+}
+
+// inSwarm puts a torrent in the swarm, so the session opens its sockets.
+func inSwarm(t *testing.T, s *Session, sw *swarm) *Torrent {
+	t.Helper()
+	tor, err := s.Add(State{ID: "joined", Magnet: sw.magnet(), Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	waitFor(t, "the session to go live", 5*time.Second, s.Live)
+	return tor
 }
 
 func waitFor(t *testing.T, what string, timeout time.Duration, ok func() bool) {
@@ -634,6 +647,7 @@ func TestInterfaceOfANewGenerationGetsNewSockets(t *testing.T) {
 	listen := ifc.ListenPacket
 	ifc.ListenPacket = func(port int) (net.PacketConn, error) { opened.Add(1); return listen(port) }
 	s.SetIfaces([]Iface{ifc})
+	inSwarm(t, s, sw)
 	s.SetIfaces([]Iface{ifc})
 	if opened.Load() != 1 {
 		t.Fatalf("an unchanged interface opened %d sockets", opened.Load())
@@ -643,4 +657,56 @@ func TestInterfaceOfANewGenerationGetsNewSockets(t *testing.T) {
 	if opened.Load() != 2 {
 		t.Fatal("a restarted tunnel kept its old sockets")
 	}
+}
+
+// trackedPC is a socket whose closing is counted.
+type trackedPC struct {
+	net.PacketConn
+	open *atomic.Int32
+	once sync.Once
+}
+
+func (p *trackedPC) Close() error {
+	p.once.Do(func() { p.open.Add(-1) })
+	return p.PacketConn.Close()
+}
+
+func TestSessionOpensNothingUntilATorrentJoinsTheSwarm(t *testing.T) {
+	sw := newSwarm(t, 0, 256<<10)
+	s, err := NewSession(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var peers, open atomic.Int32
+	ifc := sw.iface("wlan", &peers)
+	listen := ifc.ListenPacket
+	ifc.ListenPacket = func(port int) (net.PacketConn, error) {
+		pc, err := listen(port)
+		if err != nil {
+			return nil, err
+		}
+		open.Add(1)
+		return &trackedPC{PacketConn: pc, open: &open}, nil
+	}
+	s.SetIfaces([]Iface{ifc})
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open.Load() != 0 || s.Live() {
+		t.Fatalf("with no torrent in the swarm, %d sockets are open (live %v)", open.Load(), s.Live())
+	}
+	tor.Start()
+	waitFor(t, "the session's sockets", 5*time.Second, func() bool { return open.Load() > 0 })
+	if !s.Live() {
+		t.Fatal("a session with a torrent in the swarm isn't live")
+	}
+	tor.Stop(download.StatusPaused)
+	if open.Load() != 0 || s.Live() {
+		t.Fatalf("after the last torrent left, %d sockets are open (live %v)", open.Load(), s.Live())
+	}
+	tor.Stop(download.StatusQueued)
+	tor.Start()
+	waitFor(t, "the sockets to open again", 5*time.Second, func() bool { return open.Load() > 0 })
 }

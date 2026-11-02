@@ -395,6 +395,18 @@ func TestInterfacesShowWhetherPeersCanConnectIn(t *testing.T) {
 		{ID: "wan", Name: "Modem", IPv4: net.IPv4(203, 0, 113, 7), Gateway: net.IPv4(203, 0, 113, 1)},
 	})
 	e.mu.Unlock()
+	// No torrent without VPN in the swarm: nothing listens, so the routers aren't asked.
+	e.refreshPortMaps(time.Now())
+	if len(asked) != 0 || ifaceView(t, e, "eth").Incoming != "" {
+		t.Fatalf("with no torrent in the swarm the routers were asked: %v", asked)
+	}
+	tor, err := e.session(download.VPNOff).Add(torrentState(testMagnet, download.VPNOff, t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	defer tor.Stop(download.StatusPaused)
+	waitFor(t, "the session to go live", 5*time.Second, e.session(download.VPNOff).Live)
 	e.refreshPortMaps(time.Now())
 	for id, want := range map[string]string{"eth": "reachable", "wifi": "outgoing", "wan": "reachable"} {
 		if v := ifaceView(t, e, id); v.Incoming != want {
