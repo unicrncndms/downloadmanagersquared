@@ -74,25 +74,23 @@
   </header>
   <main>
     <section id="connections" class="panel">
-      <h2>Network connections
-        <span class="info" tabindex="0" data-tip="Every connection you turn on carries part of each download, so their speeds add up. Changes here take effect right away."></span>
-      </h2>
+      <h2>Network connections</h2>
       <div class="conn-scroll">
         <div class="conn-grid">
           <div class="conn-row head">
             <span>Connection</span>
-            <span class="center">Use<span class="info" tabindex="0" data-tip="Downloads go over this connection. Metered connections and system VPNs start off."></span></span>
-            <span class="center">Main<span class="info" tabindex="0" data-tip="Used on its own for servers that can't split a file. Its answer also decides which file the others must match."></span></span>
-            <span>Requests<span class="info" tabindex="0" data-tip="How many parallel requests one download makes over this connection."></span></span>
-            <span class="center">Upload<span class="info" tabindex="0" data-tip="Let torrent peers download from you over this connection and its VPN tunnel. Off by default on metered connections."></span></span>
-            <span>Limit (MB/s)<span class="info left" tabindex="0" data-tip="Speed caps for everything on this connection, its VPN tunnel included. Leave empty for no limit."></span></span>
-            <span>VPN<span class="info left" tabindex="0" data-tip="A WireGuard tunnel that runs over this connection. Import a .conf file from your VPN provider, or sign in to PIA under VPN below."></span></span>
+            <span class="center">Use</span>
+            <span class="center">Main<span class="info" tabindex="0" data-tip="Used alone for servers that can't split a file, and it decides which file the other connections must match."></span></span>
+            <span>Requests<span class="info" tabindex="0" data-tip="How many parts of a download this connection fetches at the same time."></span></span>
+            <span class="center">Upload</span>
+            <span>Limit (MB/s)</span>
+            <span>VPN</span>
             <span class="speed">Speed</span>
           </div>
           <div id="ifaces"></div>
         </div>
       </div>
-      <label class="follow"><input type="checkbox" id="followWindows"> Main follows Windows: use whichever connection Windows prefers</label>
+      <label class="follow"><input type="checkbox" id="followWindows"> Let Windows pick the main connection</label>
       <div class="row-actions"><button id="refreshIfaces">Look for connections again</button></div>
       <input type="file" id="confFile" accept=".conf,text/plain" hidden>
     </section>
@@ -100,23 +98,20 @@
     <section id="downloads" class="panel">
       <h2>Downloads</h2>
       <div class="fields">
-        <label for="sDir">Save to</label>
+        <label for="sDir">Download folder</label>
         <input type="text" id="sDir" data-setting>
 
-        <label for="sThreshold">Take over files from (GB)
-          <span class="info" tabindex="0" data-tip="Firefox keeps smaller files. To hand any file to DMS², right-click its link and choose “Download with DMS²”."></span></label>
+        <label for="sThreshold">Take over Firefox downloads above (GB)</label>
         <input type="number" id="sThreshold" min="0.001" step="any" data-setting>
 
-        <label for="sParallel">Downloads at once
-          <span class="info" tabindex="0" data-tip="The rest wait in line. Downloads go before torrents, and seeding torrents don't count."></span></label>
+        <label for="sParallel">Downloads at once</label>
         <input type="number" id="sParallel" min="1" max="16" data-setting>
 
-        <label for="sConns">Requests per connection
-          <span class="info" tabindex="0" data-tip="The default for connections that don't set their own number under Network connections."></span></label>
+        <label for="sConns">Default requests per connection</label>
         <input type="number" id="sConns" min="1" max="32" data-setting>
 
-        <label for="sEta">Time-left smoothing (seconds)
-          <span class="info" tabindex="0" data-tip="How much recent speed the time-left estimate averages. Longer is steadier; shorter reacts faster."></span></label>
+        <label for="sEta">Time-left averaging (seconds)
+          <span class="info" tabindex="0" data-tip="Longer gives a steadier estimate; shorter reacts faster to speed changes."></span></label>
         <input type="number" id="sEta" min="5" max="3600" data-setting>
       </div>
     </section>
@@ -131,21 +126,18 @@
     </section>
 
     <section id="vpn" class="panel">
-      <h2>VPN
-        <span class="info" tabindex="0" data-tip="Each connection can carry its own WireGuard tunnel, so speeds still add up through the VPN. Tunnels only carry DMS² traffic, not the rest of your PC."></span>
-      </h2>
+      <h2>VPN</h2>
       <div class="fields">
-        <label for="sVpnHttp">Downloads
-          <span class="info" tabindex="0" data-tip="Off: your connections as they are. Alongside: each connection both directly and through its tunnel. VPN only: tunnels alone, and wait while none is up. A file Firefox hands over was already requested once from your own address; right-click its link instead to avoid that."></span></label>
+        <label for="sVpnHttp">VPN for downloads
+          <span class="info" tabindex="0" data-tip="Firefox already contacted the server once from your own address before handing a download over. To avoid that, right-click the link and choose “Download with DMS²”."></span></label>
         <select id="sVpnHttp" data-setting></select>
 
-        <label for="sVpnTorrent">Torrents
-          <span class="info" tabindex="0" data-tip="The same choices. With Off, each new torrent asks whether to use the VPN before it joins the swarm."></span></label>
+        <label for="sVpnTorrent">VPN for torrents</label>
         <select id="sVpnTorrent" data-setting></select>
       </div>
 
       <h3>Private Internet Access
-        <span class="info" tabindex="0" data-tip="Signed in, every connection without a .conf of its own gets a PIA tunnel. Your login is stored encrypted for your Windows account and never shown again."></span>
+        <span class="info" tabindex="0" data-tip="Once you sign in, every connection without its own .conf gets a PIA tunnel. Your login is stored encrypted and never shown again."></span>
       </h3>
       <div class="fields">
         <span class="muted">Status</span>
@@ -154,8 +146,7 @@
         <input type="text" id="piaUser" placeholder="p1234567" autocomplete="off">
         <label for="piaPass">Password</label>
         <input type="password" id="piaPass" autocomplete="off">
-        <label for="piaRegion">Region
-          <span class="info" tabindex="0" data-tip="Regions marked “no port forwarding” can't take incoming torrent peers."></span></label>
+        <label for="piaRegion">Region</label>
         <select id="piaRegion"><option value="">Lowest latency</option></select>
       </div>
       <div class="row-actions">
@@ -165,17 +156,15 @@
     </section>
 
     <section id="sites" class="panel">
-      <h2>Sites with a link per connection
-        <span class="info" tabindex="0" data-tip="Some sites only let the address that opened a page download from it. DMS² then opens the page once per connection, in its own Firefox container, to get each its own link."></span>
+      <h2>Sites that need a link per connection
+        <span class="info" tabindex="0" data-tip="Some sites give a download link that only works for the address that opened the page. DMS² then opens the page once through each connection to get each its own link."></span>
       </h2>
       <div class="fields">
-        <label for="sBack">Start from (pages back)
-          <span class="info" tabindex="0" data-tip="Which page to open for the other connections. 1 is the page before the one that started the download. Go higher if those connections still get no link."></span></label>
+        <label for="sBack">Landing page: pages back
+          <span class="info" tabindex="0" data-tip="Which earlier page to open for the other connections. 1 is the page before the download started; go higher if they still get no link."></span></label>
         <input type="number" id="sBack" min="0" max="5">
       </div>
-      <h3>Learned sites
-        <span class="info" tabindex="0" data-tip="Clicks remembered from your first visit, replayed for later downloads. Forget a site to teach it again."></span>
-      </h3>
+      <h3>Learned sites</h3>
       <div id="recipes"></div>
     </section>
 
