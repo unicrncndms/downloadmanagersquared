@@ -27,6 +27,13 @@ function looksLikeDownload(h) {
   return !/^(text\/|image\/|application\/(xhtml\+xml|xml|json|javascript|pdf))/.test(t);
 }
 
+// A .torrent file: always DMS²'s, whatever its size.
+function isTorrentFile(h, url) {
+  if (mediaType(h) === "application/x-bittorrent") return true;
+  if (/\.torrent$/i.test(dispositionName(h))) return true;
+  try { return /\.torrent$/i.test(new URL(url).pathname); } catch (e) { return false; }
+}
+
 // Full file size from Content-Length, or from Content-Range on a 206.
 function responseSize(h, status) {
   if (status === 206) {

@@ -9,8 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -626,12 +629,17 @@ type AddRequest struct {
 	Cookie    string `json:"cookie"`
 	Referer   string `json:"referer"`
 	UserAgent string `json:"userAgent"`
+	Torrent   bool   `json:"torrent"` // the URL serves a .torrent file
 }
 
 func (e *Engine) Add(r AddRequest) (string, error) {
 	r.URL = strings.TrimSpace(r.URL)
 	if strings.HasPrefix(r.URL, "magnet:") {
-		return e.addTorrent(r.URL)
+		id, err := e.addTorrent(torrent.State{Magnet: r.URL})
+		if err != nil {
+			return "", fmt.Errorf("not a usable magnet link: %w", err)
+		}
+		return id, nil
 	}
 	if !strings.HasPrefix(r.URL, "http://") && !strings.HasPrefix(r.URL, "https://") {
 		return "", errors.New("only http, https and magnet links are supported")
@@ -639,6 +647,9 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	if r.UserAgent == "" {
 		// Some servers drop clients with Go's default user agent.
 		r.UserAgent = defaultUserAgent
+	}
+	if r.Torrent || isTorrentURL(r.URL) {
+		return e.addTorrentURL(r)
 	}
 	e.mu.Lock()
 	st := download.State{
@@ -656,13 +667,80 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	return st.ID, nil
 }
 
-func (e *Engine) addTorrent(magnet string) (string, error) {
-	e.mu.Lock()
-	dir := e.settings.SaveDir
-	e.mu.Unlock()
-	t, err := e.torrents.Add(torrent.State{ID: newID(), Magnet: magnet, Dir: dir, Choose: true, Added: time.Now()})
+func isTorrentURL(u string) bool {
+	p, err := url.Parse(u)
+	return err == nil && strings.HasSuffix(strings.ToLower(p.Path), ".torrent")
+}
+
+const maxTorrentFile = 16 << 20
+
+// fetchTorrentFile downloads a .torrent file the way the browser would have.
+func fetchTorrentFile(ctx context.Context, c *http.Client, r AddRequest) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL, nil)
 	if err != nil {
-		return "", fmt.Errorf("not a usable magnet link: %w", err)
+		return nil, err
+	}
+	for k, v := range map[string]string{"Cookie": r.Cookie, "Referer": r.Referer, "User-Agent": r.UserAgent} {
+		if v != "" {
+			req.Header.Set(k, v)
+		}
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("the torrent file's server answered %s", resp.Status)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxTorrentFile+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxTorrentFile {
+		return nil, errors.New("too big for a torrent file")
+	}
+	return b, nil
+}
+
+// addTorrentURL fetches a .torrent file through the main interface and adds it.
+func (e *Engine) addTorrentURL(r AddRequest) (string, error) {
+	var client *http.Client
+	main := e.MainID()
+	for _, u := range e.Usable() {
+		if u.ID == main {
+			client = u.Client
+		}
+	}
+	if client == nil {
+		return "", errors.New("no connection to fetch the torrent file through")
+	}
+	b, err := fetchTorrentFile(context.Background(), client, r)
+	if err != nil {
+		return "", err
+	}
+	return e.addTorrentFile(b)
+}
+
+func (e *Engine) addTorrentFile(b []byte) (string, error) {
+	magnet, info, err := torrent.ParseFile(b)
+	if err != nil {
+		return "", err
+	}
+	return e.addTorrent(torrent.State{Magnet: magnet, Info: info})
+}
+
+// addTorrent adds a torrent that waits for the user's choice of files.
+func (e *Engine) addTorrent(st torrent.State) (string, error) {
+	e.mu.Lock()
+	st.Dir = e.settings.SaveDir
+	e.mu.Unlock()
+	st.ID, st.Choose, st.Added = newID(), true, time.Now()
+	t, err := e.torrents.Add(st)
+	if err != nil {
+		return "", err
 	}
 	t.Start() // learn the files for the add step, without waiting for a slot
 	e.mu.Lock()

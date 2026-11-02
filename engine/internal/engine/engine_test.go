@@ -1,7 +1,11 @@
 package engine
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -173,5 +177,70 @@ func waitFor(t *testing.T, what string, timeout time.Duration, ok func() bool) {
 			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestTorrentFileIsFetchedWithTheBrowsersCookie(t *testing.T) {
+	file := []byte("d4:infod4:name1:xee")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cookie") != "sid=1" || r.Header.Get("Referer") != "https://tracker.example/t/1" {
+			http.Error(w, "log in first", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-bittorrent")
+		w.Write(file)
+	}))
+	defer srv.Close()
+	r := AddRequest{URL: srv.URL + "/dl/1", Cookie: "sid=1", Referer: "https://tracker.example/t/1", UserAgent: "test"}
+	got, err := fetchTorrentFile(context.Background(), srv.Client(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, file) {
+		t.Fatalf("fetched %q, want %q", got, file)
+	}
+	r.Cookie = ""
+	if _, err := fetchTorrentFile(context.Background(), srv.Client(), r); err == nil {
+		t.Fatal("a refused fetch was taken as a torrent file")
+	}
+}
+
+func TestAddedTorrentFileGoesStraightToTheChoice(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	data := make([]byte, 100<<10)
+	path := filepath.Join(t.TempDir(), "notes.txt")
+	os.WriteFile(path, data, 0o644)
+	info := metainfo.Info{PieceLength: 64 << 10}
+	if err := info.BuildFromFilePath(path); err != nil {
+		t.Fatal(err)
+	}
+	ib, _ := bencode.Marshal(info)
+	var buf bytes.Buffer
+	(&metainfo.MetaInfo{InfoBytes: ib}).Write(&buf)
+
+	id, err := e.addTorrentFile(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := summaryOf(t, e, id)
+	if s.Status != torrent.StatusChoosing || len(s.Files) != 1 || s.Files[0].Path != "notes.txt" {
+		t.Fatalf("added torrent file is %q with files %+v, want choosing notes.txt", s.Status, s.Files)
+	}
+}
+
+func TestTorrentLinksAreRecognised(t *testing.T) {
+	for url, want := range map[string]bool{
+		"https://example.com/ubuntu.iso.torrent":     true,
+		"https://example.com/get.php?f=a.TORRENT":    false, // only the path counts
+		"https://example.com/Debian.Torrent?key=abc": true,
+		"https://example.com/ubuntu.iso":             false,
+	} {
+		if got := isTorrentURL(url); got != want {
+			t.Errorf("isTorrentURL(%q) = %v, want %v", url, got, want)
+		}
 	}
 }

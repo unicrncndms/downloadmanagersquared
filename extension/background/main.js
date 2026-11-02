@@ -16,8 +16,9 @@ browser.runtime.onConnect.addListener((port) => {
   port.onDisconnect.addListener(() => offs.forEach((off) => off()));
 });
 
-browser.runtime.onMessage.addListener((msg) => {
+browser.runtime.onMessage.addListener((msg, sender) => {
   if (!msg || msg.resolver) return undefined;
+  if (msg.type === "magnet") return Capture.takeMagnet(msg.url, sender.tab);
   if (msg.type === "call") {
     const p = Engine.call(msg.method, msg.params);
     if (msg.method === "setAutostart") p.then(() => { Engine.autostart = msg.params.on; });

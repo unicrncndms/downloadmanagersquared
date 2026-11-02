@@ -1,6 +1,7 @@
 "use strict";
 
-// Takes over big downloads from Firefox and hands them to the engine.
+// Takes over big downloads, magnet links and .torrent files from Firefox and
+// hands them to the engine.
 const Capture = {
   history: new Map(),  // tabId -> recent pages shown in that tab, oldest first
   referers: new Map(), // page URL -> the page it was opened from (its Referer)
@@ -67,8 +68,10 @@ const Capture = {
     if (!Engine.connected || !Engine.settings) return {};
     if (d.statusCode !== 200 && d.statusCode !== 206) return {};
     if (this.bypass.delete(d.url)) return {};
-    if (responseSize(h, d.statusCode) < Engine.settings.thresholdBytes || !looksLikeDownload(h)) return {};
+    const torrent = isTorrentFile(h, d.url);
+    if (!torrent && (responseSize(h, d.statusCode) < Engine.settings.thresholdBytes || !looksLikeDownload(h))) return {};
     this.handOff({
+      torrent,
       url: d.url,
       pages: this.pagesFor(d.tabId, d.url, [d.originUrl, d.documentUrl]),
       filename: dispositionName(h),
@@ -85,9 +88,11 @@ const Capture = {
     if (!Engine.connected || !Engine.settings || item.byExtensionId === browser.runtime.id) return;
     if (this.bypass.delete(item.url)) return;
     const size = item.totalBytes > 0 ? item.totalBytes : item.fileSize;
-    if (!(size >= Engine.settings.thresholdBytes)) return;
+    const torrent = item.mime === "application/x-bittorrent" || /\.torrent$/i.test(item.filename || "");
+    if (!torrent && !(size >= Engine.settings.thresholdBytes)) return;
     await discardDownload(item.id);
     this.handOff({
+      torrent,
       url: item.finalUrl || item.url,
       pages: this.pagesFor(-1, item.finalUrl || item.url, [item.referrer]),
       filename: (item.filename || "").split(/[\\/]/).pop(),
@@ -129,15 +134,19 @@ const Capture = {
     return pages[i];
   },
 
-  async handOff({ url, pageUrl, pages, filename, cookieStoreId, tabId, closeBlankTab }) {
+  async handOff({ url, pageUrl, pages, filename, cookieStoreId, tabId, closeBlankTab, torrent }) {
     pages = pages || (pageUrl ? [pageUrl] : []);
     if (pageUrl === undefined) pageUrl = this.landingPage(pages);
     const referer = pages[pages.length - 1] || pageUrl;
     const cookie = await cookieHeader(url, cookieStoreId);
     try {
-      const { id } = await Engine.call("add", { url, pageUrl, filename, cookie, referer, userAgent: navigator.userAgent });
-      this.rememberPages(id, pages);
-      notify("Downloading with DMS²", filename || "download started");
+      const { id } = await Engine.call("add", { url, pageUrl, filename, cookie, referer, userAgent: navigator.userAgent, torrent: !!torrent });
+      if (torrent) {
+        this.torrentAdded();
+      } else {
+        this.rememberPages(id, pages);
+        notify("Downloading with DMS²", filename || "download started");
+      }
     } catch (e) {
       // Don't lose the download: give it back to Firefox.
       notify("DMS² couldn't take this download", `${e.message}. Firefox will download it instead.`);
@@ -148,6 +157,23 @@ const Capture = {
       const tab = await browser.tabs.get(tabId).catch(() => null);
       if (tab && (tab.url === "about:blank" || tab.url === url)) browser.tabs.remove(tabId).catch(() => {});
     }
+  },
+
+  // A magnet link clicked in a page (content/magnet.js caught the click).
+  async takeMagnet(url, tab) {
+    try {
+      await Engine.call("add", { url });
+      this.torrentAdded();
+    } catch (e) {
+      notify("DMS² couldn't take this magnet link", `${e.message}. Firefox will handle it instead.`);
+      if (tab) browser.tabs.update(tab.id, { url }).catch(() => {});
+    }
+  },
+
+  // A torrent waits for its files to be chosen, so show the add step.
+  torrentAdded() {
+    notify("Torrent added to DMS²", "Choose its files in the DMS² downloads list.");
+    openDownloads().catch(() => {});
   },
 
   rememberPages(id, pages) {
