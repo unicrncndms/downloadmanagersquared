@@ -45,6 +45,7 @@ type tunnelEntry struct {
 	on       *netif.Binding // what t runs over
 	client   *http.Client
 	up       bool
+	gen      int // counts starts: torrent sockets of an older one are on a dead stack
 	starting bool
 	started  time.Time
 	retryAt  time.Time
@@ -181,6 +182,7 @@ func (e *Engine) startTunnel(id string, te *tunnelEntry, b *netif.Binding) {
 		return
 	}
 	te.t, te.on, te.started, te.err = t, b, time.Now(), ""
+	te.gen++
 	te.client = netif.NewHTTPClient(t.DialContext)
 }
 

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -590,3 +591,56 @@ type ipPortAddr struct {
 }
 
 func (a ipPortAddr) String() string { return net.JoinHostPort(a.ip.String(), strconv.Itoa(a.port)) }
+
+func TestTorrentPausedForTheVPNSaysSoAndResumes(t *testing.T) {
+	sw := newSwarm(t, 1, 256<<10)
+	s, err := NewSession(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir(), VPN: download.VPNOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	tor.PauseForVPN()
+	if !tor.WaitingForVPN() || tor.Status() != download.StatusPaused || tor.Active() {
+		t.Fatalf("paused for the VPN: waiting %v, status %q, active %v", tor.WaitingForVPN(), tor.Status(), tor.Active())
+	}
+	if !strings.Contains(tor.Summary().Error, "VPN") {
+		t.Fatalf("paused with %q", tor.Summary().Error)
+	}
+	tor.Stop(download.StatusQueued)
+	tor.Start()
+	if tor.WaitingForVPN() || !tor.Active() {
+		t.Fatal("restarted torrent still waits for the VPN")
+	}
+	if tor.State().VPN != download.VPNOnly {
+		t.Fatal("the torrent's VPN mode was lost")
+	}
+}
+
+func TestInterfaceOfANewGenerationGetsNewSockets(t *testing.T) {
+	sw := newSwarm(t, 0, 256<<10)
+	s, err := NewSession(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var opened atomic.Int32
+	var peers atomic.Int32
+	ifc := sw.iface("lo~vpn", &peers)
+	listen := ifc.ListenPacket
+	ifc.ListenPacket = func(port int) (net.PacketConn, error) { opened.Add(1); return listen(port) }
+	s.SetIfaces([]Iface{ifc})
+	s.SetIfaces([]Iface{ifc})
+	if opened.Load() != 1 {
+		t.Fatalf("an unchanged interface opened %d sockets", opened.Load())
+	}
+	ifc.Gen = 1 // the tunnel was restarted: its old sockets are on a dead stack
+	s.SetIfaces([]Iface{ifc})
+	if opened.Load() != 2 {
+		t.Fatal("a restarted tunnel kept its old sockets")
+	}
+}

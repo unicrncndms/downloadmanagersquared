@@ -49,7 +49,7 @@ func TestAddedTorrentIsListedAndSurvivesARestart(t *testing.T) {
 	b, _ := e.get(busy)
 	b.Start() // the only slot is taken
 	defer b.Stop(download.StatusPaused)
-	id, err := e.Add(AddRequest{URL: testMagnet})
+	id, err := e.Add(AddRequest{URL: testMagnet, VPN: "off"}) // VPN only would wait for a tunnel
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestAddedTorrentFileGoesStraightToTheChoice(t *testing.T) {
 	var buf bytes.Buffer
 	(&metainfo.MetaInfo{InfoBytes: ib}).Write(&buf)
 
-	id, err := e.addTorrentFile(buf.Bytes())
+	id, err := e.addTorrentFile(buf.Bytes(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestTorrentLinksAreRecognised(t *testing.T) {
 func queuedTorrent(t *testing.T, e *Engine, n int) string {
 	t.Helper()
 	m := fmt.Sprintf("magnet:?xt=urn:btih:%040x&dn=t%d", n, n)
-	tor, err := e.torrents.Add(torrent.State{ID: newID(), Magnet: m, Dir: t.TempDir(), Status: download.StatusQueued, Added: time.Now()})
+	tor, err := e.session(download.VPNOff).Add(torrent.State{ID: newID(), Magnet: m, Dir: t.TempDir(), Status: download.StatusQueued, Added: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestMeteredInterfaceUploadsOnlyOnceSwitchedOn(t *testing.T) {
 	e.mu.Unlock()
 	upload := func() map[string]bool {
 		out := map[string]bool{}
-		for _, i := range e.torrentIfaces() {
+		for _, i := range e.torrentIfacesFor(download.VPNOff) {
 			out[i.ID] = i.Upload
 		}
 		return out
@@ -409,4 +409,8 @@ func TestInterfacesShowWhetherPeersCanConnectIn(t *testing.T) {
 	if len(asked) != n {
 		t.Errorf("mapped again after a minute: %v", asked[n:])
 	}
+}
+
+func torrentState(magnet string, m download.VPNMode, dir string) torrent.State {
+	return torrent.State{ID: newID(), Magnet: magnet, Dir: dir, Status: download.StatusQueued, VPN: m, Added: time.Now()}
 }

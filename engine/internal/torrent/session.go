@@ -29,6 +29,7 @@ import (
 // out through that interface only.
 type Iface struct {
 	ID           string
+	Gen          int  // a new generation (a restarted tunnel) gets new sockets
 	Upload       bool // peers may download from us through it
 	Dial         func(ctx context.Context, network, addr string) (net.Conn, error)
 	ListenPacket func(port int) (net.PacketConn, error) // an IPv4 UDP socket on port, 0 for any free one
@@ -155,7 +156,7 @@ func (s *Session) SetIfaces(ifaces []Iface) {
 	var closing, switching []*trackedPeer
 	kept := s.ifs[:0]
 	for _, is := range s.ifs {
-		if w, ok := want[is.ID]; ok {
+		if w, ok := want[is.ID]; ok && w.Gen == is.Gen {
 			kept = append(kept, is)
 			have[is.ID] = true
 			if w.Upload != is.Upload {

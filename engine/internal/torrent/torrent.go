@@ -32,19 +32,21 @@ const (
 
 // State is everything needed to resume a torrent after a restart.
 type State struct {
-	ID       string          `json:"id"`
-	Magnet   string          `json:"magnet"`
-	Info     []byte          `json:"info,omitempty"` // bencoded info dict, once known
-	Dir      string          `json:"dir"`
-	Choose   bool            `json:"choose,omitempty"` // the user picks files and folder before it downloads
-	Skip     []int           `json:"skip,omitempty"`   // indexes of the files not to download
-	Name     string          `json:"name,omitempty"`
-	Size     int64           `json:"size"`               // of the files to download
-	Uploaded int64           `json:"uploaded,omitempty"` // across every run
-	Status   download.Status `json:"status"`
-	Error    string          `json:"error,omitempty"`
-	Added    time.Time       `json:"added"`
-	Finished time.Time       `json:"finished,omitzero"` // when the download completed
+	ID       string           `json:"id"`
+	Magnet   string           `json:"magnet"`
+	Info     []byte           `json:"info,omitempty"` // bencoded info dict, once known
+	Dir      string           `json:"dir"`
+	Choose   bool             `json:"choose,omitempty"` // the user picks files and folder before it downloads
+	Skip     []int            `json:"skip,omitempty"`   // indexes of the files not to download
+	Name     string           `json:"name,omitempty"`
+	Size     int64            `json:"size"`               // of the files to download
+	Uploaded int64            `json:"uploaded,omitempty"` // across every run
+	VPN      download.VPNMode `json:"vpn,omitempty"`      // fixed when added: which session runs it
+	WaitVPN  bool             `json:"waitVpn,omitempty"`  // paused because no tunnel is up, under VPN only
+	Status   download.Status  `json:"status"`
+	Error    string           `json:"error,omitempty"`
+	Added    time.Time        `json:"added"`
+	Finished time.Time        `json:"finished,omitzero"` // when the download completed
 }
 
 type Torrent struct {
@@ -101,7 +103,7 @@ func (t *Torrent) Summary() download.Summary {
 		Kind: "torrent", ID: t.st.ID, URL: t.st.Magnet, Filename: t.st.Name, Dir: t.st.Dir,
 		Size: t.st.Size, Status: t.st.Status, Error: t.st.Error, Speed: t.speed.Value(), ETA: -1,
 		Links: map[string]download.LinkSummary{}, Added: t.st.Added, Finished: t.st.Finished,
-		Uploaded: t.st.Uploaded,
+		Uploaded: t.st.Uploaded, VPN: t.st.VPN,
 	}
 	if t.st.Status == StatusChoosing {
 		s.Files = t.filesLocked()
@@ -177,7 +179,7 @@ func (t *Torrent) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.cancel, t.active = cancel, true
 	t.slot = !t.st.Choose && t.st.Status != StatusSeeding
-	t.st.Error = ""
+	t.st.Error, t.st.WaitVPN = "", false
 	if t.st.Info == nil {
 		t.st.Status = StatusMetadata
 	} else {
@@ -505,10 +507,30 @@ func (t *Torrent) Stop(as download.Status) {
 	}
 	// Already stopped, only the status changes, which is how resume re-queues.
 	if t.st.Status != download.StatusCompleted {
-		t.st.Status = as
+		t.st.Status, t.st.Error, t.st.WaitVPN = as, "", false
 	}
 	t.mu.Unlock()
 	t.changed()
+}
+
+// PauseForVPN leaves the swarm because no tunnel is up, under VPN only; the
+// engine queues it again once one is.
+func (t *Torrent) PauseForVPN() {
+	t.mu.Lock()
+	if t.active {
+		t.dropLocked()
+	}
+	t.st.Status, t.st.WaitVPN = download.StatusPaused, true
+	t.st.Error = "Paused: no VPN tunnel is up. It resumes by itself once one is."
+	t.mu.Unlock()
+	t.changed()
+}
+
+// WaitingForVPN is whether the torrent paused only because no tunnel was up.
+func (t *Torrent) WaitingForVPN() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.st.Status == download.StatusPaused && t.st.WaitVPN
 }
 
 func (t *Torrent) dropLocked() {

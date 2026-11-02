@@ -169,3 +169,86 @@ func TestTunnelKeysStayOutOfTheSettings(t *testing.T) {
 		t.Fatal("the tunnel's private key reaches the extension")
 	}
 }
+
+func waitTunnelUp(t *testing.T, e *Engine) {
+	t.Helper()
+	waitFor(t, "the tunnel to come up", 30*time.Second, func() bool {
+		e.syncTunnels(time.Now())
+		return e.anyTunnelUp()
+	})
+}
+
+func TestVPNOnlyTorrentsGetNoBareSocket(t *testing.T) {
+	e := loopbackEngine(t)
+	clientPriv, clientPub, _ := tunnel.GenerateKey()
+	srv := newVPNServer(t, clientPub)
+	importConf(t, e, srv, clientPriv)
+	waitTunnelUp(t, e)
+
+	ids := func(m download.VPNMode) []string {
+		var out []string
+		for _, i := range e.torrentIfacesFor(m) {
+			out = append(out, i.ID)
+		}
+		return out
+	}
+	if got := ids(download.VPNOnly); len(got) != 1 || got[0] != tunnelPath("lo") {
+		t.Fatalf("VPN-only torrents get %v, want the tunnel alone", got)
+	}
+	if got := ids(download.VPNOff); len(got) != 1 || got[0] != "lo" {
+		t.Fatalf("torrents without VPN get %v", got)
+	}
+	if got := ids(download.VPNAlongside); len(got) != 2 {
+		t.Fatalf("torrents alongside get %v, want the interface and its tunnel", got)
+	}
+
+	// Every socket the VPN-only session can open lives on the tunnel's stack:
+	// peers, uTP and DHT, trackers and the tunnel's own DNS.
+	ifc := e.torrentIfacesFor(download.VPNOnly)[0]
+	pc, err := ifc.ListenPacket(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	if ip := pc.LocalAddr().(*net.UDPAddr).IP; !ip.Equal(net.IPv4(10, 9, 0, 2)) {
+		t.Fatalf("the VPN-only session's UDP socket is on %v, not the tunnel", ip)
+	}
+	ln, err := ifc.Listen(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if ip := ln.Addr().(*net.TCPAddr).IP; !ip.Equal(net.IPv4(10, 9, 0, 2)) {
+		t.Fatalf("the VPN-only session listens on %v, not the tunnel", ip)
+	}
+	c, err := ifc.Dial(t.Context(), "tcp4", "10.9.0.1:80") // only reachable through the tunnel
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+}
+
+func TestVPNOnlyTorrentPausesWithoutATunnelAndResumesWithOne(t *testing.T) {
+	e := loopbackEngine(t)
+	m := fmt.Sprintf("magnet:?xt=urn:btih:%040x&dn=vpn", 9)
+	tor, err := e.session(download.VPNOnly).Add(torrentState(m, download.VPNOnly, t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	e.downloads[tor.ID()], e.order = tor, append(e.order, tor.ID())
+	e.mu.Unlock()
+
+	e.schedule()
+	if !tor.WaitingForVPN() || tor.Active() {
+		t.Fatalf("with no tunnel the VPN-only torrent is %q (active %v)", tor.Status(), tor.Active())
+	}
+	clientPriv, clientPub, _ := tunnel.GenerateKey()
+	importConf(t, e, newVPNServer(t, clientPub), clientPriv)
+	waitTunnelUp(t, e)
+	e.schedule()
+	e.schedule() // the first re-queues it, the next starts it
+	if !tor.Active() {
+		t.Fatalf("with a tunnel up the torrent is still %q", tor.Status())
+	}
+}
