@@ -15,8 +15,8 @@ The interface a download uses when it can't be split. The user chooses it; other
 _Avoid_: Main connection (except in user-facing text), primary
 
 **Connection**:
-One HTTP request fetching part of the file over one interface. An interface carries several connections at once.
-_Avoid_: Stream, worker, thread
+One HTTP request fetching part of the file over one interface, or one of its tunnels. An interface carries several connections at once.
+_Avoid_: Stream, worker, thread, peer
 
 **Chunk**:
 A contiguous byte range of the file that one connection fetches.
@@ -72,3 +72,31 @@ The first visit to a landing-page host, where the user clicks through by hand an
 
 **Replay**:
 A later visit, where the recipe's clicks are repeated automatically.
+
+### Torrents
+
+**Torrent**:
+A download fetched from a BitTorrent swarm instead of an HTTP server, started from a magnet link or a `.torrent` file. It sits in the same downloads list and queue as HTTP downloads, but always queues behind them.
+
+**Peer**:
+Another BitTorrent client in the swarm that the engine exchanges pieces with. Each peer is reached over one interface or one of its tunnels.
+_Avoid_: Connection (that is an HTTP request)
+
+**Seeding**:
+A torrent uploading to peers after its own download is complete. It holds no queue slot, and only interfaces with upload on take part.
+
+**Ratio**:
+How much a torrent has uploaded divided by its size. Seeding stops when the ratio target is reached (1.0 by default) and the torrent is finished.
+
+### VPN
+
+**Tunnel**:
+A WireGuard connection to a VPN server, carried over one interface and run inside the engine. Each interface has at most one, with its own key. It shares its interface's settings and limits. Users see it as "VPN via <interface>".
+_Avoid_: VPN interface, adapter
+
+**VPN mode**:
+Which paths a download may use: Off (bare interfaces only), Alongside (tunnels and bare interfaces) or VPN only (tunnels only, and pause when none is up). Each download type has a default, and a download's mode is fixed when it is added.
+_Avoid_: Kill switch (it is what VPN only does, not a separate setting)
+
+**Provider**:
+Where tunnel configs come from: imported WireGuard `.conf` files, or PIA, which generates one config per interface through its API.
