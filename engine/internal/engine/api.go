@@ -100,23 +100,27 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		if err != nil {
 			return nil, err
 		}
-		d, err := e.get(p.ID)
+		j, err := e.entry(p.ID)
 		if err != nil {
 			return nil, err
 		}
 		switch method {
 		case "pause":
-			d.Stop(download.StatusPaused)
+			j.Stop(download.StatusPaused)
 		case "resume":
-			if !d.Running() {
-				d.Stop(download.StatusQueued)
+			if !j.Running() {
+				j.Stop(download.StatusQueued)
 			}
 		case "remove":
 			return nil, e.Remove(p.ID, p.DeleteFile)
 		case "retryLink":
+			d, err := e.get(p.ID)
+			if err != nil {
+				return nil, err
+			}
 			d.RetryLink(p.Iface)
 		case "showInFolder":
-			return nil, winutil.ShowInFolder(d.Path())
+			return nil, winutil.ShowInFolder(j.Path())
 		}
 		return nil, nil
 	case "pauseAll":
@@ -243,6 +247,7 @@ func (e *Engine) applySettings(f func(*Settings)) Settings {
 	e.saveSettingsLocked()
 	s := e.settings
 	e.mu.Unlock()
+	e.syncTorrentIfaces() // enabled interfaces or the main one may have changed
 	e.broadcast("settings", s)
 	return s
 }

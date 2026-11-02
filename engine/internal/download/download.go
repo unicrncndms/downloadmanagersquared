@@ -1108,6 +1108,7 @@ type LinkSummary struct {
 
 // Summary is what the UI shows for a download.
 type Summary struct {
+	Kind     string                 `json:"kind,omitempty"` // "torrent"; empty for HTTP
 	ID       string                 `json:"id"`
 	URL      string                 `json:"url"`
 	PageURL  string                 `json:"pageUrl,omitempty"`

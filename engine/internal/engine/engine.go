@@ -24,6 +24,7 @@ import (
 	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/rate"
 	"downloadmanagersquared/engine/internal/socks"
+	"downloadmanagersquared/engine/internal/torrent"
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
@@ -53,14 +54,26 @@ type resolveReq struct {
 	SocksPort int    `json:"socksPort"`
 }
 
+// entry is a download of either kind, as the list and the queue see it.
+type entry interface {
+	ID() string
+	Status() download.Status
+	Running() bool
+	Start()
+	Stop(as download.Status)
+	Path() string
+	Summary() download.Summary
+}
+
 type Engine struct {
-	dir string
-	ln  net.Listener
+	dir      string
+	ln       net.Listener
+	torrents *torrent.Session
 
 	mu        sync.Mutex
 	settings  Settings
 	ifaces    map[string]*ifaceEntry
-	downloads map[string]*download.Download
+	downloads map[string]entry
 	order     []string
 	dirty     map[string]bool
 	clients   map[*ipc.Conn]*client
@@ -88,51 +101,96 @@ func New() (*Engine, error) {
 		ln.Close()
 		return nil, err
 	}
-	dir := filepath.Join(base, "downloadmanagersquared")
-	os.MkdirAll(filepath.Join(dir, "downloads"), 0o755)
-
-	e := &Engine{
-		dir:       dir,
-		ln:        ln,
-		settings:  loadSettings(filepath.Join(dir, "settings.json")),
-		ifaces:    map[string]*ifaceEntry{},
-		downloads: map[string]*download.Download{},
-		dirty:     map[string]bool{},
-		clients:   map[*ipc.Conn]*client{},
-		resolves:  map[string]resolveReq{},
-		quit:      make(chan struct{}),
+	e, err := open(filepath.Join(base, "downloadmanagersquared"), ln)
+	if err != nil {
+		ln.Close()
+		return nil, err
 	}
-	e.loadDownloads()
 	e.refreshInterfaces()
 	e.updateSnapshot(0)
 	return e, nil
 }
 
+// open loads the engine kept in dir, with no interfaces yet. ln may be nil.
+func open(dir string, ln net.Listener) (*Engine, error) {
+	os.MkdirAll(filepath.Join(dir, "downloads"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "torrents"), 0o755)
+	e := &Engine{
+		dir:       dir,
+		ln:        ln,
+		settings:  loadSettings(filepath.Join(dir, "settings.json")),
+		ifaces:    map[string]*ifaceEntry{},
+		downloads: map[string]entry{},
+		dirty:     map[string]bool{},
+		clients:   map[*ipc.Conn]*client{},
+		resolves:  map[string]resolveReq{},
+		quit:      make(chan struct{}),
+	}
+	s, err := torrent.NewSession(torrent.Config{
+		Changed:  func(t *torrent.Torrent) { e.markDirty(t.ID()) },
+		Finished: func(t *torrent.Torrent) { e.notifyFinished(t.Summary()) },
+	})
+	if err != nil {
+		return nil, err
+	}
+	e.torrents = s
+	e.loadDownloads()
+	return e, nil
+}
+
 func (e *Engine) Dir() string { return e.dir }
 
+// loadDownloads restores both kinds, in the order they were added.
 func (e *Engine) loadDownloads() {
-	files, _ := filepath.Glob(filepath.Join(e.dir, "downloads", "*.json"))
-	var states []download.State
+	type loaded struct {
+		j     entry
+		added time.Time
+	}
+	var all []loaded
+	for _, st := range readStates[download.State](filepath.Join(e.dir, "downloads")) {
+		if st.Status == download.StatusRunning || st.Status == download.StatusVerifying {
+			st.Status = download.StatusQueued
+		}
+		all = append(all, loaded{download.New(e, st), st.Added})
+	}
+	for _, st := range readStates[torrent.State](filepath.Join(e.dir, "torrents")) {
+		if st.Status == download.StatusRunning || st.Status == torrent.StatusMetadata {
+			st.Status = download.StatusQueued
+		}
+		t, err := e.torrents.Add(st)
+		if err != nil {
+			log.Printf("skipping torrent %s: %v", st.ID, err)
+			continue
+		}
+		all = append(all, loaded{t, st.Added})
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].added.Before(all[j].added) })
+	for _, l := range all {
+		e.downloads[l.j.ID()] = l.j
+		e.order = append(e.order, l.j.ID())
+	}
+}
+
+// readStates reads every saved state in dir that has an ID.
+func readStates[S interface{ download.State | torrent.State }](dir string) []S {
+	files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+	var out []S
 	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			continue
 		}
-		var st download.State
-		if json.Unmarshal(b, &st) != nil || st.ID == "" {
-			log.Printf("skipping unreadable download state %s", f)
+		var st S
+		var id struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(b, &st) != nil || json.Unmarshal(b, &id) != nil || id.ID == "" {
+			log.Printf("skipping unreadable state %s", f)
 			continue
 		}
-		if st.Status == download.StatusRunning || st.Status == download.StatusVerifying {
-			st.Status = download.StatusQueued
-		}
-		states = append(states, st)
+		out = append(out, st)
 	}
-	sort.Slice(states, func(i, j int) bool { return states[i].Added.Before(states[j].Added) })
-	for _, st := range states {
-		e.downloads[st.ID] = download.New(e, st)
-		e.order = append(e.order, st.ID)
-	}
+	return out
 }
 
 // Run serves the API and drives the queue until Shutdown.
@@ -163,14 +221,17 @@ func (e *Engine) Run() {
 func (e *Engine) Shutdown() {
 	e.quitOnce.Do(func() {
 		close(e.quit)
-		e.ln.Close()
-		for _, d := range e.list() {
-			if d.Running() {
-				d.Stop(download.StatusQueued)
+		if e.ln != nil {
+			e.ln.Close()
+		}
+		for _, j := range e.list() {
+			if j.Running() {
+				j.Stop(download.StatusQueued)
 			}
-			e.Changed(d)
+			e.markDirty(j.ID())
 		}
 		e.persist()
+		e.torrents.Close()
 		e.mu.Lock()
 		for _, ent := range e.ifaces {
 			ent.socks.Close()
@@ -179,22 +240,35 @@ func (e *Engine) Shutdown() {
 	})
 }
 
-func (e *Engine) list() []*download.Download {
+func (e *Engine) list() []entry {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	out := make([]*download.Download, 0, len(e.order))
+	out := make([]entry, 0, len(e.order))
 	for _, id := range e.order {
 		out = append(out, e.downloads[id])
 	}
 	return out
 }
 
-func (e *Engine) get(id string) (*download.Download, error) {
+func (e *Engine) entry(id string) (entry, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	d := e.downloads[id]
-	if d == nil {
+	j := e.downloads[id]
+	if j == nil {
 		return nil, fmt.Errorf("no download %q", id)
+	}
+	return j, nil
+}
+
+// get is for what only HTTP downloads have: links, hashes, landing pages.
+func (e *Engine) get(id string) (*download.Download, error) {
+	j, err := e.entry(id)
+	if err != nil {
+		return nil, err
+	}
+	d, ok := j.(*download.Download)
+	if !ok {
+		return nil, fmt.Errorf("%q is not an HTTP download", id)
 	}
 	return d, nil
 }
@@ -231,17 +305,30 @@ func (e *Engine) persist() {
 	e.dirty = map[string]bool{}
 	e.mu.Unlock()
 	for _, id := range ids {
-		d, err := e.get(id)
+		j, err := e.entry(id)
 		if err != nil {
 			continue
 		}
-		if err := writeJSON(e.statePath(id), d.State()); err != nil {
+		var st any
+		switch j := j.(type) {
+		case *download.Download:
+			st = j.State()
+		case *torrent.Torrent:
+			st = j.State()
+		}
+		if err := writeJSON(e.statePath(j), st); err != nil {
 			log.Printf("saving %s: %v", id, err)
 		}
 	}
 }
 
-func (e *Engine) statePath(id string) string { return filepath.Join(e.dir, "downloads", id+".json") }
+func (e *Engine) statePath(j entry) string {
+	kind := "downloads"
+	if _, ok := j.(*torrent.Torrent); ok {
+		kind = "torrents"
+	}
+	return filepath.Join(e.dir, kind, j.ID()+".json")
+}
 
 func (e *Engine) saveSettingsLocked() {
 	if err := writeJSON(filepath.Join(e.dir, "settings.json"), e.settings); err != nil {
@@ -256,7 +343,12 @@ func (e *Engine) refreshInterfaces() {
 		return
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.refreshInterfacesLocked(list)
+	e.mu.Unlock()
+	e.syncTorrentIfaces()
+}
+
+func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 	seen := map[string]bool{}
 	nameChanged := false
 	for _, i := range list {
@@ -300,18 +392,55 @@ func (e *Engine) refreshInterfaces() {
 
 func (e *Engine) dialVia(id string) socks.DialFunc {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		e.mu.Lock()
-		ent := e.ifaces[id]
-		var b *netif.Binding
-		if ent != nil && ent.present {
-			b = ent.binding
-		}
-		e.mu.Unlock()
-		if b == nil {
-			return nil, errors.New("interface is not connected")
+		b, err := e.bindingOf(id)
+		if err != nil {
+			return nil, err
 		}
 		return b.DialContext(ctx, network, addr)
 	}
+}
+
+func (e *Engine) bindingOf(id string) (*netif.Binding, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if ent := e.ifaces[id]; ent != nil && ent.present {
+		return ent.binding, nil
+	}
+	return nil, errors.New("interface is not connected")
+}
+
+// syncTorrentIfaces hands the torrent session the usable interfaces, main first
+// (trackers and web seeds go through the first). Call it without e.mu held.
+func (e *Engine) syncTorrentIfaces() {
+	var ifs []torrent.Iface
+	main := e.MainID()
+	for _, u := range e.Usable() {
+		id := u.ID
+		ifc := torrent.Iface{
+			ID:   id,
+			Dial: e.dialVia(id),
+			ListenPacket: func() (net.PacketConn, error) {
+				b, err := e.bindingOf(id)
+				if err != nil {
+					return nil, err
+				}
+				return b.ListenPacket()
+			},
+			LookupIP: func(ctx context.Context, host string) ([]net.IP, error) {
+				b, err := e.bindingOf(id)
+				if err != nil {
+					return nil, err
+				}
+				return b.LookupIP(ctx, host)
+			},
+		}
+		if id == main {
+			ifs = append([]torrent.Iface{ifc}, ifs...)
+		} else {
+			ifs = append(ifs, ifc)
+		}
+	}
+	e.torrents.SetIfaces(ifs)
 }
 
 func (e *Engine) enabledLocked(ent *ifaceEntry) bool {
@@ -390,14 +519,17 @@ func (e *Engine) RequestResolve(id, ifaceID, pageURL string) {
 	}
 }
 
-func (e *Engine) Changed(d *download.Download) {
+func (e *Engine) Changed(d *download.Download) { e.markDirty(d.ID()) }
+
+func (e *Engine) markDirty(id string) {
 	e.mu.Lock()
-	e.dirty[d.ID()] = true
+	e.dirty[id] = true
 	e.mu.Unlock()
 }
 
-func (e *Engine) Finished(d *download.Download) {
-	s := d.Summary()
+func (e *Engine) Finished(d *download.Download) { e.notifyFinished(d.Summary()) }
+
+func (e *Engine) notifyFinished(s download.Summary) {
 	if s.Status == download.StatusCompleted {
 		winutil.Notify("Download complete", s.Filename)
 	} else {
@@ -485,8 +617,11 @@ type AddRequest struct {
 
 func (e *Engine) Add(r AddRequest) (string, error) {
 	r.URL = strings.TrimSpace(r.URL)
+	if strings.HasPrefix(r.URL, "magnet:") {
+		return e.addTorrent(r.URL)
+	}
 	if !strings.HasPrefix(r.URL, "http://") && !strings.HasPrefix(r.URL, "https://") {
-		return "", errors.New("only http and https links are supported")
+		return "", errors.New("only http, https and magnet links are supported")
 	}
 	if r.UserAgent == "" {
 		// Some servers drop clients with Go's default user agent.
@@ -508,14 +643,35 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	return st.ID, nil
 }
 
+func (e *Engine) addTorrent(magnet string) (string, error) {
+	e.mu.Lock()
+	dir := e.settings.SaveDir
+	e.mu.Unlock()
+	t, err := e.torrents.Add(torrent.State{ID: newID(), Magnet: magnet, Dir: dir, Added: time.Now()})
+	if err != nil {
+		return "", fmt.Errorf("not a usable magnet link: %w", err)
+	}
+	e.mu.Lock()
+	e.downloads[t.ID()] = t
+	e.order = append(e.order, t.ID())
+	e.dirty[t.ID()] = true
+	e.mu.Unlock()
+	log.Printf("added torrent %s", t.ID())
+	return t.ID(), nil
+}
+
 func (e *Engine) Remove(id string, deleteFile bool) error {
-	d, err := e.get(id)
+	d, err := e.entry(id)
 	if err != nil {
 		return err
 	}
 	d.Stop(download.StatusPaused)
-	if deleteFile && d.Status() != download.StatusCompleted {
-		os.Remove(d.Path())
+	if p := d.Path(); deleteFile && p != "" && d.Status() != download.StatusCompleted {
+		if _, ok := d.(*torrent.Torrent); ok {
+			os.RemoveAll(p) // a multi-file torrent is a folder
+		} else {
+			os.Remove(p)
+		}
 	}
 	e.mu.Lock()
 	delete(e.downloads, id)
@@ -527,7 +683,7 @@ func (e *Engine) Remove(id string, deleteFile bool) error {
 	}
 	e.order = slices.DeleteFunc(e.order, func(x string) bool { return x == id })
 	e.mu.Unlock()
-	os.Remove(e.statePath(id))
+	os.Remove(e.statePath(d))
 	return nil
 }
 

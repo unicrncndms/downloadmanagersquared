@@ -86,6 +86,17 @@ func (b *Binding) DialContext(ctx context.Context, network, address string) (net
 	return nil, lastErr
 }
 
+// ListenPacket opens an IPv4 UDP socket on a free port that sends through this interface.
+func (b *Binding) ListenPacket() (net.PacketConn, error) {
+	lc := net.ListenConfig{Control: b.control}
+	return lc.ListenPacket(context.Background(), "udp4", net.JoinHostPort(b.iface.IPv4.String(), "0"))
+}
+
+// LookupIP resolves host to IPv4 addresses through this interface's DNS.
+func (b *Binding) LookupIP(ctx context.Context, host string) ([]net.IP, error) {
+	return b.resolver.LookupIP(ctx, "ip4", host)
+}
+
 func (b *Binding) dialRaw(ctx context.Context, network, address string) (net.Conn, error) {
 	d := net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second, Control: b.control}
 	if len(network) >= 3 && network[:3] == "udp" {

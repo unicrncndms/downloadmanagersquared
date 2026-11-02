@@ -72,20 +72,23 @@ function makeCard(id) {
   let shownPageHint = false;
 
   function update(d) {
+    const torrent = d.kind === "torrent";
+    const known = torrent ? d.size > 0 : d.probed;
     name.textContent = d.filename || d.url;
     name.title = d.filename || d.url;
     status.textContent = STATUS_TEXT[d.status] || d.status;
     status.className = "badge " + (STATUS_CLASS[d.status] || "");
     fill.style.width = percent(d) + "%";
-    sizeText.textContent = d.probed
-      ? `${fmtBytes(d.done)} of ${fmtBytes(d.size)} (${percent(d).toFixed(1)}%)${d.rangeOk ? "" : " · main connection only"}`
-      : "Checking the link…";
+    sizeText.textContent = known
+      ? `${fmtBytes(d.done)} of ${fmtBytes(d.size)} (${percent(d).toFixed(1)}%)${torrent || d.rangeOk ? "" : " · main connection only"}`
+      : torrent ? "Asking peers for the torrent's files…" : "Checking the link…";
     speedText.textContent = d.status === "running" ? `${fmtSpeed(d.speed)} · ${fmtETA(d.eta)} left` : "";
     err.textContent = d.error || "";
-    const running = d.status === "running" || d.status === "verifying" || d.status === "queued";
+    const running = ["running", "verifying", "queued", "metadata"].includes(d.status);
     pause.hidden = !running;
     resume.hidden = running || d.status === "completed";
-    folder.hidden = !d.probed;
+    folder.hidden = !known;
+    details.hidden = torrent; // landing page and checksums are for HTTP downloads
 
     // One line per connection: name, state, connections, speed (and why, if it failed).
     const ids = Object.keys(d.links).sort((a, b) =>
@@ -113,7 +116,7 @@ function makeCard(id) {
         el("span", { class: "badge " + (busy ? "warn" : LINK_CLASS[l.status] || "dim") }, label),
         l.resolved ? el("span", { class: "muted" }, " own link") : null,
       ].filter(Boolean));
-      r.info.textContent = l.conns ? `${l.conns}×` : "";
+      r.info.textContent = !l.conns ? "" : torrent ? `${l.conns} peer${l.conns === 1 ? "" : "s"}` : `${l.conns}×`;
       r.speed.textContent = l.speed > 0 ? fmtSpeed(l.speed) : "";
       const canRetry = ["retrying", "failed", "mismatch"].includes(l.status);
       r.why.hidden = !l.error && !canRetry;

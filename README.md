@@ -25,7 +25,7 @@ Needs Go (installed with `winget install GoLang.Go`).
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-This runs the downloader tests and puts `dms-engine.exe`, `dms-host.exe` and `downloadmanagersquared.zip` (the extension) into `dist\`.
+This runs the download, torrent and engine tests and puts `dms-engine.exe`, `dms-host.exe` and `downloadmanagersquared.zip` (the extension) into `dist\`.
 
 ## Install
 

@@ -9,7 +9,7 @@ if (-not $go) { $go = 'C:\Program Files\Go\bin\go.exe' }
 
 Push-Location (Join-Path $root 'engine')
 try {
-    & $go test ./internal/download/
+    & $go test ./internal/download/ ./internal/torrent/ ./internal/engine/
     if ($LASTEXITCODE) { throw 'tests failed' }
     & $go build -trimpath -o "$dist\dms-host.exe" ./cmd/dms-host
     if ($LASTEXITCODE) { throw 'building dms-host failed' }
