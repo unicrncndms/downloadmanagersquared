@@ -271,7 +271,7 @@ func (e *Engine) piaSession(ctx context.Context, p *piaState, api pia.API, regio
 	e.mu.Lock()
 	token, tokenAt := p.token, p.tokenAt
 	regions, regionsAt := p.regions, p.regionsAt
-	login := p.login
+	login, picked := p.login, p.region.ID
 	e.mu.Unlock()
 	now := time.Now()
 	if token == "" || now.Sub(tokenAt) > piaTokenLife {
@@ -297,6 +297,14 @@ func (e *Engine) piaSession(ctx context.Context, p *piaState, api pia.API, regio
 	for _, r := range regions {
 		if r.ID == regionID {
 			region = r
+		}
+	}
+	if region.ID == "" && regionID == "" {
+		// Every interface uses the region the first one measured fastest.
+		for _, r := range regions {
+			if r.ID == picked {
+				region = r
+			}
 		}
 	}
 	if region.ID == "" { // "" or gone: the lowest latency

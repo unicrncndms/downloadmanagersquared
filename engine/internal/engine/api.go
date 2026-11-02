@@ -125,7 +125,7 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			j.Stop(download.StatusPaused)
 		case "resume":
 			if !j.Running() {
-				j.Stop(download.StatusQueued)
+				e.requeue(j)
 			}
 		case "remove":
 			return nil, e.Remove(p.ID, p.DeleteFile)

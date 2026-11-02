@@ -414,3 +414,48 @@ func TestInterfacesShowWhetherPeersCanConnectIn(t *testing.T) {
 func torrentState(magnet string, m download.VPNMode, dir string) torrent.State {
 	return torrent.State{ID: newID(), Magnet: magnet, Dir: dir, Status: download.StatusQueued, VPN: m, Added: time.Now()}
 }
+
+func TestResumedSeedingTorrentSeedsWithoutASlot(t *testing.T) {
+	dir, saveDir := t.TempDir(), t.TempDir()
+	seed := seedingTorrent(t, dir, saveDir)
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	e.settings.MaxParallel = 1
+	for _, m := range []string{"pause", "resume"} {
+		if _, err := e.Call(nil, m, []byte(`{"id":"`+seed+`"}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	j, _ := e.entry(seed)
+	if j.Status() != torrent.StatusSeeding {
+		t.Fatalf("a resumed finished torrent is %q, want seeding again", j.Status())
+	}
+	http, _ := e.Add(AddRequest{URL: "https://example.com/big.iso"})
+	e.schedule()
+	h, _ := e.entry(http)
+	defer h.Stop(download.StatusPaused)
+	if !h.Running() || j.Running() || !j.(*torrent.Torrent).Active() {
+		t.Fatalf("http running %v, seeding torrent running %v active %v; want the torrent seeding beside it", h.Running(), j.Running(), j.(*torrent.Torrent).Active())
+	}
+}
+
+func TestRemovingAnUnfinishedTorrentDeletesItsPartialFile(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	id := queuedTorrent(t, e, 7) // named t7
+	j, _ := e.entry(id)
+	part := filepath.Join(j.(*torrent.Torrent).State().Dir, "t7.part")
+	os.WriteFile(part, []byte("half"), 0o644)
+	if err := e.Remove(id, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(part); err == nil {
+		t.Fatal("the partial file of a removed unfinished torrent is still there")
+	}
+}

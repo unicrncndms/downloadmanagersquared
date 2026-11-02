@@ -362,7 +362,7 @@ func (e *Engine) schedule() {
 				t.PauseForVPN() // never without a tunnel: its session has no socket to use
 				continue
 			case tunnelUp && t.WaitingForVPN():
-				t.Stop(download.StatusQueued)
+				e.requeue(t)
 			}
 		}
 		switch {
@@ -865,9 +865,19 @@ func (e *Engine) PauseAll() {
 func (e *Engine) ResumeAll() {
 	for _, d := range e.list() {
 		if s := d.Status(); s == download.StatusPaused || s == download.StatusFailed {
-			d.Stop(download.StatusQueued)
+			e.requeue(d)
 		}
 	}
+}
+
+// requeue lets a stopped download run again: queued, or for a torrent whose
+// download completed, seeding, which takes no queue slot (schedule restarts it).
+func (e *Engine) requeue(j entry) {
+	if t, ok := j.(*torrent.Torrent); ok && !t.State().Finished.IsZero() {
+		t.Stop(torrent.StatusSeeding)
+		return
+	}
+	j.Stop(download.StatusQueued)
 }
 
 func newID() string {
@@ -1027,7 +1037,8 @@ func (e *Engine) Remove(id string, deleteFile bool) error {
 	d.Stop(download.StatusPaused)
 	if p := d.Path(); deleteFile && p != "" && !finished {
 		if _, ok := d.(*torrent.Torrent); ok {
-			os.RemoveAll(p) // a multi-file torrent is a folder
+			os.RemoveAll(p)        // a multi-file torrent is a folder
+			os.Remove(p + ".part") // a single file waits under .part until complete
 		} else {
 			os.Remove(p)
 		}
