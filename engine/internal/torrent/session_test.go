@@ -24,6 +24,7 @@ import (
 	"github.com/anacrolix/torrent/storage"
 
 	"downloadmanagersquared/engine/internal/download"
+	"downloadmanagersquared/engine/internal/rate"
 )
 
 // swarm is a set of local seeders for one file, each standing in for a peer on the
@@ -709,4 +710,43 @@ func TestSessionOpensNothingUntilATorrentJoinsTheSwarm(t *testing.T) {
 	tor.Stop(download.StatusQueued)
 	tor.Start()
 	waitFor(t, "the sockets to open again", 5*time.Second, func() bool { return open.Load() > 0 })
+}
+
+func TestDownloadingTorrentShowsPeersAndSpeedPerInterface(t *testing.T) {
+	sw := newSwarm(t, 2, 4<<20)
+	s, err := NewSession(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var a, b atomic.Int32
+	// Slow enough to watch: 512 KB/s on each interface.
+	slow := func(ifc Iface) Iface {
+		sh := rate.NewShaper()
+		sh.SetLimits(0, 512<<10)
+		dial := ifc.Dial
+		ifc.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c, err := dial(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			return sh.Conn(c), nil
+		}
+		return ifc
+	}
+	s.SetIfaces([]Iface{slow(sw.iface("wlan", &a)), slow(sw.iface("eth", &b))})
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	defer tor.Stop(download.StatusPaused)
+	waitFor(t, "peers and speeds on both interfaces", 15*time.Second, func() bool {
+		sum := tor.Summary()
+		w, e := sum.Links["wlan"], sum.Links["eth"]
+		return sum.Status == download.StatusRunning && w.Conns > 0 && e.Conns > 0 && w.Speed > 0 && e.Speed > 0 && sum.Seeds > 0 && sum.Peers >= 2
+	})
+	if sum := tor.Summary(); sum.InfoHash != sw.hash.HexString() {
+		t.Fatalf("info hash shown as %q", sum.InfoHash)
+	}
 }

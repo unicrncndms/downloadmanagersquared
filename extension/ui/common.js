@@ -81,6 +81,10 @@ const VPN_TEXT = { alongside: "VPN alongside", vpn: "VPN only" };
 const TUNNEL_TEXT = { up: "VPN up", connecting: "VPN connecting", down: "VPN retrying", off: "VPN off" };
 const TUNNEL_CLASS = { up: "ok", connecting: "warn", down: "bad", off: "dim" };
 
+function plural(n, word) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
 function percent(d) {
   return d.size > 0 ? Math.min(100, (d.done / d.size) * 100) : 0;
 }

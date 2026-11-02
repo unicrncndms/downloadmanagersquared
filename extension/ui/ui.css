@@ -47,7 +47,7 @@ button {
 button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.small { padding: 2px 8px; font-size: 12px; }
-input[type=text], input[type=number], input[type=url], select {
+input[type=text], input[type=password], input[type=number], input[type=url], select {
   border: 1px solid var(--line);
   background: var(--panel);
   border-radius: 6px;
@@ -80,3 +80,22 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
   opacity: 0; transition: opacity .2s; pointer-events: none; font-size: 13px; z-index: 10;
 }
 .toast.show { opacity: 1; }
+
+/* An (i) that explains what it sits next to, on hover or keyboard focus. */
+.info {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; margin-left: 5px; border-radius: 50%; vertical-align: 1px;
+  border: 1px solid var(--line); color: var(--muted); background: var(--panel);
+  font: italic 600 10px/1 Georgia, serif; cursor: help; user-select: none;
+}
+.info::before { content: "i"; }
+.info:hover, .info:focus { color: var(--accent); border-color: var(--accent); outline: none; }
+.info::after {
+  content: attr(data-tip); position: absolute; z-index: 20; left: -8px; top: calc(100% + 6px);
+  width: max-content; max-width: 300px; padding: 8px 10px; border-radius: 6px;
+  background: var(--text); color: var(--bg); box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+  font: normal 400 12px/1.45 system-ui, "Segoe UI", sans-serif; text-align: left; white-space: normal;
+  opacity: 0; visibility: hidden; transition: opacity .12s; pointer-events: none;
+}
+.info:hover::after, .info:focus::after { opacity: 1; visibility: visible; }
+.info.left::after { left: auto; right: -8px; }

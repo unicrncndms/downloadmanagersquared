@@ -1122,6 +1122,7 @@ type LinkSummary struct {
 	MaxConns int        `json:"maxConns,omitempty"` // connections the settings allow
 	Busy     bool       `json:"busy,omitempty"`     // holding back because the server pushed back
 	Resolved bool       `json:"resolved"`           // fetched by the browser for this interface
+	Up       float64    `json:"up,omitempty"`       // torrents: upload speed to the peers on this path
 }
 
 // Summary is what the UI shows for a download.
@@ -1151,6 +1152,10 @@ type Summary struct {
 	// Torrents only: the files to choose from (while choosing), then the upload once complete.
 	Files    []FileSummary `json:"files,omitempty"`
 	AskVPN   bool          `json:"askVpn,omitempty"` // waiting for: VPN, or the current connection?
+	Peers    int           `json:"peers,omitempty"`  // connected
+	Seeds    int           `json:"seeds,omitempty"`  // connected peers with the whole torrent
+	Swarm    int           `json:"swarm,omitempty"`  // peers known, connected or not
+	InfoHash string        `json:"infoHash,omitempty"`
 	Uploaded int64         `json:"uploaded,omitempty"`
 	Ratio    float64       `json:"ratio,omitempty"`
 	UpSpeed  float64       `json:"upSpeed,omitempty"`

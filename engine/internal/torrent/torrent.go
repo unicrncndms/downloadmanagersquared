@@ -65,6 +65,19 @@ type Torrent struct {
 	speed   rate.EWMA
 	upSpeed rate.EWMA
 	info    *metainfo.Info // st.Info parsed, once needed
+	hash    string
+
+	// What the swarm looks like, as of the last poll.
+	paths               map[string]*pathRate
+	peers, seeds, swarm int
+}
+
+// pathRate is a torrent's traffic on one interface.
+type pathRate struct {
+	peers            int
+	read, written    int64 // as the connected peers last counted them
+	down, up         int64 // only growing: a peer leaving takes its count with it
+	downRate, upRate rate.EWMA
 }
 
 // Add registers a torrent with the session without starting it.
@@ -82,7 +95,7 @@ func (s *Session) Add(st State) (*Torrent, error) {
 	if st.Size == 0 {
 		st.Size = -1 // unknown until the metadata arrives
 	}
-	return &Torrent{s: s, st: st}, nil
+	return &Torrent{s: s, st: st, hash: spec.InfoHash.HexString()}, nil
 }
 
 // Path is the torrent's file, or its folder when it has several; "" while its
@@ -105,28 +118,32 @@ func (t *Torrent) Summary() download.Summary {
 		Kind: "torrent", ID: t.st.ID, URL: t.st.Magnet, Filename: t.st.Name, Dir: t.st.Dir,
 		Size: t.st.Size, Status: t.st.Status, Error: t.st.Error, Speed: t.speed.Value(), ETA: -1,
 		Links: map[string]download.LinkSummary{}, Added: t.st.Added, Finished: t.st.Finished,
-		Uploaded: t.st.Uploaded, VPN: t.st.VPN, AskVPN: t.st.AskVPN,
+		Uploaded: t.st.Uploaded, VPN: t.st.VPN, AskVPN: t.st.AskVPN, InfoHash: t.hash,
 	}
 	if t.st.Status == StatusChoosing {
 		s.Files = t.filesLocked()
+	}
+	if t.st.Size > 0 {
+		s.Ratio = float64(t.st.Uploaded) / float64(t.st.Size)
 	}
 	switch {
 	case !t.st.Finished.IsZero():
 		s.Done = t.st.Size
 		s.Speed = 0
-		s.UpSpeed = t.upSpeed.Value()
-		if t.st.Size > 0 {
-			s.Ratio = float64(t.st.Uploaded) / float64(t.st.Size)
-		}
 	case t.t != nil && t.t.Info() != nil:
 		s.Done, _ = wanted(t.t, t.st.Skip)
 		if s.Speed > 0 {
 			s.ETA = float64(s.Size-s.Done) / s.Speed
 		}
 	}
-	if t.t != nil {
-		for id, n := range t.s.peersByIface(t.t) {
-			s.Links[id] = download.LinkSummary{Status: download.LinkReady, Conns: n}
+	if t.active {
+		s.UpSpeed = t.upSpeed.Value()
+		s.Peers, s.Seeds, s.Swarm = t.peers, t.seeds, t.swarm
+		for id, p := range t.paths {
+			if p.peers > 0 {
+				s.Links[id] = download.LinkSummary{Status: download.LinkReady, Conns: p.peers,
+					Speed: p.downRate.Value(), Up: p.upRate.Value()}
+			}
 		}
 	}
 	return s
@@ -375,10 +392,13 @@ func (t *Torrent) poll(ctx context.Context, at *atorrent.Torrent, done func() bo
 	for {
 		stats := at.Stats()
 		completed, uploaded := at.BytesCompleted(), stats.BytesWrittenData.Int64()
+		byPath := t.s.peersByIface(at)
 		if !t.update(at, func() {
 			t.speed.Update(completed, every)
 			t.upSpeed.Update(uploaded, every)
 			t.st.Uploaded = t.upBase + uploaded
+			t.peers, t.seeds, t.swarm = stats.ActivePeers, stats.ConnectedSeeders, stats.TotalPeers
+			t.ratesLocked(byPath, every)
 		}) {
 			return false
 		}
@@ -390,6 +410,30 @@ func (t *Torrent) poll(ctx context.Context, at *atorrent.Torrent, done func() bo
 			return false
 		case <-tick.C:
 		}
+	}
+}
+
+// ratesLocked turns each interface's byte counts into speeds.
+func (t *Torrent) ratesLocked(byPath map[string]ifacePeers, every time.Duration) {
+	if t.paths == nil {
+		t.paths = map[string]*pathRate{}
+	}
+	for id := range t.paths {
+		if _, ok := byPath[id]; !ok {
+			byPath[id] = ifacePeers{} // no peers left: speeds wind down
+		}
+	}
+	for id, now := range byPath {
+		p := t.paths[id]
+		if p == nil {
+			p = &pathRate{}
+			t.paths[id] = p
+		}
+		p.down += max(now.read-p.read, 0)
+		p.up += max(now.written-p.written, 0)
+		p.peers, p.read, p.written = now.n, now.read, now.written
+		p.downRate.Update(p.down, every)
+		p.upRate.Update(p.up, every)
 	}
 }
 
@@ -553,6 +597,7 @@ func (t *Torrent) dropLocked() {
 	}
 	t.t, t.stor, t.active, t.slot = nil, nil, false, false
 	t.speed, t.upSpeed = rate.EWMA{}, rate.EWMA{}
+	t.paths, t.peers, t.seeds, t.swarm = nil, 0, 0, 0
 	if t.held {
 		t.held = false
 		t.s.release() // the last torrent out closes the session's sockets

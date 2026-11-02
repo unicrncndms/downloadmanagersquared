@@ -33,6 +33,10 @@ function makeCard(id) {
   const fill = el("div");
   const sizeText = el("span", { class: "muted num" });
   const speedText = el("span", { class: "num" });
+  // Torrents only: the swarm and the upload, below the progress.
+  const peersText = el("span", { class: "muted num" });
+  const upText = el("span", { class: "num" });
+  const swarm = el("div", { class: "meta" }, peersText, upText);
   const err = el("div", { class: "err" });
   const conns = el("div", { class: "conns num" });
   const pause = el("button", { class: "small", onclick: () => act("pause", { id }) }, "Pause");
@@ -54,19 +58,20 @@ function makeCard(id) {
   const sha = el("input", { type: "text", class: "mono", placeholder: "optional" });
   const md5 = el("input", { type: "text", class: "mono", placeholder: "optional" });
   const urlText = el("div", { class: "mono muted", style: "grid-column:1/-1" });
-  const details = el("details", {},
-    el("summary", {}, "Details"),
-    el("div", { class: "form" },
-      el("label", {}, "Landing page"), page,
-      el("button", { class: "small", onclick: () => act("setPageUrl", { id, pageUrl: page.value }, "Saved") }, "Save"),
-      el("label", {}, "Expected SHA-256 / MD5"), sha, el("span"), md5,
-      el("button", { class: "small", onclick: () => act("setHashes", { id, sha256: sha.value, md5: md5.value }, "Checksums saved") }, "Save"),
-      el("label", {}, "Original link"), urlText));
+  const httpDetails = el("div", { class: "form" },
+    el("label", {}, "Landing page"), page,
+    el("button", { class: "small", onclick: () => act("setPageUrl", { id, pageUrl: page.value }, "Saved") }, "Save"),
+    el("label", {}, "Expected SHA-256 / MD5"), sha, el("span"), md5,
+    el("button", { class: "small", onclick: () => act("setHashes", { id, sha256: sha.value, md5: md5.value }, "Checksums saved") }, "Save"),
+    el("label", {}, "Original link"), urlText);
+  const facts = el("dl", { class: "facts" });
+  const details = el("details", {}, el("summary", {}, "Details"), httpDetails, facts);
 
   const root = el("div", { class: "card" },
     el("div", { class: "top" }, name, vpn, status),
     el("div", { class: "bar" }, fill),
     el("div", { class: "meta" }, sizeText, speedText),
+    swarm,
     err, pick, conns,
     actions, ask,
     details);
@@ -93,12 +98,18 @@ function makeCard(id) {
       : choosing
         ? `${files.length} file${files.length === 1 ? "" : "s"} · ${fmtBytes(files.reduce((n, f) => n + f.size, 0))}`
       : seeded
-      ? `${fmtBytes(d.size)} · uploaded ${fmtBytes(d.uploaded || 0)} · ratio ${(d.ratio || 0).toFixed(2)}`
+        ? `${fmtBytes(d.size)} · complete`
       : known
         ? `${fmtBytes(d.done)} of ${fmtBytes(d.size)} (${percent(d).toFixed(1)}%)${torrent || d.rangeOk ? "" : " · main connection only"}`
         : torrent ? "Asking peers for the torrent's files…" : "Checking the link…";
-    speedText.textContent = d.status === "running" ? `${fmtSpeed(d.speed)} · ${fmtETA(d.eta)} left`
-      : d.status === "seeding" ? `↑ ${fmtSpeed(d.upSpeed || 0)}` : "";
+    speedText.textContent = d.status === "running" ? `↓ ${fmtSpeed(d.speed)} · ${fmtETA(d.eta)} left` : "";
+
+    // The swarm: who we're connected to, and what we've given back.
+    const inSwarm = torrent && ["running", "seeding", "checking", "metadata"].includes(d.status);
+    swarm.hidden = !torrent || choosing || !(inSwarm || d.uploaded > 0);
+    peersText.textContent = !inSwarm ? ""
+      : `${plural(d.peers || 0, "peer")} · ${plural(d.seeds || 0, "seed")}${d.swarm > (d.peers || 0) ? ` · ${d.swarm} known` : ""}`;
+    upText.textContent = `↑ ${inSwarm ? fmtSpeed(d.upSpeed || 0) + " · " : ""}${fmtBytes(d.uploaded || 0)} sent · ratio ${(d.ratio || 0).toFixed(2)}`;
     err.textContent = d.error || "";
     const running = ["running", "verifying", "queued", "metadata", "checking", "seeding"].includes(d.status);
     pause.hidden = !running;
@@ -109,7 +120,18 @@ function makeCard(id) {
     const step = choosing ? `${d.askVpn}|${files.length}|${hasVpn()}` : "";
     if (step && step !== picking) renderPick(d);
     picking = step;
-    details.hidden = torrent; // landing page and checksums are for HTTP downloads
+    // Landing page and checksums are for HTTP downloads; a torrent shows what it is.
+    httpDetails.hidden = torrent;
+    facts.hidden = !torrent;
+    details.hidden = choosing;
+    if (torrent) {
+      facts.replaceChildren(...[
+        ["Save folder", d.dir],
+        ["VPN", VPN_TEXT[d.vpn] || "Off"],
+        ["Info hash", d.infoHash],
+        ["Magnet link", d.url],
+      ].filter(([, v]) => v).flatMap(([k, v]) => [el("dt", {}, k), el("dd", { class: k === "Save folder" || k === "VPN" ? "" : "mono" }, v)]));
+    }
 
     // One line per connection: name, state, connections, speed (and why, if it failed).
     const ids = Object.keys(d.links).sort((a, b) =>
@@ -131,14 +153,17 @@ function makeCard(id) {
       r.name.textContent = ifaceName(ifc, latest.state, latest.settings);
       let label = LINK_TEXT[l.status] || l.status;
       if (l.status === "ready" && d.status === "running" && l.conns > 0) label = "Downloading";
+      if (torrent && l.status === "ready") label = d.status === "seeding" ? "Seeding" : d.status === "running" ? "Downloading" : "Connected";
       const busy = l.busy && (l.status === "ready" || l.status === "retrying");
       if (busy) label = `Server busy · ${l.allowed} of ${l.maxConns} connections`;
       r.state.replaceChildren(...[
         el("span", { class: "badge " + (busy ? "warn" : LINK_CLASS[l.status] || "dim") }, label),
         l.resolved ? el("span", { class: "muted" }, " own link") : null,
       ].filter(Boolean));
-      r.info.textContent = !l.conns ? "" : torrent ? `${l.conns} peer${l.conns === 1 ? "" : "s"}` : `${l.conns}×`;
-      r.speed.textContent = l.speed > 0 ? fmtSpeed(l.speed) : "";
+      r.info.textContent = !l.conns ? "" : torrent ? plural(l.conns, "peer") : `${l.conns}×`;
+      r.speed.textContent = torrent
+        ? [l.speed > 0 ? "↓ " + fmtSpeed(l.speed) : "", l.up > 0 ? "↑ " + fmtSpeed(l.up) : ""].filter(Boolean).join(" ")
+        : l.speed > 0 ? fmtSpeed(l.speed) : "";
       const canRetry = ["retrying", "failed", "mismatch"].includes(l.status);
       r.why.hidden = !l.error && !canRetry;
       r.whyText.textContent = l.error || "";

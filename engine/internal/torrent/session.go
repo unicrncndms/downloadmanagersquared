@@ -593,14 +593,34 @@ func (p *trackedPeer) Close() error {
 // peersByIface counts a torrent's connected peers on each interface. A peer
 // address open on several interfaces (two torrents sharing a peer) counts once,
 // on the first.
-func (s *Session) peersByIface(at *atorrent.Torrent) map[string]int {
-	pcs := at.PeerConns()
+// ifacePeers are a torrent's connected peers on one interface, and the piece
+// data they have moved since they connected.
+type ifacePeers struct {
+	n             int
+	read, written int64
+}
+
+// peersByIface counts a torrent's connected peers on each interface. A peer
+// address open on several interfaces (two torrents sharing a peer) counts once,
+// on the first.
+func (s *Session) peersByIface(at *atorrent.Torrent) map[string]ifacePeers {
+	type peer struct {
+		addr          string
+		read, written int64
+	}
+	var peers []peer
+	for _, pc := range at.PeerConns() {
+		st := pc.Stats()
+		peers = append(peers, peer{pc.RemoteAddr.String(), st.BytesReadData.Int64(), st.BytesWrittenData.Int64()})
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := map[string]int{}
-	for _, pc := range pcs {
-		if at := s.peerAt[pc.RemoteAddr.String()]; len(at) > 0 {
-			out[at[0].ID]++
+	out := map[string]ifacePeers{}
+	for _, p := range peers {
+		if at := s.peerAt[p.addr]; len(at) > 0 {
+			ip := out[at[0].ID]
+			ip.n, ip.read, ip.written = ip.n+1, ip.read+p.read, ip.written+p.written
+			out[at[0].ID] = ip
 		}
 	}
 	return out
