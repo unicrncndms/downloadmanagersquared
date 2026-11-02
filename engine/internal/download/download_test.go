@@ -143,7 +143,7 @@ func TestSplitAcrossInterfacesWithIPBoundLinks(t *testing.T) {
 	var resolveMu sync.Mutex
 	var resolved []string
 	env := &testEnv{
-		// eth ~4x faster than wifi (per-read delays throttle each connection)
+		// eth ~4x faster than wifi (per-read delays slow each connection)
 		ifaces: []Iface{iface("eth", 4, 8*time.Millisecond), iface("wifi", 2, 16*time.Millisecond)},
 		main:   "eth",
 	}
@@ -335,7 +335,7 @@ func TestConnectionLimit403IsNotExpiry(t *testing.T) {
 }
 
 // When extra connections get 429, the ones already working must keep going.
-func TestThrottleKeepsWorkingConnections(t *testing.T) {
+func TestPushBackKeepsWorkingConnections(t *testing.T) {
 	data := randomData(32 << 20)
 	var open atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -553,6 +553,82 @@ func TestMainInterfaceDecidesWhatTheFileIs(t *testing.T) {
 	}
 	if s.Links["wifi"].Status != LinkMismatch || s.Links["eth"].Status != LinkReady {
 		t.Errorf("eth %+v, wifi %+v: wifi should be the mismatch", s.Links["eth"], s.Links["wifi"])
+	}
+	checkFile(t, filepath.Join(dir, "big.bin"), data)
+}
+
+// waitFinished is runToEnd for a download that is already started, with a deadline.
+func waitFinished(t *testing.T, env *testEnv, d *Download, within time.Duration) {
+	t.Helper()
+	select {
+	case <-env.finished:
+	case <-time.After(within):
+		t.Fatalf("download did not finish within %v: %+v", within, d.Summary())
+	}
+}
+
+// A busy server during the probe says when to come back; the link waits that
+// long, not a minute, and it costs none of its five tries.
+func TestBusyServerDuringProbeIsWaitedOut(t *testing.T) {
+	data := randomData(2 << 20)
+	var probes atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") == "bytes=0-0" && probes.Add(1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			io.WriteString(w, "<html>busy</html>")
+			return
+		}
+		http.ServeContent(w, r, "big.bin", time.Time{}, bytes.NewReader(data))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	env := &testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth", finished: make(chan struct{})}
+	d := New(env, State{ID: "t12", URL: srv.URL + "/big.bin", Dir: dir, Size: -1})
+	d.Start()
+	deadline := time.Now().Add(900 * time.Millisecond)
+	for !d.Summary().Links["eth"].Busy && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if l := d.Summary().Links["eth"]; !l.Busy || l.Allowed != 1 || l.Status != LinkRetrying {
+		t.Errorf("during the server's pause eth is %+v, want busy, retrying, 1 connection allowed", l)
+	}
+	waitFinished(t, env, d, 15*time.Second)
+	if s := d.Summary(); s.Status != StatusCompleted {
+		t.Fatalf("status %s: %s", s.Status, s.Error)
+	}
+	if n := d.State().Links["eth"].HTTPErrors; n != 0 {
+		t.Errorf("push-back counted as %d tries", n)
+	}
+	checkFile(t, filepath.Join(dir, "big.bin"), data)
+}
+
+// One HTTP error on one connection is a blip: the interface carries on.
+func TestOneHTTPErrorDoesNotStopTheInterface(t *testing.T) {
+	data := randomData(16 << 20)
+	var failed atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "bytes=0-0" && failed.CompareAndSwap(false, true) {
+			http.Error(w, "oops", http.StatusInternalServerError)
+			return
+		}
+		http.ServeContent(w, r, "big.bin", time.Time{}, bytes.NewReader(data))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	env := &testEnv{ifaces: []Iface{iface("eth", 4, time.Millisecond)}, main: "eth", finished: make(chan struct{})}
+	d := New(env, State{ID: "t13", URL: srv.URL + "/big.bin", Dir: dir, Size: -1})
+	d.Start()
+	waitFinished(t, env, d, 20*time.Second)
+	if s := d.Summary(); s.Status != StatusCompleted {
+		t.Fatalf("status %s: %s", s.Status, s.Error)
+	}
+	if !failed.Load() {
+		t.Fatal("the server never sent its error")
+	}
+	if n := d.State().Links["eth"].HTTPErrors; n != 0 {
+		t.Errorf("one blip counted as %d tries", n)
 	}
 	checkFile(t, filepath.Join(dir, "big.bin"), data)
 }

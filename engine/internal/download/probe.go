@@ -19,10 +19,17 @@ type probeResult struct {
 	rangeOK bool
 	isPage  bool // the server sent an HTML page, not the file
 	name    string
+	wait    time.Duration // how long a busy server asked us to stay away
 }
 
+// busy: the server pushed back. That says nothing about the link itself.
+func (r probeResult) busy() bool { return serverBusy(r.status) }
+
+// serverBusy: statuses that mean "come back later".
+func serverBusy(status int) bool { return status == 429 || status == 503 }
+
 // rejected means this link is no good for this IP (expired, IP-bound or a landing page).
-func (r probeResult) rejected() bool { return linkRejected(r.status) || r.isPage }
+func (r probeResult) rejected() bool { return !r.busy() && (linkRejected(r.status) || r.isPage) }
 
 // linkRejected: statuses that mean the link itself is not valid for this IP.
 func linkRejected(status int) bool {
@@ -78,6 +85,9 @@ func probeLink(ctx context.Context, client *http.Client, l Link, ua string) (pro
 		r.size = resp.ContentLength
 	}
 	r.name = remoteName(resp)
+	if r.busy() {
+		r.wait = retryAfter(resp.Header.Get("Retry-After"), time.Now())
+	}
 	return r, nil
 }
 
@@ -148,11 +158,12 @@ func SanitizeFilename(name string) string {
 type errKind int
 
 const (
-	kindNet      errKind = iota
-	kindExpired          // link rejected: needs a new probe or resolve
-	kindThrottle         // 429/503: slow down
-	kindRange            // server does not honor ranges on this link
+	kindNet     errKind = iota
+	kindExpired         // link rejected: needs a new probe or resolve
+	kindBusy            // 429/503: the server pushed back
+	kindRange           // server does not honor ranges on this link
 	kindDisk
+	kindHTTP // any other error status
 )
 
 type fetchError struct {
@@ -167,16 +178,11 @@ func statusError(resp *http.Response) *fetchError {
 	if linkRejected(resp.StatusCode) {
 		return &fetchError{kind: kindExpired, msg: "link rejected: " + resp.Status}
 	}
-	switch resp.StatusCode {
-	case 429, 503:
-		ra := 15 * time.Second
-		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
-			ra = time.Duration(min(s, 600)) * time.Second
-		}
-		return &fetchError{kind: kindThrottle, msg: "server busy: " + resp.Status, retryAfter: ra}
+	if serverBusy(resp.StatusCode) {
+		return &fetchError{kind: kindBusy, msg: "server busy: " + resp.Status, retryAfter: retryAfter(resp.Header.Get("Retry-After"), time.Now())}
 	}
 	if resp.StatusCode >= 400 {
-		return &fetchError{kind: kindNet, msg: fmt.Sprintf("HTTP %s", resp.Status)}
+		return &fetchError{kind: kindHTTP, msg: fmt.Sprintf("HTTP %s", resp.Status)}
 	}
 	return nil
 }

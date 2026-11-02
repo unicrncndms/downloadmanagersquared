@@ -107,8 +107,10 @@ function makeCard(id) {
       r.name.textContent = ifaceName(ifc, latest.state, latest.settings);
       let label = LINK_TEXT[l.status] || l.status;
       if (l.status === "ready" && d.status === "running" && l.conns > 0) label = "Downloading";
+      const busy = l.busy && (l.status === "ready" || l.status === "retrying");
+      if (busy) label = `Server busy · ${l.allowed} of ${l.maxConns} connections`;
       r.state.replaceChildren(...[
-        el("span", { class: "badge " + (LINK_CLASS[l.status] || "dim") }, label),
+        el("span", { class: "badge " + (busy ? "warn" : LINK_CLASS[l.status] || "dim") }, label),
         l.resolved ? el("span", { class: "muted" }, " own link") : null,
       ].filter(Boolean));
       r.info.textContent = l.conns ? `${l.conns}×` : "";

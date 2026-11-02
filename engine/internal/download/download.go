@@ -94,17 +94,11 @@ type Env interface {
 }
 
 type ifaceRun struct {
-	conns        int
-	throttle     int // connections removed after the server pushed back
-	active       int
-	pausedUntil  time.Time
-	lastThrottle time.Time
-	netFails     int
-	bytes        atomic.Int64
-	ewma         rate.EWMA
+	backoff backoff
+	active  int
+	bytes   atomic.Int64
+	ewma    rate.EWMA
 }
-
-func (ir *ifaceRun) target() int { return max(1, ir.conns-ir.throttle) }
 
 type worker struct {
 	d      *Download
@@ -379,6 +373,7 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 	byID := map[string]Iface{}
 	for _, ifc := range usable {
 		byID[ifc.ID] = ifc
+		d.ifRun(ifc.ID).backoff.conns = ifc.Conns
 		l := d.st.Links[ifc.ID]
 		if l == nil {
 			l = &Link{URL: d.st.URL, Cookie: d.st.Cookie, Referer: d.st.Referer, Status: LinkPending}
@@ -432,15 +427,11 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 			continue
 		}
 		ir := d.ifRun(ifc.ID)
-		ir.conns = ifc.Conns
-		if ir.throttle > 0 && now.Sub(ir.lastThrottle) > 2*time.Minute {
-			ir.throttle--
-			ir.lastThrottle = now
-		}
-		if now.Before(ir.pausedUntil) {
+		ir.backoff.recover(now)
+		if !ir.backoff.mayOpen(now) {
 			continue
 		}
-		for ir.active < ir.target() {
+		for ir.active < ir.backoff.target() {
 			seg := d.claimLocked(ifc.ID)
 			if seg == nil {
 				break
@@ -533,6 +524,12 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 		return
 	}
 	log.Printf("download %s probe via %s: HTTP %d, size %d, ranges %v, page %v", d.st.ID, ifaceID, r.status, r.size, r.rangeOK, r.isPage)
+	if r.busy() {
+		now := time.Now()
+		d.ifRun(ifaceID).backoff.pushedBack(now, r.wait)
+		l.serverBusy(now, r.wait, fmt.Sprintf("server busy: HTTP %d", r.status))
+		return
+	}
 	if r.rejected() {
 		if r.isPage && d.st.PageURL == "" && l.URL == d.st.URL {
 			// Either the link is a landing page, or it is the file link and this
@@ -765,7 +762,7 @@ func (d *Download) spawnLocked(ctx context.Context, ifc Iface, l Link, seg *segm
 func (d *Download) nextLocked(w *worker) *segment {
 	l := d.st.Links[w.iface]
 	ir := w.ir
-	if l == nil || l.Status != LinkReady || l.URL != w.link.URL || ir.active > ir.target() {
+	if l == nil || l.Status != LinkReady || l.URL != w.link.URL || ir.active > ir.backoff.target() {
 		return nil
 	}
 	return d.claimLocked(w.iface)
@@ -783,16 +780,15 @@ func (d *Download) workerFailedLocked(w *worker, err error) {
 	// A rejection while sibling connections on the same link still work is a
 	// per-IP connection limit, not an expired link: back off instead.
 	if fe.kind == kindExpired && ir.active > 1 {
-		fe = &fetchError{kind: kindThrottle, msg: fe.msg, retryAfter: 15 * time.Second}
+		fe = &fetchError{kind: kindBusy, msg: fe.msg, retryAfter: 15 * time.Second}
 	}
 	switch fe.kind {
 	case kindExpired:
 		if l != nil && l.URL == w.link.URL && l.Status == LinkReady {
 			l.expired(fe.msg)
 		}
-	case kindThrottle:
-		ir.throttle = min(ir.throttle+1, max(ir.conns-1, 0))
-		ir.lastThrottle, ir.pausedUntil = now, now.Add(fe.retryAfter)
+	case kindBusy:
+		ir.backoff.pushedBack(now, fe.retryAfter)
 	case kindRange:
 		if l != nil && l.URL == w.link.URL {
 			l.fail(fe.msg)
@@ -803,11 +799,15 @@ func (d *Download) workerFailedLocked(w *worker, err error) {
 		default:
 		}
 	default:
-		ir.netFails++
-		ir.pausedUntil = now.Add(2 * time.Second)
-		if ir.netFails >= 3 && l != nil && l.Status == LinkReady {
-			ir.netFails = 0
+		v := ir.backoff.failed(now, fe.kind)
+		if l == nil || l.URL != w.link.URL || l.Status != LinkReady {
+			break
+		}
+		switch v {
+		case linkUnreachable:
 			l.unreachable(now, fe.msg)
+		case linkHTTPError:
+			l.httpError(now, fe.msg)
 		}
 	}
 }
@@ -828,7 +828,10 @@ func (w *worker) run(ctx context.Context, seg *segment) {
 			d.workerFailedLocked(w, err)
 			seg = nil
 		default:
-			w.ir.netFails = 0
+			w.ir.backoff.chunkDone()
+			if l := d.st.Links[w.iface]; l != nil && l.URL == w.link.URL {
+				l.dataArrived()
+			}
 			if seg = d.nextLocked(w); seg != nil {
 				seg.owner = w
 			}
@@ -1097,7 +1100,10 @@ type LinkSummary struct {
 	Error    string     `json:"error,omitempty"`
 	Speed    float64    `json:"speed"`
 	Conns    int        `json:"conns"`
-	Resolved bool       `json:"resolved"` // fetched by the browser for this interface
+	Allowed  int        `json:"allowed,omitempty"`  // connections backoff allows right now
+	MaxConns int        `json:"maxConns,omitempty"` // connections the settings allow
+	Busy     bool       `json:"busy,omitempty"`     // holding back because the server pushed back
+	Resolved bool       `json:"resolved"`           // fetched by the browser for this interface
 }
 
 // Summary is what the UI shows for a download.
@@ -1135,10 +1141,12 @@ func (d *Download) Summary() Summary {
 	if d.running {
 		s.ETA = d.eta.Seconds()
 	}
+	now := time.Now()
 	for id, l := range d.st.Links {
 		ls := LinkSummary{Status: l.Status, Error: l.Error, Resolved: l.URL != d.st.URL}
 		if ir := d.ifs[id]; ir != nil && d.running {
 			ls.Speed, ls.Conns = ir.ewma.Value(), ir.active
+			ls.Allowed, ls.MaxConns, ls.Busy = ir.backoff.target(), ir.backoff.conns, ir.backoff.busy(now)
 		}
 		s.Links[id] = ls
 	}

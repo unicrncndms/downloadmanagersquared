@@ -22,6 +22,10 @@ _Avoid_: Stream, worker, thread
 A contiguous byte range of the file that one connection fetches.
 _Avoid_: Segment, part, piece
 
+**Backoff**:
+An interface opening fewer connections, or none for a pause, because the server pushed back or the network faltered. Its link stays ready. Each push-back costs one connection, and each quiet two minutes gives one back. Users see it as "Server busy".
+_Avoid_: Throttle, cooldown
+
 ### Links
 
 **Source URL**:
@@ -40,7 +44,7 @@ _Avoid_: Check, test request
 A link that turns out to serve a different file, so its interface is left out of the download.
 
 **Retrying**:
-A link the engine will try again by itself after a pause. An unreachable interface retries indefinitely; a repeated HTTP error becomes a failed link after five tries. An engine restart retries it at once.
+A link the engine will try again by itself after a pause. An unreachable interface retries indefinitely; a repeated HTTP error becomes a failed link after five tries, unless data arrives in between. A server that pushes back sets the pause and costs no try. An engine restart retries it at once.
 
 **Needs landing page**:
 A link that has to be resolved, but no landing page is known yet, so it waits for the user to give one.

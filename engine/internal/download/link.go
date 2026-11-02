@@ -54,9 +54,14 @@ func (l *Link) restored() {
 	}
 }
 
+// ready: the probe found the file. The HTTP error count stays until data
+// actually arrives, so a link whose data requests keep failing still gives up.
 func (l *Link) ready() {
-	l.Status, l.Error, l.Resolves, l.retryAt, l.HTTPErrors = LinkReady, "", 0, time.Time{}, 0
+	l.Status, l.Error, l.Resolves, l.retryAt = LinkReady, "", 0, time.Time{}
 }
+
+// dataArrived: a chunk came through, so the link works.
+func (l *Link) dataArrived() { l.HTTPErrors = 0 }
 
 func (l *Link) fail(msg string)     { l.Status, l.Error = LinkFailed, msg }
 func (l *Link) mismatch(msg string) { l.Status, l.Error = LinkMismatch, msg }
@@ -74,6 +79,12 @@ func (l *Link) httpError(now time.Time, msg string) {
 		return
 	}
 	l.Status, l.Error, l.retryAt = LinkRetrying, msg, now.Add(60*time.Second)
+}
+
+// serverBusy: the server said to come back later. Waiting is what it asked
+// for, so it costs no try.
+func (l *Link) serverBusy(now time.Time, retryAfter time.Duration, msg string) {
+	l.Status, l.Error, l.retryAt = LinkRetrying, msg, now.Add(retryAfter)
 }
 
 // expired: the link stopped working mid-download; probe it again to find out why.

@@ -29,6 +29,56 @@ func TestLinkGivesUpAfterFiveHTTPErrors(t *testing.T) {
 	}
 }
 
+// A link that probes fine but whose data requests keep failing still gives up.
+func TestOnlyArrivingDataResetsTheTries(t *testing.T) {
+	l := &Link{}
+	now := start
+	for range 4 {
+		l.probing()
+		l.httpError(now, "HTTP 500")
+		now = now.Add(61 * time.Second)
+		l.wake(now)
+		l.probing()
+		l.ready()
+	}
+	l.httpError(now, "HTTP 500")
+	if l.Status != LinkFailed {
+		t.Fatalf("after 5 errors with good probes in between: %s, want failed", l.Status)
+	}
+
+	l.retry()
+	l.probing()
+	l.httpError(now, "HTTP 500")
+	l.dataArrived()
+	for range 4 {
+		l.httpError(now, "HTTP 500")
+	}
+	if l.Status != LinkRetrying {
+		t.Fatalf("data arrived after the first error: %s, want retrying", l.Status)
+	}
+}
+
+func TestServerPushBackCostsNoTry(t *testing.T) {
+	l := &Link{}
+	now := start
+	for range 10 {
+		l.probing()
+		l.serverBusy(now, 2*time.Minute, "server busy: HTTP 503")
+		if l.Status != LinkRetrying {
+			t.Fatalf("%s, want retrying", l.Status)
+		}
+		l.wake(now.Add(time.Minute))
+		if l.Status != LinkRetrying {
+			t.Fatal("retried before Retry-After was over")
+		}
+		now = now.Add(2 * time.Minute)
+		l.wake(now)
+	}
+	if l.HTTPErrors != 0 {
+		t.Errorf("push-back counted %d tries", l.HTTPErrors)
+	}
+}
+
 func TestUnreachableInterfaceKeepsRetrying(t *testing.T) {
 	l := &Link{}
 	l.probing()
