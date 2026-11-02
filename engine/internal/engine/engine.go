@@ -96,8 +96,9 @@ type Engine struct {
 	dirty     map[string]bool
 	clients   map[*ipc.Conn]*client
 	clientSeq int64
-	resolves  map[string]resolveReq // waiting for an extension to pick them up
-	openWant  *string               // view to open once Firefox connects ("#settings" or downloads)
+	tunnels   map[string]*tunnelEntry // by interface ID
+	resolves  map[string]resolveReq   // waiting for an extension to pick them up
+	openWant  *string                 // view to open once Firefox connects ("#settings" or downloads)
 
 	cum      float64 // bytes moved since start, integrated from speed (for the global ETA)
 	meter    rate.Meter
@@ -144,6 +145,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		dirty:     map[string]bool{},
 		clients:   map[*ipc.Conn]*client{},
 		resolves:  map[string]resolveReq{},
+		tunnels:   map[string]*tunnelEntry{},
 		mapPort:   portmap.Map,
 		quit:      make(chan struct{}),
 	}
@@ -163,6 +165,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	}
 	e.torrents = s
 	e.loadDownloads()
+	e.loadTunnels()
 	return e, nil
 }
 
@@ -240,6 +243,7 @@ func (e *Engine) Run() {
 			if n%10 == 0 {
 				e.refreshInterfaces()
 			}
+			e.syncTunnels(now)
 			e.schedule()
 			e.persist()
 			e.updateSnapshot(now.Sub(last))
@@ -263,6 +267,7 @@ func (e *Engine) Shutdown() {
 		}
 		e.persist()
 		e.torrents.Close()
+		e.closeTunnels()
 		e.mu.Lock()
 		for _, ent := range e.ifaces {
 			ent.socks.Close()
@@ -316,8 +321,12 @@ func (e *Engine) schedule() {
 	running := 0
 	var queued, torrents []entry
 	var downloading []*torrent.Torrent // holding a slot, in the order added
+	tunnelUp := e.anyTunnelUp()
 	for _, d := range all {
 		t, isTorrent := d.(*torrent.Torrent)
+		if h, ok := d.(*download.Download); ok && tunnelUp && h.WaitingForVPN() {
+			h.Stop(download.StatusQueued) // a tunnel came up: back in the queue
+		}
 		switch {
 		case d.Running():
 			running++
@@ -529,8 +538,18 @@ func publicIPv4(ip net.IP) bool {
 	return ip.To4() != nil && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !cgnat.Contains(ip)
 }
 
+// dialVia dials through a path: an interface, or its tunnel.
 func (e *Engine) dialVia(id string) socks.DialFunc {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if ifaceID, ok := ifaceOfPath(id); ok {
+			e.mu.Lock()
+			te := e.tunnelUpLocked(ifaceID)
+			e.mu.Unlock()
+			if te == nil {
+				return nil, errors.New("the VPN tunnel is not up")
+			}
+			return te.t.DialContext(ctx, network, addr)
+		}
 		b, err := e.bindingOf(id)
 		if err != nil {
 			return nil, err
@@ -558,8 +577,8 @@ func (e *Engine) syncTorrentIfaces() {
 // (trackers and web seeds go through the first).
 func (e *Engine) torrentIfaces() []torrent.Iface {
 	var ifs []torrent.Iface
-	main := e.MainID()
-	for _, u := range e.Usable() {
+	main := e.MainID(download.VPNOff)
+	for _, u := range e.Usable(download.VPNOff) {
 		id := u.ID
 		e.mu.Lock()
 		upload := e.uploadLocked(id)
@@ -624,23 +643,42 @@ func (e *Engine) connsLocked(id string) int {
 
 // download.Env
 
-func (e *Engine) Usable() []download.Iface {
+// Usable are the paths a download in VPN mode m may use: bare interfaces, the
+// tunnels that are up, or both.
+func (e *Engine) Usable(m download.VPNMode) []download.Iface {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var out []download.Iface
-	for id, ent := range e.ifaces {
-		if ent.present && e.enabledLocked(ent) {
-			out = append(out, download.Iface{ID: id, Client: ent.binding.HTTPClient(), Conns: e.connsLocked(id)})
+	if m != download.VPNOnly {
+		for id, ent := range e.ifaces {
+			if ent.present && e.enabledLocked(ent) {
+				out = append(out, download.Iface{ID: id, Client: ent.binding.HTTPClient(), Conns: e.connsLocked(id)})
+			}
 		}
+		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if m != download.VPNOff {
+		out = append(out, e.tunnelPathsLocked()...)
+	}
 	return out
 }
 
-func (e *Engine) MainID() string {
+// MainID is the main path under VPN mode m: the main interface, or under VPN
+// only its tunnel, else any tunnel that is up.
+func (e *Engine) MainID(m download.VPNMode) string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.mainIDLocked()
+	main := e.mainIDLocked()
+	if m != download.VPNOnly {
+		return main
+	}
+	if e.tunnelUpLocked(main) != nil {
+		return tunnelPath(main)
+	}
+	if paths := e.tunnelPathsLocked(); len(paths) > 0 {
+		return paths[0].ID
+	}
+	return ""
 }
 
 // mainIDLocked: the chosen main interface, else the Windows default route, else any usable one.
@@ -672,7 +710,11 @@ func (e *Engine) ETAWindow() time.Duration {
 func (e *Engine) RequestResolve(id, ifaceID, pageURL string) {
 	e.mu.Lock()
 	req := resolveReq{ID: id, Iface: ifaceID, PageURL: pageURL}
-	if ent := e.ifaces[ifaceID]; ent != nil {
+	if base, tun := ifaceOfPath(ifaceID); tun {
+		if te, ent := e.tunnels[base], e.ifaces[base]; te != nil && ent != nil {
+			req.IfaceName, req.SocksPort = "VPN via "+ent.info.Name, te.socks.Port()
+		}
+	} else if ent := e.ifaces[ifaceID]; ent != nil {
 		req.IfaceName, req.SocksPort = ent.info.Name, ent.socks.Port()
 	}
 	e.resolves[id+"|"+ifaceID] = req
@@ -779,6 +821,7 @@ type AddRequest struct {
 	Referer   string `json:"referer"`
 	UserAgent string `json:"userAgent"`
 	Torrent   bool   `json:"torrent"` // the URL serves a .torrent file
+	VPN       string `json:"vpn"`     // "off", "alongside" or "vpn"; "" = the default for its type
 }
 
 func (e *Engine) Add(r AddRequest) (string, error) {
@@ -802,7 +845,8 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	}
 	e.mu.Lock()
 	st := download.State{
-		ID: newID(), URL: r.URL, PageURL: strings.TrimSpace(r.PageURL),
+		VPN: vpnMode(r.VPN, e.settings.VPNHTTP),
+		ID:  newID(), URL: r.URL, PageURL: strings.TrimSpace(r.PageURL),
 		Cookie: r.Cookie, Referer: r.Referer, UserAgent: r.UserAgent,
 		Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(),
@@ -857,8 +901,8 @@ func fetchTorrentFile(ctx context.Context, c *http.Client, r AddRequest) ([]byte
 // addTorrentURL fetches a .torrent file through the main interface and adds it.
 func (e *Engine) addTorrentURL(r AddRequest) (string, error) {
 	var client *http.Client
-	main := e.MainID()
-	for _, u := range e.Usable() {
+	main := e.MainID(download.VPNOff)
+	for _, u := range e.Usable(download.VPNOff) {
 		if u.ID == main {
 			client = u.Client
 		}
@@ -952,6 +996,13 @@ type IfaceView struct {
 	UploadLimit   int64  `json:"uploadLimit"`   // bytes per second, 0 = none
 	DownloadLimit int64  `json:"downloadLimit"` // bytes per second, 0 = none
 	Incoming      string `json:"incoming"`      // torrent peers can connect in: "reachable", "outgoing" (only), "" (not known yet)
+
+	// Tunnels are paths of their own, listed after the interfaces.
+	Tunnel      bool   `json:"tunnel,omitempty"`
+	Of          string `json:"of,omitempty"`          // a tunnel's interface
+	TunnelState string `json:"tunnelState,omitempty"` // "up", "connecting", "down" (retrying), "off" (its interface isn't used)
+	TunnelError string `json:"tunnelError,omitempty"`
+	HasTunnel   bool   `json:"hasTunnel,omitempty"` // an interface with a tunnel configured
 }
 
 type StateEvent struct {
@@ -1007,7 +1058,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
 			SocksPort: ent.socks.Port(), Speed: speeds[id],
 			Upload: e.uploadLocked(id), UploadLimit: up, DownloadLimit: down,
-			Incoming: incomingText(ent.incoming),
+			Incoming: incomingText(ent.incoming), HasTunnel: e.tunnels[id] != nil,
 		})
 	}
 	sort.Slice(views, func(i, j int) bool {
@@ -1016,6 +1067,9 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		}
 		return views[i].Name < views[j].Name
 	})
+	tviews := e.tunnelViewsLocked(speeds)
+	sort.Slice(tviews, func(i, j int) bool { return tviews[i].Name < tviews[j].Name })
+	views = append(views, tviews...)
 	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, Speed: total, ETA: e.eta.Seconds(), Active: active}
 }
 

@@ -2,9 +2,11 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
@@ -67,6 +69,8 @@ type settingsPatch struct {
 	ETAWindowSec       *int     `json:"etaWindowSec"`
 	DefaultConnections *int     `json:"defaultConnections"`
 	SeedRatio          *float64 `json:"seedRatio"`
+	VPNHTTP            *string  `json:"vpnHttp"`
+	VPNTorrent         *string  `json:"vpnTorrent"`
 }
 
 type ifacePatch struct {
@@ -228,6 +232,12 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			if p.SeedRatio != nil {
 				s.SeedRatio = *p.SeedRatio
 			}
+			if p.VPNHTTP != nil {
+				s.VPNHTTP = *p.VPNHTTP
+			}
+			if p.VPNTorrent != nil {
+				s.VPNTorrent = *p.VPNTorrent
+			}
 		}), nil
 	case "setInterface":
 		p, err := decode[ifacePatch](raw)
@@ -258,6 +268,30 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 				is.DownloadLimit = *p.DownloadLimit
 			}
 		}), nil
+	case "importTunnel":
+		p, err := decode[struct {
+			Iface string `json:"iface"`
+			Conf  string `json:"conf"`
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		if p.Iface == "" {
+			return nil, errors.New("no connection to carry the tunnel")
+		}
+		if err := e.setTunnel(p.Iface, p.Conf, true); err != nil {
+			return nil, fmt.Errorf("not a usable WireGuard config: %w", err)
+		}
+		e.syncTunnels(time.Now())
+		return nil, nil
+	case "removeTunnel":
+		p, err := decode[struct {
+			Iface string `json:"iface"`
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.removeTunnel(p.Iface)
 	case "refreshInterfaces":
 		e.refreshInterfaces()
 		return nil, nil

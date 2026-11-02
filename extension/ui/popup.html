@@ -62,6 +62,12 @@
     <form id="addBox" hidden>
       <input type="url" id="addUrl" placeholder="File link, landing page, magnet or .torrent link" required>
       <input type="url" id="addPage" placeholder="Landing page (optional)">
+      <select id="addVpn" title="Which paths this download may use">
+        <option value="">VPN: the default for its type</option>
+        <option value="off">VPN: off</option>
+        <option value="alongside">VPN: alongside the connections</option>
+        <option value="vpn">VPN only</option>
+      </select>
       <button class="primary">Add</button>
     </form>
   </header>

@@ -1,0 +1,267 @@
+package engine
+
+import (
+	"encoding/hex"
+	"errors"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"downloadmanagersquared/engine/internal/download"
+	"downloadmanagersquared/engine/internal/netif"
+	"downloadmanagersquared/engine/internal/socks"
+	"downloadmanagersquared/engine/internal/tunnel"
+)
+
+// A tunnel is a path of its own: downloads, links and the resolver know it by
+// its interface's ID with this suffix.
+const tunnelSuffix = "~vpn"
+
+func tunnelPath(ifaceID string) string { return ifaceID + tunnelSuffix }
+
+// ifaceOfPath splits a path ID into its interface and whether it is the tunnel.
+func ifaceOfPath(id string) (string, bool) {
+	if i, ok := strings.CutSuffix(id, tunnelSuffix); ok {
+		return i, true
+	}
+	return id, false
+}
+
+const (
+	tunnelRetry = 30 * time.Second // after a tunnel fails to start or loses its server
+	tunnelGrace = 30 * time.Second // for a new tunnel's first handshake
+)
+
+// tunnelEntry is the tunnel configured for one interface.
+type tunnelEntry struct {
+	cfg      tunnel.Config
+	socks    *socks.Server // landing pages resolved through the tunnel
+	t        *tunnel.Tunnel
+	on       *netif.Binding // what t runs over
+	client   *http.Client
+	up       bool
+	starting bool
+	started  time.Time
+	retryAt  time.Time
+	err      string
+}
+
+// The .conf files hold private keys, so they live in the engine's folder and
+// never in the settings the extension gets.
+func (e *Engine) tunnelFile(ifaceID string) string {
+	return filepath.Join(e.dir, "tunnels", hex.EncodeToString([]byte(ifaceID))+".conf")
+}
+
+func (e *Engine) loadTunnels() {
+	files, _ := filepath.Glob(filepath.Join(e.dir, "tunnels", "*.conf"))
+	for _, f := range files {
+		id, err := hex.DecodeString(strings.TrimSuffix(filepath.Base(f), ".conf"))
+		if err != nil {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		if err := e.setTunnel(string(id), string(b), false); err != nil {
+			log.Printf("tunnel for %s: %v", id, err)
+		}
+	}
+}
+
+// setTunnel makes conf the tunnel of an interface, replacing any it had.
+func (e *Engine) setTunnel(ifaceID, conf string, save bool) error {
+	cfg, err := tunnel.ParseConf(conf)
+	if err != nil {
+		return err
+	}
+	if save {
+		if err := os.MkdirAll(filepath.Dir(e.tunnelFile(ifaceID)), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(e.tunnelFile(ifaceID), []byte(conf), 0o600); err != nil {
+			return err
+		}
+	}
+	e.removeTunnelEntry(ifaceID)
+	srv, err := socks.Listen(e.dialVia(tunnelPath(ifaceID)))
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	e.tunnels[ifaceID] = &tunnelEntry{cfg: cfg, socks: srv}
+	e.mu.Unlock()
+	return nil
+}
+
+// removeTunnel takes an interface's tunnel down and forgets it.
+func (e *Engine) removeTunnel(ifaceID string) error {
+	e.removeTunnelEntry(ifaceID)
+	if err := os.Remove(e.tunnelFile(ifaceID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func (e *Engine) removeTunnelEntry(ifaceID string) {
+	e.mu.Lock()
+	te := e.tunnels[ifaceID]
+	delete(e.tunnels, ifaceID)
+	e.mu.Unlock()
+	if te != nil {
+		te.socks.Close()
+		if te.t != nil {
+			te.t.Close()
+		}
+	}
+}
+
+// syncTunnels runs a tunnel for each interface that has one and is usable,
+// following the interface's address, and restarts a tunnel whose server stopped
+// answering, like an unreachable interface retrying.
+func (e *Engine) syncTunnels(now time.Time) {
+	type start struct {
+		id string
+		te *tunnelEntry
+		b  *netif.Binding
+	}
+	var starts []start
+	var stops []*tunnel.Tunnel
+	e.mu.Lock()
+	for id, te := range e.tunnels {
+		ent := e.ifaces[id]
+		usable := ent != nil && ent.present && e.enabledLocked(ent)
+		if te.t != nil {
+			te.up = te.t.Up()
+			lost := !te.up && now.Sub(te.started) > tunnelGrace
+			if !usable || te.on != ent.binding || lost {
+				if lost {
+					te.err, te.retryAt = "the VPN server doesn't answer", now.Add(tunnelRetry)
+				}
+				stops = append(stops, te.t)
+				te.t, te.on, te.client, te.up = nil, nil, nil, false
+			}
+		}
+		if usable && te.t == nil && !te.starting && !now.Before(te.retryAt) {
+			te.starting = true
+			starts = append(starts, start{id, te, ent.binding})
+		}
+	}
+	e.mu.Unlock()
+	for _, t := range stops {
+		t.Close()
+	}
+	for _, s := range starts {
+		go e.startTunnel(s.id, s.te, s.b)
+	}
+}
+
+func (e *Engine) startTunnel(id string, te *tunnelEntry, b *netif.Binding) {
+	t, err := tunnel.Start(te.cfg, func() (net.PacketConn, error) { return b.ListenPacket(0) }, b.LookupIP)
+	if err == nil {
+		t.Shake()
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	te.starting = false
+	if e.tunnels[id] != te { // removed or replaced meanwhile
+		if t != nil {
+			t.Close()
+		}
+		return
+	}
+	if err != nil {
+		log.Printf("tunnel for %s: %v", id, err)
+		te.err, te.retryAt = err.Error(), time.Now().Add(tunnelRetry)
+		return
+	}
+	te.t, te.on, te.started, te.err = t, b, time.Now(), ""
+	te.client = netif.NewHTTPClient(t.DialContext)
+}
+
+// tunnelUpLocked is the running tunnel of an interface, nil unless it is up
+// and the interface is usable.
+func (e *Engine) tunnelUpLocked(ifaceID string) *tunnelEntry {
+	te := e.tunnels[ifaceID]
+	ent := e.ifaces[ifaceID]
+	if te == nil || te.t == nil || !te.up || ent == nil || !ent.present || !e.enabledLocked(ent) {
+		return nil
+	}
+	return te
+}
+
+// anyTunnelUp is whether a download under VPN only could run now.
+func (e *Engine) anyTunnelUp() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for id := range e.tunnels {
+		if e.tunnelUpLocked(id) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// tunnelPathsLocked are the tunnels that are up, as download paths.
+func (e *Engine) tunnelPathsLocked() []download.Iface {
+	var out []download.Iface
+	for id := range e.tunnels {
+		if te := e.tunnelUpLocked(id); te != nil {
+			out = append(out, download.Iface{ID: tunnelPath(id), Client: te.client, Conns: e.connsLocked(id)})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func (e *Engine) tunnelViewsLocked(speeds map[string]float64) []IfaceView {
+	var out []IfaceView
+	for id, te := range e.tunnels {
+		ent := e.ifaces[id]
+		name := id
+		if ent != nil {
+			name = ent.info.Name
+		} else if s := e.settings.Interfaces[id]; s != nil && s.Name != "" {
+			name = s.Name
+		}
+		state := "connecting"
+		switch {
+		case te.t != nil && te.up:
+			state = "up"
+		case ent == nil || !ent.present || !e.enabledLocked(ent):
+			state = "off"
+		case te.err != "" && te.t == nil:
+			state = "down"
+		}
+		v := IfaceView{
+			ID: tunnelPath(id), Name: "VPN via " + name, Tunnel: true, Of: id,
+			Present: state == "up", Enabled: true, Connections: e.connsLocked(id),
+			SocksPort: te.socks.Port(), Speed: speeds[tunnelPath(id)],
+			TunnelState: state, TunnelError: te.err, IP: te.cfg.Address.String(),
+		}
+		if ent != nil {
+			// A tunnel follows its interface's upload switch and shares its limits.
+			v.Upload = e.uploadLocked(id)
+			v.UploadLimit, v.DownloadLimit = ent.shaper.Limits()
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+func (e *Engine) closeTunnels() {
+	e.mu.Lock()
+	ids := make([]string, 0, len(e.tunnels))
+	for id := range e.tunnels {
+		ids = append(ids, id)
+	}
+	e.mu.Unlock()
+	for _, id := range ids {
+		e.removeTunnelEntry(id)
+	}
+}

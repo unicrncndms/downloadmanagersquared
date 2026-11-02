@@ -45,9 +45,15 @@ func NewBinding(iface Interface, shaper *rate.Shaper) *Binding {
 			return b.dialRaw(ctx, network, net.JoinHostPort(srv.String(), "53"))
 		},
 	}
-	b.client = &http.Client{
+	b.client = NewHTTPClient(b.DialContext)
+	return b
+}
+
+// NewHTTPClient is a client for downloads whose connections come from dial.
+func NewHTTPClient(dial func(ctx context.Context, network, addr string) (net.Conn, error)) *http.Client {
+	return &http.Client{
 		Transport: &http.Transport{
-			DialContext: b.DialContext,
+			DialContext: dial,
 			// Force HTTP/1.1: with HTTP/2 every range request would share one TCP connection.
 			TLSNextProto:          map[string]func(string, *tls.Conn) http.RoundTripper{},
 			DisableCompression:    true,
@@ -57,7 +63,6 @@ func NewBinding(iface Interface, shaper *rate.Shaper) *Binding {
 			ResponseHeaderTimeout: 45 * time.Second,
 		},
 	}
-	return b
 }
 
 // HTTPClient returns a client whose connections all leave through this interface.

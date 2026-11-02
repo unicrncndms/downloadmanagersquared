@@ -19,7 +19,7 @@ $("toggleAdd").onclick = () => {
 };
 $("addBox").addEventListener("submit", (e) => {
   e.preventDefault();
-  act("add", { url: $("addUrl").value, pageUrl: $("addPage").value, userAgent: navigator.userAgent }, "Added").then(() => {
+  act("add", { url: $("addUrl").value, pageUrl: $("addPage").value, vpn: $("addVpn").value, userAgent: navigator.userAgent }, "Added").then(() => {
     $("addUrl").value = "";
     $("addPage").value = "";
     $("addBox").hidden = true;
@@ -29,6 +29,7 @@ $("addBox").addEventListener("submit", (e) => {
 function makeCard(id) {
   const name = el("span", { class: "name" });
   const status = el("span", { class: "badge" });
+  const vpn = el("span", { class: "badge dim" });
   const fill = el("div");
   const sizeText = el("span", { class: "muted num" });
   const speedText = el("span", { class: "num" });
@@ -63,7 +64,7 @@ function makeCard(id) {
       el("label", {}, "Original link"), urlText));
 
   const root = el("div", { class: "card" },
-    el("div", { class: "top" }, name, status),
+    el("div", { class: "top" }, name, vpn, status),
     el("div", { class: "bar" }, fill),
     el("div", { class: "meta" }, sizeText, speedText),
     err, pick, conns,
@@ -78,6 +79,8 @@ function makeCard(id) {
     const torrent = d.kind === "torrent";
     const known = torrent ? d.size > 0 : d.probed;
     name.textContent = d.filename || d.url;
+    vpn.textContent = VPN_TEXT[d.vpn] || "";
+    vpn.hidden = !VPN_TEXT[d.vpn];
     name.title = d.filename || d.url;
     status.textContent = statusText(d);
     status.className = "badge " + (STATUS_CLASS[d.status] || "");

@@ -76,6 +76,11 @@ const INCOMING_TITLE = {
   outgoing: "The router didn't open a port (no UPnP or NAT-PMP): torrents only use peers they connect to",
 };
 
+const VPN_MODES = [["off", "Off"], ["alongside", "Alongside"], ["vpn", "VPN only"]];
+const VPN_TEXT = { alongside: "VPN alongside", vpn: "VPN only" };
+const TUNNEL_TEXT = { up: "VPN up", connecting: "VPN connecting", down: "VPN retrying", off: "VPN off" };
+const TUNNEL_CLASS = { up: "ok", connecting: "warn", down: "bad", off: "dim" };
+
 function percent(d) {
   return d.size > 0 ? Math.min(100, (d.done / d.size) * 100) : 0;
 }

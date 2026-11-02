@@ -54,11 +54,12 @@
       <p class="lead muted">Downloads are split across every enabled connection. Metered and VPN connections start disabled, and metered ones don't upload to torrent peers. A limit covers everything on its connection, downloads and torrents together; leave it blank for none.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Connection</th><th>IP</th><th></th><th>Use</th><th>Upload</th><th>Parallel connections</th><th>Limit down / up (MB/s)</th><th>Main</th><th>Speed</th></tr></thead>
+          <thead><tr><th>Connection</th><th>IP</th><th></th><th>Use</th><th>Upload</th><th>Parallel connections</th><th>Limit down / up (MB/s)</th><th>VPN</th><th>Main</th><th>Speed</th></tr></thead>
           <tbody id="ifaces"></tbody>
         </table>
       </div>
       <div class="row-actions"><button id="refreshIfaces">Look for connections again</button></div>
+      <input type="file" id="confFile" accept=".conf,text/plain" hidden>
     </section>
 
     <section id="general" class="panel">
@@ -80,6 +81,12 @@
         <label for="sRatio">Seed torrents until ratio</label>
         <input type="number" id="sRatio" min="0" max="100" step="0.1">
         <span class="hint muted">After a torrent is complete it uploads until it has sent this many times its size, then it's finished. 0 = don't seed.</span>
+
+        <label for="sVpnHttp">VPN for downloads</label>
+        <select id="sVpnHttp"></select>
+        <label for="sVpnTorrent">VPN for torrents</label>
+        <select id="sVpnTorrent"></select>
+        <span class="hint muted">Each connection with a VPN tunnel (import its WireGuard .conf above) carries its own tunnel, so speeds still add up. Alongside uses each connection both directly and through its tunnel; VPN only uses tunnels alone and pauses while none is up. You can choose differently when adding a download. Under VPN only, a download Firefox hands over was already requested once from your real address (headers only); right-click a link and choose "Download with DMS²" to avoid even that.</span>
 
         <label for="sEta">Time-left averaging window (seconds)</label>
         <input type="number" id="sEta" min="5" max="3600">

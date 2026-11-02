@@ -46,6 +46,15 @@ const (
 	StatusFailed    Status = "failed"
 )
 
+// VPNMode is which paths a download may use, fixed when it is added.
+type VPNMode string
+
+const (
+	VPNOff       VPNMode = ""          // bare interfaces only
+	VPNAlongside VPNMode = "alongside" // bare interfaces and their tunnels
+	VPNOnly      VPNMode = "vpn"       // tunnels only; pause while none is up
+)
+
 type Range struct {
 	Start int64 `json:"start"`
 	End   int64 `json:"end"` // exclusive
@@ -66,6 +75,8 @@ type State struct {
 	RangeOK    bool             `json:"rangeOk"`
 	Probed     bool             `json:"probed"`
 	Stuck      bool             `json:"stuck,omitempty"` // paused because no connection could reach the file
+	VPN        VPNMode          `json:"vpn,omitempty"`
+	WaitVPN    bool             `json:"waitVpn,omitempty"` // paused because no tunnel is up under VPN only
 	Allocated  bool             `json:"allocated"`
 	SHA256     string           `json:"sha256,omitempty"`
 	MD5        string           `json:"md5,omitempty"`
@@ -84,9 +95,11 @@ type Iface struct {
 	Conns  int
 }
 
+// Env is the engine as a download sees it. Usable and MainID answer for a VPN
+// mode: tunnels count as interfaces of their own.
 type Env interface {
-	Usable() []Iface
-	MainID() string
+	Usable(VPNMode) []Iface
+	MainID(VPNMode) string
 	ETAWindow() time.Duration
 	RequestResolve(id, ifaceID, pageURL string)
 	Changed(d *Download)
@@ -115,6 +128,7 @@ type worker struct {
 type pauseError struct {
 	msg   string
 	stuck bool // no connection can reach the file
+	vpn   bool // no tunnel is up, under VPN only
 }
 
 func (e *pauseError) Error() string { return e.msg }
@@ -209,7 +223,7 @@ func (d *Download) Start() {
 	for _, l := range d.st.Links {
 		l.resume(d.st.Stuck)
 	}
-	d.st.Stuck = false
+	d.st.Stuck, d.st.WaitVPN = false, false
 	go d.run(ctx)
 }
 
@@ -320,7 +334,7 @@ func (d *Download) run(ctx context.Context) {
 	case d.stopAs != "":
 		d.st.Status = d.stopAs
 	case errors.As(err, &pe):
-		d.st.Status, d.st.Error, d.st.Stuck = StatusPaused, pe.msg, pe.stuck
+		d.st.Status, d.st.Error, d.st.Stuck, d.st.WaitVPN = StatusPaused, pe.msg, pe.stuck, pe.vpn
 	case err != nil:
 		d.st.Status, d.st.Error, finished = StatusFailed, err.Error(), true
 	default:
@@ -357,8 +371,12 @@ func (d *Download) loop(ctx context.Context) error {
 }
 
 func (d *Download) tick(ctx context.Context) (bool, error) {
-	usable := d.env.Usable()
-	mainID := d.env.MainID()
+	usable := d.env.Usable(d.st.VPN) // fixed when added: no lock needed
+	mainID := d.env.MainID(d.st.VPN)
+	if len(usable) == 0 && d.st.VPN == VPNOnly {
+		// Never fall back to a bare interface.
+		return false, &pauseError{msg: "Paused: no VPN tunnel is up. It resumes by itself once one is.", vpn: true}
+	}
 	now := time.Now()
 	changed := false
 
@@ -492,10 +510,10 @@ func (d *Download) ifRun(id string) *ifaceRun {
 func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
 	res, err := probeLink(ctx, ifc.Client, l, d.st.UserAgent)
 	usable := map[string]Iface{}
-	for _, u := range d.env.Usable() {
+	for _, u := range d.env.Usable(d.st.VPN) {
 		usable[u.ID] = u
 	}
-	mainID := d.env.MainID()
+	mainID := d.env.MainID(d.st.VPN)
 	d.mu.Lock()
 	delete(d.probing, ifc.ID)
 	cur := d.st.Links[ifc.ID]
@@ -1128,6 +1146,8 @@ type Summary struct {
 	Added    time.Time              `json:"added"`
 	Finished time.Time              `json:"finished,omitzero"`
 
+	VPN VPNMode `json:"vpn,omitempty"`
+
 	// Torrents only: the files to choose from (while choosing), then the upload once complete.
 	Files    []FileSummary `json:"files,omitempty"`
 	Uploaded int64         `json:"uploaded,omitempty"`
@@ -1142,6 +1162,13 @@ type FileSummary struct {
 	Selected bool   `json:"selected"`
 }
 
+// WaitingForVPN is whether the download paused only because no tunnel was up.
+func (d *Download) WaitingForVPN() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.st.Status == StatusPaused && d.st.WaitVPN
+}
+
 func (d *Download) Summary() Summary {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -1150,7 +1177,7 @@ func (d *Download) Summary() Summary {
 		Size: d.st.Size, Done: d.doneLocked(), Status: d.st.Status, Error: d.st.Error,
 		Speed: d.speed, ETA: -1, RangeOK: d.st.RangeOK, Probed: d.st.Probed,
 		SHA256: d.st.SHA256, MD5: d.st.MD5, Links: map[string]LinkSummary{},
-		Added: d.st.Added, Finished: d.st.Finished,
+		Added: d.st.Added, Finished: d.st.Finished, VPN: d.st.VPN,
 	}
 	if d.running {
 		s.ETA = d.eta.Seconds()

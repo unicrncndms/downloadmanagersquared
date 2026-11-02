@@ -50,12 +50,13 @@ func (s slowBody) Read(p []byte) (int, error) {
 type testEnv struct {
 	ifaces   []Iface
 	main     string
+	asked    atomic.Value // the VPN mode Usable was last asked for
 	resolve  func(id, iface, page string)
 	finished chan struct{}
 }
 
-func (e *testEnv) Usable() []Iface          { return e.ifaces }
-func (e *testEnv) MainID() string           { return e.main }
+func (e *testEnv) Usable(m VPNMode) []Iface { e.asked.Store(m); return e.ifaces }
+func (e *testEnv) MainID(VPNMode) string    { return e.main }
 func (e *testEnv) ETAWindow() time.Duration { return 10 * time.Second }
 func (e *testEnv) Changed(*Download)        {}
 func (e *testEnv) Finished(*Download)       { close(e.finished) }
@@ -631,4 +632,24 @@ func TestOneHTTPErrorDoesNotStopTheInterface(t *testing.T) {
 		t.Errorf("one blip counted as %d tries", n)
 	}
 	checkFile(t, filepath.Join(dir, "big.bin"), data)
+}
+
+func TestVPNOnlyDownloadWithNoTunnelPausesAndWaits(t *testing.T) {
+	env := &testEnv{} // no tunnel is up: nothing usable under VPN only
+	d := New(env, State{ID: "v1", URL: "https://example.com/big.iso", Dir: t.TempDir(), Size: -1,
+		Status: StatusQueued, VPN: VPNOnly, Links: map[string]*Link{}})
+	d.Start()
+	deadline := time.Now().Add(10 * time.Second)
+	for d.Status() != StatusPaused {
+		if time.Now().After(deadline) {
+			t.Fatalf("still %q with no tunnel up", d.Status())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if m, _ := env.asked.Load().(VPNMode); m != VPNOnly {
+		t.Fatalf("asked for paths under %q, want VPN only", m)
+	}
+	if !d.WaitingForVPN() || !strings.Contains(d.Summary().Error, "VPN") {
+		t.Fatalf("paused with %q, waiting for VPN %v", d.Summary().Error, d.WaitingForVPN())
+	}
 }

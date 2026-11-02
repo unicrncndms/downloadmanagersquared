@@ -10,9 +10,28 @@ let recipesSig = "";
 
 $("refreshIfaces").onclick = () => act("refreshInterfaces", {}, "Connections refreshed");
 
+// Importing a .conf: the file picker is shared, this is the connection it's for.
+let confFor = "";
+$("confFile").addEventListener("change", async () => {
+  const f = $("confFile").files[0];
+  $("confFile").value = "";
+  if (f) act("importTunnel", { iface: confFor, conf: await f.text() }, "VPN tunnel imported");
+});
+
+function vpnCell(i, tun) {
+  if (!tun) {
+    return el("button", { class: "small", onclick: () => { confFor = i.id; $("confFile").click(); } }, "Import .conf");
+  }
+  return el("span", { style: "white-space:nowrap" },
+    el("span", { class: "badge " + (TUNNEL_CLASS[tun.tunnelState] || ""), title: tun.tunnelError || tun.ip }, TUNNEL_TEXT[tun.tunnelState] || tun.tunnelState), " ",
+    el("button", { class: "small", onclick: () => act("removeTunnel", { iface: i.id }, "VPN tunnel removed") }, "Remove"));
+}
+
 function renderIfaces(state, settings) {
-  const ifaces = state.interfaces || [];
-  const sig = JSON.stringify([ifaces.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming]), settings.mainInterface]);
+  const all = state.interfaces || [];
+  const ifaces = all.filter((i) => !i.tunnel);
+  const tunnels = new Map(all.filter((i) => i.tunnel).map((t) => [t.of, t]));
+  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError]), settings.mainInterface]);
   const body = $("ifaces");
   if (sig !== ifaceSig && !body.contains(document.activeElement)) {
     ifaceSig = sig;
@@ -33,7 +52,7 @@ function renderIfaces(state, settings) {
       main.addEventListener("change", () => act("setSettings", { mainInterface: i.id }, `${i.name} is now the main connection`));
       body.append(el("tr", { style: i.present ? "" : "opacity:.5" },
         el("td", {}, el("div", {}, i.name), el("div", { class: "muted", style: "font-size:12px" }, i.description)),
-        el("td", { class: "mono" }, i.present ? i.ip : "not connected"),
+        el("td", { class: "mono", style: "white-space:nowrap" }, i.present ? i.ip : "not connected"),
         el("td", {},
           i.isDefault ? el("span", { class: "badge dim" }, "Windows default") : null, " ",
           i.metered ? el("span", { class: "badge warn" }, "Metered") : null, " ",
@@ -45,12 +64,13 @@ function renderIfaces(state, settings) {
         el("td", {}, upload),
         el("td", {}, conns),
         el("td", { style: "white-space:nowrap" }, limit(i.downloadLimit, "downloadLimit", "Download limit"), " / ", limit(i.uploadLimit, "uploadLimit", "Upload limit")),
+        el("td", {}, vpnCell(i, tunnels.get(i.id))),
         el("td", {}, main),
         el("td", { class: "num", "data-speed": i.id })));
     }
     const auto = el("input", { type: "radio", name: "main", checked: !settings.mainInterface });
     auto.addEventListener("change", () => act("setSettings", { mainInterface: "" }, "Main connection follows Windows"));
-    body.append(el("tr", {}, el("td", { colspan: 7, class: "muted" }, "Use whatever Windows uses by default"), el("td", {}, auto), el("td")));
+    body.append(el("tr", {}, el("td", { colspan: 8, class: "muted" }, "Use whatever Windows uses by default"), el("td", {}, auto), el("td")));
   }
   for (const i of ifaces) {
     const c = body.querySelector(`[data-speed="${i.id}"]`);
@@ -70,6 +90,10 @@ function fillSettings(s, autostart) {
   $("sConns").value = s.defaultConnections;
   $("sEta").value = s.etaWindowSec;
   $("sRatio").value = s.seedRatio;
+  for (const [id, value] of [["sVpnHttp", s.vpnHttp], ["sVpnTorrent", s.vpnTorrent]]) {
+    $(id).replaceChildren(...VPN_MODES.map(([v, text]) => el("option", { value: v }, text)));
+    $(id).value = value;
+  }
   $("sAuto").checked = autostart;
   browser.storage.local.get("landingBack").then((v) => {
     $("sBack").value = Number.isInteger(v.landingBack) ? v.landingBack : 1;
@@ -84,6 +108,8 @@ $("saveSettings").onclick = async () => {
     defaultConnections: Number($("sConns").value),
     etaWindowSec: Number($("sEta").value),
     seedRatio: Number($("sRatio").value),
+    vpnHttp: $("sVpnHttp").value,
+    vpnTorrent: $("sVpnTorrent").value,
   });
   const back = Math.min(5, Math.max(0, Math.round(Number($("sBack").value) || 0)));
   await browser.storage.local.set({ landingBack: back });
