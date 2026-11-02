@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/netif"
+	"downloadmanagersquared/engine/internal/portmap"
 	"downloadmanagersquared/engine/internal/torrent"
 )
 
@@ -366,4 +369,44 @@ func ifaceView(t *testing.T, e *Engine, id string) IfaceView {
 	}
 	t.Fatalf("interface %s not shown", id)
 	return IfaceView{}
+}
+
+func TestInterfacesShowWhetherPeersCanConnectIn(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	if p := e.settings.TorrentPort; p < 1024 || p > 65535 {
+		t.Fatalf("torrent port %d", p)
+	}
+	var asked []string
+	e.mapPort = func(_ context.Context, gw portmap.Gateway, port int, _ time.Duration) error {
+		asked = append(asked, gw.IP.String())
+		if gw.IP.Equal(net.IPv4(192, 168, 1, 1)) {
+			return nil
+		}
+		return errors.New("no UPnP here")
+	}
+	e.mu.Lock()
+	e.refreshInterfacesLocked([]netif.Interface{
+		{ID: "eth", Name: "Ethernet", IPv4: net.IPv4(192, 168, 1, 20), Gateway: net.IPv4(192, 168, 1, 1)},
+		{ID: "wifi", Name: "Wi-Fi", IPv4: net.IPv4(10, 0, 0, 5), Gateway: net.IPv4(10, 0, 0, 1)},
+		{ID: "wan", Name: "Modem", IPv4: net.IPv4(203, 0, 113, 7), Gateway: net.IPv4(203, 0, 113, 1)},
+	})
+	e.mu.Unlock()
+	e.refreshPortMaps(time.Now())
+	for id, want := range map[string]string{"eth": "reachable", "wifi": "outgoing", "wan": "reachable"} {
+		if v := ifaceView(t, e, id); v.Incoming != want {
+			t.Errorf("%s incoming = %q, want %q", id, v.Incoming, want)
+		}
+	}
+	if slices.Contains(asked, "203.0.113.1") {
+		t.Error("asked the router of an interface with a public address for a port")
+	}
+	n := len(asked)
+	e.refreshPortMaps(time.Now().Add(time.Minute))
+	if len(asked) != n {
+		t.Errorf("mapped again after a minute: %v", asked[n:])
+	}
 }

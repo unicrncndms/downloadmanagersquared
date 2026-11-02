@@ -69,6 +69,13 @@ const LINK_TEXT = {
 };
 const LINK_CLASS = { failed: "bad", mismatch: "bad", resolving: "warn", "needs-page": "warn", retrying: "warn", ready: "ok" };
 
+// Whether torrent peers can connect in through an interface.
+const INCOMING_TEXT = { reachable: "reachable", outgoing: "outgoing only" };
+const INCOMING_TITLE = {
+  reachable: "Torrent peers can connect in through this connection",
+  outgoing: "The router didn't open a port (no UPnP or NAT-PMP): torrents only use peers they connect to",
+};
+
 function percent(d) {
   return d.size > 0 ? Math.min(100, (d.done / d.size) * 100) : 0;
 }

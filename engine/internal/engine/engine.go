@@ -25,6 +25,7 @@ import (
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
 	"downloadmanagersquared/engine/internal/netif"
+	"downloadmanagersquared/engine/internal/portmap"
 	"downloadmanagersquared/engine/internal/rate"
 	"downloadmanagersquared/engine/internal/socks"
 	"downloadmanagersquared/engine/internal/torrent"
@@ -38,12 +39,25 @@ const Version = "0.1.0"
 const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
 
 type ifaceEntry struct {
-	info    netif.Interface
-	binding *netif.Binding
-	shaper  *rate.Shaper // the interface's limits, across every socket its bindings hand out
-	socks   *socks.Server
-	present bool
+	info     netif.Interface
+	binding  *netif.Binding
+	shaper   *rate.Shaper // the interface's limits, across every socket its bindings hand out
+	socks    *socks.Server
+	present  bool
+	incoming incoming
 }
+
+// incoming is whether torrent peers can connect in through an interface.
+type incoming struct {
+	checked   time.Time // last port mapping attempt; zero: not tried on this address yet
+	reachable bool
+}
+
+const (
+	portLease      = time.Hour
+	portRenewAfter = 30 * time.Minute
+	portRetryAfter = 5 * time.Minute
+)
 
 type client struct {
 	extension bool
@@ -90,6 +104,8 @@ type Engine struct {
 	eta      rate.ETA
 	snapshot StateEvent
 
+	mapPort func(ctx context.Context, gw portmap.Gateway, port int, lifetime time.Duration) error
+
 	quit     chan struct{}
 	quitOnce sync.Once
 }
@@ -128,8 +144,10 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		dirty:     map[string]bool{},
 		clients:   map[*ipc.Conn]*client{},
 		resolves:  map[string]resolveReq{},
+		mapPort:   portmap.Map,
 		quit:      make(chan struct{}),
 	}
+	e.saveSettingsLocked() // keeps the torrent port picked on the first start
 	s, err := torrent.NewSession(torrent.Config{
 		Changed:  func(t *torrent.Torrent) { e.markDirty(t.ID()) },
 		Finished: func(t *torrent.Torrent) { e.notifyFinished(t.Summary()) },
@@ -138,6 +156,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 			defer e.mu.Unlock()
 			return e.settings.SeedRatio
 		},
+		Port: e.settings.TorrentPort,
 	})
 	if err != nil {
 		return nil, err
@@ -207,6 +226,7 @@ func readStates[S interface{ download.State | torrent.State }](dir string) []S {
 // Run serves the API and drives the queue until Shutdown.
 func (e *Engine) Run() {
 	go ipc.Serve(e.ln, e)
+	go e.mapPorts()
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	last := time.Now()
@@ -402,6 +422,7 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 				ent.binding.Close()
 			}
 			ent.binding = netif.NewBinding(i, ent.shaper)
+			ent.incoming = incoming{} // a new address needs its own mapping
 		}
 		ent.info, ent.present = i, true
 		s := e.settings.Interfaces[i.ID]
@@ -432,6 +453,80 @@ func (e *Engine) applyLimitsLocked() {
 		}
 		ent.shaper.SetLimits(up, down)
 	}
+}
+
+// mapPorts keeps the torrent port forwarded on every interface's router.
+func (e *Engine) mapPorts() {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		e.refreshPortMaps(time.Now())
+		select {
+		case <-e.quit:
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// refreshPortMaps asks each usable interface's router for the torrent port
+// when its last answer is due for renewal or a retry.
+func (e *Engine) refreshPortMaps(now time.Time) {
+	type job struct {
+		id string
+		gw portmap.Gateway
+	}
+	var jobs []job
+	e.mu.Lock()
+	port := e.settings.TorrentPort
+	for id, ent := range e.ifaces {
+		in := &ent.incoming
+		if !ent.present || !e.enabledLocked(ent) {
+			continue
+		}
+		if publicIPv4(ent.info.IPv4) { // no router in between to ask
+			in.checked, in.reachable = now, true
+			continue
+		}
+		wait := portRetryAfter
+		if in.reachable {
+			wait = portRenewAfter
+		}
+		if !in.checked.IsZero() && now.Sub(in.checked) < wait {
+			continue
+		}
+		in.checked = now
+		if ent.info.Gateway == nil {
+			in.reachable = false
+			continue
+		}
+		b := ent.binding
+		jobs = append(jobs, job{id, portmap.Gateway{
+			IP: ent.info.Gateway, Local: ent.info.IPv4, HTTP: b.HTTPClient(),
+			Listen: func() (net.PacketConn, error) { return b.ListenPacket(0) },
+		}})
+	}
+	e.mu.Unlock()
+	for _, j := range jobs {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		err := e.mapPort(ctx, j.gw, port, portLease)
+		cancel()
+		if err != nil {
+			log.Printf("torrent port on %s: %v", j.id, err)
+		}
+		e.mu.Lock()
+		if ent := e.ifaces[j.id]; ent != nil && !ent.incoming.checked.IsZero() {
+			ent.incoming.reachable = err == nil
+		}
+		e.mu.Unlock()
+	}
+}
+
+// publicIPv4 is whether ip is reachable from the internet as it is: not private,
+// shared (carrier NAT), loopback or link-local.
+func publicIPv4(ip net.IP) bool {
+	cgnat := net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+	return ip.To4() != nil && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !cgnat.Contains(ip)
 }
 
 func (e *Engine) dialVia(id string) socks.DialFunc {
@@ -473,12 +568,19 @@ func (e *Engine) torrentIfaces() []torrent.Iface {
 			ID:     id,
 			Upload: upload,
 			Dial:   e.dialVia(id),
-			ListenPacket: func() (net.PacketConn, error) {
+			ListenPacket: func(port int) (net.PacketConn, error) {
 				b, err := e.bindingOf(id)
 				if err != nil {
 					return nil, err
 				}
-				return b.ListenPacket()
+				return b.ListenPacket(port)
+			},
+			Listen: func(port int) (net.Listener, error) {
+				b, err := e.bindingOf(id)
+				if err != nil {
+					return nil, err
+				}
+				return b.Listen(port)
 			},
 			LookupIP: func(ctx context.Context, host string) ([]net.IP, error) {
 				b, err := e.bindingOf(id)
@@ -846,9 +948,10 @@ type IfaceView struct {
 	SocksPort   int     `json:"socksPort"`
 	Speed       float64 `json:"speed"`
 
-	Upload        bool  `json:"upload"`
-	UploadLimit   int64 `json:"uploadLimit"`   // bytes per second, 0 = none
-	DownloadLimit int64 `json:"downloadLimit"` // bytes per second, 0 = none
+	Upload        bool   `json:"upload"`
+	UploadLimit   int64  `json:"uploadLimit"`   // bytes per second, 0 = none
+	DownloadLimit int64  `json:"downloadLimit"` // bytes per second, 0 = none
+	Incoming      string `json:"incoming"`      // torrent peers can connect in: "reachable", "outgoing" (only), "" (not known yet)
 }
 
 type StateEvent struct {
@@ -904,6 +1007,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
 			SocksPort: ent.socks.Port(), Speed: speeds[id],
 			Upload: e.uploadLocked(id), UploadLimit: up, DownloadLimit: down,
+			Incoming: incomingText(ent.incoming),
 		})
 	}
 	sort.Slice(views, func(i, j int) bool {
@@ -913,6 +1017,16 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		return views[i].Name < views[j].Name
 	})
 	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, Speed: total, ETA: e.eta.Seconds(), Active: active}
+}
+
+func incomingText(in incoming) string {
+	switch {
+	case in.checked.IsZero():
+		return ""
+	case in.reachable:
+		return "reachable"
+	}
+	return "outgoing"
 }
 
 func (e *Engine) Snapshot() StateEvent {

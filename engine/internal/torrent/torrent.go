@@ -227,6 +227,7 @@ func (t *Torrent) run(ctx context.Context) {
 		return
 	}
 	t.changed()
+	go t.announceDHT(ctx, at)
 	select {
 	case <-at.GotInfo():
 	case <-ctx.Done():
@@ -302,6 +303,39 @@ func (t *Torrent) run(ctx context.Context) {
 		t.dropLocked()
 		t.st.Status = download.StatusCompleted
 	})
+}
+
+const (
+	dhtEvery   = 10 * time.Minute
+	dhtTimeout = 2 * time.Minute
+)
+
+// announceDHT looks the torrent up on every interface's DHT, and announces it
+// there, until ctx ends. Private torrents stay off the DHT (a magnet link's
+// torrent counts as public until its info says otherwise).
+func (t *Torrent) announceDHT(ctx context.Context, at *atorrent.Torrent) {
+	for {
+		for _, ds := range t.s.dhtServers() {
+			if private(at) {
+				break
+			}
+			done, stop, err := at.AnnounceToDht(ds)
+			if err != nil {
+				continue
+			}
+			select {
+			case <-done:
+			case <-time.After(dhtTimeout):
+			case <-ctx.Done():
+			}
+			stop()
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(dhtEvery):
+		}
+	}
 }
 
 // update changes the state under the lock, unless the torrent left the swarm

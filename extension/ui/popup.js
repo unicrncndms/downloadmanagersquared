@@ -217,7 +217,10 @@ connectUI((m) => {
   if ($("list").querySelector(".offline")) $("list").replaceChildren();
   const s = m.state;
   $("total").textContent = s.active ? `${fmtSpeed(s.speed)} · ${fmtETA(s.eta)} left` : "idle";
+  // With torrents in the list, say where peers can connect in.
+  const torrents = (s.downloads || []).some((d) => d.kind === "torrent");
   $("chips").replaceChildren(...s.interfaces.filter((i) => i.present && i.enabled)
-    .map((i) => el("span", {}, `${i.name}${i.isMain ? " (main)" : ""}: ${fmtSpeed(i.speed)}`)));
+    .map((i) => el("span", { title: torrents ? INCOMING_TITLE[i.incoming] || "" : "" },
+      `${i.name}${i.isMain ? " (main)" : ""}: ${fmtSpeed(i.speed)}${torrents && INCOMING_TEXT[i.incoming] ? " · " + INCOMING_TEXT[i.incoming] : ""}`)));
   renderDownloads(s);
 });

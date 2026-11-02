@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	mrand "math/rand/v2"
 	"os"
 	"path/filepath"
 
@@ -25,7 +26,8 @@ type Settings struct {
 	MaxParallel        int                       `json:"maxParallel"`
 	ETAWindowSec       int                       `json:"etaWindowSec"`
 	DefaultConnections int                       `json:"defaultConnections"`
-	SeedRatio          float64                   `json:"seedRatio"` // seed a torrent until uploaded/size reaches this; 0 = don't seed
+	SeedRatio          float64                   `json:"seedRatio"`   // seed a torrent until uploaded/size reaches this; 0 = don't seed
+	TorrentPort        int                       `json:"torrentPort"` // where peers connect in, on every interface; picked once
 }
 
 func defaultSettings() Settings {
@@ -61,6 +63,9 @@ func (s *Settings) normalize() {
 	}
 	s.DefaultConnections = min(s.DefaultConnections, 32)
 	s.SeedRatio = min(max(s.SeedRatio, 0), 100)
+	if s.TorrentPort < 1024 || s.TorrentPort > 65535 {
+		s.TorrentPort = 20000 + mrand.IntN(40000)
+	}
 	for _, is := range s.Interfaces {
 		if is.Connections != 0 { // 0 = use DefaultConnections
 			is.Connections = min(max(is.Connections, 1), 32)

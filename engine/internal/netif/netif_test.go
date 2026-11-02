@@ -78,7 +78,7 @@ func TestBindingHoldsHTTPToItsShapersLimit(t *testing.T) {
 func TestBindingHoldsPacketsToItsShapersLimit(t *testing.T) {
 	s := rate.NewShaper()
 	s.SetLimits(100<<10, 0)
-	pc, err := NewBinding(loopback(t), s).ListenPacket()
+	pc, err := NewBinding(loopback(t), s).ListenPacket(0)
 	if err != nil {
 		t.Fatal(err)
 	}

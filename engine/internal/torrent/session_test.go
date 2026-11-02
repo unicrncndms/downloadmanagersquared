@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	atorrent "github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
+	pp "github.com/anacrolix/torrent/peer_protocol"
 	"github.com/anacrolix/torrent/storage"
 
 	"downloadmanagersquared/engine/internal/download"
@@ -30,6 +32,7 @@ type swarm struct {
 	data    []byte
 	addrs   map[string]string // public (TEST-NET) address -> real loopback address
 	clients []*atorrent.Client
+	pexSeen atomic.Bool // a peer offered PEX in its extended handshake
 }
 
 func newSwarm(t *testing.T, seeders int, size int) *swarm {
@@ -40,7 +43,21 @@ func newSwarm(t *testing.T, seeders int, size int) *swarm {
 	if err := os.WriteFile(filepath.Join(src, "file.bin"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s := newSwarmOf(t, seeders, src, "file.bin")
+	s := newSwarmOf(t, seeders, src, "file.bin", false)
+	s.data = data
+	return s
+}
+
+// newPrivateSwarm is newSwarm for a torrent flagged private.
+func newPrivateSwarm(t *testing.T, seeders int, size int) *swarm {
+	t.Helper()
+	src := t.TempDir()
+	data := make([]byte, size)
+	rand.Read(data)
+	if err := os.WriteFile(filepath.Join(src, "file.bin"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := newSwarmOf(t, seeders, src, "file.bin", true)
 	s.data = data
 	return s
 }
@@ -58,15 +75,18 @@ func newMultiSwarm(t *testing.T, seeders int, sizes ...int) *swarm {
 			t.Fatal(err)
 		}
 	}
-	return newSwarmOf(t, seeders, src, "pack")
+	return newSwarmOf(t, seeders, src, "pack", false)
 }
 
 // newSwarmOf seeds src/name, a file or a folder.
-func newSwarmOf(t *testing.T, seeders int, src, name string) *swarm {
+func newSwarmOf(t *testing.T, seeders int, src, name string, private bool) *swarm {
 	t.Helper()
 	info := metainfo.Info{PieceLength: 256 << 10}
 	if err := info.BuildFromFilePath(filepath.Join(src, name)); err != nil {
 		t.Fatal(err)
+	}
+	if private {
+		info.Private = &private
 	}
 	infoBytes, err := bencode.Marshal(info)
 	if err != nil {
@@ -84,6 +104,11 @@ func newSwarmOf(t *testing.T, seeders int, src, name string) *swarm {
 		cfg.NoDefaultPortForwarding = true
 		cfg.DisableWebtorrent = true
 		cfg.DataDir = src
+		cfg.Callbacks.ReadExtendedHandshake = func(_ *atorrent.PeerConn, m *pp.ExtendedHandshakeMessage) {
+			if _, ok := m.M[pp.ExtensionNamePex]; ok {
+				s.pexSeen.Store(true)
+			}
+		}
 		stor := storage.NewFileOpts(storage.NewFileClientOpts{
 			ClientBaseDir: src, PieceCompletion: storage.NewMapPieceCompletion(),
 		})
@@ -129,7 +154,9 @@ func (s *swarm) iface(id string, peers *atomic.Int32) Iface {
 			}
 			return c, err
 		},
-		ListenPacket: func() (net.PacketConn, error) { return net.ListenPacket("udp4", "127.0.0.1:0") },
+		ListenPacket: func(port int) (net.PacketConn, error) {
+			return net.ListenPacket("udp4", fmt.Sprintf("127.0.0.1:%d", port))
+		},
 		LookupIP: func(context.Context, string) ([]net.IP, error) {
 			return nil, errors.New("no DNS in tests")
 		},
@@ -493,3 +520,73 @@ func TestInterfaceWithUploadOffNeverUploads(t *testing.T) {
 		return leech.BytesCompleted() == int64(len(sw.data))
 	})
 }
+
+func TestPeerConnectsInThroughTheInterfacesListener(t *testing.T) {
+	sw := newSwarm(t, 0, 1<<20)
+	leech := sw.leecher(t, "192.0.2.50:6881")
+	s, err := NewSession(Config{Ratio: func() float64 { return 1 }, Port: freePort(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var dialed atomic.Int32
+	ifc := sw.iface("eth", &dialed)
+	ifc.Dial = func(context.Context, string, string) (net.Conn, error) { return nil, errors.New("outgoing blocked") }
+	var accepted atomic.Int32
+	ifc.Listen = func(port int) (net.Listener, error) {
+		ln, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			return nil, err
+		}
+		return countingListener{ln, &accepted}, nil
+	}
+	s.SetIfaces([]Iface{ifc})
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, sw.info.Name), sw.data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Info: sw.infoBytes(t), Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	waitFor(t, "the torrent to seed", 10*time.Second, func() bool { return tor.Status() == StatusSeeding })
+	leech.AddPeers([]atorrent.PeerInfo{{Addr: ipPortAddr{net.IPv4(127, 0, 0, 1), s.Port()}}})
+	waitFor(t, "the incoming leecher to complete", 30*time.Second, func() bool {
+		return leech.BytesCompleted() == int64(len(sw.data))
+	})
+	if accepted.Load() == 0 {
+		t.Fatal("no peer came in through the interface's listener")
+	}
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+type countingListener struct {
+	net.Listener
+	n *atomic.Int32
+}
+
+func (l countingListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err == nil {
+		l.n.Add(1)
+	}
+	return c, err
+}
+
+type ipPortAddr struct {
+	ip   net.IP
+	port int
+}
+
+func (a ipPortAddr) String() string { return net.JoinHostPort(a.ip.String(), strconv.Itoa(a.port)) }

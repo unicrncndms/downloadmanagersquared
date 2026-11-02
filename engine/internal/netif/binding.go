@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -95,14 +96,38 @@ func (b *Binding) DialContext(ctx context.Context, network, address string) (net
 	return nil, lastErr
 }
 
-// ListenPacket opens an IPv4 UDP socket on a free port that sends through this interface.
-func (b *Binding) ListenPacket() (net.PacketConn, error) {
+// ListenPacket opens an IPv4 UDP socket on port (0: any free one) that sends
+// through this interface.
+func (b *Binding) ListenPacket(port int) (net.PacketConn, error) {
 	lc := net.ListenConfig{Control: b.control}
-	pc, err := lc.ListenPacket(context.Background(), "udp4", net.JoinHostPort(b.iface.IPv4.String(), "0"))
+	pc, err := lc.ListenPacket(context.Background(), "udp4", net.JoinHostPort(b.iface.IPv4.String(), strconv.Itoa(port)))
 	if err != nil {
 		return nil, err
 	}
 	return b.shaper.PacketConn(pc), nil
+}
+
+// Listen takes TCP connections on this interface's address and port.
+func (b *Binding) Listen(port int) (net.Listener, error) {
+	lc := net.ListenConfig{Control: b.control}
+	ln, err := lc.Listen(context.Background(), "tcp4", net.JoinHostPort(b.iface.IPv4.String(), strconv.Itoa(port)))
+	if err != nil {
+		return nil, err
+	}
+	return shapedListener{ln, b.shaper}, nil
+}
+
+type shapedListener struct {
+	net.Listener
+	s *rate.Shaper
+}
+
+func (l shapedListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return l.s.Conn(c), nil
 }
 
 // LookupIP resolves host to IPv4 addresses through this interface's DNS.

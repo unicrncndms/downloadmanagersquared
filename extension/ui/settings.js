@@ -12,7 +12,7 @@ $("refreshIfaces").onclick = () => act("refreshInterfaces", {}, "Connections ref
 
 function renderIfaces(state, settings) {
   const ifaces = state.interfaces || [];
-  const sig = JSON.stringify([ifaces.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit]), settings.mainInterface]);
+  const sig = JSON.stringify([ifaces.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming]), settings.mainInterface]);
   const body = $("ifaces");
   if (sig !== ifaceSig && !body.contains(document.activeElement)) {
     ifaceSig = sig;
@@ -38,7 +38,9 @@ function renderIfaces(state, settings) {
           i.isDefault ? el("span", { class: "badge dim" }, "Windows default") : null, " ",
           i.metered ? el("span", { class: "badge warn" }, "Metered") : null, " ",
           i.vpn ? el("span", { class: "badge warn" }, "VPN") : null, " ",
-          i.isMain ? el("span", { class: "badge" }, "Main") : null),
+          i.isMain ? el("span", { class: "badge" }, "Main") : null, " ",
+          i.incoming ? el("span", { class: "badge " + (i.incoming === "reachable" ? "ok" : "dim"), title: INCOMING_TITLE[i.incoming] },
+            i.incoming === "reachable" ? "Peers can connect in" : "Outgoing only") : null),
         el("td", {}, enabled),
         el("td", {}, upload),
         el("td", {}, conns),
