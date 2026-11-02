@@ -48,7 +48,7 @@ function makeCard(id) {
   const actions = el("div", { class: "actions" }, pause, resume, folder, remove);
   // The add step: a torrent waits here until its files and folder are chosen.
   const pick = el("div", { class: "pick", hidden: true });
-  let picking = false;
+  let picking = ""; // what the add step shows: the VPN question and/or the files
 
   const page = el("input", { type: "url" });
   const sha = el("input", { type: "text", class: "mono", placeholder: "optional" });
@@ -87,8 +87,11 @@ function makeCard(id) {
     fill.style.width = percent(d) + "%";
     const seeded = torrent && d.finished; // complete: what counts now is the upload
     const choosing = d.status === "choosing";
-    sizeText.textContent = choosing
-      ? `${d.files.length} file${d.files.length === 1 ? "" : "s"} · ${fmtBytes(d.files.reduce((n, f) => n + f.size, 0))}`
+    const files = d.files || [];
+    sizeText.textContent = choosing && !files.length
+      ? "Not in the swarm yet: finding the files needs peers"
+      : choosing
+        ? `${files.length} file${files.length === 1 ? "" : "s"} · ${fmtBytes(files.reduce((n, f) => n + f.size, 0))}`
       : seeded
       ? `${fmtBytes(d.size)} · uploaded ${fmtBytes(d.uploaded || 0)} · ratio ${(d.ratio || 0).toFixed(2)}`
       : known
@@ -103,8 +106,9 @@ function makeCard(id) {
     folder.hidden = !known || choosing;
     remove.hidden = choosing; // the add step has its own Cancel
     pick.hidden = !choosing;
-    if (choosing && !picking) renderPick(d);
-    picking = choosing;
+    const step = choosing ? `${d.askVpn}|${files.length}|${hasVpn()}` : "";
+    if (step && step !== picking) renderPick(d);
+    picking = step;
     details.hidden = torrent; // landing page and checksums are for HTTP downloads
 
     // One line per connection: name, state, connections, speed (and why, if it failed).
@@ -158,19 +162,39 @@ function makeCard(id) {
     }
   }
   function renderPick(d) {
-    const boxes = d.files.map((f) => el("input", { type: "checkbox", checked: f.selected }));
+    const files = d.files || [];
+    // Before the torrent first meets peers: suggest a VPN, or stay on this connection.
+    const vpnChoice = d.askVpn ? el("div", { class: "vpnask" },
+      el("div", {}, el("b", {}, "Join the swarm through a VPN?"), " Every peer sees the address you join from."),
+      el("label", {}, el("input", { type: "radio", name: "vpn-" + id, value: "vpn", checked: hasVpn(), disabled: !hasVpn() }),
+        hasVpn() ? " Use the VPN (recommended)" : " Use a VPN: none is set up yet ",
+        hasVpn() ? null : el("a", { href: "#", onclick: (e) => { e.preventDefault(); browser.runtime.sendMessage({ type: "openSettings", hash: "#pia" }); } }, "Set one up")),
+      el("label", {}, el("input", { type: "radio", name: "vpn-" + id, value: "off", checked: !hasVpn() }), " Stay on the current connection")) : null;
+    const vpnValue = () => (pick.querySelector(`input[name="vpn-${id}"]:checked`) || {}).value;
+    if (!files.length) { // a magnet link: the question comes before fetching the files
+      pick.replaceChildren(vpnChoice, el("div", { class: "actions" },
+        el("button", { class: "small primary", onclick: () => act("chooseVpn", { id, vpn: vpnValue() }) }, "Continue"),
+        el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, "Cancelled") }, "Cancel")));
+      return;
+    }
+    const boxes = files.map((f) => el("input", { type: "checkbox", checked: f.selected }));
     const dir = el("input", { type: "text", value: d.dir });
-    pick.replaceChildren(
-      el("div", { class: "files" }, d.files.map((f, i) => el("label", {},
+    pick.replaceChildren(vpnChoice,
+      el("div", { class: "files" }, files.map((f, i) => el("label", {},
         boxes[i], el("span", { class: "path" }, f.path), el("span", { class: "muted num" }, fmtBytes(f.size))))),
       el("div", { class: "form" },
-        el("label", {}, d.files.length > 1 ? "Save to (in a folder named after the torrent)" : "Save to"), dir, el("span")),
+        el("label", {}, files.length > 1 ? "Save to (in a folder named after the torrent)" : "Save to"), dir, el("span")),
       el("div", { class: "actions" },
-        el("button", { class: "small primary", onclick: () => act("chooseFiles", { id, files: boxes.map((b) => b.checked), dir: dir.value }, "Download queued") }, "Download"),
+        el("button", { class: "small primary", onclick: () => act("chooseFiles", { id, files: boxes.map((b) => b.checked), dir: dir.value, ...(d.askVpn ? { vpn: vpnValue() } : {}) }, "Download queued") }, "Download"),
         el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, "Cancelled") }, "Cancel")));
   }
 
   return { root, update };
+}
+
+// Whether any VPN tunnel is set up, so a torrent can be sent through one.
+function hasVpn() {
+  return ((latest.state && latest.state.interfaces) || []).some((i) => i.tunnel);
 }
 
 function removeDownload(id, actions, ask) {

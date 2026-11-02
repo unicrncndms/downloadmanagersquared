@@ -42,9 +42,10 @@ type hashParams struct {
 }
 
 type chooseParams struct {
-	ID    string `json:"id"`
-	Files []bool `json:"files"`
-	Dir   string `json:"dir"`
+	ID    string  `json:"id"`
+	Files []bool  `json:"files"`
+	Dir   string  `json:"dir"`
+	VPN   *string `json:"vpn"` // answers the VPN question too, when the files were known with it
 }
 
 type pageParams struct {
@@ -152,7 +153,22 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		if !ok {
 			return nil, fmt.Errorf("%q is not a torrent", p.ID)
 		}
+		if p.VPN != nil && t.State().AskVPN {
+			if t, err = e.chooseTorrentVPN(p.ID, *p.VPN); err != nil {
+				return nil, err
+			}
+		}
 		return nil, t.Choose(p.Files, strings.TrimSpace(p.Dir))
+	case "chooseVpn":
+		p, err := decode[struct {
+			ID  string `json:"id"`
+			VPN string `json:"vpn"`
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		_, err = e.chooseTorrentVPN(p.ID, p.VPN)
+		return nil, err
 	case "pauseAll":
 		e.PauseAll()
 		return nil, nil

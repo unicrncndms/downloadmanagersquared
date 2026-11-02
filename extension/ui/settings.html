@@ -87,7 +87,7 @@
         <select id="sVpnHttp"></select>
         <label for="sVpnTorrent">VPN for torrents</label>
         <select id="sVpnTorrent"></select>
-        <span class="hint muted">Each connection with a VPN tunnel (import its WireGuard .conf above) carries its own tunnel, so speeds still add up. Alongside uses each connection both directly and through its tunnel; VPN only uses tunnels alone and pauses while none is up. You can choose differently when adding a download. Under VPN only, a download Firefox hands over was already requested once from your real address (headers only); right-click a link and choose "Download with DMS²" to avoid even that.</span>
+        <span class="hint muted">Each connection with a VPN tunnel (import its WireGuard .conf above) carries its own tunnel, so speeds still add up. Alongside uses each connection both directly and through its tunnel; VPN only uses tunnels alone and pauses while none is up. You can choose differently when adding a download. With torrents set to Off, each new torrent asks before it joins the swarm whether to go through a VPN. Under VPN only, a download Firefox hands over was already requested once from your real address (headers only); right-click a link and choose "Download with DMS²" to avoid even that.</span>
 
         <label for="sEta">Time-left averaging window (seconds)</label>
         <input type="number" id="sEta" min="5" max="3600">

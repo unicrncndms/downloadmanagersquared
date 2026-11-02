@@ -14,8 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
+
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/netif"
+	"downloadmanagersquared/engine/internal/torrent"
 	"downloadmanagersquared/engine/internal/tunnel"
 )
 
@@ -255,5 +259,87 @@ func TestVPNOnlyTorrentPausesWithoutATunnelAndResumesWithOne(t *testing.T) {
 	e.schedule() // the first re-queues it, the next starts it
 	if !tor.Active() {
 		t.Fatalf("with a tunnel up the torrent is still %q", tor.Status())
+	}
+}
+
+func TestNewTorrentAsksAboutTheVPNBeforeJoiningTheSwarm(t *testing.T) {
+	e := loopbackEngine(t)
+	if e.settings.VPNTorrent != modeOff {
+		t.Fatalf("torrents default to %q, want off", e.settings.VPNTorrent)
+	}
+	id, err := e.Add(AddRequest{URL: testMagnet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, _ := e.entry(id)
+	e.schedule()
+	if s := summaryOf(t, e, id); s.Status != torrent.StatusChoosing || !s.AskVPN || j.(*torrent.Torrent).Active() {
+		t.Fatalf("new magnet is %q, asking %v, active %v; want it waiting for the VPN question, out of the swarm", s.Status, s.AskVPN, j.(*torrent.Torrent).Active())
+	}
+
+	// Use VPN: it joins only through tunnels, and with none up it waits.
+	if _, err := e.Call(nil, "chooseVpn", []byte(`{"id":"`+id+`","vpn":"vpn"}`)); err != nil {
+		t.Fatal(err)
+	}
+	j, _ = e.entry(id)
+	tor := j.(*torrent.Torrent)
+	if tor.State().VPN != download.VPNOnly || tor.State().AskVPN {
+		t.Fatalf("after choosing the VPN the torrent runs under %q (asking %v)", tor.State().VPN, tor.State().AskVPN)
+	}
+	e.schedule()
+	if !tor.WaitingForVPN() {
+		t.Fatalf("with no tunnel up the VPN torrent is %q", tor.Status())
+	}
+}
+
+func TestStayingOnTheCurrentConnectionJoinsAtOnce(t *testing.T) {
+	e := loopbackEngine(t)
+	id, _ := e.Add(AddRequest{URL: testMagnet})
+	if _, err := e.Call(nil, "chooseVpn", []byte(`{"id":"`+id+`","vpn":"off"}`)); err != nil {
+		t.Fatal(err)
+	}
+	j, _ := e.entry(id)
+	tor := j.(*torrent.Torrent)
+	if !tor.Active() || tor.Status() != torrent.StatusMetadata || tor.State().VPN != download.VPNOff {
+		t.Fatalf("staying on the connection: %q, active %v, VPN %q", tor.Status(), tor.Active(), tor.State().VPN)
+	}
+}
+
+func TestChosenVPNModeAsksNothing(t *testing.T) {
+	e := loopbackEngine(t)
+	id, _ := e.Add(AddRequest{URL: testMagnet, VPN: "off"}) // chosen in the add box
+	if summaryOf(t, e, id).AskVPN {
+		t.Fatal("asked about the VPN although the mode was chosen when adding")
+	}
+	e.settings.VPNTorrent = modeVPNOnly // VPN by default: nothing to suggest
+	id, _ = e.Add(AddRequest{URL: fmt.Sprintf("magnet:?xt=urn:btih:%040x", 5)})
+	if summaryOf(t, e, id).AskVPN {
+		t.Fatal("asked about the VPN although torrents use it by default")
+	}
+}
+
+func TestTorrentFileTakesTheVPNChoiceWithItsFiles(t *testing.T) {
+	e := loopbackEngine(t)
+	data := make([]byte, 100<<10)
+	path := filepath.Join(t.TempDir(), "notes.txt")
+	os.WriteFile(path, data, 0o644)
+	info := metainfo.Info{PieceLength: 64 << 10}
+	info.BuildFromFilePath(path)
+	ib, _ := bencode.Marshal(info)
+	var buf bytes.Buffer
+	(&metainfo.MetaInfo{InfoBytes: ib}).Write(&buf)
+	id, err := e.addTorrentFile(buf.Bytes(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := summaryOf(t, e, id); !s.AskVPN || len(s.Files) != 1 {
+		t.Fatalf("torrent file: asking %v, files %v", s.AskVPN, s.Files)
+	}
+	if _, err := e.Call(nil, "chooseFiles", []byte(`{"id":"`+id+`","files":[true],"vpn":"vpn"}`)); err != nil {
+		t.Fatal(err)
+	}
+	j, _ := e.entry(id)
+	if st := j.(*torrent.Torrent).State(); st.VPN != download.VPNOnly || st.Status != download.StatusQueued {
+		t.Fatalf("after the add step: VPN %q, status %q", st.VPN, st.Status)
 	}
 }

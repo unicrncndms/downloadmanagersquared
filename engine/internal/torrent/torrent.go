@@ -37,6 +37,7 @@ type State struct {
 	Info     []byte           `json:"info,omitempty"` // bencoded info dict, once known
 	Dir      string           `json:"dir"`
 	Choose   bool             `json:"choose,omitempty"` // the user picks files and folder before it downloads
+	AskVPN   bool             `json:"askVpn,omitempty"` // the user picks VPN or not before it joins the swarm
 	Skip     []int            `json:"skip,omitempty"`   // indexes of the files not to download
 	Name     string           `json:"name,omitempty"`
 	Size     int64            `json:"size"`               // of the files to download
@@ -103,7 +104,7 @@ func (t *Torrent) Summary() download.Summary {
 		Kind: "torrent", ID: t.st.ID, URL: t.st.Magnet, Filename: t.st.Name, Dir: t.st.Dir,
 		Size: t.st.Size, Status: t.st.Status, Error: t.st.Error, Speed: t.speed.Value(), ETA: -1,
 		Links: map[string]download.LinkSummary{}, Added: t.st.Added, Finished: t.st.Finished,
-		Uploaded: t.st.Uploaded, VPN: t.st.VPN,
+		Uploaded: t.st.Uploaded, VPN: t.st.VPN, AskVPN: t.st.AskVPN,
 	}
 	if t.st.Status == StatusChoosing {
 		s.Files = t.filesLocked()
@@ -169,7 +170,9 @@ func (t *Torrent) Start() {
 		t.mu.Unlock()
 		return
 	}
-	if t.st.Choose && t.st.Info != nil {
+	// Waiting for the user: the files are known, or the VPN question comes first
+	// (learning the files from peers already joins the swarm).
+	if t.st.AskVPN || t.st.Choose && t.st.Info != nil {
 		t.st.Status = StatusChoosing
 		t.mu.Unlock()
 		t.changed()

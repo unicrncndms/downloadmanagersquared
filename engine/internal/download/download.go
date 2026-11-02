@@ -1150,6 +1150,7 @@ type Summary struct {
 
 	// Torrents only: the files to choose from (while choosing), then the upload once complete.
 	Files    []FileSummary `json:"files,omitempty"`
+	AskVPN   bool          `json:"askVpn,omitempty"` // waiting for: VPN, or the current connection?
 	Uploaded int64         `json:"uploaded,omitempty"`
 	Ratio    float64       `json:"ratio,omitempty"`
 	UpSpeed  float64       `json:"upSpeed,omitempty"`

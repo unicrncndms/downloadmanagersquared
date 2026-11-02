@@ -870,6 +870,34 @@ func (e *Engine) ResumeAll() {
 	}
 }
 
+// chooseTorrentVPN answers a new torrent's VPN question, moving it to the
+// session of that mode before it joins the swarm.
+func (e *Engine) chooseTorrentVPN(id, vpn string) (*torrent.Torrent, error) {
+	j, err := e.entry(id)
+	if err != nil {
+		return nil, err
+	}
+	t, ok := j.(*torrent.Torrent)
+	if !ok || !t.State().AskVPN || t.Active() {
+		return nil, fmt.Errorf("%q isn't waiting for a VPN choice", id)
+	}
+	st := t.State()
+	st.VPN, st.AskVPN, st.Status = vpnMode(vpn, modeOff), false, download.StatusQueued
+	nt, err := e.session(st.VPN).Add(st)
+	if err != nil {
+		return nil, err
+	}
+	e.mu.Lock()
+	if e.downloads[id] != j {
+		e.mu.Unlock()
+		return nil, fmt.Errorf("%q changed meanwhile", id)
+	}
+	e.downloads[id], e.dirty[id] = nt, true
+	e.mu.Unlock()
+	nt.Start() // learn the files through the chosen paths, or back to choosing them
+	return nt, nil
+}
+
 // requeue lets a stopped download run again: queued, or for a torrent whose
 // download completed, seeding, which takes no queue slot (schedule restarts it).
 func (e *Engine) requeue(j entry) {
@@ -1008,6 +1036,8 @@ func (e *Engine) addTorrent(st torrent.State, vpn string) (string, error) {
 	e.mu.Lock()
 	st.Dir = e.settings.SaveDir
 	st.VPN = vpnMode(vpn, e.settings.VPNTorrent)
+	// About to join the swarm on the bare connection, unasked: suggest a VPN first.
+	st.AskVPN = vpn == "" && st.VPN == download.VPNOff
 	e.mu.Unlock()
 	st.ID, st.Choose, st.Added = newID(), true, time.Now()
 	t, err := e.session(st.VPN).Add(st)

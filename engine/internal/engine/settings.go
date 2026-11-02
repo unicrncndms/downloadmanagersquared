@@ -67,7 +67,7 @@ func defaultSettings() Settings {
 		DefaultConnections: 4,
 		SeedRatio:          1,
 		VPNHTTP:            modeOff,
-		VPNTorrent:         modeVPNOnly,
+		VPNTorrent:         modeOff, // each new torrent asks first
 	}
 }
 
