@@ -142,6 +142,29 @@ browser.storage.local.get("landingBack").then((v) => {
   $("sBack").value = Number.isInteger(v.landingBack) ? v.landingBack : 1;
 });
 
+// --- VPN provider ---
+
+// The chosen provider is only remembered here; being signed in to one wins.
+let provider = "";
+let piaSignedIn = false;
+browser.storage.local.get("vpnProvider").then((v) => { if (!piaSignedIn) showProvider(v.vpnProvider || ""); });
+
+function showProvider(p) {
+  provider = p;
+  $("vpnProvider").value = p;
+  $("piaBox").hidden = p !== "pia";
+}
+
+$("vpnProvider").addEventListener("change", async () => {
+  const p = $("vpnProvider").value;
+  if (piaSignedIn && p !== "pia") {
+    if (!confirm("Sign out of Private Internet Access? Its tunnels will close.")) return showProvider("pia");
+    await act("clearPia", {}, "Signed out of PIA");
+  }
+  showProvider(p);
+  await browser.storage.local.set({ vpnProvider: p });
+});
+
 // --- PIA ---
 
 const PIA_STATE = {
@@ -151,6 +174,8 @@ const PIA_STATE = {
 let piaRegionsLoaded = false;
 
 function renderPIA(p, settings) {
+  piaSignedIn = !!p.configured;
+  if (piaSignedIn && provider !== "pia" && document.activeElement !== $("vpnProvider")) showProvider("pia");
   const [text, cls] = PIA_STATE[p.state] || [p.state, ""];
   $("piaState").textContent = text + (p.state === "ok" && p.region ? ` · ${p.region}` : "");
   $("piaState").className = "badge " + cls;

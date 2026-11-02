@@ -134,10 +134,18 @@
 
         <label for="sVpnTorrent">VPN for torrents</label>
         <select id="sVpnTorrent" data-setting></select>
+
+        <label for="vpnProvider">VPN provider
+          <span class="info" tabindex="0" data-tip="Signing in to a provider gives every connection without its own .conf a tunnel. For other VPNs, import a .conf per connection above."></span></label>
+        <select id="vpnProvider">
+          <option value="">None</option>
+          <option value="pia">Private Internet Access</option>
+        </select>
       </div>
 
+      <div id="piaBox" hidden>
       <h3>Private Internet Access
-        <span class="info" tabindex="0" data-tip="Once you sign in, every connection without its own .conf gets a PIA tunnel. Your login is stored encrypted and never shown again."></span>
+        <span class="info" tabindex="0" data-tip="Your login is stored encrypted and never shown again."></span>
       </h3>
       <div class="fields">
         <span class="muted">Status</span>
@@ -152,6 +160,7 @@
       <div class="row-actions">
         <button class="primary" id="piaSave">Sign in</button>
         <button id="piaClear">Sign out</button>
+      </div>
       </div>
     </section>
 
