@@ -24,6 +24,9 @@ import (
 	"downloadmanagersquared/engine/internal/torrent"
 )
 
+// Tests finish real downloads (vpn.bin, seed.bin…): no notifications on the desktop for those.
+func init() { notify = func(string, string) {} }
+
 const testMagnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=debian.iso"
 
 func summaryOf(t *testing.T, e *Engine, id string) download.Summary {

@@ -806,11 +806,14 @@ func (e *Engine) markDirty(id string) {
 
 func (e *Engine) Finished(d *download.Download) { e.notifyFinished(d.Summary()) }
 
+// notify shows a Windows notification; tests switch it off.
+var notify = winutil.Notify
+
 func (e *Engine) notifyFinished(s download.Summary) {
 	if s.Status == download.StatusCompleted || s.Status == torrent.StatusSeeding {
-		winutil.Notify("Download complete", s.Filename)
+		notify("Download complete", s.Filename)
 	} else {
-		winutil.Notify("Download failed", s.Filename+": "+s.Error)
+		notify("Download failed", s.Filename+": "+s.Error)
 	}
 }
 
