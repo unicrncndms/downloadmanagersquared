@@ -1,11 +1,17 @@
 package engine
 
 import (
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 
 	"downloadmanagersquared/engine/internal/download"
+	"downloadmanagersquared/engine/internal/torrent"
 )
 
 const testMagnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=debian.iso"
@@ -71,5 +77,90 @@ func TestRemovingANamelessTorrentKeepsTheDownloadFolder(t *testing.T) {
 	}
 	if _, err := os.Stat(other); err != nil {
 		t.Fatalf("removing the torrent deleted other files in the download folder: %v", err)
+	}
+}
+
+// seedingTorrent saves a complete torrent that was seeding when the engine
+// stopped, with its file in saveDir, and returns its ID.
+func seedingTorrent(t *testing.T, engineDir, saveDir string) string {
+	t.Helper()
+	data := make([]byte, 300<<10)
+	rand.Read(data)
+	file := filepath.Join(saveDir, "seed.bin")
+	if err := os.WriteFile(file, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info := metainfo.Info{PieceLength: 64 << 10}
+	if err := info.BuildFromFilePath(file); err != nil {
+		t.Fatal(err)
+	}
+	ib, err := bencode.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mi := metainfo.MetaInfo{InfoBytes: ib}
+	m := metainfo.Magnet{InfoHash: mi.HashInfoBytes(), DisplayName: info.Name}
+	st := torrent.State{
+		ID: "seed1", Magnet: m.String(), Info: ib, Dir: saveDir, Name: info.Name, Size: info.TotalLength(),
+		Status: torrent.StatusSeeding, Added: time.Now(), Finished: time.Now(),
+	}
+	if err := writeJSON(filepath.Join(engineDir, "torrents", st.ID+".json"), st); err != nil {
+		t.Fatal(err)
+	}
+	return st.ID
+}
+
+func TestSeedingTorrentKeepsSeedingAfterARestartWithoutASlot(t *testing.T) {
+	dir, saveDir := t.TempDir(), t.TempDir()
+	seed := seedingTorrent(t, dir, saveDir)
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	e.settings.MaxParallel = 1
+	if s := summaryOf(t, e, seed); s.Status != torrent.StatusSeeding {
+		t.Fatalf("after restart the seeding torrent is %q", s.Status)
+	}
+	queued, err := e.Add(AddRequest{URL: testMagnet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.schedule()
+	q, _ := e.entry(queued)
+	if !q.Running() {
+		t.Fatal("the seeding torrent took the only slot; the queued one didn't start")
+	}
+	j, _ := e.entry(seed)
+	waitFor(t, "the restored torrent to seed again", 10*time.Second, func() bool {
+		return j.(*torrent.Torrent).Active() && j.Status() == torrent.StatusSeeding
+	})
+}
+
+func TestRemovingASeedingTorrentKeepsItsFiles(t *testing.T) {
+	dir, saveDir := t.TempDir(), t.TempDir()
+	seed := seedingTorrent(t, dir, saveDir)
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	e.schedule()
+	if err := e.Remove(seed, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(saveDir, "seed.bin")); err != nil {
+		t.Fatalf("removing a seeding torrent deleted its file: %v", err)
+	}
+}
+
+func waitFor(t *testing.T, what string, timeout time.Duration, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

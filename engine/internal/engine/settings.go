@@ -22,6 +22,7 @@ type Settings struct {
 	MaxParallel        int                       `json:"maxParallel"`
 	ETAWindowSec       int                       `json:"etaWindowSec"`
 	DefaultConnections int                       `json:"defaultConnections"`
+	SeedRatio          float64                   `json:"seedRatio"` // seed a torrent until uploaded/size reaches this; 0 = don't seed
 }
 
 func defaultSettings() Settings {
@@ -32,6 +33,7 @@ func defaultSettings() Settings {
 		MaxParallel:        1,
 		ETAWindowSec:       60,
 		DefaultConnections: 4,
+		SeedRatio:          1,
 	}
 }
 
@@ -55,6 +57,7 @@ func (s *Settings) normalize() {
 		s.DefaultConnections = d.DefaultConnections
 	}
 	s.DefaultConnections = min(s.DefaultConnections, 32)
+	s.SeedRatio = min(max(s.SeedRatio, 0), 100)
 	for _, is := range s.Interfaces {
 		if is.Connections != 0 { // 0 = use DefaultConnections
 			is.Connections = min(max(is.Connections, 1), 32)

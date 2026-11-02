@@ -57,6 +57,7 @@ function fillSettings(s, autostart) {
   $("sParallel").value = s.maxParallel;
   $("sConns").value = s.defaultConnections;
   $("sEta").value = s.etaWindowSec;
+  $("sRatio").value = s.seedRatio;
   $("sAuto").checked = autostart;
   browser.storage.local.get("landingBack").then((v) => {
     $("sBack").value = Number.isInteger(v.landingBack) ? v.landingBack : 1;
@@ -70,6 +71,7 @@ $("saveSettings").onclick = async () => {
     maxParallel: Number($("sParallel").value),
     defaultConnections: Number($("sConns").value),
     etaWindowSec: Number($("sEta").value),
+    seedRatio: Number($("sRatio").value),
   });
   const back = Math.min(5, Math.max(0, Math.round(Number($("sBack").value) || 0)));
   await browser.storage.local.set({ landingBack: back });

@@ -35,7 +35,8 @@ type Iface struct {
 
 type Config struct {
 	Changed  func(*Torrent) // optional: progress or state changed
-	Finished func(*Torrent) // optional: the torrent completed
+	Finished func(*Torrent) // optional: the torrent's download completed
+	Ratio    func() float64 // optional: seed until uploaded/size reaches this; nil or 0 = don't seed
 }
 
 // ifaceSockets is one interface as the session uses it.
@@ -77,6 +78,7 @@ func NewSession(cfg Config) (*Session, error) {
 	c.NoDefaultPortForwarding = true
 	c.DisableWebtorrent = true // WebRTC opens its own UDP sockets
 	c.ListenPort = 0
+	c.Seed = true // without it, peers are dropped on completion; Torrent decides how long to seed
 	c.TrackerDialContext = s.dialFirst
 	c.HTTPDialContext = s.dialFirst
 	c.TrackerListenPacket = func(string, string) (net.PacketConn, error) {
@@ -93,6 +95,7 @@ func NewSession(cfg Config) (*Session, error) {
 	// a piece database in the working directory.
 	s.stor = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: os.TempDir(), PieceCompletion: storage.NewMapPieceCompletion(),
+		Logger: slog.New(slog.DiscardHandler),
 	})
 	c.DefaultStorage = s.stor
 	c.Logger = alog.Default.WithFilterLevel(alog.Critical)

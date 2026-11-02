@@ -53,9 +53,15 @@ function el(tag, attrs, ...children) {
 
 const STATUS_TEXT = {
   queued: "Queued", running: "Downloading", paused: "Paused", verifying: "Verifying",
-  completed: "Completed", failed: "Failed", metadata: "Finding files",
+  completed: "Completed", failed: "Failed", metadata: "Finding files", checking: "Checking files",
+  seeding: "Seeding",
 };
-const STATUS_CLASS = { completed: "ok", failed: "bad", paused: "dim", queued: "dim" };
+const STATUS_CLASS = { completed: "ok", seeding: "ok", failed: "bad", paused: "dim", queued: "dim" };
+
+function statusText(d) {
+  if (d.kind === "torrent" && d.status === "completed") return "Finished"; // done seeding
+  return STATUS_TEXT[d.status] || d.status;
+}
 
 const LINK_TEXT = {
   pending: "Waiting", probing: "Checking link", ready: "Ready", resolving: "Getting link in browser",

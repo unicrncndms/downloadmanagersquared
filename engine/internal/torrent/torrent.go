@@ -2,6 +2,8 @@ package torrent
 
 import (
 	"context"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -13,20 +15,27 @@ import (
 	"downloadmanagersquared/engine/internal/rate"
 )
 
-// StatusMetadata is a magnet link's first step: learning the torrent's files from peers.
-const StatusMetadata download.Status = "metadata"
+// Statuses a torrent has beyond an HTTP download's. A finished torrent (done
+// seeding) is download.StatusCompleted.
+const (
+	StatusMetadata download.Status = "metadata" // a magnet link learning the torrent's files from peers
+	StatusChecking download.Status = "checking" // hashing data already on disk
+	StatusSeeding  download.Status = "seeding"  // complete, uploading until the ratio target
+)
 
 // State is everything needed to resume a torrent after a restart.
 type State struct {
 	ID       string          `json:"id"`
 	Magnet   string          `json:"magnet"`
+	Info     []byte          `json:"info,omitempty"` // bencoded info dict, once known
 	Dir      string          `json:"dir"`
 	Name     string          `json:"name,omitempty"`
 	Size     int64           `json:"size"`
+	Uploaded int64           `json:"uploaded,omitempty"` // across every run
 	Status   download.Status `json:"status"`
 	Error    string          `json:"error,omitempty"`
 	Added    time.Time       `json:"added"`
-	Finished time.Time       `json:"finished,omitzero"`
+	Finished time.Time       `json:"finished,omitzero"` // when the download completed
 }
 
 type Torrent struct {
@@ -34,11 +43,14 @@ type Torrent struct {
 
 	mu      sync.Mutex
 	st      State
-	t       *atorrent.Torrent // nil unless running
+	t       *atorrent.Torrent // nil unless in the swarm
 	stor    storage.ClientImplCloser
 	cancel  context.CancelFunc
-	running bool
+	active  bool  // in the swarm, in any phase
+	slot    bool  // checking or downloading after the queue started it: holds a queue slot
+	upBase  int64 // st.Uploaded when this run joined the swarm
 	speed   rate.EWMA
+	upSpeed rate.EWMA
 }
 
 // Add registers a torrent with the session without starting it.
@@ -79,10 +91,16 @@ func (t *Torrent) Summary() download.Summary {
 		Kind: "torrent", ID: t.st.ID, URL: t.st.Magnet, Filename: t.st.Name, Dir: t.st.Dir,
 		Size: t.st.Size, Status: t.st.Status, Error: t.st.Error, Speed: t.speed.Value(), ETA: -1,
 		Links: map[string]download.LinkSummary{}, Added: t.st.Added, Finished: t.st.Finished,
+		Uploaded: t.st.Uploaded,
 	}
 	switch {
-	case t.st.Status == download.StatusCompleted:
+	case !t.st.Finished.IsZero():
 		s.Done = t.st.Size
+		s.Speed = 0
+		s.UpSpeed = t.upSpeed.Value()
+		if t.st.Size > 0 {
+			s.Ratio = float64(t.st.Uploaded) / float64(t.st.Size)
+		}
 	case t.t != nil && t.t.Info() != nil:
 		s.Done = t.t.BytesCompleted()
 		if s.Speed > 0 {
@@ -105,10 +123,19 @@ func (t *Torrent) Status() download.Status {
 	return t.st.Status
 }
 
+// Running is whether the torrent holds a queue slot: checking or downloading.
+// Seeding holds none.
 func (t *Torrent) Running() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.running
+	return t.slot
+}
+
+// Active is whether the torrent is in the swarm, in any phase.
+func (t *Torrent) Active() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.active
 }
 
 func (t *Torrent) State() State {
@@ -117,17 +144,23 @@ func (t *Torrent) State() State {
 	return t.st
 }
 
-// Start joins the swarm and downloads every file.
+// Start joins the swarm: queued, it downloads everything, then seeds; seeding
+// (after a restart), it checks its data and seeds again without a queue slot.
 func (t *Torrent) Start() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.running || t.st.Status == download.StatusCompleted {
+	if t.active || t.st.Status == download.StatusCompleted {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	t.cancel, t.running = cancel, true
-	// Only a magnet link is kept, so the files are learned from peers again each start.
-	t.st.Status, t.st.Error = StatusMetadata, ""
+	t.cancel, t.active = cancel, true
+	t.slot = t.st.Status != StatusSeeding
+	t.st.Error = ""
+	if t.st.Info == nil {
+		t.st.Status = StatusMetadata
+	} else {
+		t.st.Status = StatusChecking
+	}
 	go t.run(ctx)
 }
 
@@ -143,8 +176,10 @@ func (t *Torrent) join(ctx context.Context) (*atorrent.Torrent, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
+	spec.InfoBytes = t.st.Info
 	t.stor = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: t.st.Dir, PieceCompletion: storage.NewMapPieceCompletion(),
+		Logger: slog.New(slog.DiscardHandler),
 	})
 	spec.Storage = t.stor
 	at, _, err := t.s.cl.AddTorrentSpec(spec)
@@ -153,7 +188,7 @@ func (t *Torrent) join(ctx context.Context) (*atorrent.Torrent, error) {
 		t.stor = nil
 		return nil, err
 	}
-	t.t = at
+	t.t, t.upBase = at, t.st.Uploaded
 	return at, nil
 }
 
@@ -162,77 +197,155 @@ func (t *Torrent) run(ctx context.Context) {
 	if err != nil {
 		t.mu.Lock()
 		if ctx.Err() == nil {
-			t.cancel()
-			t.running = false
-			t.failLocked(err)
+			t.dropLocked()
+			t.st.Status, t.st.Error = download.StatusFailed, err.Error()
 		}
 		t.mu.Unlock()
 		t.changed()
 		return
 	}
+	t.changed()
 	select {
 	case <-at.GotInfo():
 	case <-ctx.Done():
 		return
 	}
+	if !t.update(at, func() {
+		// Peers choose the name; never let it be a path.
+		t.st.Name, t.st.Size = download.SanitizeFilename(at.Name()), at.Length()
+		t.st.Info = at.Metainfo().InfoBytes
+		t.st.Status = StatusChecking
+	}) {
+		return
+	}
+	// The file storage trusts a full-size file and distrusts a .part one without
+	// reading either, so hash whatever is on disk.
+	if t.hasData(at) {
+		go at.VerifyDataContext(ctx)
+		time.Sleep(50 * time.Millisecond) // let it queue the first pieces
+	}
+	if !t.poll(ctx, at, func() bool { return !checking(at) }) {
+		return
+	}
+	if at.BytesCompleted() < at.Length() {
+		if !t.update(at, func() { t.st.Status = download.StatusRunning }) {
+			return
+		}
+		at.DownloadAll()
+		if !t.poll(ctx, at, func() bool { return at.BytesCompleted() == at.Length() }) {
+			return
+		}
+	}
+	notify := false
+	if !t.update(at, func() {
+		notify = t.st.Finished.IsZero()
+		if notify {
+			t.st.Finished = time.Now()
+		}
+		t.st.Status, t.slot = StatusSeeding, false
+	}) {
+		return
+	}
+	if f := t.s.cfg.Finished; notify && f != nil {
+		f(t)
+	}
+	if !t.poll(ctx, at, func() bool {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		return t.st.Size > 0 && float64(t.st.Uploaded) >= t.s.ratio()*float64(t.st.Size)
+	}) {
+		return
+	}
+	t.update(at, func() {
+		t.dropLocked()
+		t.st.Status = download.StatusCompleted
+	})
+}
+
+// update changes the state under the lock, unless the torrent left the swarm
+// (at is no longer its torrent), and reports whether it did.
+func (t *Torrent) update(at *atorrent.Torrent, f func()) bool {
 	t.mu.Lock()
 	if t.t != at {
 		t.mu.Unlock()
-		return // stopped while the metadata arrived
+		return false
 	}
-	// Peers choose the name; never let it be a path.
-	t.st.Name, t.st.Size = download.SanitizeFilename(at.Name()), at.Length()
-	t.st.Status = download.StatusRunning
+	f()
 	t.mu.Unlock()
 	t.changed()
-	at.DownloadAll()
+	return true
+}
+
+// poll keeps the speeds and upload count current until done reports true, and
+// reports false if the torrent left the swarm first.
+func (t *Torrent) poll(ctx context.Context, at *atorrent.Torrent, done func() bool) bool {
 	const every = 500 * time.Millisecond
 	tick := time.NewTicker(every)
 	defer tick.Stop()
 	for {
+		stats := at.Stats()
+		completed, uploaded := at.BytesCompleted(), stats.BytesWrittenData.Int64()
+		if !t.update(at, func() {
+			t.speed.Update(completed, every)
+			t.upSpeed.Update(uploaded, every)
+			t.st.Uploaded = t.upBase + uploaded
+		}) {
+			return false
+		}
+		if done() {
+			return true
+		}
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case <-tick.C:
 		}
-		done := at.BytesCompleted()
-		t.mu.Lock()
-		t.speed.Update(done, every)
-		t.mu.Unlock()
-		if done < at.Length() {
-			t.changed()
-			continue
-		}
-		t.mu.Lock()
-		if t.t != at {
-			t.mu.Unlock()
-			return
-		}
-		t.dropLocked()
-		t.st.Status, t.st.Finished = download.StatusCompleted, time.Now()
-		t.mu.Unlock()
-		t.changed()
-		if f := t.s.cfg.Finished; f != nil {
-			f(t)
-		}
-		return
 	}
+}
+
+// hasData is whether any of the torrent's files, finished or partial, is on disk.
+func (t *Torrent) hasData(at *atorrent.Torrent) bool {
+	t.mu.Lock()
+	dir := t.st.Dir
+	t.mu.Unlock()
+	for _, f := range at.Files() {
+		p := filepath.Join(dir, filepath.FromSlash(f.Path()))
+		for _, q := range []string{p, p + ".part"} {
+			if _, err := os.Stat(q); err == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// checking is whether any piece is being hashed or waits to be.
+func checking(at *atorrent.Torrent) bool {
+	for _, r := range at.PieceStateRuns() {
+		if r.Checking {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Session) ratio() float64 {
+	if s.cfg.Ratio == nil {
+		return 0
+	}
+	return s.cfg.Ratio()
 }
 
 // Stop leaves the swarm; as is the status to show afterwards (paused or queued).
 func (t *Torrent) Stop(as download.Status) {
 	t.mu.Lock()
-	if !t.running {
-		// Already stopped: only the status changes, which is how resume re-queues.
-		if t.st.Status != download.StatusCompleted {
-			t.st.Status = as
-		}
-		t.mu.Unlock()
-		t.changed()
-		return
+	if t.active {
+		t.dropLocked()
 	}
-	t.dropLocked()
-	t.st.Status = as
+	// Already stopped, only the status changes, which is how resume re-queues.
+	if t.st.Status != download.StatusCompleted {
+		t.st.Status = as
+	}
 	t.mu.Unlock()
 	t.changed()
 }
@@ -243,11 +356,8 @@ func (t *Torrent) dropLocked() {
 		t.t.Drop()
 		t.stor.Close()
 	}
-	t.t, t.stor, t.running = nil, nil, false
-}
-
-func (t *Torrent) failLocked(err error) {
-	t.st.Status, t.st.Error = download.StatusFailed, err.Error()
+	t.t, t.stor, t.active, t.slot = nil, nil, false, false
+	t.speed, t.upSpeed = rate.EWMA{}, rate.EWMA{}
 }
 
 func (t *Torrent) changed() {

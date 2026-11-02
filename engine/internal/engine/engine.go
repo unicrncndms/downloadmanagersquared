@@ -129,6 +129,11 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	s, err := torrent.NewSession(torrent.Config{
 		Changed:  func(t *torrent.Torrent) { e.markDirty(t.ID()) },
 		Finished: func(t *torrent.Torrent) { e.notifyFinished(t.Summary()) },
+		Ratio: func() float64 {
+			e.mu.Lock()
+			defer e.mu.Unlock()
+			return e.settings.SeedRatio
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -154,7 +159,9 @@ func (e *Engine) loadDownloads() {
 		all = append(all, loaded{download.New(e, st), st.Added})
 	}
 	for _, st := range readStates[torrent.State](filepath.Join(e.dir, "torrents")) {
-		if st.Status == download.StatusRunning || st.Status == torrent.StatusMetadata {
+		// A seeding torrent goes on seeding (schedule restarts it); the rest queue again.
+		switch st.Status {
+		case download.StatusRunning, torrent.StatusMetadata, torrent.StatusChecking:
 			st.Status = download.StatusQueued
 		}
 		t, err := e.torrents.Add(st)
@@ -286,10 +293,12 @@ func (e *Engine) schedule() {
 		}
 	}
 	for _, d := range all {
-		if running >= limit {
-			return
+		// Seeding holds no slot: a torrent restored while seeding rejoins at once.
+		if t, ok := d.(*torrent.Torrent); ok && !t.Active() && t.Status() == torrent.StatusSeeding {
+			t.Start()
+			continue
 		}
-		if !d.Running() && d.Status() == download.StatusQueued {
+		if running < limit && !d.Running() && d.Status() == download.StatusQueued {
 			d.Start()
 			running++
 		}
@@ -530,7 +539,7 @@ func (e *Engine) markDirty(id string) {
 func (e *Engine) Finished(d *download.Download) { e.notifyFinished(d.Summary()) }
 
 func (e *Engine) notifyFinished(s download.Summary) {
-	if s.Status == download.StatusCompleted {
+	if s.Status == download.StatusCompleted || s.Status == torrent.StatusSeeding {
 		winutil.Notify("Download complete", s.Filename)
 	} else {
 		winutil.Notify("Download failed", s.Filename+": "+s.Error)
@@ -665,8 +674,13 @@ func (e *Engine) Remove(id string, deleteFile bool) error {
 	if err != nil {
 		return err
 	}
+	// Once a torrent's download completed (seeding, or checking to seed again), its files are the user's.
+	finished := d.Status() == download.StatusCompleted
+	if t, ok := d.(*torrent.Torrent); ok && !t.State().Finished.IsZero() {
+		finished = true
+	}
 	d.Stop(download.StatusPaused)
-	if p := d.Path(); deleteFile && p != "" && d.Status() != download.StatusCompleted {
+	if p := d.Path(); deleteFile && p != "" && !finished {
 		if _, ok := d.(*torrent.Torrent); ok {
 			os.RemoveAll(p) // a multi-file torrent is a folder
 		} else {

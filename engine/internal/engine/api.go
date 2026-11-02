@@ -52,12 +52,13 @@ type resolvedParams struct {
 }
 
 type settingsPatch struct {
-	MainInterface      *string `json:"mainInterface"`
-	ThresholdBytes     *int64  `json:"thresholdBytes"`
-	SaveDir            *string `json:"saveDir"`
-	MaxParallel        *int    `json:"maxParallel"`
-	ETAWindowSec       *int    `json:"etaWindowSec"`
-	DefaultConnections *int    `json:"defaultConnections"`
+	MainInterface      *string  `json:"mainInterface"`
+	ThresholdBytes     *int64   `json:"thresholdBytes"`
+	SaveDir            *string  `json:"saveDir"`
+	MaxParallel        *int     `json:"maxParallel"`
+	ETAWindowSec       *int     `json:"etaWindowSec"`
+	DefaultConnections *int     `json:"defaultConnections"`
+	SeedRatio          *float64 `json:"seedRatio"`
 }
 
 type ifacePatch struct {
@@ -198,6 +199,9 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			}
 			if p.DefaultConnections != nil {
 				s.DefaultConnections = *p.DefaultConnections
+			}
+			if p.SeedRatio != nil {
+				s.SeedRatio = *p.SeedRatio
 			}
 		}), nil
 	case "setInterface":

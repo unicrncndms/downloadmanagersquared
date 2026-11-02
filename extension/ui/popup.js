@@ -76,15 +76,19 @@ function makeCard(id) {
     const known = torrent ? d.size > 0 : d.probed;
     name.textContent = d.filename || d.url;
     name.title = d.filename || d.url;
-    status.textContent = STATUS_TEXT[d.status] || d.status;
+    status.textContent = statusText(d);
     status.className = "badge " + (STATUS_CLASS[d.status] || "");
     fill.style.width = percent(d) + "%";
-    sizeText.textContent = known
-      ? `${fmtBytes(d.done)} of ${fmtBytes(d.size)} (${percent(d).toFixed(1)}%)${torrent || d.rangeOk ? "" : " · main connection only"}`
-      : torrent ? "Asking peers for the torrent's files…" : "Checking the link…";
-    speedText.textContent = d.status === "running" ? `${fmtSpeed(d.speed)} · ${fmtETA(d.eta)} left` : "";
+    const seeded = torrent && d.finished; // complete: what counts now is the upload
+    sizeText.textContent = seeded
+      ? `${fmtBytes(d.size)} · uploaded ${fmtBytes(d.uploaded || 0)} · ratio ${(d.ratio || 0).toFixed(2)}`
+      : known
+        ? `${fmtBytes(d.done)} of ${fmtBytes(d.size)} (${percent(d).toFixed(1)}%)${torrent || d.rangeOk ? "" : " · main connection only"}`
+        : torrent ? "Asking peers for the torrent's files…" : "Checking the link…";
+    speedText.textContent = d.status === "running" ? `${fmtSpeed(d.speed)} · ${fmtETA(d.eta)} left`
+      : d.status === "seeding" ? `↑ ${fmtSpeed(d.upSpeed || 0)}` : "";
     err.textContent = d.error || "";
-    const running = ["running", "verifying", "queued", "metadata"].includes(d.status);
+    const running = ["running", "verifying", "queued", "metadata", "checking", "seeding"].includes(d.status);
     pause.hidden = !running;
     resume.hidden = running || d.status === "completed";
     folder.hidden = !known;
@@ -146,7 +150,8 @@ function makeCard(id) {
 function removeDownload(id, actions, ask) {
   const d = (latest.state.downloads || []).find((x) => x.id === id);
   if (!d) return;
-  if (d.status === "completed") return act("remove", { id, deleteFile: false }, "Removed from list (file kept)");
+  // A torrent whose download completed (seeding or finished) keeps its files without asking.
+  if (d.status === "completed" || (d.kind === "torrent" && d.finished)) return act("remove", { id, deleteFile: false }, "Removed from list (files kept)");
   actions.hidden = true;
   ask.hidden = false;
 }

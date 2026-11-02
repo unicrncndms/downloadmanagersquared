@@ -1127,6 +1127,11 @@ type Summary struct {
 	Links    map[string]LinkSummary `json:"links"`
 	Added    time.Time              `json:"added"`
 	Finished time.Time              `json:"finished,omitzero"`
+
+	// Torrents only, once complete.
+	Uploaded int64   `json:"uploaded,omitempty"`
+	Ratio    float64 `json:"ratio,omitempty"`
+	UpSpeed  float64 `json:"upSpeed,omitempty"`
 }
 
 func (d *Download) Summary() Summary {
