@@ -24,7 +24,7 @@ $xpi = Join-Path $dist 'downloadmanagersquared.zip'
 Remove-Item $xpi -ErrorAction SilentlyContinue
 Push-Location (Join-Path $root 'extension')
 try {
-    tar.exe -a -c -f $xpi manifest.json background ui icons resolver-content.js
+    tar.exe -a -c -f $xpi manifest.json background content ui icons resolver-content.js
     if ($LASTEXITCODE) { throw 'packing the extension failed' }
 } finally {
     Pop-Location
