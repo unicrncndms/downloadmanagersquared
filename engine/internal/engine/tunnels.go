@@ -39,7 +39,8 @@ const (
 
 // tunnelEntry is the tunnel configured for one interface.
 type tunnelEntry struct {
-	cfg      tunnel.Config
+	pia      bool          // PIA makes a new config (and key) at each start
+	cfg      tunnel.Config // a .conf's, or PIA's latest
 	socks    *socks.Server // landing pages resolved through the tunnel
 	t        *tunnel.Tunnel
 	on       *netif.Binding // what t runs over
@@ -131,6 +132,25 @@ func (e *Engine) syncTunnels(now time.Time) {
 		te *tunnelEntry
 		b  *netif.Binding
 	}
+	e.mu.Lock()
+	wanted := e.piaWantedLocked()
+	e.mu.Unlock()
+	for _, id := range wanted {
+		srv, err := socks.Listen(e.dialVia(tunnelPath(id)))
+		if err != nil {
+			continue
+		}
+		e.mu.Lock()
+		if e.tunnels[id] == nil {
+			e.tunnels[id] = &tunnelEntry{pia: true, socks: srv}
+			srv = nil
+		}
+		e.mu.Unlock()
+		if srv != nil {
+			srv.Close()
+		}
+	}
+
 	var starts []start
 	var stops []*tunnel.Tunnel
 	e.mu.Lock()
@@ -148,7 +168,8 @@ func (e *Engine) syncTunnels(now time.Time) {
 				te.t, te.on, te.client, te.up = nil, nil, nil, false
 			}
 		}
-		if usable && te.t == nil && !te.starting && !now.Before(te.retryAt) {
+		waitsForUser := te.pia && (e.pia == nil || e.pia.refused)
+		if usable && te.t == nil && !te.starting && !now.Before(te.retryAt) && !waitsForUser {
 			te.starting = true
 			starts = append(starts, start{id, te, ent.binding})
 		}
@@ -163,12 +184,26 @@ func (e *Engine) syncTunnels(now time.Time) {
 }
 
 func (e *Engine) startTunnel(id string, te *tunnelEntry, b *netif.Binding) {
-	t, err := tunnel.Start(te.cfg, func() (net.PacketConn, error) { return b.ListenPacket(0) }, b.LookupIP)
+	e.mu.Lock()
+	cfg := te.cfg
+	e.mu.Unlock()
+	var err error
+	if te.pia {
+		// A new key each start: one PIA rejected or forgot is replaced this way.
+		cfg, err = e.piaConfig(b)
+	}
+	var t *tunnel.Tunnel
+	if err == nil {
+		t, err = tunnel.Start(cfg, func() (net.PacketConn, error) { return b.ListenPacket(0) }, b.LookupIP)
+	}
 	if err == nil {
 		t.Shake()
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err == nil {
+		te.cfg = cfg
+	}
 	te.starting = false
 	if e.tunnels[id] != te { // removed or replaced meanwhile
 		if t != nil {
@@ -244,7 +279,13 @@ func (e *Engine) tunnelViewsLocked(speeds map[string]float64) []IfaceView {
 			ID: tunnelPath(id), Name: "VPN via " + name, Tunnel: true, Of: id,
 			Present: state == "up", Enabled: true, Connections: e.connsLocked(id),
 			SocksPort: te.socks.Port(), Speed: speeds[tunnelPath(id)],
-			TunnelState: state, TunnelError: te.err, IP: te.cfg.Address.String(),
+			TunnelState: state, TunnelError: te.err, Provider: "conf",
+		}
+		if te.pia {
+			v.Provider = "pia"
+		}
+		if te.cfg.Address.IsValid() {
+			v.IP = te.cfg.Address.String()
 		}
 		if ent != nil {
 			// A tunnel follows its interface's upload switch and shares its limits.

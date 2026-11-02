@@ -25,6 +25,7 @@ import (
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
 	"downloadmanagersquared/engine/internal/netif"
+	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/portmap"
 	"downloadmanagersquared/engine/internal/rate"
 	"downloadmanagersquared/engine/internal/socks"
@@ -108,6 +109,8 @@ type Engine struct {
 	snapshot StateEvent
 
 	mapPort func(ctx context.Context, gw portmap.Gateway, port int, lifetime time.Duration) error
+	pia     *piaState
+	piaAPI  pia.API
 
 	quit     chan struct{}
 	quitOnce sync.Once
@@ -149,6 +152,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		resolves:  map[string]resolveReq{},
 		tunnels:   map[string]*tunnelEntry{},
 		mapPort:   portmap.Map,
+		piaAPI:    pia.Default,
 		quit:      make(chan struct{}),
 	}
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
@@ -177,6 +181,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	}
 	e.loadDownloads()
 	e.loadTunnels()
+	e.loadPIA()
 	return e, nil
 }
 
@@ -1066,11 +1071,13 @@ type IfaceView struct {
 	TunnelState string `json:"tunnelState,omitempty"` // "up", "connecting", "down" (retrying), "off" (its interface isn't used)
 	TunnelError string `json:"tunnelError,omitempty"`
 	HasTunnel   bool   `json:"hasTunnel,omitempty"` // an interface with a tunnel configured
+	Provider    string `json:"provider,omitempty"`  // a tunnel's: "conf" or "pia"
 }
 
 type StateEvent struct {
 	Downloads  []download.Summary `json:"downloads"`
 	Interfaces []IfaceView        `json:"interfaces"`
+	PIA        PIAView            `json:"pia"`
 	Speed      float64            `json:"speed"`
 	ETA        float64            `json:"eta"`
 	Active     int                `json:"active"`
@@ -1133,7 +1140,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	tviews := e.tunnelViewsLocked(speeds)
 	sort.Slice(tviews, func(i, j int) bool { return tviews[i].Name < tviews[j].Name })
 	views = append(views, tviews...)
-	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, Speed: total, ETA: e.eta.Seconds(), Active: active}
+	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, PIA: e.piaViewLocked(), Speed: total, ETA: e.eta.Seconds(), Active: active}
 }
 
 func incomingText(in incoming) string {

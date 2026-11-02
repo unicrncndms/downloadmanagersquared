@@ -303,6 +303,15 @@ func (t *Tunnel) Up() bool {
 	return false
 }
 
+// AddPeer lets one more peer in, for a tunnel that is the server side.
+func (t *Tunnel) AddPeer(pub string, allowed netip.Prefix) error {
+	k, err := parseKey(pub)
+	if err != nil {
+		return err
+	}
+	return t.dev.IpcSet(fmt.Sprintf("public_key=%s\nreplace_allowed_ips=true\nallowed_ip=%s\n", hex.EncodeToString(k[:]), allowed))
+}
+
 // Shake makes the tunnel shake hands now, so Up soon tells whether its server answers.
 func (t *Tunnel) Shake() {
 	c, err := t.tnet.DialUDP(nil, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 9})

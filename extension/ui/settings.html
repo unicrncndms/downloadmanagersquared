@@ -45,6 +45,7 @@
     <nav>
       <a href="#connections">Connections</a>
       <a href="#general">Settings</a>
+      <a href="#pia">PIA</a>
       <a href="#sites">Learned sites</a>
     </nav>
   </header>
@@ -99,6 +100,24 @@
         <span><input type="checkbox" id="sAuto"></span>
       </form>
       <div class="row-actions"><button class="primary" id="saveSettings">Save</button></div>
+    </section>
+
+    <section id="pia" class="panel">
+      <h2>Private Internet Access</h2>
+      <p class="lead muted">With a PIA login, every connection without a .conf of its own gets its own PIA tunnel. Your login is kept by the engine, encrypted for your Windows account, and never shown here again.</p>
+      <p><span id="piaState" class="badge dim">Not set up</span> <span id="piaError" class="muted"></span></p>
+      <form class="settings" id="piaForm" autocomplete="off">
+        <label for="piaUser">Username</label>
+        <input type="text" id="piaUser" placeholder="p1234567">
+        <label for="piaPass">Password</label>
+        <input type="password" id="piaPass">
+        <label for="piaRegion">Region</label>
+        <select id="piaRegion"><option value="">Lowest latency</option></select>
+      </form>
+      <div class="row-actions">
+        <button class="primary" id="piaSave">Save</button>
+        <button id="piaClear">Sign out</button>
+      </div>
     </section>
 
     <section id="sites" class="panel">

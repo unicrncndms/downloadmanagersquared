@@ -22,6 +22,7 @@ import (
 // vpnServer is a WireGuard server on loopback serving a file at 10.9.0.1,
 // an address only reachable through the tunnel.
 type vpnServer struct {
+	t        *tunnel.Tunnel
 	endpoint string
 	pub      string
 	data     []byte
@@ -52,7 +53,7 @@ func newVPNServer(t *testing.T, clientPub string) *vpnServer {
 		w.Header().Set("Content-Disposition", `attachment; filename="vpn.bin"`)
 		http.ServeContent(w, r, "vpn.bin", time.Time{}, bytes.NewReader(data))
 	}))
-	return &vpnServer{endpoint: srv.LocalAddr().String(), pub: pub, data: data}
+	return &vpnServer{t: srv, endpoint: srv.LocalAddr().String(), pub: pub, data: data}
 }
 
 // loopbackEngine is an engine whose only interface is this machine's loopback.
@@ -64,6 +65,13 @@ func loopbackEngine(t *testing.T) *Engine {
 	}
 	t.Cleanup(e.Shutdown)
 	e.settings.SaveDir = t.TempDir()
+	e.mu.Lock()
+	e.refreshInterfacesLocked(loopbackIfaces())
+	e.mu.Unlock()
+	return e
+}
+
+func loopbackIfaces() []netif.Interface {
 	ifs, _ := net.Interfaces()
 	var idx uint32
 	for _, i := range ifs {
@@ -71,10 +79,7 @@ func loopbackEngine(t *testing.T) *Engine {
 			idx = uint32(i.Index)
 		}
 	}
-	e.mu.Lock()
-	e.refreshInterfacesLocked([]netif.Interface{{ID: "lo", Name: "Loopback", Index: idx, IPv4: net.IPv4(127, 0, 0, 1)}})
-	e.mu.Unlock()
-	return e
+	return []netif.Interface{{ID: "lo", Name: "Loopback", Index: idx, IPv4: net.IPv4(127, 0, 0, 1)}}
 }
 
 func importConf(t *testing.T, e *Engine, srv *vpnServer, clientPriv string) {

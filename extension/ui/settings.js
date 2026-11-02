@@ -19,6 +19,9 @@ $("confFile").addEventListener("change", async () => {
 });
 
 function vpnCell(i, tun) {
+  if (tun && tun.provider === "pia") {
+    return el("span", { class: "badge " + (TUNNEL_CLASS[tun.tunnelState] || ""), title: tun.tunnelError || tun.ip }, "PIA: " + (TUNNEL_TEXT[tun.tunnelState] || tun.tunnelState));
+  }
   if (!tun) {
     return el("button", { class: "small", onclick: () => { confFor = i.id; $("confFile").click(); } }, "Import .conf");
   }
@@ -116,6 +119,39 @@ $("saveSettings").onclick = async () => {
   await act("setAutostart", { on: $("sAuto").checked }, "Settings saved");
 };
 
+// --- PIA ---
+
+const PIA_STATE = {
+  off: ["Not set up", "dim"], connecting: ["Connecting", "warn"], ok: ["Connected", "ok"],
+  "login-failed": ["Login refused: enter your username and password again", "bad"], error: ["Trouble connecting", "warn"],
+};
+let piaRegionsLoaded = false;
+
+function renderPIA(p, settings) {
+  const [text, cls] = PIA_STATE[p.state] || [p.state, ""];
+  $("piaState").textContent = text + (p.state === "ok" && p.region ? ` · ${p.region}` : "");
+  $("piaState").className = "badge " + cls;
+  $("piaError").textContent = p.state === "error" ? p.error || "" : "";
+  $("piaClear").hidden = !p.configured;
+  if (!piaRegionsLoaded) {
+    piaRegionsLoaded = true;
+    call("piaRegions", {}).then((regions) => {
+      $("piaRegion").replaceChildren(el("option", { value: "" }, "Lowest latency"),
+        ...regions.sort((a, b) => a.name.localeCompare(b.name))
+          .map((r) => el("option", { value: r.id }, r.name + (r.portForward ? "" : " (no port forwarding)"))));
+      $("piaRegion").value = settings.piaRegion || "";
+    }).catch(() => { piaRegionsLoaded = false; });
+  }
+}
+
+$("piaSave").onclick = () => {
+  const user = $("piaUser").value.trim();
+  if (user && !$("piaPass").value) return toast("Enter the password too");
+  act("setPia", { user, pass: $("piaPass").value, region: $("piaRegion").value }, user ? "PIA login saved" : "PIA region saved")
+    .then(() => { $("piaPass").value = ""; });
+};
+$("piaClear").onclick = () => act("clearPia", {}, "Signed out of PIA");
+
 // --- learned sites ---
 
 function renderRecipes(recipes) {
@@ -143,6 +179,7 @@ connectUI((m) => {
   renderConn(m, "Engine connected");
   if (!m.state || !m.settings) return;
   renderIfaces(m.state, m.settings);
+  renderPIA(m.state.pia || { state: "off" }, m.settings);
   renderRecipes(m.recipes);
   if (!settingsFilled) {
     fillSettings(m.settings, m.autostart);

@@ -284,6 +284,27 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		}
 		e.syncTunnels(time.Now())
 		return nil, nil
+	case "setPia":
+		p, err := decode[struct {
+			User   string  `json:"user"`
+			Pass   string  `json:"pass"`
+			Region *string `json:"region"`
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		if p.Region != nil {
+			e.applySettings(func(s *Settings) { s.PIARegion = *p.Region })
+			e.restartPIATunnels()
+		}
+		if p.User != "" {
+			return nil, e.setPIA(strings.TrimSpace(p.User), p.Pass)
+		}
+		return nil, nil
+	case "clearPia":
+		return nil, e.setPIA("", "")
+	case "piaRegions":
+		return e.piaRegions()
 	case "removeTunnel":
 		p, err := decode[struct {
 			Iface string `json:"iface"`

@@ -31,6 +31,7 @@ type Settings struct {
 	TorrentPort        int                       `json:"torrentPort"` // where peers connect in, on every interface; picked once
 	VPNHTTP            string                    `json:"vpnHttp"`     // VPN mode an HTTP download gets unless chosen when added
 	VPNTorrent         string                    `json:"vpnTorrent"`  // the same for a torrent
+	PIARegion          string                    `json:"piaRegion"`   // "" = the lowest latency
 }
 
 // VPN modes as settings and the extension name them.
