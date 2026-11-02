@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
+	"downloadmanagersquared/engine/internal/torrent"
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
@@ -35,6 +37,12 @@ type hashParams struct {
 	ID     string `json:"id"`
 	SHA256 string `json:"sha256"`
 	MD5    string `json:"md5"`
+}
+
+type chooseParams struct {
+	ID    string `json:"id"`
+	Files []bool `json:"files"`
+	Dir   string `json:"dir"`
 }
 
 type pageParams struct {
@@ -124,6 +132,20 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, winutil.ShowInFolder(j.Path())
 		}
 		return nil, nil
+	case "chooseFiles":
+		p, err := decode[chooseParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		j, err := e.entry(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		t, ok := j.(*torrent.Torrent)
+		if !ok {
+			return nil, fmt.Errorf("%q is not a torrent", p.ID)
+		}
+		return nil, t.Choose(p.Files, strings.TrimSpace(p.Dir))
 	case "pauseAll":
 		e.PauseAll()
 		return nil, nil

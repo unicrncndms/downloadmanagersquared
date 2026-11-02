@@ -45,6 +45,9 @@ function makeCard(id) {
     el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, "Removed from list (partial file kept)") }, "Keep partial file"),
     el("button", { class: "small", onclick: () => { ask.hidden = true; actions.hidden = false; } }, "Cancel"));
   const actions = el("div", { class: "actions" }, pause, resume, folder, remove);
+  // The add step: a torrent waits here until its files and folder are chosen.
+  const pick = el("div", { class: "pick", hidden: true });
+  let picking = false;
 
   const page = el("input", { type: "url" });
   const sha = el("input", { type: "text", class: "mono", placeholder: "optional" });
@@ -63,7 +66,7 @@ function makeCard(id) {
     el("div", { class: "top" }, name, status),
     el("div", { class: "bar" }, fill),
     el("div", { class: "meta" }, sizeText, speedText),
-    err, conns,
+    err, pick, conns,
     actions, ask,
     details);
 
@@ -80,7 +83,10 @@ function makeCard(id) {
     status.className = "badge " + (STATUS_CLASS[d.status] || "");
     fill.style.width = percent(d) + "%";
     const seeded = torrent && d.finished; // complete: what counts now is the upload
-    sizeText.textContent = seeded
+    const choosing = d.status === "choosing";
+    sizeText.textContent = choosing
+      ? `${d.files.length} file${d.files.length === 1 ? "" : "s"} · ${fmtBytes(d.files.reduce((n, f) => n + f.size, 0))}`
+      : seeded
       ? `${fmtBytes(d.size)} · uploaded ${fmtBytes(d.uploaded || 0)} · ratio ${(d.ratio || 0).toFixed(2)}`
       : known
         ? `${fmtBytes(d.done)} of ${fmtBytes(d.size)} (${percent(d).toFixed(1)}%)${torrent || d.rangeOk ? "" : " · main connection only"}`
@@ -90,8 +96,12 @@ function makeCard(id) {
     err.textContent = d.error || "";
     const running = ["running", "verifying", "queued", "metadata", "checking", "seeding"].includes(d.status);
     pause.hidden = !running;
-    resume.hidden = running || d.status === "completed";
-    folder.hidden = !known;
+    resume.hidden = running || choosing || d.status === "completed";
+    folder.hidden = !known || choosing;
+    remove.hidden = choosing; // the add step has its own Cancel
+    pick.hidden = !choosing;
+    if (choosing && !picking) renderPick(d);
+    picking = choosing;
     details.hidden = torrent; // landing page and checksums are for HTTP downloads
 
     // One line per connection: name, state, connections, speed (and why, if it failed).
@@ -144,6 +154,19 @@ function makeCard(id) {
       filled = true;
     }
   }
+  function renderPick(d) {
+    const boxes = d.files.map((f) => el("input", { type: "checkbox", checked: f.selected }));
+    const dir = el("input", { type: "text", value: d.dir });
+    pick.replaceChildren(
+      el("div", { class: "files" }, d.files.map((f, i) => el("label", {},
+        boxes[i], el("span", { class: "path" }, f.path), el("span", { class: "muted num" }, fmtBytes(f.size))))),
+      el("div", { class: "form" },
+        el("label", {}, d.files.length > 1 ? "Save to (in a folder named after the torrent)" : "Save to"), dir, el("span")),
+      el("div", { class: "actions" },
+        el("button", { class: "small primary", onclick: () => act("chooseFiles", { id, files: boxes.map((b) => b.checked), dir: dir.value }, "Download queued") }, "Download"),
+        el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, "Cancelled") }, "Cancel")));
+  }
+
   return { root, update };
 }
 

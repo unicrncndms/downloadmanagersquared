@@ -159,9 +159,9 @@ func (e *Engine) loadDownloads() {
 		all = append(all, loaded{download.New(e, st), st.Added})
 	}
 	for _, st := range readStates[torrent.State](filepath.Join(e.dir, "torrents")) {
-		// A seeding torrent goes on seeding (schedule restarts it); the rest queue again.
+		// Seeding and fetching metadata go on (schedule restarts them); the rest queue again.
 		switch st.Status {
-		case download.StatusRunning, torrent.StatusMetadata, torrent.StatusChecking:
+		case download.StatusRunning, torrent.StatusChecking:
 			st.Status = download.StatusQueued
 		}
 		t, err := e.torrents.Add(st)
@@ -293,14 +293,18 @@ func (e *Engine) schedule() {
 		}
 	}
 	for _, d := range all {
-		// Seeding holds no slot: a torrent restored while seeding rejoins at once.
-		if t, ok := d.(*torrent.Torrent); ok && !t.Active() && t.Status() == torrent.StatusSeeding {
-			t.Start()
-			continue
+		// Seeding and fetching metadata hold no slot: a torrent restored doing either rejoins at once.
+		if t, ok := d.(*torrent.Torrent); ok && !t.Active() {
+			if s := t.Status(); s == torrent.StatusSeeding || s == torrent.StatusMetadata {
+				t.Start()
+				continue
+			}
 		}
 		if running < limit && !d.Running() && d.Status() == download.StatusQueued {
 			d.Start()
-			running++
+			if d.Running() { // a torrent still to be chosen only fetches its files
+				running++
+			}
 		}
 	}
 }
@@ -656,10 +660,11 @@ func (e *Engine) addTorrent(magnet string) (string, error) {
 	e.mu.Lock()
 	dir := e.settings.SaveDir
 	e.mu.Unlock()
-	t, err := e.torrents.Add(torrent.State{ID: newID(), Magnet: magnet, Dir: dir, Added: time.Now()})
+	t, err := e.torrents.Add(torrent.State{ID: newID(), Magnet: magnet, Dir: dir, Choose: true, Added: time.Now()})
 	if err != nil {
 		return "", fmt.Errorf("not a usable magnet link: %w", err)
 	}
+	t.Start() // learn the files for the add step, without waiting for a slot
 	e.mu.Lock()
 	e.downloads[t.ID()] = t
 	e.order = append(e.order, t.ID())

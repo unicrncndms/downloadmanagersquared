@@ -40,8 +40,32 @@ func newSwarm(t *testing.T, seeders int, size int) *swarm {
 	if err := os.WriteFile(filepath.Join(src, "file.bin"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	s := newSwarmOf(t, seeders, src, "file.bin")
+	s.data = data
+	return s
+}
+
+// newMultiSwarm seeds a torrent named "pack" holding one file of each size,
+// f0.bin, f1.bin and so on.
+func newMultiSwarm(t *testing.T, seeders int, sizes ...int) *swarm {
+	t.Helper()
+	src := t.TempDir()
+	os.Mkdir(filepath.Join(src, "pack"), 0o755)
+	for i, n := range sizes {
+		data := make([]byte, n)
+		rand.Read(data)
+		if err := os.WriteFile(filepath.Join(src, "pack", fmt.Sprintf("f%d.bin", i)), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return newSwarmOf(t, seeders, src, "pack")
+}
+
+// newSwarmOf seeds src/name, a file or a folder.
+func newSwarmOf(t *testing.T, seeders int, src, name string) *swarm {
+	t.Helper()
 	info := metainfo.Info{PieceLength: 256 << 10}
-	if err := info.BuildFromFilePath(filepath.Join(src, "file.bin")); err != nil {
+	if err := info.BuildFromFilePath(filepath.Join(src, name)); err != nil {
 		t.Fatal(err)
 	}
 	infoBytes, err := bencode.Marshal(info)
@@ -49,7 +73,7 @@ func newSwarm(t *testing.T, seeders int, size int) *swarm {
 		t.Fatal(err)
 	}
 	mi := metainfo.MetaInfo{InfoBytes: infoBytes}
-	s := &swarm{info: info, hash: mi.HashInfoBytes(), data: data, addrs: map[string]string{}}
+	s := &swarm{info: info, hash: mi.HashInfoBytes(), addrs: map[string]string{}}
 	for i := range seeders {
 		cfg := atorrent.NewDefaultClientConfig()
 		cfg.SetListenAddr("127.0.0.1:0")
@@ -343,4 +367,92 @@ func TestSeedingTorrentRestartsWithoutAQueueSlot(t *testing.T) {
 		t.Fatal("a seeding torrent checking its data holds a queue slot")
 	}
 	waitFor(t, "the restarted torrent to seed", 10*time.Second, func() bool { return tor.Status() == StatusSeeding })
+}
+
+func TestMagnetFetchesItsFilesThenWaitsForTheChoice(t *testing.T) {
+	sw := newMultiSwarm(t, 1, 256<<10, 512<<10)
+	var peers atomic.Int32
+	s, err := NewSession(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetIfaces([]Iface{sw.iface("eth", &peers)})
+	dir := t.TempDir()
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: dir, Choose: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	if tor.Running() {
+		t.Fatal("fetching metadata holds a queue slot")
+	}
+	waitFor(t, "the torrent's files", 10*time.Second, func() bool { return tor.Status() == StatusChoosing })
+	files := tor.Summary().Files
+	if len(files) != 2 || files[0].Path != "f0.bin" || files[1].Size != 512<<10 || !files[0].Selected || !files[1].Selected {
+		t.Fatalf("files offered = %+v, want f0.bin and f1.bin, both ticked", files)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("waiting for the choice, the torrent already wrote %d entries", len(entries))
+	}
+}
+
+func TestOnlyTickedFilesDownloadIntoTheChosenFolder(t *testing.T) {
+	// Files on piece boundaries, so no piece holds part of both.
+	sw := newMultiSwarm(t, 1, 512<<10, 512<<10)
+	var peers atomic.Int32
+	s, err := NewSession(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetIfaces([]Iface{sw.iface("eth", &peers)})
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir(), Choose: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	waitFor(t, "the torrent's files", 10*time.Second, func() bool { return tor.Status() == StatusChoosing })
+
+	chosen := t.TempDir()
+	if err := tor.Choose([]bool{false, true}, chosen); err != nil {
+		t.Fatal(err)
+	}
+	if tor.Status() != download.StatusQueued {
+		t.Fatalf("after the choice the torrent is %q, want queued", tor.Status())
+	}
+	if sum := tor.Summary(); sum.Size != 512<<10 {
+		t.Fatalf("size = %d, want only the ticked file's %d", sum.Size, 512<<10)
+	}
+	tor.Start()
+	waitFor(t, "the ticked file", 30*time.Second, func() bool { return tor.Status() == download.StatusCompleted })
+	// A multi-file torrent saves into a folder named after it.
+	if _, err := os.Stat(filepath.Join(chosen, "pack", "f1.bin")); err != nil {
+		t.Fatalf("ticked file missing: %v", err)
+	}
+	for _, p := range []string{"f0.bin", "f0.bin.part"} {
+		if _, err := os.Stat(filepath.Join(chosen, "pack", p)); err == nil {
+			t.Fatalf("unticked file was downloaded (%s exists)", p)
+		}
+	}
+}
+
+func TestChoosingNoFileIsRefused(t *testing.T) {
+	sw := newMultiSwarm(t, 0, 256<<10, 256<<10)
+	s, err := NewSession(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Info: sw.infoBytes(t), Dir: t.TempDir(), Choose: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start() // the files are known: straight to the choice
+	if tor.Status() != StatusChoosing {
+		t.Fatalf("a torrent with known files is %q, want choosing", tor.Status())
+	}
+	if err := tor.Choose([]bool{false, false}, ""); err == nil {
+		t.Fatal("choosing no file was accepted")
+	}
 }

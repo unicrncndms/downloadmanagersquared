@@ -34,13 +34,22 @@ func TestAddedTorrentIsListedAndSurvivesARestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.settings.MaxParallel = 1
+	busy, _ := e.Add(AddRequest{URL: "https://example.com/big.iso"})
+	b, _ := e.get(busy)
+	b.Start() // the only slot is taken
+	defer b.Stop(download.StatusPaused)
 	id, err := e.Add(AddRequest{URL: testMagnet})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Learning the files needs no slot: the add step must show them soon.
 	s := summaryOf(t, e, id)
-	if s.Kind != "torrent" || s.Filename != "debian.iso" || s.Status != download.StatusQueued {
-		t.Fatalf("listed as kind %q name %q status %q, want a queued torrent named debian.iso", s.Kind, s.Filename, s.Status)
+	if s.Kind != "torrent" || s.Filename != "debian.iso" || s.Status != torrent.StatusMetadata {
+		t.Fatalf("listed as kind %q name %q status %q, want a torrent named debian.iso fetching metadata", s.Kind, s.Filename, s.Status)
+	}
+	if _, err := e.Call(nil, "chooseFiles", []byte(`{"id":"`+id+`","files":[true]}`)); err == nil {
+		t.Fatal("chose files before they were known")
 	}
 	e.Shutdown()
 
@@ -49,9 +58,10 @@ func TestAddedTorrentIsListedAndSurvivesARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Shutdown()
-	s = summaryOf(t, e, id)
-	if s.Kind != "torrent" || s.Filename != "debian.iso" || s.Status != download.StatusQueued {
-		t.Fatalf("after restart: kind %q name %q status %q, want the same queued torrent", s.Kind, s.Filename, s.Status)
+	e.schedule()
+	j, _ := e.entry(id)
+	if s := summaryOf(t, e, id); s.Status != torrent.StatusMetadata || !j.(*torrent.Torrent).Active() {
+		t.Fatalf("after restart the torrent is %q (active %v), want fetching metadata again", s.Status, j.(*torrent.Torrent).Active())
 	}
 }
 
@@ -122,12 +132,13 @@ func TestSeedingTorrentKeepsSeedingAfterARestartWithoutASlot(t *testing.T) {
 	if s := summaryOf(t, e, seed); s.Status != torrent.StatusSeeding {
 		t.Fatalf("after restart the seeding torrent is %q", s.Status)
 	}
-	queued, err := e.Add(AddRequest{URL: testMagnet})
+	queued, err := e.Add(AddRequest{URL: "https://example.com/big.iso"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.schedule()
 	q, _ := e.entry(queued)
+	defer q.Stop(download.StatusPaused)
 	if !q.Running() {
 		t.Fatal("the seeding torrent took the only slot; the queued one didn't start")
 	}

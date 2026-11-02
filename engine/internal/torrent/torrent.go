@@ -2,13 +2,19 @@ package torrent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	atorrent "github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 
 	"downloadmanagersquared/engine/internal/download"
@@ -19,6 +25,7 @@ import (
 // seeding) is download.StatusCompleted.
 const (
 	StatusMetadata download.Status = "metadata" // a magnet link learning the torrent's files from peers
+	StatusChoosing download.Status = "choosing" // waiting for the user to pick files and a folder
 	StatusChecking download.Status = "checking" // hashing data already on disk
 	StatusSeeding  download.Status = "seeding"  // complete, uploading until the ratio target
 )
@@ -29,8 +36,10 @@ type State struct {
 	Magnet   string          `json:"magnet"`
 	Info     []byte          `json:"info,omitempty"` // bencoded info dict, once known
 	Dir      string          `json:"dir"`
+	Choose   bool            `json:"choose,omitempty"` // the user picks files and folder before it downloads
+	Skip     []int           `json:"skip,omitempty"`   // indexes of the files not to download
 	Name     string          `json:"name,omitempty"`
-	Size     int64           `json:"size"`
+	Size     int64           `json:"size"`               // of the files to download
 	Uploaded int64           `json:"uploaded,omitempty"` // across every run
 	Status   download.Status `json:"status"`
 	Error    string          `json:"error,omitempty"`
@@ -51,6 +60,7 @@ type Torrent struct {
 	upBase  int64 // st.Uploaded when this run joined the swarm
 	speed   rate.EWMA
 	upSpeed rate.EWMA
+	info    *metainfo.Info // st.Info parsed, once needed
 }
 
 // Add registers a torrent with the session without starting it.
@@ -93,6 +103,9 @@ func (t *Torrent) Summary() download.Summary {
 		Links: map[string]download.LinkSummary{}, Added: t.st.Added, Finished: t.st.Finished,
 		Uploaded: t.st.Uploaded,
 	}
+	if t.st.Status == StatusChoosing {
+		s.Files = t.filesLocked()
+	}
 	switch {
 	case !t.st.Finished.IsZero():
 		s.Done = t.st.Size
@@ -102,7 +115,7 @@ func (t *Torrent) Summary() download.Summary {
 			s.Ratio = float64(t.st.Uploaded) / float64(t.st.Size)
 		}
 	case t.t != nil && t.t.Info() != nil:
-		s.Done = t.t.BytesCompleted()
+		s.Done, _ = wanted(t.t, t.st.Skip)
 		if s.Speed > 0 {
 			s.ETA = float64(s.Size-s.Done) / s.Speed
 		}
@@ -144,17 +157,26 @@ func (t *Torrent) State() State {
 	return t.st
 }
 
-// Start joins the swarm: queued, it downloads everything, then seeds; seeding
-// (after a restart), it checks its data and seeds again without a queue slot.
+// Start joins the swarm. Queued, it downloads the chosen files, then seeds.
+// Seeding (after a restart), it checks its data and seeds again. Still to be
+// chosen, it only learns the files (if it doesn't know them) and waits in
+// StatusChoosing. Only checking and downloading hold a queue slot.
 func (t *Torrent) Start() {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	if t.active || t.st.Status == download.StatusCompleted {
+		t.mu.Unlock()
 		return
 	}
+	if t.st.Choose && t.st.Info != nil {
+		t.st.Status = StatusChoosing
+		t.mu.Unlock()
+		t.changed()
+		return
+	}
+	defer t.mu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.cancel, t.active = cancel, true
-	t.slot = t.st.Status != StatusSeeding
+	t.slot = !t.st.Choose && t.st.Status != StatusSeeding
 	t.st.Error = ""
 	if t.st.Info == nil {
 		t.st.Status = StatusMetadata
@@ -215,7 +237,14 @@ func (t *Torrent) run(ctx context.Context) {
 		t.st.Name, t.st.Size = download.SanitizeFilename(at.Name()), at.Length()
 		t.st.Info = at.Metainfo().InfoBytes
 		t.st.Status = StatusChecking
+		if t.st.Choose {
+			t.dropLocked()
+			t.st.Status = StatusChoosing
+		}
 	}) {
+		return
+	}
+	if t.State().Status == StatusChoosing {
 		return
 	}
 	// The file storage trusts a full-size file and distrusts a .part one without
@@ -227,12 +256,25 @@ func (t *Torrent) run(ctx context.Context) {
 	if !t.poll(ctx, at, func() bool { return !checking(at) }) {
 		return
 	}
-	if at.BytesCompleted() < at.Length() {
+	t.mu.Lock()
+	skip := t.st.Skip
+	t.mu.Unlock()
+	complete := func() bool {
+		done, size := wanted(at, skip)
+		return done == size
+	}
+	if !complete() {
 		if !t.update(at, func() { t.st.Status = download.StatusRunning }) {
 			return
 		}
-		at.DownloadAll()
-		if !t.poll(ctx, at, func() bool { return at.BytesCompleted() == at.Length() }) {
+		for i, f := range at.Files() {
+			if slices.Contains(skip, i) {
+				f.SetPriority(atorrent.PiecePriorityNone)
+			} else {
+				f.Download()
+			}
+		}
+		if !t.poll(ctx, at, complete) {
 			return
 		}
 	}
@@ -301,6 +343,91 @@ func (t *Torrent) poll(ctx context.Context, at *atorrent.Torrent, done func() bo
 		case <-tick.C:
 		}
 	}
+}
+
+// wanted is how much of the files to download is done, and their size.
+func wanted(at *atorrent.Torrent, skip []int) (done, size int64) {
+	for i, f := range at.Files() {
+		if !slices.Contains(skip, i) {
+			done += f.BytesCompleted()
+			size += f.Length()
+		}
+	}
+	return done, size
+}
+
+// Choose sets which files to download (one flag per file, in the torrent's
+// order) and the folder to save into ("" keeps the current one), and queues the
+// torrent. Only a torrent waiting in StatusChoosing takes a choice.
+func (t *Torrent) Choose(files []bool, dir string) error {
+	t.mu.Lock()
+	if t.st.Status != StatusChoosing {
+		t.mu.Unlock()
+		return errors.New("the files of this torrent can't be chosen now")
+	}
+	info, err := t.infoLocked()
+	if err != nil {
+		t.mu.Unlock()
+		return err
+	}
+	all := info.UpvertedFiles()
+	if len(files) != len(all) {
+		t.mu.Unlock()
+		return fmt.Errorf("got a choice for %d files, the torrent has %d", len(files), len(all))
+	}
+	var skip []int
+	var size int64
+	for i, on := range files {
+		if on {
+			size += all[i].Length
+		} else {
+			skip = append(skip, i)
+		}
+	}
+	if len(skip) == len(files) {
+		t.mu.Unlock()
+		return errors.New("choose at least one file")
+	}
+	if dir != "" {
+		t.st.Dir = dir
+	}
+	t.st.Skip, t.st.Size, t.st.Choose = skip, size, false
+	t.st.Status = download.StatusQueued
+	t.mu.Unlock()
+	t.changed()
+	return nil
+}
+
+// infoLocked parses the kept info dict.
+func (t *Torrent) infoLocked() (*metainfo.Info, error) {
+	if t.info == nil {
+		if t.st.Info == nil {
+			return nil, errors.New("the torrent's files aren't known yet")
+		}
+		var info metainfo.Info
+		if err := bencode.Unmarshal(t.st.Info, &info); err != nil {
+			return nil, err
+		}
+		t.info = &info
+	}
+	return t.info, nil
+}
+
+// filesLocked lists the torrent's files for the add step, nil while unknown.
+func (t *Torrent) filesLocked() []download.FileSummary {
+	info, err := t.infoLocked()
+	if err != nil {
+		return nil
+	}
+	var out []download.FileSummary
+	for i, f := range info.UpvertedFiles() {
+		p := info.BestName()
+		if info.IsDir() {
+			p = strings.Join(f.BestPath(), "/")
+		}
+		out = append(out, download.FileSummary{Path: p, Size: f.Length, Selected: !slices.Contains(t.st.Skip, i)})
+	}
+	return out
 }
 
 // hasData is whether any of the torrent's files, finished or partial, is on disk.

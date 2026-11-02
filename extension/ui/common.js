@@ -54,7 +54,7 @@ function el(tag, attrs, ...children) {
 const STATUS_TEXT = {
   queued: "Queued", running: "Downloading", paused: "Paused", verifying: "Verifying",
   completed: "Completed", failed: "Failed", metadata: "Finding files", checking: "Checking files",
-  seeding: "Seeding",
+  seeding: "Seeding", choosing: "Choose files",
 };
 const STATUS_CLASS = { completed: "ok", seeding: "ok", failed: "bad", paused: "dim", queued: "dim" };
 

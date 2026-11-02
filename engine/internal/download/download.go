@@ -1128,10 +1128,18 @@ type Summary struct {
 	Added    time.Time              `json:"added"`
 	Finished time.Time              `json:"finished,omitzero"`
 
-	// Torrents only, once complete.
-	Uploaded int64   `json:"uploaded,omitempty"`
-	Ratio    float64 `json:"ratio,omitempty"`
-	UpSpeed  float64 `json:"upSpeed,omitempty"`
+	// Torrents only: the files to choose from (while choosing), then the upload once complete.
+	Files    []FileSummary `json:"files,omitempty"`
+	Uploaded int64         `json:"uploaded,omitempty"`
+	Ratio    float64       `json:"ratio,omitempty"`
+	UpSpeed  float64       `json:"upSpeed,omitempty"`
+}
+
+// FileSummary is one file of a torrent.
+type FileSummary struct {
+	Path     string `json:"path"` // within the torrent, "/"-separated
+	Size     int64  `json:"size"`
+	Selected bool   `json:"selected"`
 }
 
 func (d *Download) Summary() Summary {
