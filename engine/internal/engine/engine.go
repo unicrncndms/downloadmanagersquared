@@ -283,31 +283,47 @@ func (e *Engine) get(id string) (*download.Download, error) {
 	return d, nil
 }
 
-// schedule starts queued downloads while there are free slots.
+// schedule starts queued downloads while there are free slots, HTTP downloads
+// before torrents, each in the order added. A queued HTTP download that finds
+// no free slot takes one from the latest added torrent that is downloading,
+// which goes back to the queue.
 func (e *Engine) schedule() {
 	e.mu.Lock()
 	limit := e.settings.MaxParallel
 	e.mu.Unlock()
 	all := e.list()
 	running := 0
+	var queued, torrents []entry
+	var downloading []*torrent.Torrent // holding a slot, in the order added
 	for _, d := range all {
-		if d.Running() {
+		t, isTorrent := d.(*torrent.Torrent)
+		switch {
+		case d.Running():
 			running++
+			if isTorrent {
+				downloading = append(downloading, t)
+			}
+		case isTorrent && !t.Active() && (t.Status() == torrent.StatusSeeding || t.Status() == torrent.StatusMetadata):
+			// Seeding and fetching metadata hold no slot: a torrent restored doing either rejoins at once.
+			t.Start()
+		case d.Status() == download.StatusQueued && isTorrent:
+			torrents = append(torrents, d)
+		case d.Status() == download.StatusQueued:
+			queued = append(queued, d)
 		}
 	}
-	for _, d := range all {
-		// Seeding and fetching metadata hold no slot: a torrent restored doing either rejoins at once.
-		if t, ok := d.(*torrent.Torrent); ok && !t.Active() {
-			if s := t.Status(); s == torrent.StatusSeeding || s == torrent.StatusMetadata {
-				t.Start()
-				continue
+	for _, d := range append(queued, torrents...) {
+		if running >= limit {
+			if _, isTorrent := d.(*torrent.Torrent); isTorrent || len(downloading) == 0 {
+				return
 			}
+			downloading[len(downloading)-1].Stop(download.StatusQueued)
+			downloading = downloading[:len(downloading)-1]
+			running--
 		}
-		if running < limit && !d.Running() && d.Status() == download.StatusQueued {
-			d.Start()
-			if d.Running() { // a torrent still to be chosen only fetches its files
-				running++
-			}
+		d.Start()
+		if d.Running() { // a torrent still to be chosen only fetches its files
+			running++
 		}
 	}
 }

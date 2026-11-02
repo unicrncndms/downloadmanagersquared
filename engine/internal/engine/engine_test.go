@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -242,5 +243,74 @@ func TestTorrentLinksAreRecognised(t *testing.T) {
 		if got := isTorrentURL(url); got != want {
 			t.Errorf("isTorrentURL(%q) = %v, want %v", url, got, want)
 		}
+	}
+}
+
+// queuedTorrent adds a torrent whose files are already chosen, so the queue
+// starts it like an HTTP download. n makes its info hash unique.
+func queuedTorrent(t *testing.T, e *Engine, n int) string {
+	t.Helper()
+	m := fmt.Sprintf("magnet:?xt=urn:btih:%040x&dn=t%d", n, n)
+	tor, err := e.torrents.Add(torrent.State{ID: newID(), Magnet: m, Dir: t.TempDir(), Status: download.StatusQueued, Added: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	e.downloads[tor.ID()] = tor
+	e.order = append(e.order, tor.ID())
+	e.mu.Unlock()
+	return tor.ID()
+}
+
+func running(t *testing.T, e *Engine, id string) bool {
+	t.Helper()
+	j, err := e.entry(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return j.Running()
+}
+
+func TestQueuedHTTPStartsBeforeAnEarlierQueuedTorrent(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	e.settings.MaxParallel = 1
+	tor := queuedTorrent(t, e, 1)
+	http, _ := e.Add(AddRequest{URL: "https://example.com/big.iso"})
+	e.schedule()
+	if !running(t, e, http) || running(t, e, tor) {
+		t.Fatalf("http running %v, torrent running %v; want the HTTP download first", running(t, e, http), running(t, e, tor))
+	}
+}
+
+func TestHTTPTakesTheSlotOfTheLatestDownloadingTorrent(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	e.settings.MaxParallel = 2
+	first, second := queuedTorrent(t, e, 1), queuedTorrent(t, e, 2)
+	e.schedule()
+	if !running(t, e, first) || !running(t, e, second) {
+		t.Fatal("both torrents should download while slots are free")
+	}
+
+	http, _ := e.Add(AddRequest{URL: "https://example.com/big.iso"})
+	e.schedule()
+	j, _ := e.entry(second)
+	if !running(t, e, http) || !running(t, e, first) || running(t, e, second) || j.Status() != download.StatusQueued {
+		t.Fatalf("http %v, first torrent %v, second torrent %v (%q); want the latest torrent bumped back to queued",
+			running(t, e, http), running(t, e, first), running(t, e, second), j.Status())
+	}
+
+	h, _ := e.entry(http)
+	h.Stop(download.StatusPaused)
+	e.schedule()
+	if !running(t, e, second) {
+		t.Fatal("the bumped torrent didn't resume when the slot freed")
 	}
 }
