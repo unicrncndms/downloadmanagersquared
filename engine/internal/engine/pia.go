@@ -121,24 +121,30 @@ func (e *Engine) piaWantedLocked() []string {
 	return ids
 }
 
+// piaLink is what a PIA tunnel needs for port forwarding.
+type piaLink struct {
+	forwards bool         // the region forwards ports
+	gateways []pia.Server // where port forwarding answers inside the tunnel, best first
+}
+
 // piaConfig registers a new key for one interface, through that interface,
 // and returns its tunnel config.
-func (e *Engine) piaConfig(b *netif.Binding) (tunnel.Config, error) {
+func (e *Engine) piaConfig(b *netif.Binding) (tunnel.Config, piaLink, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	e.mu.Lock()
 	p, api, regionID := e.pia, e.piaAPI, e.settings.PIARegion
 	e.mu.Unlock()
 	if p == nil {
-		return tunnel.Config{}, errors.New("PIA isn't set up")
+		return tunnel.Config{}, piaLink{}, errors.New("PIA isn't set up")
 	}
 	token, region, err := e.piaSession(ctx, p, api, regionID, b)
 	if err != nil {
-		return tunnel.Config{}, err
+		return tunnel.Config{}, piaLink{}, err
 	}
 	priv, pub, err := tunnel.GenerateKey()
 	if err != nil {
-		return tunnel.Config{}, err
+		return tunnel.Config{}, piaLink{}, err
 	}
 	srv := region.WG()[0]
 	k, err := api.AddKey(ctx, b.DialContext, srv, token, pub)
@@ -146,9 +152,117 @@ func (e *Engine) piaConfig(b *netif.Binding) (tunnel.Config, error) {
 		e.mu.Lock()
 		p.token = "" // maybe it expired early: log in again next time
 		e.mu.Unlock()
-		return tunnel.Config{}, err
+		return tunnel.Config{}, piaLink{}, err
 	}
-	return tunnel.ParseConf(k.Conf(priv, srv))
+	cfg, err := tunnel.ParseConf(k.Conf(priv, srv))
+	// PIA's README puts port forwarding on the server's address inside the
+	// tunnel; its scripts use the server's own. Try both.
+	link := piaLink{forwards: region.PortForward}
+	if k.ServerVIP != "" {
+		link.gateways = append(link.gateways, pia.Server{IP: k.ServerVIP, CN: srv.CN})
+	}
+	link.gateways = append(link.gateways, srv)
+	return cfg, link, err
+}
+
+const (
+	pfRebind = 15 * time.Minute // PIA drops a port not bound again within this
+	pfRetry  = time.Minute
+	pfShown  = 20 * time.Minute // a bind older than this no longer counts as reachable
+)
+
+// forwardLoop keeps the PIA tunnels' ports forwarded.
+func (e *Engine) forwardLoop() {
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-e.quit:
+			return
+		case now := <-t.C:
+			e.forwardPorts(now)
+		}
+	}
+}
+
+// forwardPorts gets each PIA tunnel in a forwarding region a port, and binds
+// it again every 15 minutes.
+func (e *Engine) forwardPorts(now time.Time) {
+	type job struct {
+		id string
+		te *tunnelEntry
+		t  *tunnel.Tunnel
+		b  *netif.Binding
+	}
+	var jobs []job
+	e.mu.Lock()
+	for id, te := range e.tunnels {
+		if !te.pia || !te.link.forwards || e.tunnelUpLocked(id) == nil || te.pfBusy {
+			continue
+		}
+		due := te.boundAt.IsZero() || now.Sub(te.boundAt) >= pfRebind
+		if te.pfErr != "" {
+			due = now.Sub(te.pfTried) >= pfRetry
+		}
+		if due {
+			te.pfBusy = true
+			jobs = append(jobs, job{id, te, te.t, te.on})
+		}
+	}
+	p, api, regionID := e.pia, e.piaAPI, e.settings.PIARegion
+	e.mu.Unlock()
+	for _, j := range jobs {
+		err := e.forwardPort(now, p, api, regionID, j.te, j.t, j.b)
+		e.mu.Lock()
+		j.te.pfBusy, j.te.pfTried = false, now
+		if j.te.t == j.t { // still the same tunnel
+			if err != nil {
+				log.Printf("PIA port forwarding on %s: %v", j.id, err)
+				j.te.pfErr = err.Error()
+			} else {
+				j.te.pfErr, j.te.boundAt = "", now
+			}
+		}
+		e.mu.Unlock()
+	}
+}
+
+func (e *Engine) forwardPort(now time.Time, p *piaState, api pia.API, regionID string, te *tunnelEntry, t *tunnel.Tunnel, b *netif.Binding) error {
+	if p == nil {
+		return errors.New("PIA isn't set up")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	e.mu.Lock()
+	sig, gws := te.sig, te.link.gateways
+	e.mu.Unlock()
+	var lastErr error
+	for _, gw := range gws {
+		if sig == nil || now.After(sig.Expires.Add(-24*time.Hour)) {
+			token, _, err := e.piaSession(ctx, p, api, regionID, b)
+			if err != nil {
+				return err
+			}
+			s, err := api.Signature(ctx, t.DialContext, gw, token)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			sig = &s
+		}
+		if err := api.BindPort(ctx, t.DialContext, gw, *sig); err != nil {
+			lastErr = err
+			continue
+		}
+		e.mu.Lock()
+		if te.t == t {
+			te.sig, te.pfPort = sig, sig.Port
+			te.link.gateways = []pia.Server{gw} // the one that answers
+		}
+		e.mu.Unlock()
+		return nil
+	}
+	return lastErr
 }
 
 // piaSession is a valid token and the region to use, logging in and reading

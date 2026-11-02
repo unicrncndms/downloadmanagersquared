@@ -3,10 +3,14 @@ package torrent
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	atorrent "github.com/anacrolix/torrent"
 )
 
 func TestPrivateTorrentOffersNoPEX(t *testing.T) {
@@ -105,5 +109,56 @@ func TestPrivateTorrentStaysOffTheDHT(t *testing.T) {
 		if node.asked(sw.hash[:]) {
 			t.Fatal("the private torrent was looked up on the DHT")
 		}
+	}
+}
+
+func TestInterfaceListensOnItsOwnForwardedPort(t *testing.T) {
+	sw := newSwarm(t, 0, 256<<10)
+	s, err := NewSession(Config{Port: freePort(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var peers atomic.Int32
+	ifc := sw.iface("lo~vpn", &peers)
+	var listened []int
+	ifc.Listen = func(port int) (net.Listener, error) {
+		listened = append(listened, port)
+		return net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
+	}
+	ifc.Port = freePort(t) // the port PIA forwards to this tunnel
+	s.SetIfaces([]Iface{ifc})
+	first := ifc.Port
+	ifc.Port = freePort(t) // a new forwarded port after the tunnel came back
+	s.SetIfaces([]Iface{ifc})
+	if len(listened) != 2 || listened[0] != first || listened[1] != ifc.Port {
+		t.Fatalf("listened on %v, want the forwarded %d and then %d", listened, first, ifc.Port)
+	}
+	if ds := s.dhtServers(); len(ds) != 1 || ds[0].(portedDHT).port != ifc.Port {
+		t.Fatalf("DHT announces %+v, want the forwarded port", ds)
+	}
+}
+
+// announceRecorder is a DHT server that only records what it's asked to announce.
+type announceRecorder struct {
+	atorrent.DhtServer
+	port    int
+	implied bool
+}
+
+func (a *announceRecorder) Announce(_ [20]byte, port int, implied bool) (atorrent.DhtAnnounce, error) {
+	a.port, a.implied = port, implied
+	return nil, errors.New("recorded")
+}
+
+func TestDHTAnnouncesTheInterfacesPort(t *testing.T) {
+	rec := &announceRecorder{}
+	portedDHT{DhtServer: rec, port: 47123}.Announce([20]byte{}, 6881, true)
+	if rec.port != 47123 || rec.implied {
+		t.Fatalf("announced port %d implied %v, want 47123 stated", rec.port, rec.implied)
+	}
+	portedDHT{DhtServer: rec}.Announce([20]byte{}, 6881, true)
+	if rec.port != 6881 || !rec.implied {
+		t.Fatal("an interface that doesn't listen should announce as the client does")
 	}
 }

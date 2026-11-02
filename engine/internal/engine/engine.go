@@ -254,6 +254,7 @@ func readStates[S interface{ download.State | torrent.State }](dir string) []S {
 func (e *Engine) Run() {
 	go ipc.Serve(e.ln, e)
 	go e.mapPorts()
+	go e.forwardLoop()
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	last := time.Now()
@@ -627,7 +628,7 @@ func (e *Engine) torrentIfacesFor(m download.VPNMode) []torrent.Iface {
 				// Bound to this tunnel's stack: after a restart it is a new generation.
 				t := te.t
 				ifc = torrent.Iface{
-					ID: id, Gen: te.gen, Upload: e.uploadLocked(base),
+					ID: id, Gen: te.gen, Port: te.pfPort, Upload: e.uploadLocked(base),
 					Dial: t.DialContext, ListenPacket: t.ListenPacket, LookupIP: t.LookupIP, Listen: t.Listen,
 				}
 			}

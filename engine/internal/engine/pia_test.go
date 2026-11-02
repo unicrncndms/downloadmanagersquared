@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -24,13 +25,20 @@ import (
 // fakePIA is PIA's API in front of one in-process WireGuard server, which
 // accepts every key registered with addKey.
 type fakePIA struct {
-	api      pia.API
-	logins   atomic.Int32
-	keys     atomic.Int32
-	password string
+	api        pia.API
+	logins     atomic.Int32
+	keys       atomic.Int32
+	signatures atomic.Int32
+	binds      atomic.Int32
+	password   string
+	vpn        *vpnServer
 }
 
-func newFakePIA(t *testing.T) *fakePIA {
+func newFakePIA(t *testing.T) *fakePIA { return newFakePIAForwarding(t, false) }
+
+// newFakePIAForwarding is newFakePIA in a region that may forward ports: then
+// the server answers port forwarding inside the tunnel at 10.9.0.1:19999.
+func newFakePIAForwarding(t *testing.T, forwards bool) *fakePIA {
 	t.Helper()
 	f := &fakePIA{password: "right"}
 	_, dummy, _ := tunnel.GenerateKey()
@@ -46,7 +54,7 @@ func newFakePIA(t *testing.T) *fakePIA {
 			}
 			fmt.Fprint(w, `{"token":"TOKEN"}`)
 		case "/servers":
-			fmt.Fprintf(w, `{"regions":[{"id":"nl","name":"Netherlands","port_forward":true,"servers":{"meta":[{"ip":"%s","cn":"nl"}],"wg":[{"ip":"%s","cn":"example.com"}]}}]}`+"\nSIG\n", host, host)
+			fmt.Fprintf(w, `{"regions":[{"id":"nl","name":"Netherlands","port_forward":%v,"servers":{"meta":[{"ip":"%s","cn":"nl"}],"wg":[{"ip":"%s","cn":"example.com"}]}}]}`+"\nSIG\n", forwards, host, host)
 		}
 	}))
 	t.Cleanup(web.Close)
@@ -64,7 +72,27 @@ func newFakePIA(t *testing.T) *fakePIA {
 	ca := x509.NewCertPool()
 	ca.AddCert(keys.Certificate())
 	_, kport, _ := net.SplitHostPort(keys.Listener.Addr().String())
-	f.api = pia.API{TokenURL: web.URL + "/token", ServerListURL: web.URL + "/servers", CA: ca, KeyPort: atoi(kport), MetaPort: 1}
+	f.api = pia.API{TokenURL: web.URL + "/token", ServerListURL: web.URL + "/servers", CA: ca, KeyPort: atoi(kport), MetaPort: 1, PFPort: 19999}
+
+	pfLn, err := srv.t.Listen(19999) // inside the tunnel, as on PIA's servers
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(`{"port":47000,"expires_at":%q}`, time.Now().Add(1440*time.Hour).Format(time.RFC3339))))
+	pf := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/getSignature":
+			f.signatures.Add(1)
+			json.NewEncoder(w).Encode(map[string]string{"status": "OK", "payload": payload, "signature": "SIG"})
+		case "/bindPort":
+			f.binds.Add(1)
+			json.NewEncoder(w).Encode(map[string]string{"status": "OK"})
+		}
+	}))
+	pf.Listener = pfLn
+	pf.StartTLS()
+	t.Cleanup(pf.Close)
+	f.vpn = srv
 	return f
 }
 
@@ -156,4 +184,60 @@ func TestRefusedPIALoginWaitsForTheUser(t *testing.T) {
 	f.password = "wrong" // the user fixes it on PIA's side and saves again
 	setPIA(t, e, "p0123456", "wrong")
 	waitTunnelUp(t, e)
+}
+
+func TestPIATunnelForwardsAPortAndTakesPeersOnIt(t *testing.T) {
+	f := newFakePIAForwarding(t, true)
+	e := loopbackEngine(t)
+	e.piaAPI = f.api
+	setPIA(t, e, "p0123456", "right")
+	waitTunnelUp(t, e)
+	e.forwardPorts(time.Now())
+	if v := ifaceView(t, e, tunnelPath("lo")); v.Incoming != "reachable" {
+		t.Fatalf("tunnel with a forwarded port shown as %q", v.Incoming)
+	}
+	// The VPN-only session listens on the forwarded port inside the tunnel,
+	// where PIA sends incoming peers.
+	e.syncTorrentIfaces()
+	if ifs := e.torrentIfacesFor(download.VPNOnly); len(ifs) != 1 || ifs[0].Port != 47000 {
+		t.Fatalf("VPN-only torrents listen on %+v, want port 47000", ifs)
+	}
+	c, err := f.vpn.t.DialContext(t.Context(), "tcp4", "10.9.0.2:47000")
+	if err != nil {
+		t.Fatalf("a peer coming in through PIA couldn't connect: %v", err)
+	}
+	c.Close()
+
+	// PIA drops a port that isn't bound again within 15 minutes.
+	e.forwardPorts(time.Now().Add(5 * time.Minute))
+	if f.binds.Load() != 1 {
+		t.Fatalf("bound again after 5 minutes (%d binds)", f.binds.Load())
+	}
+	for i := 1; i <= 5; i++ { // over an hour
+		e.forwardPorts(time.Now().Add(time.Duration(i) * 15 * time.Minute))
+	}
+	if f.binds.Load() != 6 || f.signatures.Load() != 1 {
+		t.Fatalf("an hour later: %d binds, %d signatures; want a bind every 15 minutes on one signature", f.binds.Load(), f.signatures.Load())
+	}
+	if v := ifaceView(t, e, tunnelPath("lo")); v.Incoming != "reachable" {
+		t.Fatalf("after an hour the tunnel is %q", v.Incoming)
+	}
+}
+
+func TestPIARegionWithoutForwardingIsOutgoingOnly(t *testing.T) {
+	f := newFakePIAForwarding(t, false)
+	e := loopbackEngine(t)
+	e.piaAPI = f.api
+	setPIA(t, e, "p0123456", "right")
+	waitTunnelUp(t, e)
+	e.forwardPorts(time.Now())
+	if f.signatures.Load() != 0 {
+		t.Fatal("asked a region without port forwarding for a port")
+	}
+	if v := ifaceView(t, e, tunnelPath("lo")); v.Incoming != "outgoing" {
+		t.Fatalf("tunnel in a region without forwarding shown as %q", v.Incoming)
+	}
+	if ifs := e.torrentIfacesFor(download.VPNOnly); len(ifs) != 1 {
+		t.Fatal("torrents can't use a tunnel without a forwarded port")
+	}
 }

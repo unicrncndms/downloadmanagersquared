@@ -30,6 +30,7 @@ import (
 type Iface struct {
 	ID           string
 	Gen          int  // a new generation (a restarted tunnel) gets new sockets
+	Port         int  // where peers connect in on this interface; 0 = the session's
 	Upload       bool // peers may download from us through it
 	Dial         func(ctx context.Context, network, addr string) (net.Conn, error)
 	ListenPacket func(port int) (net.PacketConn, error) // an IPv4 UDP socket on port, 0 for any free one
@@ -51,6 +52,7 @@ type ifaceSockets struct {
 	utp   *utp.Socket // uTP peers and DHT share this UDP socket
 	dht   *dht.Server
 	tcp   net.Listener          // nil unless peers can connect in over TCP
+	port  int                   // where peers connect in, 0 if they can't
 	peers int                   // peers open or being dialed
 	open  map[*trackedPeer]bool // peers open
 	gone  chan struct{}         // closed when the interface is no longer used
@@ -156,7 +158,7 @@ func (s *Session) SetIfaces(ifaces []Iface) {
 	var closing, switching []*trackedPeer
 	kept := s.ifs[:0]
 	for _, is := range s.ifs {
-		if w, ok := want[is.ID]; ok && w.Gen == is.Gen {
+		if w, ok := want[is.ID]; ok && w.Gen == is.Gen && w.Port == is.Iface.Port {
 			kept = append(kept, is)
 			have[is.ID] = true
 			if w.Upload != is.Upload {
@@ -198,10 +200,14 @@ func (s *Session) SetIfaces(ifaces []Iface) {
 }
 
 func (s *Session) addIface(ifc Iface) error {
-	incoming := ifc.Listen != nil && s.cfg.Port != 0
+	want := s.cfg.Port
+	if ifc.Port != 0 {
+		want = ifc.Port
+	}
+	incoming := ifc.Listen != nil && want != 0
 	port := 0
 	if incoming {
-		port = s.cfg.Port
+		port = want
 	}
 	pc, err := ifc.ListenPacket(port)
 	if err != nil && port != 0 {
@@ -242,10 +248,26 @@ func (s *Session) addIface(ifc Iface) error {
 	}
 	s.cl.AddDhtServer(atorrent.AnacrolixDhtServerWrapper{Server: ds})
 	if incoming {
+		is.port = port
 		s.cl.AddListener(&peerListener{s: s, is: is, l: is.tcp})
 		s.cl.AddListener(&peerListener{s: s, is: is, l: us})
 	}
 	return nil
+}
+
+// portedDHT announces on one interface's DHT with that interface's port. The
+// client states one port for all (or lets the DHT take our UDP source port,
+// which a VPN's NAT needn't keep); a forwarded port differs per tunnel.
+type portedDHT struct {
+	atorrent.DhtServer
+	port int // 0: announce as asked
+}
+
+func (d portedDHT) Announce(hash [20]byte, port int, impliedPort bool) (atorrent.DhtAnnounce, error) {
+	if d.port != 0 {
+		port, impliedPort = d.port, false
+	}
+	return d.DhtServer.Announce(hash, port, impliedPort)
 }
 
 func (is *ifaceSockets) close() {
@@ -325,7 +347,7 @@ func (s *Session) dhtServers() []atorrent.DhtServer {
 	defer s.mu.Unlock()
 	var out []atorrent.DhtServer
 	for _, is := range s.ifs {
-		out = append(out, atorrent.AnacrolixDhtServerWrapper{Server: is.dht})
+		out = append(out, portedDHT{atorrent.AnacrolixDhtServerWrapper{Server: is.dht}, is.port})
 	}
 	return out
 }

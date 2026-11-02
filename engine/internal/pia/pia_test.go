@@ -3,6 +3,7 @@ package pia
 import (
 	"context"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"downloadmanagersquared/engine/internal/tunnel"
 )
@@ -159,5 +161,48 @@ func TestAddKeyRefusesAServerWithoutPIAsCertificate(t *testing.T) {
 func TestDefaultAPIHasPIAsCA(t *testing.T) {
 	if Default.CA == nil || Default.KeyPort != 1337 || !strings.HasPrefix(Default.TokenURL, "https://www.privateinternetaccess.com/") {
 		t.Fatalf("default API %+v", Default)
+	}
+}
+
+func TestPortForwardingSignsThenBinds(t *testing.T) {
+	var binds []string
+	expires := time.Now().Add(60 * 24 * time.Hour).UTC().Truncate(time.Second)
+	payload := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(`{"token":"x","port":47123,"expires_at":%q}`, expires.Format(time.RFC3339Nano))))
+	pf := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch r.URL.Path {
+		case "/getSignature":
+			if q.Get("token") != "TOKEN" {
+				json.NewEncoder(w).Encode(map[string]string{"status": "ERROR", "message": "bad token"})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"status": "OK", "payload": payload, "signature": "SIG/+="})
+		case "/bindPort":
+			binds = append(binds, q.Get("payload")+"|"+q.Get("signature"))
+			json.NewEncoder(w).Encode(map[string]string{"status": "OK", "message": "port scheduled for add"})
+		}
+	}))
+	defer pf.Close()
+	ca := x509.NewCertPool()
+	ca.AddCert(pf.Certificate())
+	_, port, _ := net.SplitHostPort(pf.Listener.Addr().String())
+	api := API{CA: ca, PFPort: atoi(port)}
+	gw := Server{IP: "127.0.0.1", CN: "example.com"}
+
+	sig, err := api.Signature(t.Context(), dial, gw, "TOKEN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sig.Port != 47123 || !sig.Expires.Equal(expires) {
+		t.Fatalf("signature for port %d until %v, want 47123 until %v", sig.Port, sig.Expires, expires)
+	}
+	if err := api.BindPort(t.Context(), dial, gw, sig); err != nil {
+		t.Fatal(err)
+	}
+	if len(binds) != 1 || binds[0] != payload+"|SIG/+=" {
+		t.Fatalf("bound with %v, want the payload and signature as received", binds)
+	}
+	if _, err := api.Signature(t.Context(), dial, gw, "OLD"); err == nil {
+		t.Fatal("a refused signature request succeeded")
 	}
 }

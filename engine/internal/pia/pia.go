@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -268,4 +269,46 @@ func (k Key) Conf(priv string, srv Server) string {
 	fmt.Fprintf(&b, "\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = %s\nPersistentKeepalive = 25\n",
 		k.ServerKey, net.JoinHostPort(srv.IP, strconv.Itoa(k.ServerPort)))
 	return b.String()
+}
+
+// Signature lets a port be bound on one server, until it expires (about two months).
+type Signature struct {
+	Payload   string // base64, sent back as received
+	Signature string
+	Port      int
+	Expires   time.Time
+}
+
+// Signature asks the server for a forwarded port. gw is the server as seen
+// inside the tunnel, and dial must go through that tunnel.
+func (a API) Signature(ctx context.Context, dial Dial, gw Server, token string) (Signature, error) {
+	u := url.URL{Scheme: "https", Host: net.JoinHostPort(gw.CN, strconv.Itoa(a.PFPort)), Path: "/getSignature",
+		RawQuery: url.Values{"token": {token}}.Encode()}
+	var r struct {
+		Payload   string `json:"payload"`
+		Signature string `json:"signature"`
+	}
+	if err := a.get(ctx, a.client(dial, gw.IP, gw.CN), u.String(), &r); err != nil {
+		return Signature{}, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(r.Payload)
+	if err != nil {
+		return Signature{}, fmt.Errorf("reading PIA's port payload: %w", err)
+	}
+	var p struct {
+		Port    int       `json:"port"`
+		Expires time.Time `json:"expires_at"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil || p.Port <= 0 {
+		return Signature{}, fmt.Errorf("reading PIA's port payload: %v", err)
+	}
+	return Signature{Payload: r.Payload, Signature: r.Signature, Port: p.Port, Expires: p.Expires}, nil
+}
+
+// BindPort (re)binds the signed port; PIA drops it unless this repeats every 15 minutes.
+func (a API) BindPort(ctx context.Context, dial Dial, gw Server, s Signature) error {
+	u := url.URL{Scheme: "https", Host: net.JoinHostPort(gw.CN, strconv.Itoa(a.PFPort)), Path: "/bindPort",
+		RawQuery: url.Values{"payload": {s.Payload}, "signature": {s.Signature}}.Encode()}
+	var r struct{}
+	return a.get(ctx, a.client(dial, gw.IP, gw.CN), u.String(), &r)
 }

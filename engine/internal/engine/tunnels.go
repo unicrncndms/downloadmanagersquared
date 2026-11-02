@@ -14,6 +14,7 @@ import (
 
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/netif"
+	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/socks"
 	"downloadmanagersquared/engine/internal/tunnel"
 )
@@ -51,6 +52,15 @@ type tunnelEntry struct {
 	started  time.Time
 	retryAt  time.Time
 	err      string
+
+	// PIA port forwarding, for this tunnel's server.
+	link    piaLink
+	sig     *pia.Signature
+	pfPort  int // forwarded to the tunnel, 0 if none
+	boundAt time.Time
+	pfTried time.Time
+	pfErr   string
+	pfBusy  bool
 }
 
 // The .conf files hold private keys, so they live in the engine's folder and
@@ -188,9 +198,10 @@ func (e *Engine) startTunnel(id string, te *tunnelEntry, b *netif.Binding) {
 	cfg := te.cfg
 	e.mu.Unlock()
 	var err error
+	var link piaLink
 	if te.pia {
 		// A new key each start: one PIA rejected or forgot is replaced this way.
-		cfg, err = e.piaConfig(b)
+		cfg, link, err = e.piaConfig(b)
 	}
 	var t *tunnel.Tunnel
 	if err == nil {
@@ -203,6 +214,8 @@ func (e *Engine) startTunnel(id string, te *tunnelEntry, b *netif.Binding) {
 	defer e.mu.Unlock()
 	if err == nil {
 		te.cfg = cfg
+		// A new server: the old forwarded port is gone with the old tunnel.
+		te.link, te.sig, te.pfPort, te.boundAt, te.pfErr = link, nil, 0, time.Time{}, ""
 	}
 	te.starting = false
 	if e.tunnels[id] != te { // removed or replaced meanwhile
@@ -286,6 +299,16 @@ func (e *Engine) tunnelViewsLocked(speeds map[string]float64) []IfaceView {
 		}
 		if te.cfg.Address.IsValid() {
 			v.IP = te.cfg.Address.String()
+		}
+		if state == "up" {
+			switch {
+			case !te.pia || !te.link.forwards:
+				v.Incoming = "outgoing"
+			case te.pfPort != 0 && time.Since(te.boundAt) < pfShown:
+				v.Incoming = "reachable"
+			case te.pfErr != "":
+				v.Incoming = "outgoing"
+			}
 		}
 		if ent != nil {
 			// A tunnel follows its interface's upload switch and shares its limits.
