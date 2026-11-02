@@ -40,6 +40,7 @@ const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Ge
 type ifaceEntry struct {
 	info    netif.Interface
 	binding *netif.Binding
+	shaper  *rate.Shaper // the interface's limits, across every socket its bindings hand out
 	socks   *socks.Server
 	present bool
 }
@@ -392,7 +393,7 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 				log.Printf("socks for %s: %v", i.Name, err)
 				continue
 			}
-			ent = &ifaceEntry{socks: srv}
+			ent = &ifaceEntry{socks: srv, shaper: rate.NewShaper()}
 			e.ifaces[i.ID] = ent
 			log.Printf("interface %s (%s) %s, socks port %d", i.Name, i.Description, i.IPv4, srv.Port())
 		}
@@ -400,7 +401,7 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 			if ent.binding != nil {
 				ent.binding.Close()
 			}
-			ent.binding = netif.NewBinding(i)
+			ent.binding = netif.NewBinding(i, ent.shaper)
 		}
 		ent.info, ent.present = i, true
 		s := e.settings.Interfaces[i.ID]
@@ -419,6 +420,17 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 	}
 	if nameChanged {
 		e.saveSettingsLocked()
+	}
+	e.applyLimitsLocked()
+}
+
+func (e *Engine) applyLimitsLocked() {
+	for id, ent := range e.ifaces {
+		var up, down int64
+		if s := e.settings.Interfaces[id]; s != nil {
+			up, down = s.UploadLimit, s.DownloadLimit
+		}
+		ent.shaper.SetLimits(up, down)
 	}
 }
 
@@ -441,16 +453,26 @@ func (e *Engine) bindingOf(id string) (*netif.Binding, error) {
 	return nil, errors.New("interface is not connected")
 }
 
-// syncTorrentIfaces hands the torrent session the usable interfaces, main first
-// (trackers and web seeds go through the first). Call it without e.mu held.
+// syncTorrentIfaces hands the torrent session the usable interfaces. Call it
+// without e.mu held.
 func (e *Engine) syncTorrentIfaces() {
+	e.torrents.SetIfaces(e.torrentIfaces())
+}
+
+// torrentIfaces are the usable interfaces as torrents use them, main first
+// (trackers and web seeds go through the first).
+func (e *Engine) torrentIfaces() []torrent.Iface {
 	var ifs []torrent.Iface
 	main := e.MainID()
 	for _, u := range e.Usable() {
 		id := u.ID
+		e.mu.Lock()
+		upload := e.uploadLocked(id)
+		e.mu.Unlock()
 		ifc := torrent.Iface{
-			ID:   id,
-			Dial: e.dialVia(id),
+			ID:     id,
+			Upload: upload,
+			Dial:   e.dialVia(id),
 			ListenPacket: func() (net.PacketConn, error) {
 				b, err := e.bindingOf(id)
 				if err != nil {
@@ -472,7 +494,16 @@ func (e *Engine) syncTorrentIfaces() {
 			ifs = append(ifs, ifc)
 		}
 	}
-	e.torrents.SetIfaces(ifs)
+	return ifs
+}
+
+// uploadLocked is whether peers may download from us through the interface.
+func (e *Engine) uploadLocked(id string) bool {
+	if s := e.settings.Interfaces[id]; s != nil && s.Upload != nil {
+		return *s.Upload
+	}
+	ent := e.ifaces[id]
+	return ent == nil || !ent.info.Metered
 }
 
 func (e *Engine) enabledLocked(ent *ifaceEntry) bool {
@@ -814,6 +845,10 @@ type IfaceView struct {
 	Connections int     `json:"connections"`
 	SocksPort   int     `json:"socksPort"`
 	Speed       float64 `json:"speed"`
+
+	Upload        bool  `json:"upload"`
+	UploadLimit   int64 `json:"uploadLimit"`   // bytes per second, 0 = none
+	DownloadLimit int64 `json:"downloadLimit"` // bytes per second, 0 = none
 }
 
 type StateEvent struct {
@@ -862,11 +897,13 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	mainID := e.mainIDLocked()
 	views := []IfaceView{}
 	for id, ent := range e.ifaces {
+		up, down := ent.shaper.Limits()
 		views = append(views, IfaceView{
 			ID: id, Name: ent.info.Name, Description: ent.info.Description, IP: ent.info.IPv4.String(),
 			Present: ent.present, Enabled: e.enabledLocked(ent), Metered: ent.info.Metered, VPN: ent.info.VPN,
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
 			SocksPort: ent.socks.Port(), Speed: speeds[id],
+			Upload: e.uploadLocked(id), UploadLimit: up, DownloadLimit: down,
 		})
 	}
 	sort.Slice(views, func(i, j int) bool {

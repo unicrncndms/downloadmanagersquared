@@ -9,9 +9,12 @@ import (
 )
 
 type IfaceSettings struct {
-	Name        string `json:"name,omitempty"`    // last seen name, for display while absent
-	Enabled     *bool  `json:"enabled,omitempty"` // nil: default (on unless metered or VPN)
-	Connections int    `json:"connections,omitempty"`
+	Name          string `json:"name,omitempty"`    // last seen name, for display while absent
+	Enabled       *bool  `json:"enabled,omitempty"` // nil: default (on unless metered or VPN)
+	Connections   int    `json:"connections,omitempty"`
+	Upload        *bool  `json:"upload,omitempty"`        // nil: default (on unless metered)
+	UploadLimit   int64  `json:"uploadLimit,omitempty"`   // bytes per second, 0 = none
+	DownloadLimit int64  `json:"downloadLimit,omitempty"` // bytes per second, 0 = none
 }
 
 type Settings struct {
@@ -62,6 +65,7 @@ func (s *Settings) normalize() {
 		if is.Connections != 0 { // 0 = use DefaultConnections
 			is.Connections = min(max(is.Connections, 1), 32)
 		}
+		is.UploadLimit, is.DownloadLimit = max(is.UploadLimit, 0), max(is.DownloadLimit, 0)
 	}
 }
 

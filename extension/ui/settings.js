@@ -12,7 +12,7 @@ $("refreshIfaces").onclick = () => act("refreshInterfaces", {}, "Connections ref
 
 function renderIfaces(state, settings) {
   const ifaces = state.interfaces || [];
-  const sig = JSON.stringify([ifaces.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip]), settings.mainInterface]);
+  const sig = JSON.stringify([ifaces.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit]), settings.mainInterface]);
   const body = $("ifaces");
   if (sig !== ifaceSig && !body.contains(document.activeElement)) {
     ifaceSig = sig;
@@ -22,6 +22,13 @@ function renderIfaces(state, settings) {
       conns.addEventListener("change", () => act("setInterface", { id: i.id, connections: Number(conns.value) }));
       const enabled = el("input", { type: "checkbox", checked: i.enabled });
       enabled.addEventListener("change", () => act("setInterface", { id: i.id, enabled: enabled.checked }));
+      const upload = el("input", { type: "checkbox", checked: i.upload, title: "Let torrent peers download from you over this connection" });
+      upload.addEventListener("change", () => act("setInterface", { id: i.id, upload: upload.checked }));
+      const limit = (bps, key, title) => {
+        const input = el("input", { type: "number", min: 0, step: "any", placeholder: "none", title, value: bps ? +(bps / MB).toFixed(3) : "", style: "width:70px" });
+        input.addEventListener("change", () => act("setInterface", { id: i.id, [key]: Math.round((Number(input.value) || 0) * MB) }));
+        return input;
+      };
       const main = el("input", { type: "radio", name: "main", checked: settings.mainInterface === i.id });
       main.addEventListener("change", () => act("setSettings", { mainInterface: i.id }, `${i.name} is now the main connection`));
       body.append(el("tr", { style: i.present ? "" : "opacity:.5" },
@@ -33,13 +40,15 @@ function renderIfaces(state, settings) {
           i.vpn ? el("span", { class: "badge warn" }, "VPN") : null, " ",
           i.isMain ? el("span", { class: "badge" }, "Main") : null),
         el("td", {}, enabled),
+        el("td", {}, upload),
         el("td", {}, conns),
+        el("td", { style: "white-space:nowrap" }, limit(i.downloadLimit, "downloadLimit", "Download limit"), " / ", limit(i.uploadLimit, "uploadLimit", "Upload limit")),
         el("td", {}, main),
         el("td", { class: "num", "data-speed": i.id })));
     }
     const auto = el("input", { type: "radio", name: "main", checked: !settings.mainInterface });
     auto.addEventListener("change", () => act("setSettings", { mainInterface: "" }, "Main connection follows Windows"));
-    body.append(el("tr", {}, el("td", { colspan: 5, class: "muted" }, "Use whatever Windows uses by default"), el("td", {}, auto), el("td")));
+    body.append(el("tr", {}, el("td", { colspan: 7, class: "muted" }, "Use whatever Windows uses by default"), el("td", {}, auto), el("td")));
   }
   for (const i of ifaces) {
     const c = body.querySelector(`[data-speed="${i.id}"]`);
@@ -50,6 +59,7 @@ function renderIfaces(state, settings) {
 // --- settings ---
 
 const GB = 1e9;
+const MB = 1e6;
 
 function fillSettings(s, autostart) {
   $("sThreshold").value = +(s.thresholdBytes / GB).toFixed(3);

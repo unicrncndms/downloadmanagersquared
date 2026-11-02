@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	"downloadmanagersquared/engine/internal/rate"
 )
 
 // ipUnicastIf is IP_UNICAST_IF from ws2ipdef.h.
@@ -19,15 +21,18 @@ const ipUnicastIf = 31
 
 // Binding sends traffic out through exactly one interface: sockets are bound to
 // its address and pinned with IP_UNICAST_IF, and DNS goes to its own DNS servers.
+// Every socket it hands out counts against the interface's shaper; its own DNS
+// queries don't.
 type Binding struct {
 	iface    Interface
+	shaper   *rate.Shaper
 	resolver *net.Resolver
 	client   *http.Client
 	nextDNS  atomic.Uint32
 }
 
-func NewBinding(iface Interface) *Binding {
-	b := &Binding{iface: iface}
+func NewBinding(iface Interface, shaper *rate.Shaper) *Binding {
+	b := &Binding{iface: iface, shaper: shaper}
 	b.resolver = &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
@@ -66,7 +71,11 @@ func (b *Binding) DialContext(ctx context.Context, network, address string) (net
 		return nil, err
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		return b.dialRaw(ctx, network, address)
+		c, err := b.dialRaw(ctx, network, address)
+		if err != nil {
+			return nil, err
+		}
+		return b.shaper.Conn(c), nil
 	}
 	ips, err := b.resolver.LookupIP(ctx, "ip4", host)
 	if err != nil {
@@ -76,7 +85,7 @@ func (b *Binding) DialContext(ctx context.Context, network, address string) (net
 	for _, ip := range ips {
 		c, err := b.dialRaw(ctx, network, net.JoinHostPort(ip.String(), port))
 		if err == nil {
-			return c, nil
+			return b.shaper.Conn(c), nil
 		}
 		lastErr = err
 	}
@@ -89,7 +98,11 @@ func (b *Binding) DialContext(ctx context.Context, network, address string) (net
 // ListenPacket opens an IPv4 UDP socket on a free port that sends through this interface.
 func (b *Binding) ListenPacket() (net.PacketConn, error) {
 	lc := net.ListenConfig{Control: b.control}
-	return lc.ListenPacket(context.Background(), "udp4", net.JoinHostPort(b.iface.IPv4.String(), "0"))
+	pc, err := lc.ListenPacket(context.Background(), "udp4", net.JoinHostPort(b.iface.IPv4.String(), "0"))
+	if err != nil {
+		return nil, err
+	}
+	return b.shaper.PacketConn(pc), nil
 }
 
 // LookupIP resolves host to IPv4 addresses through this interface's DNS.

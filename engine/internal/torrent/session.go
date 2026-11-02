@@ -28,6 +28,7 @@ import (
 // out through that interface only.
 type Iface struct {
 	ID           string
+	Upload       bool // peers may download from us through it
 	Dial         func(ctx context.Context, network, addr string) (net.Conn, error)
 	ListenPacket func() (net.PacketConn, error) // an IPv4 UDP socket on a free port
 	LookupIP     func(ctx context.Context, host string) ([]net.IP, error)
@@ -44,7 +45,8 @@ type ifaceSockets struct {
 	Iface
 	utp   *utp.Socket // uTP peers and DHT share this UDP socket
 	dht   *dht.Server
-	peers int // peers open or being dialed
+	peers int                   // peers open or being dialed
+	open  map[*trackedPeer]bool // peers open
 }
 
 // dialing is the interface every dial to one peer address goes out on, while any is in flight.
@@ -114,31 +116,47 @@ func NewSession(cfg Config) (*Session, error) {
 var errNoIface = errors.New("no usable interface")
 
 // SetIfaces makes ifaces the interfaces torrents use, in that order (the first
-// carries trackers and web seeds). Matched by ID: new ones get their sockets, and
-// ones no longer listed stop taking new peers and close their sockets. The client
-// can't forget a DHT server, so a removed interface's closed server stays in its
-// list and fails its announces.
+// carries trackers and web seeds). Matched by ID: new ones get their sockets,
+// ones no longer listed close their peers and sockets, and the rest switch
+// upload on their open peers. The client can't forget a DHT server, so a
+// removed interface's closed server stays in its list and fails its announces.
 func (s *Session) SetIfaces(ifaces []Iface) {
 	s.setMu.Lock()
 	defer s.setMu.Unlock()
-	want := map[string]bool{}
+	want := map[string]Iface{}
 	for _, ifc := range ifaces {
-		want[ifc.ID] = true
+		want[ifc.ID] = ifc
 	}
 	s.mu.Lock()
 	have := map[string]bool{}
 	var gone []*ifaceSockets
+	var closing, switching []*trackedPeer
 	kept := s.ifs[:0]
 	for _, is := range s.ifs {
-		if want[is.ID] {
+		if w, ok := want[is.ID]; ok {
 			kept = append(kept, is)
 			have[is.ID] = true
+			if w.Upload != is.Upload {
+				is.Upload = w.Upload
+				for p := range is.open {
+					switching = append(switching, p)
+				}
+			}
 		} else {
 			gone = append(gone, is)
+			for p := range is.open {
+				closing = append(closing, p)
+			}
 		}
 	}
 	s.ifs = kept
 	s.mu.Unlock()
+	for _, p := range closing {
+		p.Close()
+	}
+	for _, p := range switching {
+		p.gate.SetUpload(p.is.Upload)
+	}
 	for _, is := range gone {
 		is.dht.Close()
 		is.utp.Close()
@@ -167,7 +185,7 @@ func (s *Session) addIface(ifc Iface) error {
 		pc.Close()
 		return err
 	}
-	is := &ifaceSockets{Iface: ifc, utp: us}
+	is := &ifaceSockets{Iface: ifc, utp: us, open: map[*trackedPeer]bool{}}
 	s.mu.Lock()
 	s.setup = is
 	ds, err := s.cl.NewAnacrolixDhtServer(us)
@@ -275,12 +293,17 @@ func (s *Session) dialed(addr string, is *ifaceSockets, c net.Conn) net.Conn {
 		return nil
 	}
 	s.peerAt[addr] = append(s.peerAt[addr], is)
-	return &trackedPeer{Conn: c, s: s, addr: addr, is: is}
+	g := newUploadGate(c, is.Upload)
+	p := &trackedPeer{Conn: g, gate: g, s: s, addr: addr, is: is}
+	is.open[p] = true
+	return p
 }
 
-func (s *Session) peerClosed(addr string, is *ifaceSockets) {
+func (s *Session) peerClosed(p *trackedPeer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	addr, is := p.addr, p.is
+	delete(is.open, p)
 	is.peers--
 	at := s.peerAt[addr]
 	if i := slices.Index(at, is); i >= 0 {
@@ -326,14 +349,15 @@ func (d peerDialer) Dial(ctx context.Context, addr string) (net.Conn, error) {
 // trackedPeer is a peer's socket, counted against its interface until closed.
 type trackedPeer struct {
 	net.Conn
+	gate *uploadGate
 	s    *Session
-	addr string // as dialed, which is how the client names the peer
-	is   *ifaceSockets
+	addr string        // as dialed, which is how the client names the peer
+	is   *ifaceSockets // Upload read under s.mu
 	once sync.Once
 }
 
 func (p *trackedPeer) Close() error {
-	p.once.Do(func() { p.s.peerClosed(p.addr, p.is) })
+	p.once.Do(func() { p.s.peerClosed(p) })
 	return p.Conn.Close()
 }
 

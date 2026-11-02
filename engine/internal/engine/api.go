@@ -70,9 +70,12 @@ type settingsPatch struct {
 }
 
 type ifacePatch struct {
-	ID          string `json:"id"`
-	Enabled     *bool  `json:"enabled"`
-	Connections *int   `json:"connections"`
+	ID            string `json:"id"`
+	Enabled       *bool  `json:"enabled"`
+	Connections   *int   `json:"connections"`
+	Upload        *bool  `json:"upload"`
+	UploadLimit   *int64 `json:"uploadLimit"`
+	DownloadLimit *int64 `json:"downloadLimit"`
 }
 
 type hello struct {
@@ -244,6 +247,16 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			if p.Connections != nil {
 				is.Connections = *p.Connections
 			}
+			if p.Upload != nil {
+				v := *p.Upload
+				is.Upload = &v
+			}
+			if p.UploadLimit != nil {
+				is.UploadLimit = *p.UploadLimit
+			}
+			if p.DownloadLimit != nil {
+				is.DownloadLimit = *p.DownloadLimit
+			}
 		}), nil
 	case "refreshInterfaces":
 		e.refreshInterfaces()
@@ -271,9 +284,10 @@ func (e *Engine) applySettings(f func(*Settings)) Settings {
 	f(&e.settings)
 	e.settings.normalize()
 	e.saveSettingsLocked()
+	e.applyLimitsLocked()
 	s := e.settings
 	e.mu.Unlock()
-	e.syncTorrentIfaces() // enabled interfaces or the main one may have changed
+	e.syncTorrentIfaces() // enabled interfaces, upload or the main one may have changed
 	e.broadcast("settings", s)
 	return s
 }

@@ -116,7 +116,8 @@ func (s *swarm) magnet() string {
 // stand-ins, and counts every peer it carried.
 func (s *swarm) iface(id string, peers *atomic.Int32) Iface {
 	return Iface{
-		ID: id,
+		ID:     id,
+		Upload: true,
 		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			real, ok := s.addrs[addr]
 			if !ok || network != "tcp" && network != "tcp4" {
@@ -455,4 +456,40 @@ func TestChoosingNoFileIsRefused(t *testing.T) {
 	if err := tor.Choose([]bool{false, false}, ""); err == nil {
 		t.Fatal("choosing no file was accepted")
 	}
+}
+
+func TestInterfaceWithUploadOffNeverUploads(t *testing.T) {
+	sw := newSwarm(t, 0, 1<<20)
+	leech := sw.leecher(t, "192.0.2.50:6881")
+	var peers atomic.Int32
+	s, err := NewSession(Config{Ratio: func() float64 { return 1 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	metered := sw.iface("lte", &peers)
+	metered.Upload = false
+	s.SetIfaces([]Iface{metered})
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, sw.info.Name), sw.data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Info: sw.infoBytes(t), Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	waitFor(t, "the torrent to seed", 10*time.Second, func() bool { return tor.Status() == StatusSeeding })
+	waitFor(t, "the leecher to connect", 10*time.Second, func() bool { return peers.Load() > 0 })
+	time.Sleep(3 * time.Second)
+	if n := leech.BytesCompleted(); n != 0 || tor.Summary().Uploaded != 0 {
+		t.Fatalf("with upload off the leecher got %d bytes (uploaded %d)", n, tor.Summary().Uploaded)
+	}
+
+	metered.Upload = true
+	s.SetIfaces([]Iface{metered})
+	waitFor(t, "the leecher to complete once upload is on", 30*time.Second, func() bool {
+		return leech.BytesCompleted() == int64(len(sw.data))
+	})
 }

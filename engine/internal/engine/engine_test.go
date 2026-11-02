@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 
 	"downloadmanagersquared/engine/internal/download"
+	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/torrent"
 )
 
@@ -313,4 +315,55 @@ func TestHTTPTakesTheSlotOfTheLatestDownloadingTorrent(t *testing.T) {
 	if !running(t, e, second) {
 		t.Fatal("the bumped torrent didn't resume when the slot freed")
 	}
+}
+
+func TestMeteredInterfaceUploadsOnlyOnceSwitchedOn(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	on := true
+	e.settings.Interfaces["lte"] = &IfaceSettings{Enabled: &on} // metered: off unless enabled
+	e.mu.Lock()
+	e.refreshInterfacesLocked([]netif.Interface{
+		{ID: "eth", Name: "Ethernet", IPv4: net.IPv4(127, 0, 0, 1)},
+		{ID: "lte", Name: "Phone", IPv4: net.IPv4(127, 0, 0, 1), Metered: true},
+	})
+	e.mu.Unlock()
+	upload := func() map[string]bool {
+		out := map[string]bool{}
+		for _, i := range e.torrentIfaces() {
+			out[i.ID] = i.Upload
+		}
+		return out
+	}
+	if u := upload(); !u["eth"] || u["lte"] {
+		t.Fatalf("upload by default: %v, want on for Ethernet and off for the metered phone", u)
+	}
+	if _, err := e.Call(nil, "setInterface", []byte(`{"id":"lte","upload":true,"downloadLimit":500000,"uploadLimit":100000}`)); err != nil {
+		t.Fatal(err)
+	}
+	if u := upload(); !u["lte"] {
+		t.Fatal("switching upload on didn't reach the torrents")
+	}
+	if up, down := e.ifaces["lte"].shaper.Limits(); up != 100000 || down != 500000 {
+		t.Fatalf("phone limits = up %d down %d, want 100000 and 500000", up, down)
+	}
+	v := ifaceView(t, e, "lte")
+	if !v.Upload || v.UploadLimit != 100000 || v.DownloadLimit != 500000 {
+		t.Fatalf("phone shown as %+v", v)
+	}
+}
+
+func ifaceView(t *testing.T, e *Engine, id string) IfaceView {
+	t.Helper()
+	e.updateSnapshot(0)
+	for _, v := range e.Snapshot().Interfaces {
+		if v.ID == id {
+			return v
+		}
+	}
+	t.Fatalf("interface %s not shown", id)
+	return IfaceView{}
 }

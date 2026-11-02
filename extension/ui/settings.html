@@ -51,10 +51,10 @@
   <main>
     <section id="connections" class="panel">
       <h2>Network connections</h2>
-      <p class="lead muted">Downloads are split across every enabled connection. Metered and VPN connections start disabled.</p>
+      <p class="lead muted">Downloads are split across every enabled connection. Metered and VPN connections start disabled, and metered ones don't upload to torrent peers. A limit covers everything on its connection, downloads and torrents together; leave it blank for none.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Connection</th><th>IP</th><th></th><th>Use</th><th>Parallel connections</th><th>Main</th><th>Speed</th></tr></thead>
+          <thead><tr><th>Connection</th><th>IP</th><th></th><th>Use</th><th>Upload</th><th>Parallel connections</th><th>Limit down / up (MB/s)</th><th>Main</th><th>Speed</th></tr></thead>
           <tbody id="ifaces"></tbody>
         </table>
       </div>
