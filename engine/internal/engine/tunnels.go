@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/pia"
@@ -62,7 +63,17 @@ func (e *Engine) loadTunnels() {
 			continue
 		}
 		b, err := os.ReadFile(f)
+		if err == nil {
+			_, err = tunnel.ParseConf(string(b))
+		}
 		if err != nil {
+			log.Printf("tunnel for %s unreadable, set aside: %v", id, err)
+			setAside(f)
+			name := string(id)
+			if s := e.settings.Interfaces[name]; s != nil && s.Name != "" {
+				name = s.Name
+			}
+			notify("VPN config unreadable", "VPN config for "+name+" couldn't be read, import it again.", nil)
 			continue
 		}
 		if err := e.setTunnel(string(id), string(b), false); err != nil {
@@ -78,10 +89,7 @@ func (e *Engine) setTunnel(ifaceID, conf string, save bool) error {
 		return err
 	}
 	if save {
-		if err := os.MkdirAll(filepath.Dir(e.tunnelFile(ifaceID)), 0o700); err != nil {
-			return err
-		}
-		if err := os.WriteFile(e.tunnelFile(ifaceID), []byte(conf), 0o600); err != nil {
+		if err := atomicfile.Write(e.tunnelFile(ifaceID), []byte(conf), 0o600); err != nil {
 			return err
 		}
 	}

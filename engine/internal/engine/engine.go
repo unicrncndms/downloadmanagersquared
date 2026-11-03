@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
 	"downloadmanagersquared/engine/internal/netif"
@@ -132,10 +133,15 @@ func New() (*Engine, error) {
 func open(dir string, ln net.Listener) (*Engine, error) {
 	os.MkdirAll(filepath.Join(dir, "downloads"), 0o755)
 	os.MkdirAll(filepath.Join(dir, "torrents"), 0o755)
+	atomicfile.RemoveStale(dir)
+	settings, broken := loadSettings(filepath.Join(dir, "settings.json"))
+	if broken {
+		notify("Settings reset", "Settings couldn't be read and were reset; the old file is settings.json.broken.", nil)
+	}
 	e := &Engine{
 		dir:      dir,
 		ln:       ln,
-		settings: loadSettings(filepath.Join(dir, "settings.json")),
+		settings: settings,
 		ifaces:   map[string]*ifaceEntry{},
 		clients:  map[*ipc.Conn]*client{},
 		resolves: map[string]resolveReq{},
@@ -184,17 +190,25 @@ func (e *Engine) session(m paths.Mode) *torrent.Session {
 	return e.sessions[paths.Off]
 }
 
-// loadDownloads restores both kinds, in the order they were added.
+// loadDownloads restores both kinds, in the order they were added. Unreadable
+// state files are set aside, with one balloon for all of them.
 func (e *Engine) loadDownloads() {
 	var all []queue.Entry
-	for _, st := range readStates[download.State](filepath.Join(e.dir, "downloads")) {
+	states, broken := readStates[download.State](filepath.Join(e.dir, "downloads"))
+	for _, st := range states {
 		if st.Status == download.StatusRunning || st.Status == download.StatusVerifying {
 			st.Status = download.StatusQueued
 		}
 		st.VPN = paths.ParseMode(string(st.VPN), paths.Off) // saved before modes were spelled out
 		all = append(all, download.New(e, st))
 	}
-	for _, st := range readStates[torrent.State](filepath.Join(e.dir, "torrents")) {
+	tstates, tbroken := readStates[torrent.State](filepath.Join(e.dir, "torrents"))
+	if n := broken + tbroken; n == 1 {
+		notify("A download couldn't be restored", "Its unfinished file ends in .dms.part and can be deleted.", nil)
+	} else if n > 1 {
+		notify("Downloads couldn't be restored", fmt.Sprintf("%d downloads couldn't be restored. Their unfinished files end in .dms.part and can be deleted.", n), nil)
+	}
+	for _, st := range tstates {
 		// Seeding and fetching metadata go on (schedule restarts them); the rest queue again.
 		switch st.Status {
 		case download.StatusRunning, torrent.StatusChecking:
@@ -211,26 +225,25 @@ func (e *Engine) loadDownloads() {
 	e.queue = queue.New(e.dir, all)
 }
 
-// readStates reads every saved state in dir that has an ID.
-func readStates[S interface{ download.State | torrent.State }](dir string) []S {
+// readStates reads every saved state in dir that has an ID. The others are
+// set aside as <id>.json.broken; broken counts them.
+func readStates[S interface{ download.State | torrent.State }](dir string) (out []S, broken int) {
 	files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
-	var out []S
 	for _, f := range files {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			continue
-		}
 		var st S
 		var id struct {
 			ID string `json:"id"`
 		}
-		if json.Unmarshal(b, &st) != nil || json.Unmarshal(b, &id) != nil || id.ID == "" {
-			log.Printf("skipping unreadable state %s", f)
+		b, err := os.ReadFile(f)
+		if err != nil || json.Unmarshal(b, &st) != nil || json.Unmarshal(b, &id) != nil || id.ID == "" {
+			log.Printf("unreadable state %s, set aside", f)
+			setAside(f)
+			broken++
 			continue
 		}
 		out = append(out, st)
 	}
-	return out
+	return out, broken
 }
 
 // Run serves the API and drives the queue until Shutdown.
@@ -303,7 +316,7 @@ func (e *Engine) schedule() {
 }
 
 func (e *Engine) saveSettingsLocked() {
-	if err := writeJSON(filepath.Join(e.dir, "settings.json"), e.settings); err != nil {
+	if err := atomicfile.WriteJSON(filepath.Join(e.dir, "settings.json"), e.settings); err != nil {
 		log.Printf("saving settings: %v", err)
 	}
 }

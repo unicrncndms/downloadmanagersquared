@@ -314,6 +314,7 @@ func (d *Download) run(ctx context.Context) {
 	d.mu.Lock()
 	d.syncRemainingLocked()
 	if d.file != nil {
+		d.file.Sync() // a clean stop: what the saved state records is on disk
 		d.file.Close()
 		d.file = nil
 	}
@@ -1186,7 +1187,18 @@ func (d *Download) Rejoins() bool { return false }
 func (d *Download) Added() time.Time { return d.st.Added } // fixed when added: no lock needed
 
 // Saved is the download's kind and the state that resumes it after a restart.
-func (d *Download) Saved() (string, any) { return "downloads", d.State() }
+// The file is flushed to disk first, so the progress the state records is there
+// even after a power cut.
+func (d *Download) Saved() (string, any) {
+	st := d.State()
+	d.mu.Lock()
+	f := d.file
+	d.mu.Unlock()
+	if f != nil {
+		f.Sync() // FlushFileBuffers; fails harmlessly if the download closed it meanwhile
+	}
+	return "downloads", st
+}
 
 // VPN is the download's VPN mode.
 func (d *Download) VPN() paths.Mode { return d.st.VPN } // fixed when added: no lock needed

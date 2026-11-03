@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/pia"
@@ -52,18 +53,26 @@ func (e *Engine) piaFile() string { return filepath.Join(e.dir, "pia.dat") }
 
 func (e *Engine) loadPIA() {
 	b, err := os.ReadFile(e.piaFile())
-	if err != nil {
-		return
-	}
-	plain, err := winutil.Unprotect(b)
-	if err != nil {
-		log.Printf("PIA login: %v", err)
+	if errors.Is(err, os.ErrNotExist) {
 		return
 	}
 	var l piaLogin
-	if json.Unmarshal(plain, &l) == nil && l.User != "" {
-		e.pia = &piaState{login: l}
+	if err == nil {
+		var plain []byte
+		if plain, err = winutil.Unprotect(b); err == nil {
+			err = json.Unmarshal(plain, &l)
+		}
 	}
+	if err == nil && l.User == "" {
+		err = errors.New("no user name")
+	}
+	if err != nil {
+		log.Printf("PIA login unreadable, set aside: %v", err)
+		setAside(e.piaFile())
+		notify("PIA login unreadable", "PIA login couldn't be read, sign in again.", nil)
+		return
+	}
+	e.pia = &piaState{login: l}
 }
 
 // setPIA saves a new login (or with user "" forgets PIA), and gives every
@@ -92,7 +101,7 @@ func (e *Engine) setPIA(user, pass string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(e.piaFile(), sealed, 0o600); err != nil {
+	if err := atomicfile.Write(e.piaFile(), sealed, 0o600); err != nil {
 		return err
 	}
 	e.mu.Lock()

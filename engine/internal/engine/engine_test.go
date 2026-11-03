@@ -19,6 +19,7 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 
+	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/paths"
@@ -129,7 +130,7 @@ func seedingTorrent(t *testing.T, engineDir, saveDir string) string {
 		ID: "seed1", Magnet: m.String(), Info: ib, Dir: saveDir, Name: info.Name, Size: info.TotalLength(),
 		Status: torrent.StatusSeeding, Added: time.Now(), Finished: time.Now(),
 	}
-	if err := writeJSON(filepath.Join(engineDir, "torrents", st.ID+".json"), st); err != nil {
+	if err := atomicfile.WriteJSON(filepath.Join(engineDir, "torrents", st.ID+".json"), st); err != nil {
 		t.Fatal(err)
 	}
 	return st.ID

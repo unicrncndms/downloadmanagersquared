@@ -2,9 +2,10 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
+	"log"
 	mrand "math/rand/v2"
 	"os"
-	"path/filepath"
 
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/winutil"
@@ -82,27 +83,31 @@ func (s *Settings) normalize() {
 	}
 }
 
-func loadSettings(path string) Settings {
-	s := defaultSettings()
-	if b, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(b, &s)
+// loadSettings reads the settings. An unreadable file (any read or parse
+// error) is set aside as settings.json.broken and the defaults are used.
+func loadSettings(path string) (s Settings, broken bool) {
+	s = defaultSettings()
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		s.normalize()
+		return s, false
+	}
+	if err == nil {
+		err = json.Unmarshal(b, &s)
+	}
+	if err != nil {
+		log.Printf("settings unreadable, set aside: %v", err)
+		setAside(path)
+		s = defaultSettings()
 	}
 	s.normalize()
-	return s
+	return s, err != nil
 }
 
-// writeJSON saves atomically, so a crash never leaves a half-written file.
-func writeJSON(path string, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
+// setAside renames an unreadable engine file to <name>.broken, replacing an
+// older one, so the user can still look at it.
+func setAside(path string) {
+	if err := os.Rename(path, path+".broken"); err != nil {
+		log.Printf("setting aside %s: %v", path, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }

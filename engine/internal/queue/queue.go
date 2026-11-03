@@ -3,7 +3,6 @@
 package queue
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/paths"
 )
@@ -223,7 +223,7 @@ func (q *Queue) Save() {
 	q.mu.Unlock()
 	for _, e := range changed {
 		_, st := e.Saved()
-		if err := writeJSON(q.statePath(e), st); err != nil {
+		if err := atomicfile.WriteJSON(q.statePath(e), st); err != nil {
 			log.Printf("saving %s: %v", e.ID(), err)
 		}
 	}
@@ -243,19 +243,4 @@ func (q *Queue) Close() {
 func (q *Queue) statePath(e Entry) string {
 	kind, _ := e.Saved()
 	return filepath.Join(q.dir, kind, e.ID()+".json")
-}
-
-func writeJSON(path string, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }
