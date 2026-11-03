@@ -12,7 +12,6 @@ const Resolver = {
   tabJobs: new Map(),
   creating: new Map(),
 
-  RECORD_TIMEOUT: 15 * 60000,
   COLORS: ["blue", "turquoise", "green", "yellow", "orange", "red", "pink", "purple"],
 
   async init() {
@@ -90,6 +89,8 @@ const Resolver = {
       lastClick: 0,     // the download's wait counts from here
       measured: { steps: [] }, // the waits this replay saw, saved when it succeeds
       budgetFor: -1,    // the step whose budget runs
+      retried: new Set(), // steps that had their second chance in a restored window
+      activity: 0,      // while a person is needed: the last click, page load or captcha change
     };
     this.jobs.set(key, job);
     this.startOrQueue(job);
@@ -153,8 +154,41 @@ const Resolver = {
       notify("Show DMS² how to get the link",
         `Click through ${job.host} for ${job.ifaceName} as you normally would. Your clicks are remembered for next time.`);
     }
-    this.setTimer(job, "overall", visible ? this.RECORD_TIMEOUT : replayTimeout(this.recipes[job.host]),
-      () => this.fail(job, visible ? "nobody clicked through the page in time" : "timed out"));
+    if (visible) this.touch(job);
+    else this.setTimer(job, "overall", replayTimeout(this.recipes[job.host]), () => this.fail(job, "timed out"));
+  },
+
+  // Something happened while a person is needed (a click, a page load, a
+  // captcha coming or going): they get another five minutes.
+  touch(job, why = "nobody clicked through the page in time") {
+    job.activity = Date.now();
+    this.setTimer(job, "overall", RECORD_IDLE, () => {
+      if (recordingIdle(job.activity, Date.now())) this.fail(job, why);
+    });
+  },
+
+  // A step that ran out of time in a minimized window gets one more go with the
+  // window shown but not focused: some pages only count down while visible.
+  // False once that has been tried, or if the window isn't minimized.
+  async secondChance(job, index) {
+    if (job.retried.has(index)) return false;
+    const win = await browser.windows.get(job.windowId).catch(() => null);
+    if (!win || win.state !== "minimized") return false;
+    job.retried.add(index);
+    await browser.windows.update(job.windowId, { ...this.shownBounds(), focused: false }).catch(() => {});
+    this.setTimer(job, "overall", replayTimeout(this.recipes[job.host]), () => this.fail(job, "timed out"));
+    return true;
+  },
+
+  // A step's budget ran out: once more if the window was minimized, then ask for help.
+  async budgetOut(job, index, ms, why) {
+    if (job.done || job.mode !== "replay") return;
+    if (await this.secondChance(job, index)) {
+      this.setTimer(job, "budget", ms, () => this.budgetOut(job, index, ms, why));
+      if (index < this.steps(job).length) this.sendStep(job);
+      return;
+    }
+    this.switchToRecord(job, index, why);
   },
 
   setTimer(job, name, ms, fn) {
@@ -213,6 +247,7 @@ const Resolver = {
       job.loading = false;
       job.lastUrl = tab.url;
       job.mark = Date.now();
+      if (job.mode === "record") this.touch(job);
       // A new page means the captcha (if any) is behind us; the new page's script
       // reports straight away if there is another one.
       if (job.captcha) this.captchaDone(job);
@@ -252,7 +287,7 @@ const Resolver = {
     clearTimeout(job.timers.budget);
     clearTimeout(job.timers.effect);
     job.clicked = null;
-    this.setTimer(job, "overall", this.RECORD_TIMEOUT, () => this.fail(job, "the captcha wasn't solved in time"));
+    this.touch(job, "the captcha wasn't solved in time");
     this.show(job, { drawAttention: true });
     notify("DMS² needs you to solve a captcha", `${job.host} asks for a captcha on ${job.ifaceName}. The window is open; DMS² continues once it's solved.`);
   },
@@ -260,7 +295,7 @@ const Resolver = {
   captchaDone(job) {
     job.captcha = false;
     if (job.mode !== "replay") {
-      this.setTimer(job, "overall", this.RECORD_TIMEOUT, () => this.fail(job, "nobody clicked through the page in time"));
+      this.touch(job);
       return;
     }
     // Back out of the way; the page's script carries on with the next click by itself.
@@ -290,7 +325,7 @@ const Resolver = {
   armBudget(job, index, ms, why) {
     if (job.budgetFor === index) return;
     job.budgetFor = index;
-    this.setTimer(job, "budget", ms, () => this.switchToRecord(job, index, why));
+    this.setTimer(job, "budget", ms, () => this.budgetOut(job, index, ms, why));
   },
 
   // A replayed click showed an effect: the step is done. After a navigation
@@ -332,7 +367,7 @@ const Resolver = {
     this.show(job);
     notify("DMS² needs a hand", `${why} on ${job.host} (${job.ifaceName}). Please click through; your clicks will be remembered.`);
     this.sendRecord(job);
-    this.setTimer(job, "overall", this.RECORD_TIMEOUT, () => this.fail(job, "nobody clicked through the page in time"));
+    this.touch(job);
   },
 
   onContentMessage(msg, sender) {
@@ -360,7 +395,7 @@ const Resolver = {
           job.step = msg.index + 1;
           this.sendStep(job);
         } else {
-          this.switchToRecord(job, msg.index, "Couldn't find the button to click");
+          this.budgetOut(job, msg.index, budget(steps[msg.index].wait), "Couldn't find the button to click");
         }
         break;
       case "captcha":
@@ -376,6 +411,7 @@ const Resolver = {
         if (job.recordFrom === 0 && job.recorded.length === 0) job.startUrl = sender.tab.url;
         job.recorded.push({ ...msg.step, wait: Date.now() - job.mark });
         job.mark = job.lastClick = Date.now();
+        this.touch(job);
         break;
     }
   },
@@ -415,6 +451,8 @@ const Resolver = {
     this.clearTimers(job);
     if (job.startUrl && job.startUrl !== job.pageUrl && isHttp(job.startUrl)) this.correctPage(job);
     if (job.mode === "record") this.saveRecipe(job);
+    // Where the first click was is where to start on this site from now on.
+    if (job.mode === "record" && job.recordFrom === 0 && job.startUrl) Capture.learnStepBack(job.id, job.startUrl);
     if (job.mode === "replay" && this.recipes[job.host]) {
       // The site's waits this time are the ones to expect next time.
       job.measured.download = Date.now() - job.lastClick;

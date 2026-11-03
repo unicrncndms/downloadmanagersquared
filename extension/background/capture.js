@@ -5,7 +5,7 @@
 const Capture = {
   history: new Map(),  // tabId -> recent pages shown in that tab, oldest first
   referers: new Map(), // page URL -> the page it was opened from (its Referer)
-  landingBack: 1,      // how many pages before the download the landing page is
+  stepBacks: {},       // host -> how many pages before the download its landing page is, as recorded
   pagesById: {},       // download id -> page history, for the resolver's "previous page" button
   bypass: new Set(),   // URLs we handed back to Firefox after the engine refused them
 
@@ -41,12 +41,9 @@ const Capture = {
       const h = tab.openerTabId !== undefined && this.history.get(tab.openerTabId);
       if (h) this.history.set(tab.id, h.slice());
     });
-    browser.storage.local.get(["landingBack", "pagesById"]).then((s) => {
-      if (Number.isInteger(s.landingBack)) this.landingBack = s.landingBack;
+    browser.storage.local.get(["stepBacks", "pagesById"]).then((s) => {
+      this.stepBacks = s.stepBacks || {};
       this.pagesById = s.pagesById || {};
-    });
-    browser.storage.onChanged.addListener((c) => {
-      if (c.landingBack && Number.isInteger(c.landingBack.newValue)) this.landingBack = c.landingBack.newValue;
     });
 
     browser.contextMenus.create({ id: "dms-link", title: "Download with DMS²", contexts: ["link"] });
@@ -109,8 +106,20 @@ const Capture = {
     return pagesFor(tabId >= 0 ? this.history.get(tabId) : [], this.referers, hints, downloadUrl);
   },
 
+  // Unknown hosts start one page back on the same site; recorded ones where
+  // their first click was.
   landingPage(pages) {
-    return landingPage(pages, this.landingBack);
+    return landingPage(pages, stepBackFor(this.stepBacks, pages));
+  },
+
+  // A recording for download id started clicking on firstClickUrl: remember how
+  // far back that was for the host the download started on.
+  learnStepBack(id, firstClickUrl) {
+    const pages = this.pagesById[id] || [];
+    const n = learnedStepBack(pages, firstClickUrl);
+    if (n === null) return;
+    this.stepBacks[hostOf(pages[pages.length - 1])] = n;
+    browser.storage.local.set({ stepBacks: this.stepBacks });
   },
 
   async handOff({ url, pageUrl, pages, filename, cookieStoreId, tabId, closeBlankTab, torrent }) {

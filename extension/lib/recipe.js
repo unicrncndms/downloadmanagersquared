@@ -45,4 +45,13 @@ function withMeasuredWaits(recipe, measured) {
   };
 }
 
-if (typeof module !== "undefined") module.exports = { mergeSteps, recorded, budget, replayTimeout, withMeasuredWaits };
+const RECORD_IDLE = 5 * 60000; // ms without a click, page load or captcha change
+
+// Whether a recording has been left alone long enough to give up on it.
+function recordingIdle(lastActivity, now) {
+  return now - lastActivity >= RECORD_IDLE;
+}
+
+if (typeof module !== "undefined") {
+  module.exports = { mergeSteps, recorded, budget, replayTimeout, withMeasuredWaits, recordingIdle, RECORD_IDLE };
+}

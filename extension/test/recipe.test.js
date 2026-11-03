@@ -38,3 +38,11 @@ test("a recording keeps the waits it saw", () => {
   assert.deepEqual(r, { steps: [{ text: "a", wait: 1000 }, { text: "new", wait: 4000 }], downloadWait: 6000, learned: 99 });
   assert.deepEqual(recorded(undefined, 0, [], 0, 5), { steps: [], downloadWait: 0, learned: 5 });
 });
+
+const { recordingIdle, RECORD_IDLE } = require("../lib/recipe.js");
+
+test("recording ends after five minutes without a click, page load or captcha change", () => {
+  assert.equal(RECORD_IDLE, 5 * 60000);
+  assert.equal(recordingIdle(1000, 1000 + RECORD_IDLE - 1), false);
+  assert.equal(recordingIdle(1000, 1000 + RECORD_IDLE), true);
+});

@@ -122,12 +122,6 @@ const FIELDS = {
 for (const [id, [key, , parse]] of Object.entries(FIELDS)) {
   $(id).addEventListener("change", () => act("setSettings", { [key]: parse($(id).value) }, "Saved"));
 }
-$("sBack").addEventListener("change", async () => {
-  const back = Math.min(5, Math.max(0, Math.round(Number($("sBack").value) || 0)));
-  await browser.storage.local.set({ landingBack: back });
-  $("sBack").value = back;
-  toast("Saved");
-});
 $("sAuto").addEventListener("change", () => act("setAutostart", { on: $("sAuto").checked }, "Saved"));
 
 // fillSettings shows what the engine has, except in the field being edited.
@@ -136,10 +130,6 @@ function fillSettings(s) {
     if (document.activeElement !== $(id)) $(id).value = show(s);
   }
 }
-
-browser.storage.local.get("landingBack").then((v) => {
-  $("sBack").value = Number.isInteger(v.landingBack) ? v.landingBack : 1;
-});
 
 // --- VPN provider ---
 

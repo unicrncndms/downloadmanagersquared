@@ -115,9 +115,25 @@ function landingPage(pages, back) {
   return pages[i];
 }
 
+// How many pages back from the one that started a download its landing page
+// is: what recording learned for that host (stepBacks: host -> pages back),
+// else one page.
+function stepBackFor(stepBacks, pages) {
+  const n = pages.length ? stepBacks[hostOf(pages[pages.length - 1])] : undefined;
+  return Number.isInteger(n) ? n : 1;
+}
+
+// What a recording teaches: how many pages before the one that started the
+// download the page of the first click was; null if it isn't among them.
+function learnedStepBack(pages, firstClickUrl) {
+  const i = pages.lastIndexOf(firstClickUrl);
+  return i < 0 ? null : pages.length - 1 - i;
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     headerMap, mediaType, isPage, isAttachment, looksLikeDownload, isTorrentFile, responseSize,
     dispositionName, hostOf, siteOf, isHttp, captureResponse, captureDownload, pagesFor, landingPage,
+    stepBackFor, learnedStepBack,
   };
 }

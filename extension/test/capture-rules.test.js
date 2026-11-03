@@ -69,3 +69,20 @@ test("the landing page steps back on the same site only", () => {
   assert.equal(r.landingPage(pages, 5), "https://dl.host.com/file/1");
   assert.equal(r.landingPage([], 1), "");
 });
+
+test("an unknown host starts one page back; a learned host as many as it learned", () => {
+  const pages = ["https://host.com/a", "https://host.com/b", "https://host.com/c"];
+  assert.equal(r.stepBackFor({}, pages), 1);
+  assert.equal(r.stepBackFor({ "host.com": 0 }, pages), 0);
+  assert.equal(r.stepBackFor({ "host.com": 2 }, pages), 2);
+  assert.equal(r.landingPage(pages, r.stepBackFor({ "host.com": 2 }, pages)), "https://host.com/a");
+  assert.equal(r.landingPage(pages, r.stepBackFor({ "host.com": 0 }, pages)), "https://host.com/c");
+});
+
+test("recording learns how many pages back the first click's page was", () => {
+  const pages = ["https://host.com/a", "https://host.com/b", "https://host.com/c"];
+  assert.equal(r.learnedStepBack(pages, "https://host.com/c"), 0);
+  assert.equal(r.learnedStepBack(pages, "https://host.com/a"), 2);
+  assert.equal(r.learnedStepBack(pages, "https://elsewhere/"), null);
+  assert.equal(r.learnedStepBack([], "https://host.com/a"), null);
+});
