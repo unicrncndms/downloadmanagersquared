@@ -38,7 +38,22 @@
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) return false;
     const cs = getComputedStyle(el);
-    return cs.visibility !== "hidden" && cs.display !== "none" && !el.disabled;
+    return cs.visibility !== "hidden" && cs.display !== "none";
+  }
+
+  // What lib/ready.js needs to know about an element, read from the DOM.
+  function factsOf(el) {
+    const r = el.getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return {
+      visible: visible(el),
+      covered: !!top && top !== el && !el.contains(top),
+      disabled: !!el.disabled,
+      ariaDisabled: el.getAttribute("aria-disabled") === "true",
+      pointerEvents: getComputedStyle(el).pointerEvents,
+      isLink: el.tagName === "A",
+      href: el.getAttribute("href"),
+    };
   }
 
   function cssPath(el) {
@@ -105,22 +120,40 @@
     while (captchaPending()) await sleep(500);
   }
 
-  async function replay(step, index) {
+  let replaying = 0; // a newer replay command stops an older one
+
+  // Clicks a step's element as soon as the page makes it ready, then watches
+  // whether the next step's element shows up (the background sees the rest).
+  async function replay(step, index, next) {
+    const run = ++replaying;
     await untilNoCaptcha();
     const start = Date.now();
     let el = null;
     while (!(el = find(step)) && Date.now() - start < FIND_TIMEOUT) {
       await sleep(300);
+      if (run !== replaying) return;
     }
     if (!el) {
       browser.runtime.sendMessage({ resolver: true, type: "notFound", index });
       return;
     }
-    await sleep(400 + Math.random() * 600);
-    await untilNoCaptcha();
     el.scrollIntoView({ block: "center" });
+    while (!isReady(factsOf(el)) || captchaPending()) {
+      await sleep(250);
+      if (run !== replaying) return;
+      if (!el.isConnected && !(el = find(step))) return replay(step, index, next);
+    }
     browser.runtime.sendMessage({ resolver: true, type: "clicked", index });
     el.click();
+    if (!next) return;
+    const clicked = Date.now();
+    while (Date.now() - clicked < EFFECT_WAIT && run === replaying) {
+      await sleep(200);
+      if (find(next)) {
+        browser.runtime.sendMessage({ resolver: true, type: "effect", kind: "nextStep", index });
+        return;
+      }
+    }
   }
 
   function startRecording(ifaceName, prev) {
@@ -155,7 +188,7 @@
   }
 
   browser.runtime.onMessage.addListener((msg) => {
-    if (msg.cmd === "replay") replay(msg.step, msg.index);
+    if (msg.cmd === "replay") replay(msg.step, msg.index, msg.next);
     if (msg.cmd === "record") startRecording(msg.ifaceName, msg.prev);
   });
 })();

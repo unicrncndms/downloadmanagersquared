@@ -32,6 +32,7 @@
     "scripts": [
       "lib/capture-rules.js",
       "lib/recipe.js",
+      "lib/ready.js",
       "background/util.js",
       "background/engine.js",
       "background/resolver.js",

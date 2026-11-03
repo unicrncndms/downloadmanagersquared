@@ -87,6 +87,7 @@ const Resolver = {
       key, id: r.id, iface: r.iface, ifaceName: r.ifaceName || r.iface, pageUrl: r.pageUrl,
       host: hostOf(r.pageUrl), mode: "new", step: 0, recordFrom: 0, recorded: [],
       tabs: new Set(), tabId: null, windowId: null, loading: false, skipped: false, timers: {},
+      clicked: null, // during replay: { index, at, clicks, effects } of the step waiting for an effect
     };
     this.jobs.set(key, job);
     this.startOrQueue(job);
@@ -168,16 +169,42 @@ const Resolver = {
 
   onTabCreated(tab) {
     const job = tab.openerTabId !== undefined && this.tabJobs.get(tab.openerTabId);
-    if (job) {
-      job.tabs.add(tab.id);
-      this.tabJobs.set(tab.id, job);
-    }
+    if (!job) return;
+    job.tabs.add(tab.id);
+    this.tabJobs.set(tab.id, job);
+    if (job.mode === "replay") this.watchNewTab(job, tab);
+  },
+
+  // A tab a replayed click opened: the same site carries on there; another
+  // site gets a moment to start a download, else it is a pop-up ad and closes.
+  watchNewTab(job, tab) {
+    const openedAt = Date.now();
+    const check = async () => {
+      if (job.done) return;
+      const t = await browser.tabs.get(tab.id).catch(() => null);
+      if (!t) return;
+      const url = t.url && t.url !== "about:blank" ? t.url : t.pendingUrl || "";
+      const verdict = popupVerdict({ openerSite: siteOf(job.lastUrl || job.pageUrl), site: url ? siteOf(url) : "", age: Date.now() - openedAt, download: false });
+      if (verdict === "keep") {
+        // The next page opened in a tab of its own: follow it there.
+        job.tabId = tab.id;
+        this.clickEffect(job, "newTab");
+      } else if (verdict === "close") {
+        browser.tabs.remove(tab.id).catch(() => {});
+      } else {
+        setTimeout(check, 500);
+      }
+    };
+    setTimeout(check, 500);
   },
 
   onTabUpdated(tabId, info, tab) {
     const job = this.tabJobs.get(tabId);
     if (!job || job.done || tabId !== job.tabId) return;
-    if (info.status === "loading") job.loading = true;
+    if (info.status === "loading") {
+      job.loading = true;
+      this.clickEffect(job, "navigation");
+    }
     if (info.status === "complete") {
       job.loading = false;
       job.lastUrl = tab.url;
@@ -190,6 +217,7 @@ const Resolver = {
 
   async drive(job) {
     try {
+      await browser.tabs.executeScript(job.tabId, { file: "/lib/ready.js", runAt: "document_idle" });
       await browser.tabs.executeScript(job.tabId, { file: "/resolver-content.js", runAt: "document_idle" });
     } catch (e) {
       return; // e.g. an error page; the overall timer will catch a stuck job
@@ -247,7 +275,35 @@ const Resolver = {
         () => this.switchToRecord(job, steps.length, "The download didn't start"));
       return;
     }
-    browser.tabs.sendMessage(job.tabId, { cmd: "replay", step: steps[job.step], index: job.step }).catch(() => {});
+    browser.tabs.sendMessage(job.tabId, { cmd: "replay", step: steps[job.step], index: job.step, next: steps[job.step + 1] }).catch(() => {});
+  },
+
+  // A replayed click showed an effect: the step is done. After a navigation
+  // the next step is sent once the new page has loaded.
+  clickEffect(job, kind) {
+    const c = job.clicked;
+    if (!c || job.mode !== "replay") return;
+    c.effects[kind] = true;
+    if (afterClick(c.effects, Date.now() - c.at, c.clicks) !== "done") return;
+    job.clicked = null;
+    clearTimeout(job.timers.effect);
+    job.step = c.index + 1;
+    if (kind !== "navigation" && !job.loading) this.sendStep(job);
+  },
+
+  // No effect within the wait: click again, or after too many clicks ask the user.
+  judgeClick(job) {
+    const c = job.clicked;
+    if (!c || job.done || job.mode !== "replay") return;
+    const verdict = afterClick(c.effects, Date.now() - c.at, c.clicks);
+    if (verdict === "wait") {
+      this.setTimer(job, "effect", 250, () => this.judgeClick(job));
+    } else if (verdict === "retry") {
+      this.sendStep(job);
+    } else if (verdict === "giveUp") {
+      job.clicked = null;
+      this.switchToRecord(job, c.index, "Clicking the button had no effect");
+    }
   },
 
   switchToRecord(job, fromIndex, why) {
@@ -268,13 +324,15 @@ const Resolver = {
     if (!job || job.done) return;
     const steps = this.steps(job);
     switch (msg.type) {
-      case "clicked":
+      case "clicked": {
         if (job.mode !== "replay") return;
-        job.step = msg.index + 1;
-        // If the click navigates, the next step is sent once the new page has loaded.
-        setTimeout(() => {
-          if (!job.done && !job.loading && job.mode === "replay") this.sendStep(job);
-        }, 1500);
+        const prev = job.clicked && job.clicked.index === msg.index ? job.clicked.clicks : 0;
+        job.clicked = { index: msg.index, at: Date.now(), clicks: prev + 1, effects: {} };
+        this.setTimer(job, "effect", EFFECT_WAIT, () => this.judgeClick(job));
+        break;
+      }
+      case "effect":
+        if (job.clicked && job.clicked.index === msg.index) this.clickEffect(job, msg.kind);
         break;
       case "notFound":
         if (job.mode !== "replay") return;
