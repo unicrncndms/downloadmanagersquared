@@ -13,17 +13,29 @@ const Resolver = {
   creating: new Map(),
 
   COLORS: ["blue", "turquoise", "green", "yellow", "orange", "red", "pink", "purple"],
+  PREFIX: "DMS² · ", // every DMS² container's name starts so
 
   async init() {
     const s = await browser.storage.local.get(["containers", "recipes"]);
-    this.containers = s.containers || {};
     this.recipes = s.recipes || {};
-    for (const [iface, store] of Object.entries(this.containers)) {
-      try { await browser.contextualIdentities.get(store); } catch (e) { delete this.containers[iface]; }
-    }
-    this.reindex();
+    // Containers live only while a resolve runs: any left from before (a crash,
+    // a quit mid-resolve) go, found by stored id and by name.
+    const stale = new Set(Object.values(s.containers || {}));
+    const all = await browser.contextualIdentities.query({}).catch(() => []);
+    for (const c of all) if (c.name.startsWith(this.PREFIX)) stale.add(c.cookieStoreId);
+    for (const store of stale) await browser.contextualIdentities.remove(store).catch(() => {});
+    this.containers = {};
+    this.saveContainers();
 
     browser.proxy.onRequest.addListener((d) => this.proxyFor(d), { urls: ["<all_urls>"] });
+    // The second fence: with no proxy to send it through, a container request
+    // is cancelled. (Firefox would otherwise fail a dead extension proxy over
+    // to the user's own manual or PAC proxy.)
+    browser.webRequest.onBeforeRequest.addListener((d) => this.cancelUnrouted(d), { urls: ["<all_urls>"] }, ["blocking"]);
+    // Without the engine no resolve can finish: fail them and close their windows.
+    Engine.on("connection", ({ connected }) => {
+      if (!connected) for (const job of [...this.jobs.values()]) this.fail(job, "the engine went away");
+    });
     browser.proxy.onError.addListener((e) => console.warn("DMS² proxy:", e.message));
     browser.contextualIdentities.onRemoved.addListener(({ contextualIdentity }) => {
       for (const [iface, store] of Object.entries(this.containers)) {
@@ -53,7 +65,7 @@ const Resolver = {
     if (!this.creating.has(iface)) {
       const color = this.COLORS[Object.keys(this.containers).length % this.COLORS.length];
       this.creating.set(iface, browser.contextualIdentities
-        .create({ name: `DMS² · ${name || iface}`, color, icon: "circle" })
+        .create({ name: `${this.PREFIX}${name || iface}`, color, icon: "circle" })
         .then((c) => {
           this.containers[iface] = c.cookieStoreId;
           this.saveContainers();
@@ -64,13 +76,24 @@ const Resolver = {
     return this.creating.get(iface);
   },
 
+  // The engine's proxy port for a DMS² container, 0 if it has none to use now.
+  // Both the proxy and the cancel listener decide by this.
+  portFor(cookieStoreId) {
+    return containerPort(this.ifaceByStore[cookieStoreId], Engine.connected, Engine.state && Engine.state.interfaces);
+  },
+
   proxyFor(d) {
-    const iface = this.ifaceByStore[d.cookieStoreId];
-    if (!iface) return { type: "direct" };
-    const v = ((Engine.state && Engine.state.interfaces) || []).find((i) => i.id === iface);
-    // Fail closed: a container page must never leave through the wrong connection.
-    const port = Engine.connected && v && v.present ? v.socksPort : 1;
-    return { type: "socks", host: "127.0.0.1", port, proxyDNS: true };
+    // Outside DMS² containers: {type: "direct"}, which leaves the user's own
+    // proxy in charge. It must never become null: only null forces a request
+    // direct, past the user's proxy.
+    if (!this.ownsStore(d.cookieStoreId)) return { type: "direct" };
+    // Fail closed: a container page must never leave through the wrong
+    // connection. Port 1 is a second fence behind the cancel listener.
+    return { type: "socks", host: "127.0.0.1", port: this.portFor(d.cookieStoreId) || 1, proxyDNS: true };
+  },
+
+  cancelUnrouted(d) {
+    return this.ownsStore(d.cookieStoreId) && !this.portFor(d.cookieStoreId) ? { cancel: true } : {};
   },
 
   ownsStore(cookieStoreId) {
@@ -506,6 +529,14 @@ const Resolver = {
     for (const t of job.tabs) this.tabJobs.delete(t);
     this.jobs.delete(job.key);
     if (job.windowId !== null) browser.windows.remove(job.windowId).catch(() => {});
+    // The interface's container goes with its last running resolve, and its
+    // tabs with it: nothing of it is left for session restore.
+    const store = this.containers[job.iface];
+    if (store && ![...this.jobs.values()].some((j) => j.iface === job.iface && j.mode !== "waiting")) {
+      delete this.containers[job.iface];
+      this.saveContainers();
+      browser.contextualIdentities.remove(store).catch(() => {});
+    }
     for (const j of this.jobs.values()) {
       if (j.mode === "waiting" && j.host === job.host) this.startOrQueue(j);
     }

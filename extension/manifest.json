@@ -33,6 +33,7 @@
       "lib/capture-rules.js",
       "lib/recipe.js",
       "lib/ready.js",
+      "lib/route.js",
       "background/util.js",
       "background/engine.js",
       "background/resolver.js",
