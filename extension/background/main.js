@@ -6,6 +6,8 @@ browser.runtime.onConnect.addListener((port) => {
   const send = () => port.postMessage({
     connected: Engine.connected,
     error: Engine.lastError,
+    notInstalled: Engine.notInstalled,
+    engineVersion: Engine.version,
     state: Engine.state,
     settings: Engine.settings,
     autostart: Engine.autostart,

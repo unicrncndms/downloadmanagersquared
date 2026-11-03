@@ -12,10 +12,13 @@ function connectUI(onUpdate) {
   return port;
 }
 
+// Where the engine and the extension are released (build.ps1 -Repo sets the repo).
+const RELEASES_URL = "https://github.com/rarensmann/downloadmanagersquared/releases/latest";
+
 // Engine connection badge in the page header.
 function renderConn(m, connectedText) {
   const conn = $("conn");
-  conn.textContent = m.connected ? connectedText : "Engine offline";
+  conn.textContent = m.connected ? connectedText : m.notInstalled ? "Engine not installed" : "Engine offline";
   conn.className = "badge " + (m.connected ? "ok" : "bad");
   conn.title = m.error || "";
 }

@@ -5,6 +5,8 @@ const Engine = {
   port: null,
   connected: false,
   lastError: "",
+  notInstalled: false, // the browser found no native host: the engine was never installed
+  version: "",         // the engine's, from hello
   settings: null,
   state: null,
   autostart: false,
@@ -22,7 +24,9 @@ const Engine = {
       this.port = null;
       for (const { reject } of this.pending.values()) reject(new Error("engine disconnected"));
       this.pending.clear();
-      this.setConnected(false, (p.error && p.error.message) || this.lastError || "engine disconnected");
+      const msg = (p.error && p.error.message) || "";
+      this.notInstalled = /no such native application/i.test(msg);
+      this.setConnected(false, msg || this.lastError || "engine disconnected");
       setTimeout(() => this.connect(), this.retryDelay);
       this.retryDelay = Math.min(this.retryDelay * 2, 30000);
     });
@@ -31,6 +35,8 @@ const Engine = {
         this.settings = h.settings;
         this.state = h.state;
         this.autostart = h.autostart;
+        this.version = h.version || "";
+        this.notInstalled = false;
         this.retryDelay = 2000;
         this.setConnected(true, "");
       })

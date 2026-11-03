@@ -52,6 +52,11 @@ if ($Repo) {
     $manifest = $manifest -replace '("id":\s*"downloadmanagersquared@dms",)', "`$1`n      `"update_url`": `"https://github.com/$Repo/releases/latest/download/updates.json`","
 }
 [IO.File]::WriteAllText((Join-Path $stage 'manifest.json'), $manifest, (New-Object Text.UTF8Encoding $false))
+if ($Repo) {
+    $common = Join-Path $stage 'ui\common.js'
+    $js = (Get-Content -Raw -Encoding UTF8 $common) -replace 'github\.com/[^/"]+/[^/"]+/releases', "github.com/$Repo/releases"
+    [IO.File]::WriteAllText($common, $js, (New-Object Text.UTF8Encoding $false))
+}
 
 # Zip with forward slashes (Compress-Archive writes backslashes, which AMO rejects).
 $xpi = Join-Path $dist 'downloadmanagersquared.xpi'

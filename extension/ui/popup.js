@@ -256,13 +256,31 @@ function renderDownloads(state) {
   if (downloads.length && empty) empty.remove();
 }
 
+// A line under the header when engine and extension may not work together.
+function renderVersion(m) {
+  const ext = browser.runtime.getManifest().version;
+  const clash = m.connected && versionsClash(m.engineVersion, ext);
+  $("versionWarn").hidden = !clash;
+  if (clash) {
+    $("versionWarn").replaceChildren(`Engine v${m.engineVersion} and extension v${ext} may not work together: `,
+      el("a", { href: RELEASES_URL, target: "_blank" }, "update both"));
+  }
+}
+
 connectUI((m) => {
   latest = m;
   renderConn(m, "Connected");
+  renderVersion(m);
   if (!m.connected || !m.state) {
-    $("list").replaceChildren(el("div", { class: "offline" },
-      "The download engine isn't reachable. Make sure it's running in the tray, or run dms-engine.exe from the release zip again.",
-      m.error ? el("div", { class: "muted mono" }, m.error) : null));
+    $("list").replaceChildren(m.notInstalled
+      ? el("div", { class: "offline" },
+        el("b", {}, "Engine not installed. "),
+        "DMS² needs its download engine on this PC. Download the zip from the ",
+        el("a", { href: RELEASES_URL, target: "_blank" }, "release page"),
+        ", extract it and run dms-engine.exe.")
+      : el("div", { class: "offline" },
+        "The download engine isn't reachable. Make sure it's running in the tray, or run dms-engine.exe from the release zip again.",
+        m.error ? el("div", { class: "muted mono" }, m.error) : null));
     cards.clear();
     return;
   }
