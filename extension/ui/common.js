@@ -13,7 +13,7 @@ function connectUI(onUpdate) {
 }
 
 // Where the engine and the extension are released (build.ps1 -Repo sets the repo).
-const RELEASES_URL = "https://github.com/rarensmann/downloadmanagersquared/releases/latest";
+const RELEASES_URL = "https://github.com/unicrncndms/downloadmanagersquared/releases/latest";
 
 // Engine connection badge in the page header.
 function renderConn(m, connectedText) {

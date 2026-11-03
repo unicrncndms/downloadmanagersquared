@@ -28,7 +28,7 @@ const (
 
 // Repo is the GitHub owner/repo releases come from, set at build time
 // (build.ps1 -Repo).
-var Repo = "rarensmann/downloadmanagersquared"
+var Repo = "unicrncndms/downloadmanagersquared"
 
 // ReleasesURL is the page listing the releases.
 func ReleasesURL() string { return "https://github.com/" + Repo + "/releases/latest" }
