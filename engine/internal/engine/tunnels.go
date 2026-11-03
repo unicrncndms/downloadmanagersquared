@@ -27,6 +27,7 @@ const (
 // tunnelEntry is the tunnel configured for one interface.
 type tunnelEntry struct {
 	pia      bool          // PIA makes a new config (and key) at each start
+	server   string        // PIA: the server's name, kept apart from other tunnels'
 	cfg      tunnel.Config // a .conf's, or PIA's latest
 	socks    *socks.Server // landing pages resolved through the tunnel
 	t        *tunnel.Tunnel
@@ -194,7 +195,7 @@ func (e *Engine) startTunnel(id string, te *tunnelEntry, b *netif.Binding) {
 	var link piaLink
 	if te.pia {
 		// A new key each start: one PIA rejected or forgot is replaced this way.
-		cfg, link, err = e.piaConfig(b)
+		cfg, link, err = e.piaConfig(te, b)
 	}
 	var t *tunnel.Tunnel
 	if err == nil {

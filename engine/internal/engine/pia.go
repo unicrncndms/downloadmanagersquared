@@ -139,7 +139,7 @@ type piaLink struct {
 
 // piaConfig registers a new key for one interface, through that interface,
 // and returns its tunnel config.
-func (e *Engine) piaConfig(b *netif.Binding) (tunnel.Config, piaLink, error) {
+func (e *Engine) piaConfig(te *tunnelEntry, b *netif.Binding) (tunnel.Config, piaLink, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	e.mu.Lock()
@@ -156,7 +156,10 @@ func (e *Engine) piaConfig(b *netif.Binding) (tunnel.Config, piaLink, error) {
 	if err != nil {
 		return tunnel.Config{}, piaLink{}, err
 	}
-	srv := region.WG()[0]
+	srv, err := e.reservePIAServer(te, region.WG())
+	if err != nil {
+		return tunnel.Config{}, piaLink{}, err
+	}
 	k, err := api.AddKey(ctx, b.DialContext, srv, token, pub)
 	if err != nil {
 		e.mu.Lock()
@@ -173,6 +176,35 @@ func (e *Engine) piaConfig(b *netif.Binding) (tunnel.Config, piaLink, error) {
 	}
 	link.gateways = append(link.gateways, srv)
 	return cfg, link, err
+}
+
+// reservePIAServer picks te's server among a region's, the one fewest other
+// tunnels hold. PIA gives an account one peer IP per server and routes it to
+// the newest key, so two tunnels sharing a server would leave one of them dead.
+// Apart, each also gets its own exit IP.
+func (e *Engine) reservePIAServer(te *tunnelEntry, servers []pia.Server) (pia.Server, error) {
+	if len(servers) == 0 {
+		return pia.Server{}, errors.New("PIA's region has no WireGuard server")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	held := map[string]int{}
+	for _, o := range e.tunnels {
+		if o != te && o.pia && o.server != "" {
+			held[o.server]++
+		}
+	}
+	best := servers[0]
+	for _, s := range servers[1:] {
+		if held[s.CN] < held[best.CN] {
+			best = s
+		}
+	}
+	if held[best.CN] > 0 {
+		log.Printf("PIA: more tunnels than servers in the region; %s is shared and only one of its tunnels will carry traffic", best.CN)
+	}
+	te.server = best.CN
+	return best, nil
 }
 
 const (

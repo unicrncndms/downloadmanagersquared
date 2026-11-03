@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -13,11 +14,13 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"downloadmanagersquared/engine/internal/download"
+	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/tunnel"
@@ -35,16 +38,35 @@ type fakePIA struct {
 	vpn        *vpnServer
 }
 
-func newFakePIA(t *testing.T) *fakePIA { return newFakePIAForwarding(t, false) }
+func newFakePIA(t *testing.T) *fakePIA { return newFakePIAWith(t, false, 1) }
 
 // newFakePIAForwarding is newFakePIA in a region that may forward ports: then
 // the server answers port forwarding inside the tunnel at 203.0.113.1:19999.
-func newFakePIAForwarding(t *testing.T, forwards bool) *fakePIA {
+func newFakePIAForwarding(t *testing.T, forwards bool) *fakePIA { return newFakePIAWith(t, forwards, 1) }
+
+// newFakePIAWith is a region of n WireGuard servers. Like PIA's, a server gives
+// every key of the account the same peer IP, so its latest key takes the IP over.
+func newFakePIAWith(t *testing.T, forwards bool, n int) *fakePIA {
 	t.Helper()
 	f := &fakePIA{password: "right"}
-	_, dummy, _ := tunnel.GenerateKey()
-	srv := newVPNServer(t, dummy)
-	host, port, _ := net.SplitHostPort(srv.endpoint)
+	servers := map[string]*vpnServer{}
+	var wg []string
+	var host string
+	for i := range n {
+		_, dummy, _ := tunnel.GenerateKey()
+		s := newVPNServer(t, dummy)
+		cn := "example.com"
+		if n > 1 {
+			cn = fmt.Sprintf("s%d.example.com", i)
+		}
+		if i == 0 {
+			f.vpn = s
+		}
+		servers[cn] = s
+		host, _, _ = net.SplitHostPort(s.endpoint)
+		wg = append(wg, fmt.Sprintf(`{"ip":"%s","cn":"%s"}`, host, cn))
+	}
+	srv := f.vpn
 	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/token":
@@ -55,18 +77,21 @@ func newFakePIAForwarding(t *testing.T, forwards bool) *fakePIA {
 			}
 			fmt.Fprint(w, `{"token":"TOKEN"}`)
 		case "/servers":
-			fmt.Fprintf(w, `{"regions":[{"id":"nl","name":"Netherlands","port_forward":%v,"servers":{"meta":[{"ip":"%s","cn":"nl"}],"wg":[{"ip":"%s","cn":"example.com"}]}}]}`+"\nSIG\n", forwards, host, host)
+			fmt.Fprintf(w, `{"regions":[{"id":"nl","name":"Netherlands","port_forward":%v,"servers":{"meta":[{"ip":"%s","cn":"nl"}],"wg":[%s]}}]}`+"\nSIG\n", forwards, host, strings.Join(wg, ","))
 		}
 	}))
 	t.Cleanup(web.Close)
 	keys := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pub := r.URL.Query().Get("pubkey")
-		if r.URL.Query().Get("pt") != "TOKEN" || srv.t.AddPeer(pub, netip.MustParsePrefix("10.9.0.2/32")) != nil {
+		cn, _, _ := net.SplitHostPort(r.Host)
+		s := servers[cn]
+		if r.URL.Query().Get("pt") != "TOKEN" || s == nil || s.t.AddPeer(pub, netip.MustParsePrefix("10.9.0.2/32")) != nil {
 			json.NewEncoder(w).Encode(map[string]string{"status": "ERROR"})
 			return
 		}
 		f.keys.Add(1)
-		json.NewEncoder(w).Encode(map[string]any{"status": "OK", "server_key": srv.pub, "server_port": atoi(port),
+		_, port, _ := net.SplitHostPort(s.endpoint)
+		json.NewEncoder(w).Encode(map[string]any{"status": "OK", "server_key": s.pub, "server_port": atoi(port),
 			"server_vip": "203.0.113.1", "peer_ip": "10.9.0.2", "dns_servers": []string{"203.0.113.1"}})
 	}))
 	t.Cleanup(keys.Close)
@@ -138,6 +163,38 @@ func TestPIALoginGivesEveryInterfaceATunnel(t *testing.T) {
 		}
 	}
 	t.Fatal("the PIA tunnel isn't a path for VPN-only downloads")
+}
+
+// PIA gives an account one peer IP per server, so two tunnels on one server
+// steal it from each other and only the newest carries traffic.
+func TestPIATunnelsOfTwoInterfacesEachCarryTraffic(t *testing.T) {
+	f := newFakePIAWith(t, false, 2)
+	e := loopbackEngine(t)
+	lo := loopbackIfaces()[0]
+	lo2 := lo
+	lo2.ID, lo2.Name = "lo2", "Loopback 2"
+	e.mu.Lock()
+	e.refreshInterfacesLocked([]netif.Interface{lo, lo2})
+	e.mu.Unlock()
+	e.piaAPI = f.api
+	setPIA(t, e, "p0123456", "right")
+	waitFor(t, "both tunnels to come up", 30*time.Second, func() bool {
+		e.syncTunnels(time.Now())
+		return len(e.Paths(paths.VPNOnly)) == 2
+	})
+	for _, id := range []string{"lo", "lo2"} {
+		e.mu.Lock()
+		c := e.tunnels[id].client
+		e.mu.Unlock()
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodHead, "http://203.0.113.1/", nil)
+		resp, err := c.Do(req)
+		cancel()
+		if err != nil {
+			t.Fatalf("the tunnel of %s carries no traffic: %v", id, err)
+		}
+		resp.Body.Close()
+	}
 }
 
 func TestPIATunnelsComeBackAfterARestart(t *testing.T) {
