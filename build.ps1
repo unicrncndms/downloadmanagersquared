@@ -32,7 +32,7 @@ try {
 }
 
 if (Get-Command node -ErrorAction SilentlyContinue) {
-    node --test (Join-Path $root 'extension	est')
+    node --test (Join-Path $root 'extension\test')
     if ($LASTEXITCODE) { throw 'extension tests failed' }
 } else {
     Write-Host 'node is not on PATH: extension tests skipped'
