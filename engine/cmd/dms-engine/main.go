@@ -145,13 +145,16 @@ func uninstall(l install.Layout) {
 	if wipe && data != "" {
 		errs = append(errs, os.RemoveAll(data))
 	}
-	errs = append(errs, l.RemoveLater())
 	if err := errors.Join(errs...); err != nil {
 		winutil.MessageBox(title, "Uninstalled, but not everything could be removed: "+err.Error())
-		return
+	} else {
+		winutil.Dialog(title, "downloadmanagersquared is uninstalled. Remove the extension in Firefox under Add-ons too.",
+			windows.MB_OK|windows.MB_ICONINFORMATION)
 	}
-	winutil.Dialog(title, "downloadmanagersquared is uninstalled. Remove the extension in Firefox under Add-ons too.",
-		windows.MB_OK|windows.MB_ICONINFORMATION)
+	// Last, as this exe lives in the folder: it can only go once this process has exited.
+	if err := l.RemoveLater(); err != nil {
+		winutil.MessageBox(title, "Could not remove "+l.Dir+": "+err.Error())
+	}
 }
 
 // quitEngine asks this user's running engine to quit and waits until it has

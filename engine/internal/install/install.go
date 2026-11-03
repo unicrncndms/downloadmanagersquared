@@ -203,11 +203,13 @@ func (l Layout) Unregister() error {
 }
 
 // RemoveLater deletes the install folder once this process (which runs from
-// it) has exited: a detached cmd waits a few seconds, then removes it.
+// it) has exited: a detached cmd waits a few seconds, then removes it, trying
+// again a few times while a file is still in use (a dms-host still exiting).
 func (l Layout) RemoveLater() error {
+	try := `ping -n 3 127.0.0.1 >nul & if exist "` + l.Dir + `" rmdir /s /q "` + l.Dir + `"`
 	cmd := exec.Command("cmd.exe")
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CmdLine:       `cmd.exe /d /c ping -n 4 127.0.0.1 >nul & rmdir /s /q "` + l.Dir + `"`,
+		CmdLine:       `cmd.exe /d /c ` + try + ` & ` + try + ` & ` + try + ` & ` + try,
 		HideWindow:    true,
 		CreationFlags: windows.CREATE_NO_WINDOW | windows.DETACHED_PROCESS,
 	}
