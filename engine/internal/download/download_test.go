@@ -686,3 +686,30 @@ func waitAsked(t *testing.T, env *testEnv) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestDiscardDeletesOnlyAnUnfinishedFile(t *testing.T) {
+	dir := t.TempDir()
+	done := New(&testEnv{}, State{ID: "c1", Dir: dir, Filename: "done.bin", Status: StatusCompleted, Links: map[string]*Link{}})
+	half := New(&testEnv{}, State{ID: "c2", Dir: dir, Filename: "half.bin", Status: StatusPaused, Links: map[string]*Link{}})
+	for _, d := range []*Download{done, half} {
+		if err := os.WriteFile(d.Path(), []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done.Discard(true)
+	half.Discard(true)
+	if _, err := os.Stat(done.Path()); err != nil {
+		t.Fatal("removing a finished download deleted the user's file")
+	}
+	if _, err := os.Stat(half.Path()); err == nil {
+		t.Fatal("the unfinished file is still there")
+	}
+}
+
+func TestResumeQueuesAStoppedDownload(t *testing.T) {
+	d := New(&testEnv{}, State{ID: "r1", Dir: t.TempDir(), Status: StatusPaused, Links: map[string]*Link{}})
+	d.Resume()
+	if d.Status() != StatusQueued || d.Yields() || d.Rejoins() {
+		t.Fatalf("resumed as %q, yields %v, rejoins %v", d.Status(), d.Yields(), d.Rejoins())
+	}
+}

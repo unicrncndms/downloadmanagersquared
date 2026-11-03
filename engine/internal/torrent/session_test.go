@@ -751,3 +751,29 @@ func TestDownloadingTorrentShowsPeersAndSpeedPerInterface(t *testing.T) {
 		t.Fatalf("info hash shown as %q", sum.InfoHash)
 	}
 }
+
+func TestFinishedTorrentResumesToSeedWithoutASlot(t *testing.T) {
+	s, err := NewSession(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	done, err := s.Add(State{ID: "f1", Magnet: newSwarm(t, 0, 256<<10).magnet(), Dir: t.TempDir(),
+		Status: download.StatusPaused, Finished: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	half, err := s.Add(State{ID: "f2", Magnet: fmt.Sprintf("magnet:?xt=urn:btih:%040x", 5), Dir: t.TempDir(),
+		Status: download.StatusPaused})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done.Resume()
+	half.Resume()
+	if done.Status() != StatusSeeding || !done.Rejoins() {
+		t.Fatalf("a finished torrent resumed as %q, rejoining %v; want seeding without a slot", done.Status(), done.Rejoins())
+	}
+	if half.Status() != download.StatusQueued || half.Rejoins() || !half.Yields() {
+		t.Fatalf("an unfinished torrent resumed as %q, rejoining %v", half.Status(), half.Rejoins())
+	}
+}

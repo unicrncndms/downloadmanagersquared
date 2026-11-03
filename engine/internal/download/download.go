@@ -1163,6 +1163,31 @@ type FileSummary struct {
 	Selected bool   `json:"selected"`
 }
 
+// Resume lets a stopped download run again: back in the queue.
+func (d *Download) Resume() { d.Stop(StatusQueued) }
+
+// Discard stops the download for good. With deleteFile, an unfinished file
+// goes; a completed one is the user's.
+func (d *Download) Discard(deleteFile bool) {
+	finished := d.Status() == StatusCompleted
+	d.Stop(StatusPaused)
+	if p := d.Path(); deleteFile && !finished {
+		os.Remove(p)
+	}
+}
+
+// Yields is false: HTTP downloads go first in the queue.
+func (d *Download) Yields() bool { return false }
+
+// Rejoins is false: an HTTP download only runs in a slot.
+func (d *Download) Rejoins() bool { return false }
+
+// Added is when the download was added.
+func (d *Download) Added() time.Time { return d.st.Added } // fixed when added: no lock needed
+
+// Saved is the download's kind and the state that resumes it after a restart.
+func (d *Download) Saved() (string, any) { return "downloads", d.State() }
+
 // VPN is the download's VPN mode.
 func (d *Download) VPN() paths.Mode { return d.st.VPN } // fixed when added: no lock needed
 

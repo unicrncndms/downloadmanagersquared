@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/torrent"
@@ -118,17 +117,15 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		if err != nil {
 			return nil, err
 		}
-		j, err := e.entry(p.ID)
+		j, err := e.queue.Get(p.ID)
 		if err != nil {
 			return nil, err
 		}
 		switch method {
 		case "pause":
-			j.Stop(download.StatusPaused)
+			return nil, e.queue.Pause(p.ID)
 		case "resume":
-			if !j.Running() {
-				e.requeue(j)
-			}
+			return nil, e.queue.Resume(p.ID)
 		case "remove":
 			return nil, e.Remove(p.ID, p.DeleteFile)
 		case "retryLink":
@@ -146,7 +143,7 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		if err != nil {
 			return nil, err
 		}
-		j, err := e.entry(p.ID)
+		j, err := e.queue.Get(p.ID)
 		if err != nil {
 			return nil, err
 		}

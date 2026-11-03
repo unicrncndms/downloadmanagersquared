@@ -225,9 +225,7 @@ func TestVPNOnlyTorrentPausesWithoutATunnelAndResumesWithOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.mu.Lock()
-	e.downloads[tor.ID()], e.order = tor, append(e.order, tor.ID())
-	e.mu.Unlock()
+	e.queue.Add(tor)
 
 	e.schedule()
 	if !tor.WaitingForVPN() || tor.Active() {
@@ -252,7 +250,7 @@ func TestNewTorrentAsksAboutTheVPNBeforeJoiningTheSwarm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	j, _ := e.entry(id)
+	j, _ := e.queue.Get(id)
 	e.schedule()
 	if s := summaryOf(t, e, id); s.Status != torrent.StatusChoosing || !s.AskVPN || j.(*torrent.Torrent).Active() {
 		t.Fatalf("new magnet is %q, asking %v, active %v; want it waiting for the VPN question, out of the swarm", s.Status, s.AskVPN, j.(*torrent.Torrent).Active())
@@ -262,7 +260,7 @@ func TestNewTorrentAsksAboutTheVPNBeforeJoiningTheSwarm(t *testing.T) {
 	if _, err := e.Call(nil, "chooseVpn", []byte(`{"id":"`+id+`","vpn":"vpn"}`)); err != nil {
 		t.Fatal(err)
 	}
-	j, _ = e.entry(id)
+	j, _ = e.queue.Get(id)
 	tor := j.(*torrent.Torrent)
 	if tor.State().VPN != paths.VPNOnly || tor.State().AskVPN {
 		t.Fatalf("after choosing the VPN the torrent runs under %q (asking %v)", tor.State().VPN, tor.State().AskVPN)
@@ -279,7 +277,7 @@ func TestStayingOnTheCurrentConnectionJoinsAtOnce(t *testing.T) {
 	if _, err := e.Call(nil, "chooseVpn", []byte(`{"id":"`+id+`","vpn":"off"}`)); err != nil {
 		t.Fatal(err)
 	}
-	j, _ := e.entry(id)
+	j, _ := e.queue.Get(id)
 	tor := j.(*torrent.Torrent)
 	if !tor.Active() || tor.Status() != torrent.StatusMetadata || tor.State().VPN != paths.Off {
 		t.Fatalf("staying on the connection: %q, active %v, VPN %q", tor.Status(), tor.Active(), tor.State().VPN)
@@ -319,7 +317,7 @@ func TestTorrentFileTakesTheVPNChoiceWithItsFiles(t *testing.T) {
 	if _, err := e.Call(nil, "chooseFiles", []byte(`{"id":"`+id+`","files":[true],"vpn":"vpn"}`)); err != nil {
 		t.Fatal(err)
 	}
-	j, _ := e.entry(id)
+	j, _ := e.queue.Get(id)
 	if st := j.(*torrent.Torrent).State(); st.VPN != paths.VPNOnly || st.Status != download.StatusQueued {
 		t.Fatalf("after the add step: VPN %q, status %q", st.VPN, st.Status)
 	}

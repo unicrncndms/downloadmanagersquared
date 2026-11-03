@@ -73,6 +73,14 @@ The first visit to a landing-page host, where the user clicks through by hand an
 **Replay**:
 A later visit, where the recipe's clicks are repeated automatically.
 
+### Queue
+
+**Queue**:
+The downloads list in the order added, deciding which ones run. HTTP downloads go first; a torrent gives its slot to a queued HTTP download.
+
+**Slot**:
+One of the *Max parallel* places a running download holds. Seeding and fetching a torrent's metadata hold none.
+
 ### Torrents
 
 **Torrent**:

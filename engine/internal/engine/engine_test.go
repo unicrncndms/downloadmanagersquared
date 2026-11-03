@@ -74,7 +74,7 @@ func TestAddedTorrentIsListedAndSurvivesARestart(t *testing.T) {
 	}
 	defer e.Shutdown()
 	e.schedule()
-	j, _ := e.entry(id)
+	j, _ := e.queue.Get(id)
 	if s := summaryOf(t, e, id); s.Status != torrent.StatusMetadata || !j.(*torrent.Torrent).Active() {
 		t.Fatalf("after restart the torrent is %q (active %v), want fetching metadata again", s.Status, j.(*torrent.Torrent).Active())
 	}
@@ -152,12 +152,12 @@ func TestSeedingTorrentKeepsSeedingAfterARestartWithoutASlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.schedule()
-	q, _ := e.entry(queued)
+	q, _ := e.queue.Get(queued)
 	defer q.Stop(download.StatusPaused)
 	if !q.Running() {
 		t.Fatal("the seeding torrent took the only slot; the queued one didn't start")
 	}
-	j, _ := e.entry(seed)
+	j, _ := e.queue.Get(seed)
 	waitFor(t, "the restored torrent to seed again", 10*time.Second, func() bool {
 		return j.(*torrent.Torrent).Active() && j.Status() == torrent.StatusSeeding
 	})
@@ -265,64 +265,8 @@ func queuedTorrent(t *testing.T, e *Engine, n int) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.mu.Lock()
-	e.downloads[tor.ID()] = tor
-	e.order = append(e.order, tor.ID())
-	e.mu.Unlock()
+	e.queue.Add(tor)
 	return tor.ID()
-}
-
-func running(t *testing.T, e *Engine, id string) bool {
-	t.Helper()
-	j, err := e.entry(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return j.Running()
-}
-
-func TestQueuedHTTPStartsBeforeAnEarlierQueuedTorrent(t *testing.T) {
-	e, err := open(t.TempDir(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer e.Shutdown()
-	e.settings.MaxParallel = 1
-	tor := queuedTorrent(t, e, 1)
-	http, _ := e.Add(AddRequest{URL: "https://example.com/big.iso"})
-	e.schedule()
-	if !running(t, e, http) || running(t, e, tor) {
-		t.Fatalf("http running %v, torrent running %v; want the HTTP download first", running(t, e, http), running(t, e, tor))
-	}
-}
-
-func TestHTTPTakesTheSlotOfTheLatestDownloadingTorrent(t *testing.T) {
-	e, err := open(t.TempDir(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer e.Shutdown()
-	e.settings.MaxParallel = 2
-	first, second := queuedTorrent(t, e, 1), queuedTorrent(t, e, 2)
-	e.schedule()
-	if !running(t, e, first) || !running(t, e, second) {
-		t.Fatal("both torrents should download while slots are free")
-	}
-
-	http, _ := e.Add(AddRequest{URL: "https://example.com/big.iso"})
-	e.schedule()
-	j, _ := e.entry(second)
-	if !running(t, e, http) || !running(t, e, first) || running(t, e, second) || j.Status() != download.StatusQueued {
-		t.Fatalf("http %v, first torrent %v, second torrent %v (%q); want the latest torrent bumped back to queued",
-			running(t, e, http), running(t, e, first), running(t, e, second), j.Status())
-	}
-
-	h, _ := e.entry(http)
-	h.Stop(download.StatusPaused)
-	e.schedule()
-	if !running(t, e, second) {
-		t.Fatal("the bumped torrent didn't resume when the slot freed")
-	}
 }
 
 func TestMeteredInterfaceUploadsOnlyOnceSwitchedOn(t *testing.T) {
@@ -446,13 +390,13 @@ func TestResumedSeedingTorrentSeedsWithoutASlot(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	j, _ := e.entry(seed)
+	j, _ := e.queue.Get(seed)
 	if j.Status() != torrent.StatusSeeding {
 		t.Fatalf("a resumed finished torrent is %q, want seeding again", j.Status())
 	}
 	http, _ := e.Add(AddRequest{URL: "https://example.com/big.iso"})
 	e.schedule()
-	h, _ := e.entry(http)
+	h, _ := e.queue.Get(http)
 	defer h.Stop(download.StatusPaused)
 	if !h.Running() || j.Running() || !j.(*torrent.Torrent).Active() {
 		t.Fatalf("http running %v, seeding torrent running %v active %v; want the torrent seeding beside it", h.Running(), j.Running(), j.(*torrent.Torrent).Active())
@@ -466,7 +410,7 @@ func TestRemovingAnUnfinishedTorrentDeletesItsPartialFile(t *testing.T) {
 	}
 	defer e.Shutdown()
 	id := queuedTorrent(t, e, 7) // named t7
-	j, _ := e.entry(id)
+	j, _ := e.queue.Get(id)
 	part := filepath.Join(j.(*torrent.Torrent).State().Dir, "t7.part")
 	os.WriteFile(part, []byte("half"), 0o644)
 	if err := e.Remove(id, true); err != nil {

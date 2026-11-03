@@ -28,6 +28,7 @@ import (
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/portmap"
+	"downloadmanagersquared/engine/internal/queue"
 	"downloadmanagersquared/engine/internal/rate"
 	"downloadmanagersquared/engine/internal/socks"
 	"downloadmanagersquared/engine/internal/torrent"
@@ -75,33 +76,17 @@ type resolveReq struct {
 	SocksPort int    `json:"socksPort"`
 }
 
-// entry is a download of either kind, as the list and the queue see it.
-type entry interface {
-	ID() string
-	Status() download.Status
-	Running() bool
-	Start()
-	Stop(as download.Status)
-	Path() string
-	Summary() download.Summary
-	VPN() paths.Mode
-	PauseForVPN()
-	WaitingForVPN() bool
-}
-
 type Engine struct {
 	dir string
 	ln  net.Listener
 	// One torrent session per VPN mode: a session's sockets are only the paths
 	// its mode allows, so a VPN-only torrent has no bare socket to leak through.
 	sessions map[paths.Mode]*torrent.Session
+	queue    *queue.Queue
 
 	mu        sync.Mutex
 	settings  Settings
 	ifaces    map[string]*ifaceEntry
-	downloads map[string]entry
-	order     []string
-	dirty     map[string]bool
 	clients   map[*ipc.Conn]*client
 	clientSeq int64
 	tunnels   map[string]*tunnelEntry // by interface ID
@@ -147,18 +132,16 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	os.MkdirAll(filepath.Join(dir, "downloads"), 0o755)
 	os.MkdirAll(filepath.Join(dir, "torrents"), 0o755)
 	e := &Engine{
-		dir:       dir,
-		ln:        ln,
-		settings:  loadSettings(filepath.Join(dir, "settings.json")),
-		ifaces:    map[string]*ifaceEntry{},
-		downloads: map[string]entry{},
-		dirty:     map[string]bool{},
-		clients:   map[*ipc.Conn]*client{},
-		resolves:  map[string]resolveReq{},
-		tunnels:   map[string]*tunnelEntry{},
-		mapPort:   portmap.Map,
-		piaAPI:    pia.Default,
-		quit:      make(chan struct{}),
+		dir:      dir,
+		ln:       ln,
+		settings: loadSettings(filepath.Join(dir, "settings.json")),
+		ifaces:   map[string]*ifaceEntry{},
+		clients:  map[*ipc.Conn]*client{},
+		resolves: map[string]resolveReq{},
+		tunnels:  map[string]*tunnelEntry{},
+		mapPort:  portmap.Map,
+		piaAPI:   pia.Default,
+		quit:     make(chan struct{}),
 	}
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
 	e.sessions = map[paths.Mode]*torrent.Session{}
@@ -167,7 +150,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	ports := map[paths.Mode]int{paths.Off: e.settings.TorrentPort, paths.VPNOnly: e.settings.TorrentPort}
 	for _, m := range []paths.Mode{paths.Off, paths.Alongside, paths.VPNOnly} {
 		s, err := torrent.NewSession(torrent.Config{
-			Changed:  func(t *torrent.Torrent) { e.markDirty(t.ID()) },
+			Changed:  func(t *torrent.Torrent) { e.queue.MarkDirty(t.ID()) },
 			Finished: func(t *torrent.Torrent) { e.notifyFinished(t.Summary()) },
 			Ratio: func() float64 {
 				e.mu.Lock()
@@ -202,17 +185,13 @@ func (e *Engine) session(m paths.Mode) *torrent.Session {
 
 // loadDownloads restores both kinds, in the order they were added.
 func (e *Engine) loadDownloads() {
-	type loaded struct {
-		j     entry
-		added time.Time
-	}
-	var all []loaded
+	var all []queue.Entry
 	for _, st := range readStates[download.State](filepath.Join(e.dir, "downloads")) {
 		if st.Status == download.StatusRunning || st.Status == download.StatusVerifying {
 			st.Status = download.StatusQueued
 		}
 		st.VPN = paths.ParseMode(string(st.VPN), paths.Off) // saved before modes were spelled out
-		all = append(all, loaded{download.New(e, st), st.Added})
+		all = append(all, download.New(e, st))
 	}
 	for _, st := range readStates[torrent.State](filepath.Join(e.dir, "torrents")) {
 		// Seeding and fetching metadata go on (schedule restarts them); the rest queue again.
@@ -226,13 +205,9 @@ func (e *Engine) loadDownloads() {
 			log.Printf("skipping torrent %s: %v", st.ID, err)
 			continue
 		}
-		all = append(all, loaded{t, st.Added})
+		all = append(all, t)
 	}
-	sort.SliceStable(all, func(i, j int) bool { return all[i].added.Before(all[j].added) })
-	for _, l := range all {
-		e.downloads[l.j.ID()] = l.j
-		e.order = append(e.order, l.j.ID())
-	}
+	e.queue = queue.New(e.dir, all)
 }
 
 // readStates reads every saved state in dir that has an ID.
@@ -278,7 +253,7 @@ func (e *Engine) Run() {
 			e.syncTunnels(now)
 			e.syncTorrentIfaces()
 			e.schedule()
-			e.persist()
+			e.queue.Save()
 			e.updateSnapshot(now.Sub(last))
 			last = now
 			e.broadcast("state", e.Snapshot())
@@ -292,13 +267,7 @@ func (e *Engine) Shutdown() {
 		if e.ln != nil {
 			e.ln.Close()
 		}
-		for _, j := range e.list() {
-			if j.Running() {
-				j.Stop(download.StatusQueued)
-			}
-			e.markDirty(j.ID())
-		}
-		e.persist()
+		e.queue.Close()
 		for _, s := range e.sessions {
 			s.Close()
 		}
@@ -311,29 +280,9 @@ func (e *Engine) Shutdown() {
 	})
 }
 
-func (e *Engine) list() []entry {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	out := make([]entry, 0, len(e.order))
-	for _, id := range e.order {
-		out = append(out, e.downloads[id])
-	}
-	return out
-}
-
-func (e *Engine) entry(id string) (entry, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	j := e.downloads[id]
-	if j == nil {
-		return nil, fmt.Errorf("no download %q", id)
-	}
-	return j, nil
-}
-
 // get is for what only HTTP downloads have: links, hashes, landing pages.
 func (e *Engine) get(id string) (*download.Download, error) {
-	j, err := e.entry(id)
+	j, err := e.queue.Get(id)
 	if err != nil {
 		return nil, err
 	}
@@ -344,92 +293,12 @@ func (e *Engine) get(id string) (*download.Download, error) {
 	return d, nil
 }
 
-// schedule starts queued downloads while there are free slots, HTTP downloads
-// before torrents, each in the order added. A queued HTTP download that finds
-// no free slot takes one from the latest added torrent that is downloading,
-// which goes back to the queue.
+// schedule lets the queue start what it can, under the current limit and paths.
 func (e *Engine) schedule() {
-	all := e.list()
 	e.mu.Lock()
-	limit := e.settings.MaxParallel
-	snap := e.pathSnapshotLocked()
+	limit, snap := e.settings.MaxParallel, e.pathSnapshotLocked()
 	e.mu.Unlock()
-	running := 0
-	var queued, torrents []entry
-	var downloading []*torrent.Torrent // holding a slot, in the order added
-	for _, d := range all {
-		t, isTorrent := d.(*torrent.Torrent)
-		if paths.For(d.VPN(), snap).Wait {
-			d.PauseForVPN() // never without a tunnel: under VPN only there is no other path
-			if d.WaitingForVPN() {
-				continue
-			}
-		} else if d.WaitingForVPN() {
-			e.requeue(d) // a tunnel came up
-		}
-		switch {
-		case d.Running():
-			running++
-			if isTorrent {
-				downloading = append(downloading, t)
-			}
-		case isTorrent && !t.Active() && (t.Status() == torrent.StatusSeeding || t.Status() == torrent.StatusMetadata):
-			// Seeding and fetching metadata hold no slot: a torrent restored doing either rejoins at once.
-			t.Start()
-		case d.Status() == download.StatusQueued && isTorrent:
-			torrents = append(torrents, d)
-		case d.Status() == download.StatusQueued:
-			queued = append(queued, d)
-		}
-	}
-	for _, d := range append(queued, torrents...) {
-		if running >= limit {
-			if _, isTorrent := d.(*torrent.Torrent); isTorrent || len(downloading) == 0 {
-				return
-			}
-			downloading[len(downloading)-1].Stop(download.StatusQueued)
-			downloading = downloading[:len(downloading)-1]
-			running--
-		}
-		d.Start()
-		if d.Running() { // a torrent still to be chosen only fetches its files
-			running++
-		}
-	}
-}
-
-func (e *Engine) persist() {
-	e.mu.Lock()
-	ids := make([]string, 0, len(e.dirty))
-	for id := range e.dirty {
-		ids = append(ids, id)
-	}
-	e.dirty = map[string]bool{}
-	e.mu.Unlock()
-	for _, id := range ids {
-		j, err := e.entry(id)
-		if err != nil {
-			continue
-		}
-		var st any
-		switch j := j.(type) {
-		case *download.Download:
-			st = j.State()
-		case *torrent.Torrent:
-			st = j.State()
-		}
-		if err := writeJSON(e.statePath(j), st); err != nil {
-			log.Printf("saving %s: %v", id, err)
-		}
-	}
-}
-
-func (e *Engine) statePath(j entry) string {
-	kind := "downloads"
-	if _, ok := j.(*torrent.Torrent); ok {
-		kind = "torrents"
-	}
-	return filepath.Join(e.dir, kind, j.ID()+".json")
+	e.queue.Schedule(limit, snap)
 }
 
 func (e *Engine) saveSettingsLocked() {
@@ -751,13 +620,7 @@ func (e *Engine) RequestResolve(id, ifaceID, pageURL string) {
 	}
 }
 
-func (e *Engine) Changed(d *download.Download) { e.markDirty(d.ID()) }
-
-func (e *Engine) markDirty(id string) {
-	e.mu.Lock()
-	e.dirty[id] = true
-	e.mu.Unlock()
-}
+func (e *Engine) Changed(d *download.Download) { e.queue.MarkDirty(d.ID()) }
 
 func (e *Engine) Finished(d *download.Download) { e.notifyFinished(d.Summary()) }
 
@@ -821,24 +684,13 @@ func (e *Engine) OpenManager(hash string) {
 	}
 }
 
-func (e *Engine) PauseAll() {
-	for _, d := range e.list() {
-		d.Stop(download.StatusPaused)
-	}
-}
-
-func (e *Engine) ResumeAll() {
-	for _, d := range e.list() {
-		if s := d.Status(); s == download.StatusPaused || s == download.StatusFailed {
-			e.requeue(d)
-		}
-	}
-}
+func (e *Engine) PauseAll()  { e.queue.PauseAll() }
+func (e *Engine) ResumeAll() { e.queue.ResumeAll() }
 
 // chooseTorrentVPN answers a new torrent's VPN question, moving it to the
 // session of that mode before it joins the swarm.
 func (e *Engine) chooseTorrentVPN(id, vpn string) (*torrent.Torrent, error) {
-	j, err := e.entry(id)
+	j, err := e.queue.Get(id)
 	if err != nil {
 		return nil, err
 	}
@@ -852,25 +704,11 @@ func (e *Engine) chooseTorrentVPN(id, vpn string) (*torrent.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
-	e.mu.Lock()
-	if e.downloads[id] != j {
-		e.mu.Unlock()
-		return nil, fmt.Errorf("%q changed meanwhile", id)
+	if err := e.queue.Replace(t, nt); err != nil {
+		return nil, err
 	}
-	e.downloads[id], e.dirty[id] = nt, true
-	e.mu.Unlock()
 	nt.Start() // learn the files through the chosen paths, or back to choosing them
 	return nt, nil
-}
-
-// requeue lets a stopped download run again: queued, or for a torrent whose
-// download completed, seeding, which takes no queue slot (schedule restarts it).
-func (e *Engine) requeue(j entry) {
-	if t, ok := j.(*torrent.Torrent); ok && !t.State().Finished.IsZero() {
-		t.Stop(torrent.StatusSeeding)
-		return
-	}
-	j.Stop(download.StatusQueued)
 }
 
 func newID() string {
@@ -917,11 +755,8 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(),
 	}
-	d := download.New(e, st)
-	e.downloads[st.ID] = d
-	e.order = append(e.order, st.ID)
-	e.dirty[st.ID] = true
 	e.mu.Unlock()
+	e.queue.Add(download.New(e, st))
 	log.Printf("added %s", st.ID) // no URL: links are private
 	return st.ID, nil
 }
@@ -1004,45 +839,22 @@ func (e *Engine) addTorrent(st torrent.State, vpn string) (string, error) {
 		return "", err
 	}
 	t.Start() // learn the files for the add step, without waiting for a slot
-	e.mu.Lock()
-	e.downloads[t.ID()] = t
-	e.order = append(e.order, t.ID())
-	e.dirty[t.ID()] = true
-	e.mu.Unlock()
+	e.queue.Add(t)
 	log.Printf("added torrent %s", t.ID())
 	return t.ID(), nil
 }
 
 func (e *Engine) Remove(id string, deleteFile bool) error {
-	d, err := e.entry(id)
-	if err != nil {
+	if err := e.queue.Remove(id, deleteFile); err != nil {
 		return err
 	}
-	// Once a torrent's download completed (seeding, or checking to seed again), its files are the user's.
-	finished := d.Status() == download.StatusCompleted
-	if t, ok := d.(*torrent.Torrent); ok && !t.State().Finished.IsZero() {
-		finished = true
-	}
-	d.Stop(download.StatusPaused)
-	if p := d.Path(); deleteFile && p != "" && !finished {
-		if _, ok := d.(*torrent.Torrent); ok {
-			os.RemoveAll(p)        // a multi-file torrent is a folder
-			os.Remove(p + ".part") // a single file waits under .part until complete
-		} else {
-			os.Remove(p)
-		}
-	}
 	e.mu.Lock()
-	delete(e.downloads, id)
-	delete(e.dirty, id)
 	for k := range e.resolves {
 		if strings.HasPrefix(k, id+"|") {
 			delete(e.resolves, k)
 		}
 	}
-	e.order = slices.DeleteFunc(e.order, func(x string) bool { return x == id })
 	e.mu.Unlock()
-	os.Remove(e.statePath(d))
 	return nil
 }
 
@@ -1086,7 +898,7 @@ type StateEvent struct {
 
 func (e *Engine) updateSnapshot(dt time.Duration) {
 	sums := []download.Summary{}
-	for _, d := range e.list() {
+	for _, d := range e.queue.List() {
 		sums = append(sums, d.Summary())
 	}
 	speeds := map[string]float64{}

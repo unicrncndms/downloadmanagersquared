@@ -570,6 +570,44 @@ func (t *Torrent) Stop(as download.Status) {
 	t.changed()
 }
 
+// Resume lets a stopped torrent run again: queued, or once its download
+// completed, seeding, which takes no queue slot.
+func (t *Torrent) Resume() {
+	if !t.State().Finished.IsZero() {
+		t.Stop(StatusSeeding)
+		return
+	}
+	t.Stop(download.StatusQueued)
+}
+
+// Discard stops the torrent for good. With deleteFiles, unfinished files go;
+// once its download completed (seeding, or checking to seed again) they are the user's.
+func (t *Torrent) Discard(deleteFiles bool) {
+	finished := t.Status() == download.StatusCompleted || !t.State().Finished.IsZero()
+	t.Stop(download.StatusPaused)
+	if p := t.Path(); deleteFiles && p != "" && !finished {
+		os.RemoveAll(p)        // a multi-file torrent is a folder
+		os.Remove(p + ".part") // a single file waits under .part until complete
+	}
+}
+
+// Yields is true: torrents queue behind HTTP downloads and give their slot to one.
+func (t *Torrent) Yields() bool { return true }
+
+// Rejoins is whether the torrent should rejoin the swarm without a slot:
+// seeding, or fetching its metadata.
+func (t *Torrent) Rejoins() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !t.active && (t.st.Status == StatusSeeding || t.st.Status == StatusMetadata)
+}
+
+// Added is when the torrent was added.
+func (t *Torrent) Added() time.Time { return t.st.Added } // fixed when added: no lock needed
+
+// Saved is the torrent's kind and the state that resumes it after a restart.
+func (t *Torrent) Saved() (string, any) { return "torrents", t.State() }
+
 // VPN is the torrent's VPN mode.
 func (t *Torrent) VPN() paths.Mode { return t.st.VPN } // fixed when added: no lock needed
 
