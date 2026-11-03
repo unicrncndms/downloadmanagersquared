@@ -29,7 +29,7 @@ import (
 // out through that interface only.
 type Iface struct {
 	ID           string
-	Gen          int  // a new generation (a restarted tunnel) gets new sockets
+	Gen          int  // a new generation (a restarted tunnel, a new address) gets new sockets
 	Port         int  // where peers connect in on this interface; 0 = the session's
 	Upload       bool // peers may download from us through it
 	Dial         func(ctx context.Context, network, addr string) (net.Conn, error)

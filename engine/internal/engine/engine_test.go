@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -474,4 +475,35 @@ func TestRemovingAnUnfinishedTorrentDeletesItsPartialFile(t *testing.T) {
 	if _, err := os.Stat(part); err == nil {
 		t.Fatal("the partial file of a removed unfinished torrent is still there")
 	}
+}
+
+func TestTorrentsListenOnAnInterfacesNewAddress(t *testing.T) {
+	e := loopbackEngine(t)
+	tor, err := e.session(paths.Off).Add(torrentState(testMagnet, paths.Off, t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	defer tor.Stop(download.StatusPaused)
+	e.syncTorrentIfaces()
+	waitFor(t, "the session to go live", 5*time.Second, e.session(paths.Off).Live)
+	reachable := func(ip string) func() bool {
+		return func() bool {
+			c, err := net.DialTimeout("tcp4", net.JoinHostPort(ip, strconv.Itoa(e.settings.TorrentPort)), time.Second)
+			if err == nil {
+				c.Close()
+			}
+			return err == nil
+		}
+	}
+	waitFor(t, "peers to reach the interface", 5*time.Second, reachable("127.0.0.1"))
+
+	// The interface gets a new address, as after a DHCP renewal.
+	moved := loopbackIfaces()
+	moved[0].IPv4 = net.IPv4(127, 0, 0, 2)
+	e.mu.Lock()
+	e.refreshInterfacesLocked(moved)
+	e.mu.Unlock()
+	e.syncTorrentIfaces()
+	waitFor(t, "peers to reach the interface's new address", 5*time.Second, reachable("127.0.0.2"))
 }

@@ -43,6 +43,7 @@ const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Ge
 type ifaceEntry struct {
 	info     netif.Interface
 	binding  *netif.Binding
+	gen      int          // goes up with each new binding, so torrents reopen their sockets on it
 	shaper   *rate.Shaper // the interface's limits, across every socket its bindings hand out
 	socks    *socks.Server
 	present  bool
@@ -470,6 +471,7 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 				ent.binding.Close()
 			}
 			ent.binding = netif.NewBinding(i, ent.shaper)
+			ent.gen++
 			ent.incoming = incoming{} // a new address needs its own mapping
 		}
 		ent.info, ent.present = i, true
@@ -640,6 +642,7 @@ func (e *Engine) torrentIfacesFor(m paths.Mode) []torrent.Iface {
 		}
 		ifs = append(ifs, torrent.Iface{
 			ID:     id,
+			Gen:    e.ifaces[id].gen, // a new address: the old sockets are bound to the old one
 			Upload: e.uploadLocked(id),
 			Dial:   e.dialVia(id),
 			ListenPacket: func(port int) (net.PacketConn, error) {
