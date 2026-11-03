@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/download"
@@ -129,5 +131,46 @@ func TestUnreadablePIALoginAndTunnelAreSetAside(t *testing.T) {
 	}
 	if len(*shown) != 1 || !strings.Contains((*shown)[0], "VPN config for wifi") {
 		t.Fatalf("balloons on the second start %q, want one about the tunnel", *shown)
+	}
+}
+
+// closeWatcher is a listener that notes whether a download's state was saved
+// by the time the pipe closed.
+type closeWatcher struct {
+	net.Listener
+	state string
+	saved bool
+}
+
+func (c *closeWatcher) Close() error {
+	_, err := os.Stat(c.state)
+	c.saved = err == nil
+	return nil
+}
+
+func TestQuitSavesStateBeforeThePipeCloses(t *testing.T) {
+	dir := t.TempDir()
+	ln := &closeWatcher{}
+	e, err := open(dir, ln)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := e.Add(AddRequest{URL: "https://example.com/a.iso"})
+	ln.state = filepath.Join(dir, "downloads", id+".json")
+	res, err := e.Call(nil, "quit", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pid := res.(map[string]int)["pid"]; pid != os.Getpid() {
+		t.Fatalf("quit answered pid %d, want %d", pid, os.Getpid())
+	}
+	select {
+	case <-e.QuitRequested():
+	case <-time.After(time.Second):
+		t.Fatal("quit didn't ask the tray to quit")
+	}
+	e.Shutdown() // what the tray does on quit
+	if !ln.saved {
+		t.Fatal("the pipe closed before the download's state was saved")
 	}
 }

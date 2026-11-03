@@ -1,6 +1,7 @@
 # Builds the engine, the native-messaging shim and the extension package into dist\,
 # all stamped with one version: -Version, else the latest git tag, else 0.0.0.
-param([string]$Version)
+# -Repo owner/repo is where the engine sends people for the extension and releases.
+param([string]$Version, [string]$Repo)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $dist = Join-Path $root 'dist'
@@ -17,6 +18,7 @@ $go = (Get-Command go -ErrorAction SilentlyContinue).Source
 if (-not $go) { throw 'Go is not on PATH. Install it (winget install GoLang.Go) and open a new terminal.' }
 
 $ldflags = "-X downloadmanagersquared/engine/internal/engine.Version=$Version"
+if ($Repo) { $ldflags += " -X downloadmanagersquared/engine/internal/install.Repo=$Repo" }
 Push-Location (Join-Path $root 'engine')
 try {
     & $go test ./...

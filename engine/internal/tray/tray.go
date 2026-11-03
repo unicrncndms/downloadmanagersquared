@@ -66,6 +66,9 @@ func onReady(e *engine.Engine) {
 			case <-quit.ClickedCh:
 				systray.Quit()
 				return
+			case <-e.QuitRequested():
+				systray.Quit()
+				return
 			}
 		}
 	}()

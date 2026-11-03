@@ -261,7 +261,7 @@ connectUI((m) => {
   renderConn(m, "Connected");
   if (!m.connected || !m.state) {
     $("list").replaceChildren(el("div", { class: "offline" },
-      "The download engine isn't reachable. Make sure it's running in the tray, or reinstall it (installer\\install.ps1).",
+      "The download engine isn't reachable. Make sure it's running in the tray, or run dms-engine.exe from the release zip again.",
       m.error ? el("div", { class: "muted mono" }, m.error) : null));
     cards.clear();
     return;

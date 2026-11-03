@@ -11,9 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -120,22 +118,13 @@ func connect() (net.Conn, error) {
 }
 
 // startEngine launches dms-engine.exe from this directory, breaking away from
-// Firefox's job object so the engine survives Firefox closing.
+// the browser's job object so the engine survives the browser closing.
 func startEngine() error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	exe := filepath.Join(filepath.Dir(self), "dms-engine.exe")
-	for _, flags := range []uint32{windows.CREATE_BREAKAWAY_FROM_JOB | windows.DETACHED_PROCESS, windows.DETACHED_PROCESS} {
-		cmd := exec.Command(exe)
-		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: flags}
-		if err = cmd.Start(); err == nil {
-			cmd.Process.Release()
-			return nil
-		}
-	}
-	return err
+	return winutil.StartDetached(filepath.Join(filepath.Dir(self), "dms-engine.exe"))
 }
 
 func readFrame(r io.Reader) ([]byte, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -347,6 +348,10 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, err
 		}
 		return nil, winutil.SetAutostart(p.On)
+	case "quit":
+		// The caller waits for this process to exit before replacing or removing it.
+		e.reqOnce.Do(func() { close(e.quitReq) })
+		return map[string]int{"pid": os.Getpid()}, nil
 	case "openManager":
 		p, _ := decode[struct {
 			Hash string `json:"hash"`

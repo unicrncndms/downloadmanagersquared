@@ -29,13 +29,7 @@ This runs the download, torrent and engine tests and puts `dms-engine.exe`, `dms
 
 ## Install
 
-1. Engine (current user, no admin):
-
-   ```bash
-   powershell -ExecutionPolicy Bypass -File installer\install.ps1
-   ```
-
-   It copies the executables to `%LOCALAPPDATA%\downloadmanagersquared`, registers the native-messaging host for Firefox, enables start-with-Windows and starts the engine in the tray.
+1. Engine (current user, no admin): run `dist\dms-engine.exe`. It copies itself to `%LOCALAPPDATA%\downloadmanagersquared`, registers the native-messaging host for Firefox, enables start-with-Windows and starts the engine in the tray. Running a newer build the same way upgrades it.
 
 2. Extension. Release Firefox only installs signed extensions:
    - **To try it right away**: open `about:debugging#/runtime/this-firefox` → *Load Temporary Add-on…* → pick `extension\manifest.json`. It stays until Firefox restarts.
@@ -65,7 +59,7 @@ Files are written as `name.dms.part` (sparse, so even a 50 GB file is created in
 
 - Settings and download state: `%APPDATA%\downloadmanagersquared\` (`settings.json`, `downloads\*.json`)
 - Engine log: `%APPDATA%\downloadmanagersquared\engine.log`
-- Uninstall: `installer\uninstall.ps1` (downloads and settings are kept)
+- Uninstall: *Settings → Apps → Installed apps → downloadmanagersquared* (downloads are kept; settings too, unless you choose to delete them)
 
 ## Known limitations
 

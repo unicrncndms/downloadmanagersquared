@@ -108,6 +108,8 @@ type Engine struct {
 
 	quit     chan struct{}
 	quitOnce sync.Once
+	quitReq  chan struct{} // closed when a client asks the engine to quit
+	reqOnce  sync.Once
 }
 
 // New claims the pipe (proving this is the only engine of this user) and loads
@@ -122,12 +124,12 @@ func New() (*Engine, error) {
 		}
 		return nil, fmt.Errorf("could not open the engine's pipe: %w", err)
 	}
-	base, err := os.UserConfigDir()
+	dir, err := DataDir()
 	if err != nil {
 		ln.Close()
 		return nil, err
 	}
-	e, err := open(filepath.Join(base, "downloadmanagersquared"), ln)
+	e, err := open(dir, ln)
 	if err != nil {
 		ln.Close()
 		return nil, err
@@ -135,6 +137,16 @@ func New() (*Engine, error) {
 	e.refreshInterfaces()
 	e.updateSnapshot(0)
 	return e, nil
+}
+
+// DataDir is where the engine keeps the user's settings, state and log:
+// %APPDATA%\downloadmanagersquared.
+func DataDir() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "downloadmanagersquared"), nil
 }
 
 // open loads the engine kept in dir, with no interfaces yet. ln may be nil.
@@ -157,6 +169,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		mapPort:  portmap.Map,
 		piaAPI:   pia.Default,
 		quit:     make(chan struct{}),
+		quitReq:  make(chan struct{}),
 	}
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
 	e.sessions = map[paths.Mode]*torrent.Session{}
@@ -283,13 +296,19 @@ func (e *Engine) Run() {
 	}
 }
 
+// QuitRequested is closed when a client (an upgrade or the uninstaller) asks
+// the engine to quit; the tray then quits as if from its menu.
+func (e *Engine) QuitRequested() <-chan struct{} { return e.quitReq }
+
+// Shutdown saves everything, then lets go of the pipe: whoever waits for the
+// pipe to be free finds the state on disk.
 func (e *Engine) Shutdown() {
 	e.quitOnce.Do(func() {
 		close(e.quit)
+		e.queue.Close()
 		if e.ln != nil {
 			e.ln.Close()
 		}
-		e.queue.Close()
 		for _, s := range e.sessions {
 			s.Close()
 		}
