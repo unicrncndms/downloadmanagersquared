@@ -52,22 +52,6 @@ func Hidden(cmd *exec.Cmd) *exec.Cmd {
 	return cmd
 }
 
-// Notify shows a Windows toast. It borrows PowerShell's registered app ID,
-// because toasts from an unregistered ID are silently dropped.
-func Notify(title, msg string) {
-	const script = `[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime] > $null
-$t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
-$x = $t.GetElementsByTagName('text')
-$x.Item(0).AppendChild($t.CreateTextNode($env:DMS_TITLE)) > $null
-$x.Item(1).AppendChild($t.CreateTextNode($env:DMS_MSG)) > $null
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($t))`
-	cmd := Hidden(exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script))
-	cmd.Env = append(os.Environ(), "DMS_TITLE="+title, "DMS_MSG="+msg)
-	if cmd.Start() == nil {
-		go cmd.Wait()
-	}
-}
-
 // ShowInFolder opens Explorer with the file selected.
 func ShowInFolder(path string) error {
 	cmd := exec.Command("explorer.exe")

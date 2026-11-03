@@ -22,7 +22,8 @@ func Run(e *engine.Engine) {
 
 func onReady(e *engine.Engine) {
 	systray.SetIcon(Icon())
-	systray.SetTooltip("downloadmanagersquared")
+	winutil.SetBalloonIcon(Icon())
+	systray.SetTooltip(winutil.AppName)
 
 	summary := systray.AddMenuItem("Idle", "")
 	summary.Disable()
@@ -78,7 +79,8 @@ func onReady(e *engine.Engine) {
 			}
 			summary.SetTitle(head)
 
-			tip := []string{"DMS²  " + head}
+			// Starts with the app name: balloons are named after the tooltip.
+			tip := []string{winutil.AppName + "  " + head}
 			i := 0
 			for _, v := range s.Interfaces {
 				if !v.Present || !v.Enabled || i >= ifaceRows {

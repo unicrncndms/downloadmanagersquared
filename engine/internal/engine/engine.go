@@ -152,7 +152,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	for _, m := range []paths.Mode{paths.Off, paths.Alongside, paths.VPNOnly} {
 		s, err := torrent.NewSession(torrent.Config{
 			Changed:  func(t *torrent.Torrent) { e.queue.MarkDirty(t.ID()) },
-			Finished: func(t *torrent.Torrent) { e.notifyFinished(t.Summary()) },
+			Finished: func(t *torrent.Torrent) { e.notifyFinished(t.Summary(), t.Path()) },
 			Ratio: func() float64 {
 				e.mu.Lock()
 				defer e.mu.Unlock()
@@ -623,16 +623,17 @@ func (e *Engine) RequestResolve(id, ifaceID, pageURL string) {
 
 func (e *Engine) Changed(d *download.Download) { e.queue.MarkDirty(d.ID()) }
 
-func (e *Engine) Finished(d *download.Download) { e.notifyFinished(d.Summary()) }
+func (e *Engine) Finished(d *download.Download) { e.notifyFinished(d.Summary(), d.Path()) }
 
-// notify shows a Windows notification; tests switch it off.
-var notify = winutil.Notify
+// notify shows a tray balloon, running click when it is clicked; tests switch it off.
+var notify = winutil.NotifyClick
 
-func (e *Engine) notifyFinished(s download.Summary) {
+// notifyFinished says a download ended; a click on a finished one shows it in its folder.
+func (e *Engine) notifyFinished(s download.Summary, path string) {
 	if s.Status == download.StatusCompleted || s.Status == torrent.StatusSeeding {
-		notify("Download complete", s.Filename)
+		notify("Download complete", s.Filename, func() { winutil.ShowInFolder(path) })
 	} else {
-		notify("Download failed", s.Filename+": "+s.Error)
+		notify("Download failed", s.Filename+": "+s.Error, nil)
 	}
 }
 
