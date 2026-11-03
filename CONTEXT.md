@@ -94,6 +94,13 @@ How much a torrent has uploaded divided by its size. Seeding stops when the rati
 A WireGuard connection to a VPN server, carried over one interface and run inside the engine. Each interface has at most one, with its own key. It shares its interface's settings and limits. Users see it as "VPN via <interface>".
 _Avoid_: VPN interface, adapter
 
+**Path**:
+A route a download's traffic can take: a bare interface, or that interface's tunnel. VPN mode decides which paths a download may use.
+_Avoid_: Route, link (a link is one interface's access to a file)
+
+**Main path**:
+The path a download treats as its main interface: the main interface itself, or under VPN only its tunnel, else any tunnel that is up.
+
 **VPN mode**:
 Which paths a download may use: Off (bare interfaces only), Alongside (tunnels and bare interfaces) or VPN only (tunnels only, and pause when none is up). Each download type has a default, and a download's mode is fixed when it is added.
 _Avoid_: Kill switch (it is what VPN only does, not a separate setting)

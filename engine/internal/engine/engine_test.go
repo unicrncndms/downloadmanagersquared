@@ -20,6 +20,7 @@ import (
 
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/netif"
+	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/portmap"
 	"downloadmanagersquared/engine/internal/torrent"
 )
@@ -259,7 +260,7 @@ func TestTorrentLinksAreRecognised(t *testing.T) {
 func queuedTorrent(t *testing.T, e *Engine, n int) string {
 	t.Helper()
 	m := fmt.Sprintf("magnet:?xt=urn:btih:%040x&dn=t%d", n, n)
-	tor, err := e.session(download.VPNOff).Add(torrent.State{ID: newID(), Magnet: m, Dir: t.TempDir(), Status: download.StatusQueued, Added: time.Now()})
+	tor, err := e.session(paths.Off).Add(torrent.State{ID: newID(), Magnet: m, Dir: t.TempDir(), Status: download.StatusQueued, Added: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +340,7 @@ func TestMeteredInterfaceUploadsOnlyOnceSwitchedOn(t *testing.T) {
 	e.mu.Unlock()
 	upload := func() map[string]bool {
 		out := map[string]bool{}
-		for _, i := range e.torrentIfacesFor(download.VPNOff) {
+		for _, i := range e.torrentIfacesFor(paths.Off) {
 			out[i.ID] = i.Upload
 		}
 		return out
@@ -403,13 +404,13 @@ func TestInterfacesShowWhetherPeersCanConnectIn(t *testing.T) {
 	if len(asked) != 0 || ifaceView(t, e, "eth").Incoming != "" {
 		t.Fatalf("with no torrent in the swarm the routers were asked: %v", asked)
 	}
-	tor, err := e.session(download.VPNOff).Add(torrentState(testMagnet, download.VPNOff, t.TempDir()))
+	tor, err := e.session(paths.Off).Add(torrentState(testMagnet, paths.Off, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	tor.Start()
 	defer tor.Stop(download.StatusPaused)
-	waitFor(t, "the session to go live", 5*time.Second, e.session(download.VPNOff).Live)
+	waitFor(t, "the session to go live", 5*time.Second, e.session(paths.Off).Live)
 	e.refreshPortMaps(time.Now())
 	for id, want := range map[string]string{"eth": "reachable", "wifi": "outgoing", "wan": "reachable"} {
 		if v := ifaceView(t, e, id); v.Incoming != want {
@@ -426,7 +427,7 @@ func TestInterfacesShowWhetherPeersCanConnectIn(t *testing.T) {
 	}
 }
 
-func torrentState(magnet string, m download.VPNMode, dir string) torrent.State {
+func torrentState(magnet string, m paths.Mode, dir string) torrent.State {
 	return torrent.State{ID: newID(), Magnet: magnet, Dir: dir, Status: download.StatusQueued, VPN: m, Added: time.Now()}
 }
 

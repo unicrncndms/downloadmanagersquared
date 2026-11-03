@@ -10,6 +10,7 @@ import (
 
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
+	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/torrent"
 	"downloadmanagersquared/engine/internal/winutil"
 )
@@ -249,10 +250,10 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 				s.SeedRatio = *p.SeedRatio
 			}
 			if p.VPNHTTP != nil {
-				s.VPNHTTP = *p.VPNHTTP
+				s.VPNHTTP = paths.ParseMode(*p.VPNHTTP, s.VPNHTTP)
 			}
 			if p.VPNTorrent != nil {
-				s.VPNTorrent = *p.VPNTorrent
+				s.VPNTorrent = paths.ParseMode(*p.VPNTorrent, s.VPNTorrent)
 			}
 		}), nil
 	case "setInterface":

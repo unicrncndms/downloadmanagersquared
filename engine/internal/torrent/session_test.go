@@ -24,6 +24,7 @@ import (
 	"github.com/anacrolix/torrent/storage"
 
 	"downloadmanagersquared/engine/internal/download"
+	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/rate"
 )
 
@@ -613,7 +614,7 @@ func TestTorrentPausedForTheVPNSaysSoAndResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir(), VPN: download.VPNOnly})
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir(), VPN: paths.VPNOnly})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +631,7 @@ func TestTorrentPausedForTheVPNSaysSoAndResumes(t *testing.T) {
 	if tor.WaitingForVPN() || !tor.Active() {
 		t.Fatal("restarted torrent still waits for the VPN")
 	}
-	if tor.State().VPN != download.VPNOnly {
+	if tor.State().VPN != paths.VPNOnly {
 		t.Fatal("the torrent's VPN mode was lost")
 	}
 }

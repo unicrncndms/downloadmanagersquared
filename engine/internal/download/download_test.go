@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"downloadmanagersquared/engine/internal/paths"
 )
 
 // tagTransport stands in for an interface: it marks each request with the
@@ -50,13 +52,24 @@ func (s slowBody) Read(p []byte) (int, error) {
 type testEnv struct {
 	ifaces   []Iface
 	main     string
-	asked    atomic.Value // the VPN mode Usable was last asked for
+	asked    atomic.Value // the VPN mode Paths was last asked for
 	resolve  func(id, iface, page string)
 	finished chan struct{}
 }
 
-func (e *testEnv) Usable(m VPNMode) []Iface { e.asked.Store(m); return e.ifaces }
-func (e *testEnv) MainID(VPNMode) string    { return e.main }
+func (e *testEnv) Paths(m paths.Mode) []Iface {
+	e.asked.Store(m)
+	var out []Iface // the main path first
+	for _, i := range e.ifaces {
+		if i.ID == e.main {
+			out = append([]Iface{i}, out...)
+		} else {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
 func (e *testEnv) ETAWindow() time.Duration { return 10 * time.Second }
 func (e *testEnv) Changed(*Download)        {}
 func (e *testEnv) Finished(*Download)       { close(e.finished) }
@@ -634,22 +647,42 @@ func TestOneHTTPErrorDoesNotStopTheInterface(t *testing.T) {
 	checkFile(t, filepath.Join(dir, "big.bin"), data)
 }
 
-func TestVPNOnlyDownloadWithNoTunnelPausesAndWaits(t *testing.T) {
-	env := &testEnv{} // no tunnel is up: nothing usable under VPN only
+func TestPauseForVPNWaitsUntilStartedAgain(t *testing.T) {
+	env := &testEnv{} // no path: the download idles until paused
 	d := New(env, State{ID: "v1", URL: "https://example.com/big.iso", Dir: t.TempDir(), Size: -1,
-		Status: StatusQueued, VPN: VPNOnly, Links: map[string]*Link{}})
+		Status: StatusQueued, VPN: paths.VPNOnly, Links: map[string]*Link{}})
 	d.Start()
-	deadline := time.Now().Add(10 * time.Second)
-	for d.Status() != StatusPaused {
-		if time.Now().After(deadline) {
-			t.Fatalf("still %q with no tunnel up", d.Status())
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if m, _ := env.asked.Load().(VPNMode); m != VPNOnly {
+	waitAsked(t, env)
+	if m, _ := env.asked.Load().(paths.Mode); m != paths.VPNOnly {
 		t.Fatalf("asked for paths under %q, want VPN only", m)
 	}
-	if !d.WaitingForVPN() || !strings.Contains(d.Summary().Error, "VPN") {
-		t.Fatalf("paused with %q, waiting for VPN %v", d.Summary().Error, d.WaitingForVPN())
+	d.PauseForVPN()
+	if d.Status() != StatusPaused || !d.WaitingForVPN() || !strings.Contains(d.Summary().Error, "VPN") {
+		t.Fatalf("%q with %q, waiting for VPN %v", d.Status(), d.Summary().Error, d.WaitingForVPN())
+	}
+	d.Start()
+	defer d.Stop(StatusPaused)
+	if d.WaitingForVPN() {
+		t.Fatal("still waiting for VPN once started")
+	}
+}
+
+func TestPauseForVPNLeavesAPausedDownloadAlone(t *testing.T) {
+	d := New(&testEnv{}, State{ID: "v2", URL: "https://example.com/big.iso", Dir: t.TempDir(), Size: -1,
+		Status: StatusPaused, VPN: paths.VPNOnly, Links: map[string]*Link{}})
+	d.PauseForVPN()
+	if d.WaitingForVPN() {
+		t.Fatal("a download the user paused would resume by itself")
+	}
+}
+
+func waitAsked(t *testing.T, env *testEnv) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for env.asked.Load() == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("never asked for its paths")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

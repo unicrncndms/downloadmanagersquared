@@ -18,6 +18,7 @@ import (
 	"github.com/anacrolix/torrent/storage"
 
 	"downloadmanagersquared/engine/internal/download"
+	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/rate"
 )
 
@@ -32,22 +33,22 @@ const (
 
 // State is everything needed to resume a torrent after a restart.
 type State struct {
-	ID       string           `json:"id"`
-	Magnet   string           `json:"magnet"`
-	Info     []byte           `json:"info,omitempty"` // bencoded info dict, once known
-	Dir      string           `json:"dir"`
-	Choose   bool             `json:"choose,omitempty"` // the user picks files and folder before it downloads
-	AskVPN   bool             `json:"askVpn,omitempty"` // the user picks VPN or not before it joins the swarm
-	Skip     []int            `json:"skip,omitempty"`   // indexes of the files not to download
-	Name     string           `json:"name,omitempty"`
-	Size     int64            `json:"size"`               // of the files to download
-	Uploaded int64            `json:"uploaded,omitempty"` // across every run
-	VPN      download.VPNMode `json:"vpn,omitempty"`      // fixed when added: which session runs it
-	WaitVPN  bool             `json:"waitVpn,omitempty"`  // paused because no tunnel is up, under VPN only
-	Status   download.Status  `json:"status"`
-	Error    string           `json:"error,omitempty"`
-	Added    time.Time        `json:"added"`
-	Finished time.Time        `json:"finished,omitzero"` // when the download completed
+	ID       string          `json:"id"`
+	Magnet   string          `json:"magnet"`
+	Info     []byte          `json:"info,omitempty"` // bencoded info dict, once known
+	Dir      string          `json:"dir"`
+	Choose   bool            `json:"choose,omitempty"` // the user picks files and folder before it downloads
+	AskVPN   bool            `json:"askVpn,omitempty"` // the user picks VPN or not before it joins the swarm
+	Skip     []int           `json:"skip,omitempty"`   // indexes of the files not to download
+	Name     string          `json:"name,omitempty"`
+	Size     int64           `json:"size"`               // of the files to download
+	Uploaded int64           `json:"uploaded,omitempty"` // across every run
+	VPN      paths.Mode      `json:"vpn,omitempty"`      // fixed when added: which session runs it
+	WaitVPN  bool            `json:"waitVpn,omitempty"`  // paused because no tunnel is up, under VPN only
+	Status   download.Status `json:"status"`
+	Error    string          `json:"error,omitempty"`
+	Added    time.Time       `json:"added"`
+	Finished time.Time       `json:"finished,omitzero"` // when the download completed
 }
 
 type Torrent struct {
@@ -569,10 +570,18 @@ func (t *Torrent) Stop(as download.Status) {
 	t.changed()
 }
 
+// VPN is the torrent's VPN mode.
+func (t *Torrent) VPN() paths.Mode { return t.st.VPN } // fixed when added: no lock needed
+
 // PauseForVPN leaves the swarm because no tunnel is up, under VPN only; the
-// engine queues it again once one is.
+// engine queues it again once one is. Only a torrent in the swarm or waiting
+// to join it pauses: one the user paused, or that is finished, stays as it is.
 func (t *Torrent) PauseForVPN() {
 	t.mu.Lock()
+	if s := t.st.Status; !t.active && s != download.StatusQueued && s != StatusSeeding && s != StatusMetadata {
+		t.mu.Unlock()
+		return
+	}
 	if t.active {
 		t.dropLocked()
 	}

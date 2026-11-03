@@ -8,30 +8,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
-	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/netif"
+	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/socks"
 	"downloadmanagersquared/engine/internal/tunnel"
 )
-
-// A tunnel is a path of its own: downloads, links and the resolver know it by
-// its interface's ID with this suffix.
-const tunnelSuffix = "~vpn"
-
-func tunnelPath(ifaceID string) string { return ifaceID + tunnelSuffix }
-
-// ifaceOfPath splits a path ID into its interface and whether it is the tunnel.
-func ifaceOfPath(id string) (string, bool) {
-	if i, ok := strings.CutSuffix(id, tunnelSuffix); ok {
-		return i, true
-	}
-	return id, false
-}
 
 const (
 	tunnelRetry = 30 * time.Second // after a tunnel fails to start or loses its server
@@ -101,7 +86,7 @@ func (e *Engine) setTunnel(ifaceID, conf string, save bool) error {
 		}
 	}
 	e.removeTunnelEntry(ifaceID)
-	srv, err := socks.Listen(e.dialVia(tunnelPath(ifaceID)))
+	srv, err := socks.Listen(e.dialVia(paths.Tunnel(ifaceID)))
 	if err != nil {
 		return err
 	}
@@ -146,7 +131,7 @@ func (e *Engine) syncTunnels(now time.Time) {
 	wanted := e.piaWantedLocked()
 	e.mu.Unlock()
 	for _, id := range wanted {
-		srv, err := socks.Listen(e.dialVia(tunnelPath(id)))
+		srv, err := socks.Listen(e.dialVia(paths.Tunnel(id)))
 		if err != nil {
 			continue
 		}
@@ -245,30 +230,6 @@ func (e *Engine) tunnelUpLocked(ifaceID string) *tunnelEntry {
 	return te
 }
 
-// anyTunnelUp is whether a download under VPN only could run now.
-func (e *Engine) anyTunnelUp() bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	for id := range e.tunnels {
-		if e.tunnelUpLocked(id) != nil {
-			return true
-		}
-	}
-	return false
-}
-
-// tunnelPathsLocked are the tunnels that are up, as download paths.
-func (e *Engine) tunnelPathsLocked() []download.Iface {
-	var out []download.Iface
-	for id := range e.tunnels {
-		if te := e.tunnelUpLocked(id); te != nil {
-			out = append(out, download.Iface{ID: tunnelPath(id), Client: te.client, Conns: e.connsLocked(id)})
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
 func (e *Engine) tunnelViewsLocked(speeds map[string]float64) []IfaceView {
 	var out []IfaceView
 	for id, te := range e.tunnels {
@@ -289,9 +250,9 @@ func (e *Engine) tunnelViewsLocked(speeds map[string]float64) []IfaceView {
 			state = "down"
 		}
 		v := IfaceView{
-			ID: tunnelPath(id), Name: "VPN via " + name, Tunnel: true, Of: id,
+			ID: paths.Tunnel(id), Name: "VPN via " + name, Tunnel: true, Of: id,
 			Present: state == "up", Enabled: true, Connections: e.connsLocked(id),
-			SocksPort: te.socks.Port(), Speed: speeds[tunnelPath(id)],
+			SocksPort: te.socks.Port(), Speed: speeds[paths.Tunnel(id)],
 			TunnelState: state, TunnelError: te.err, Provider: "conf",
 		}
 		if te.pia {

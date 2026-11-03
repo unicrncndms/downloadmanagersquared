@@ -19,6 +19,7 @@ import (
 
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/netif"
+	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/torrent"
 	"downloadmanagersquared/engine/internal/tunnel"
 )
@@ -120,7 +121,7 @@ func TestHTTPUnderVPNOnlyWaitsForATunnelThenUsesOnlyIt(t *testing.T) {
 		t.Fatalf("file over the tunnel: %d bytes, %v", len(got), err)
 	}
 	for path := range d.Summary().Links {
-		if path != tunnelPath("lo") {
+		if path != paths.Tunnel("lo") {
 			t.Fatalf("under VPN only the download used %q", path)
 		}
 	}
@@ -133,21 +134,14 @@ func TestTunnelGetsItsOwnProxyForResolving(t *testing.T) {
 	importConf(t, e, srv, clientPriv)
 	waitFor(t, "the tunnel to come up", 30*time.Second, func() bool {
 		e.syncTunnels(time.Now())
-		for _, u := range e.Usable(download.VPNOnly) {
-			if u.ID == tunnelPath("lo") {
+		for _, u := range e.Paths(paths.VPNOnly) {
+			if u.ID == paths.Tunnel("lo") {
 				return true
 			}
 		}
 		return false
 	})
-	if bare := e.Usable(download.VPNOff); len(bare) != 1 || bare[0].ID != "lo" {
-		t.Fatalf("with VPN off the paths are %v, want the bare interface", bare)
-	}
-	if all := e.Usable(download.VPNAlongside); len(all) != 2 {
-		t.Fatalf("alongside, the paths are %v, want the interface and its tunnel", all)
-	}
-
-	v := ifaceView(t, e, tunnelPath("lo"))
+	v := ifaceView(t, e, paths.Tunnel("lo"))
 	if !v.Tunnel || !v.Present || v.Name != "VPN via Loopback" || v.SocksPort == 0 {
 		t.Fatalf("tunnel shown as %+v", v)
 	}
@@ -183,7 +177,7 @@ func waitTunnelUp(t *testing.T, e *Engine) {
 	t.Helper()
 	waitFor(t, "the tunnel to come up", 30*time.Second, func() bool {
 		e.syncTunnels(time.Now())
-		return e.anyTunnelUp()
+		return len(e.Paths(paths.VPNOnly)) > 0
 	})
 }
 
@@ -194,26 +188,13 @@ func TestVPNOnlyTorrentsGetNoBareSocket(t *testing.T) {
 	importConf(t, e, srv, clientPriv)
 	waitTunnelUp(t, e)
 
-	ids := func(m download.VPNMode) []string {
-		var out []string
-		for _, i := range e.torrentIfacesFor(m) {
-			out = append(out, i.ID)
-		}
-		return out
-	}
-	if got := ids(download.VPNOnly); len(got) != 1 || got[0] != tunnelPath("lo") {
-		t.Fatalf("VPN-only torrents get %v, want the tunnel alone", got)
-	}
-	if got := ids(download.VPNOff); len(got) != 1 || got[0] != "lo" {
-		t.Fatalf("torrents without VPN get %v", got)
-	}
-	if got := ids(download.VPNAlongside); len(got) != 2 {
-		t.Fatalf("torrents alongside get %v, want the interface and its tunnel", got)
-	}
-
 	// Every socket the VPN-only session can open lives on the tunnel's stack:
 	// peers, uTP and DHT, trackers and the tunnel's own DNS.
-	ifc := e.torrentIfacesFor(download.VPNOnly)[0]
+	ifs := e.torrentIfacesFor(paths.VPNOnly)
+	if len(ifs) != 1 || ifs[0].ID != paths.Tunnel("lo") {
+		t.Fatalf("VPN-only torrents get %d paths, want the tunnel alone", len(ifs))
+	}
+	ifc := ifs[0]
 	pc, err := ifc.ListenPacket(0)
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +221,7 @@ func TestVPNOnlyTorrentsGetNoBareSocket(t *testing.T) {
 func TestVPNOnlyTorrentPausesWithoutATunnelAndResumesWithOne(t *testing.T) {
 	e := loopbackEngine(t)
 	m := fmt.Sprintf("magnet:?xt=urn:btih:%040x&dn=vpn", 9)
-	tor, err := e.session(download.VPNOnly).Add(torrentState(m, download.VPNOnly, t.TempDir()))
+	tor, err := e.session(paths.VPNOnly).Add(torrentState(m, paths.VPNOnly, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +245,7 @@ func TestVPNOnlyTorrentPausesWithoutATunnelAndResumesWithOne(t *testing.T) {
 
 func TestNewTorrentAsksAboutTheVPNBeforeJoiningTheSwarm(t *testing.T) {
 	e := loopbackEngine(t)
-	if e.settings.VPNTorrent != modeOff {
+	if e.settings.VPNTorrent != paths.Off {
 		t.Fatalf("torrents default to %q, want off", e.settings.VPNTorrent)
 	}
 	id, err := e.Add(AddRequest{URL: testMagnet})
@@ -283,7 +264,7 @@ func TestNewTorrentAsksAboutTheVPNBeforeJoiningTheSwarm(t *testing.T) {
 	}
 	j, _ = e.entry(id)
 	tor := j.(*torrent.Torrent)
-	if tor.State().VPN != download.VPNOnly || tor.State().AskVPN {
+	if tor.State().VPN != paths.VPNOnly || tor.State().AskVPN {
 		t.Fatalf("after choosing the VPN the torrent runs under %q (asking %v)", tor.State().VPN, tor.State().AskVPN)
 	}
 	e.schedule()
@@ -300,7 +281,7 @@ func TestStayingOnTheCurrentConnectionJoinsAtOnce(t *testing.T) {
 	}
 	j, _ := e.entry(id)
 	tor := j.(*torrent.Torrent)
-	if !tor.Active() || tor.Status() != torrent.StatusMetadata || tor.State().VPN != download.VPNOff {
+	if !tor.Active() || tor.Status() != torrent.StatusMetadata || tor.State().VPN != paths.Off {
 		t.Fatalf("staying on the connection: %q, active %v, VPN %q", tor.Status(), tor.Active(), tor.State().VPN)
 	}
 }
@@ -311,7 +292,7 @@ func TestChosenVPNModeAsksNothing(t *testing.T) {
 	if summaryOf(t, e, id).AskVPN {
 		t.Fatal("asked about the VPN although the mode was chosen when adding")
 	}
-	e.settings.VPNTorrent = modeVPNOnly // VPN by default: nothing to suggest
+	e.settings.VPNTorrent = paths.VPNOnly // VPN by default: nothing to suggest
 	id, _ = e.Add(AddRequest{URL: fmt.Sprintf("magnet:?xt=urn:btih:%040x", 5)})
 	if summaryOf(t, e, id).AskVPN {
 		t.Fatal("asked about the VPN although torrents use it by default")
@@ -339,7 +320,7 @@ func TestTorrentFileTakesTheVPNChoiceWithItsFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	j, _ := e.entry(id)
-	if st := j.(*torrent.Torrent).State(); st.VPN != download.VPNOnly || st.Status != download.StatusQueued {
+	if st := j.(*torrent.Torrent).State(); st.VPN != paths.VPNOnly || st.Status != download.StatusQueued {
 		t.Fatalf("after the add step: VPN %q, status %q", st.VPN, st.Status)
 	}
 }

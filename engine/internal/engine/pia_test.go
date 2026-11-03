@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"downloadmanagersquared/engine/internal/download"
+	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/tunnel"
 )
@@ -112,7 +113,7 @@ func TestPIALoginGivesEveryInterfaceATunnel(t *testing.T) {
 	e.piaAPI = f.api
 	setPIA(t, e, "p0123456", "right")
 	waitTunnelUp(t, e)
-	if v := ifaceView(t, e, tunnelPath("lo")); !v.Present || v.Name != "VPN via Loopback" {
+	if v := ifaceView(t, e, paths.Tunnel("lo")); !v.Present || v.Name != "VPN via Loopback" {
 		t.Fatalf("PIA tunnel shown as %+v", v)
 	}
 	e.updateSnapshot(0)
@@ -131,8 +132,8 @@ func TestPIALoginGivesEveryInterfaceATunnel(t *testing.T) {
 	if len(b) == 0 || bytes.Contains(b, []byte("right")) {
 		t.Fatal("pia.dat is missing or holds the password in the clear")
 	}
-	for _, u := range e.Usable(download.VPNOnly) {
-		if u.ID == tunnelPath("lo") {
+	for _, u := range e.Paths(paths.VPNOnly) {
+		if u.ID == paths.Tunnel("lo") {
 			return
 		}
 	}
@@ -193,14 +194,14 @@ func TestPIATunnelForwardsAPortAndTakesPeersOnIt(t *testing.T) {
 	setPIA(t, e, "p0123456", "right")
 	waitTunnelUp(t, e)
 	e.forwardPorts(time.Now())
-	if v := ifaceView(t, e, tunnelPath("lo")); v.Incoming != "reachable" {
+	if v := ifaceView(t, e, paths.Tunnel("lo")); v.Incoming != "reachable" {
 		t.Fatalf("tunnel with a forwarded port shown as %q", v.Incoming)
 	}
 	// The VPN-only session listens on the forwarded port inside the tunnel,
 	// where PIA sends incoming peers, while one of its torrents is in the swarm.
 	e.syncTorrentIfaces()
 	vpnTorrentInSwarm(t, e)
-	if ifs := e.torrentIfacesFor(download.VPNOnly); len(ifs) != 1 || ifs[0].Port != 47000 {
+	if ifs := e.torrentIfacesFor(paths.VPNOnly); len(ifs) != 1 || ifs[0].Port != 47000 {
 		t.Fatalf("VPN-only torrents listen on %+v, want port 47000", ifs)
 	}
 	c, err := f.vpn.t.DialContext(t.Context(), "tcp4", "10.9.0.2:47000")
@@ -220,20 +221,20 @@ func TestPIATunnelForwardsAPortAndTakesPeersOnIt(t *testing.T) {
 	if f.binds.Load() != 6 || f.signatures.Load() != 1 {
 		t.Fatalf("an hour later: %d binds, %d signatures; want a bind every 15 minutes on one signature", f.binds.Load(), f.signatures.Load())
 	}
-	if v := ifaceView(t, e, tunnelPath("lo")); v.Incoming != "reachable" {
+	if v := ifaceView(t, e, paths.Tunnel("lo")); v.Incoming != "reachable" {
 		t.Fatalf("after an hour the tunnel is %q", v.Incoming)
 	}
 }
 
 func vpnTorrentInSwarm(t *testing.T, e *Engine) {
 	t.Helper()
-	tor, err := e.session(download.VPNOnly).Add(torrentState(fmt.Sprintf("magnet:?xt=urn:btih:%040x", 77), download.VPNOnly, t.TempDir()))
+	tor, err := e.session(paths.VPNOnly).Add(torrentState(fmt.Sprintf("magnet:?xt=urn:btih:%040x", 77), paths.VPNOnly, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	tor.Start()
 	t.Cleanup(func() { tor.Stop(download.StatusPaused) })
-	waitFor(t, "the VPN-only session to go live", 5*time.Second, e.session(download.VPNOnly).Live)
+	waitFor(t, "the VPN-only session to go live", 5*time.Second, e.session(paths.VPNOnly).Live)
 }
 
 func TestPIARegionWithoutForwardingIsOutgoingOnly(t *testing.T) {
@@ -246,10 +247,10 @@ func TestPIARegionWithoutForwardingIsOutgoingOnly(t *testing.T) {
 	if f.signatures.Load() != 0 {
 		t.Fatal("asked a region without port forwarding for a port")
 	}
-	if v := ifaceView(t, e, tunnelPath("lo")); v.Incoming != "outgoing" {
+	if v := ifaceView(t, e, paths.Tunnel("lo")); v.Incoming != "outgoing" {
 		t.Fatalf("tunnel in a region without forwarding shown as %q", v.Incoming)
 	}
-	if ifs := e.torrentIfacesFor(download.VPNOnly); len(ifs) != 1 {
+	if ifs := e.torrentIfacesFor(paths.VPNOnly); len(ifs) != 1 {
 		t.Fatal("torrents can't use a tunnel without a forwarded port")
 	}
 }

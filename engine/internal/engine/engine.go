@@ -25,6 +25,7 @@ import (
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
 	"downloadmanagersquared/engine/internal/netif"
+	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/portmap"
 	"downloadmanagersquared/engine/internal/rate"
@@ -82,6 +83,9 @@ type entry interface {
 	Stop(as download.Status)
 	Path() string
 	Summary() download.Summary
+	VPN() paths.Mode
+	PauseForVPN()
+	WaitingForVPN() bool
 }
 
 type Engine struct {
@@ -89,7 +93,7 @@ type Engine struct {
 	ln  net.Listener
 	// One torrent session per VPN mode: a session's sockets are only the paths
 	// its mode allows, so a VPN-only torrent has no bare socket to leak through.
-	sessions map[download.VPNMode]*torrent.Session
+	sessions map[paths.Mode]*torrent.Session
 
 	mu        sync.Mutex
 	settings  Settings
@@ -156,11 +160,11 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		quit:      make(chan struct{}),
 	}
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
-	e.sessions = map[download.VPNMode]*torrent.Session{}
+	e.sessions = map[paths.Mode]*torrent.Session{}
 	// Alongside listens nowhere: the other two hold the torrent port on the
 	// interfaces and in the tunnels.
-	ports := map[download.VPNMode]int{download.VPNOff: e.settings.TorrentPort, download.VPNOnly: e.settings.TorrentPort}
-	for _, m := range []download.VPNMode{download.VPNOff, download.VPNAlongside, download.VPNOnly} {
+	ports := map[paths.Mode]int{paths.Off: e.settings.TorrentPort, paths.VPNOnly: e.settings.TorrentPort}
+	for _, m := range []paths.Mode{paths.Off, paths.Alongside, paths.VPNOnly} {
 		s, err := torrent.NewSession(torrent.Config{
 			Changed:  func(t *torrent.Torrent) { e.markDirty(t.ID()) },
 			Finished: func(t *torrent.Torrent) { e.notifyFinished(t.Summary()) },
@@ -188,11 +192,11 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 func (e *Engine) Dir() string { return e.dir }
 
 // session runs the torrents of VPN mode m.
-func (e *Engine) session(m download.VPNMode) *torrent.Session {
+func (e *Engine) session(m paths.Mode) *torrent.Session {
 	if s := e.sessions[m]; s != nil {
 		return s
 	}
-	return e.sessions[download.VPNOff]
+	return e.sessions[paths.Off]
 }
 
 // loadDownloads restores both kinds, in the order they were added.
@@ -206,6 +210,7 @@ func (e *Engine) loadDownloads() {
 		if st.Status == download.StatusRunning || st.Status == download.StatusVerifying {
 			st.Status = download.StatusQueued
 		}
+		st.VPN = paths.ParseMode(string(st.VPN), paths.Off) // saved before modes were spelled out
 		all = append(all, loaded{download.New(e, st), st.Added})
 	}
 	for _, st := range readStates[torrent.State](filepath.Join(e.dir, "torrents")) {
@@ -214,6 +219,7 @@ func (e *Engine) loadDownloads() {
 		case download.StatusRunning, torrent.StatusChecking:
 			st.Status = download.StatusQueued
 		}
+		st.VPN = paths.ParseMode(string(st.VPN), paths.Off)
 		t, err := e.session(st.VPN).Add(st)
 		if err != nil {
 			log.Printf("skipping torrent %s: %v", st.ID, err)
@@ -342,28 +348,23 @@ func (e *Engine) get(id string) (*download.Download, error) {
 // no free slot takes one from the latest added torrent that is downloading,
 // which goes back to the queue.
 func (e *Engine) schedule() {
+	all := e.list()
 	e.mu.Lock()
 	limit := e.settings.MaxParallel
+	snap := e.pathSnapshotLocked()
 	e.mu.Unlock()
-	all := e.list()
 	running := 0
 	var queued, torrents []entry
 	var downloading []*torrent.Torrent // holding a slot, in the order added
-	tunnelUp := e.anyTunnelUp()
 	for _, d := range all {
 		t, isTorrent := d.(*torrent.Torrent)
-		if h, ok := d.(*download.Download); ok && tunnelUp && h.WaitingForVPN() {
-			h.Stop(download.StatusQueued) // a tunnel came up: back in the queue
-		}
-		if isTorrent && t.State().VPN == download.VPNOnly {
-			s := t.Status()
-			switch {
-			case !tunnelUp && (t.Active() || s == download.StatusQueued || s == torrent.StatusSeeding || s == torrent.StatusMetadata):
-				t.PauseForVPN() // never without a tunnel: its session has no socket to use
+		if paths.For(d.VPN(), snap).Wait {
+			d.PauseForVPN() // never without a tunnel: under VPN only there is no other path
+			if d.WaitingForVPN() {
 				continue
-			case tunnelUp && t.WaitingForVPN():
-				e.requeue(t)
 			}
+		} else if d.WaitingForVPN() {
+			e.requeue(d) // a tunnel came up
 		}
 		switch {
 		case d.Running():
@@ -526,7 +527,7 @@ func (e *Engine) refreshPortMaps(now time.Time) {
 	var jobs []job
 	// Only the no-VPN session listens on the interfaces, and only while one of
 	// its torrents is in the swarm: otherwise there is nothing to open a port for.
-	live := e.session(download.VPNOff).Live()
+	live := e.session(paths.Off).Live()
 	e.mu.Lock()
 	port := e.settings.TorrentPort
 	for id, ent := range e.ifaces {
@@ -586,7 +587,7 @@ func publicIPv4(ip net.IP) bool {
 // dialVia dials through a path: an interface, or its tunnel.
 func (e *Engine) dialVia(id string) socks.DialFunc {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if ifaceID, ok := ifaceOfPath(id); ok {
+		if ifaceID, ok := paths.IfaceOf(id); ok {
 			e.mu.Lock()
 			te := e.tunnelUpLocked(ifaceID)
 			e.mu.Unlock()
@@ -622,40 +623,24 @@ func (e *Engine) syncTorrentIfaces() {
 
 // torrentIfacesFor are the usable paths under VPN mode m as torrents use them,
 // main first (trackers and web seeds go through the first).
-func (e *Engine) torrentIfacesFor(m download.VPNMode) []torrent.Iface {
+func (e *Engine) torrentIfacesFor(m paths.Mode) []torrent.Iface {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	var ifs []torrent.Iface
-	main := e.MainID(m)
-	for _, u := range e.Usable(m) {
-		id := u.ID
-		if base, tun := ifaceOfPath(id); tun {
-			e.mu.Lock()
+	for _, id := range paths.For(m, e.pathSnapshotLocked()).Paths {
+		if base, tun := paths.IfaceOf(id); tun {
+			// Bound to this tunnel's stack: after a restart it is a new generation.
 			te := e.tunnelUpLocked(base)
-			var ifc torrent.Iface
-			if te != nil {
-				// Bound to this tunnel's stack: after a restart it is a new generation.
-				t := te.t
-				ifc = torrent.Iface{
-					ID: id, Gen: te.gen, Port: te.pfPort, Upload: e.uploadLocked(base),
-					Dial: t.DialContext, ListenPacket: t.ListenPacket, LookupIP: t.LookupIP, Listen: t.Listen,
-				}
-			}
-			e.mu.Unlock()
-			if te == nil {
-				continue
-			}
-			if id == main {
-				ifs = append([]torrent.Iface{ifc}, ifs...)
-			} else {
-				ifs = append(ifs, ifc)
-			}
+			t := te.t
+			ifs = append(ifs, torrent.Iface{
+				ID: id, Gen: te.gen, Port: te.pfPort, Upload: e.uploadLocked(base),
+				Dial: t.DialContext, ListenPacket: t.ListenPacket, LookupIP: t.LookupIP, Listen: t.Listen,
+			})
 			continue
 		}
-		e.mu.Lock()
-		upload := e.uploadLocked(id)
-		e.mu.Unlock()
-		ifc := torrent.Iface{
+		ifs = append(ifs, torrent.Iface{
 			ID:     id,
-			Upload: upload,
+			Upload: e.uploadLocked(id),
 			Dial:   e.dialVia(id),
 			ListenPacket: func(port int) (net.PacketConn, error) {
 				b, err := e.bindingOf(id)
@@ -678,12 +663,7 @@ func (e *Engine) torrentIfacesFor(m download.VPNMode) []torrent.Iface {
 				}
 				return b.LookupIP(ctx, host)
 			},
-		}
-		if id == main {
-			ifs = append([]torrent.Iface{ifc}, ifs...)
-		} else {
-			ifs = append(ifs, ifc)
-		}
+		})
 	}
 	return ifs
 }
@@ -713,62 +693,34 @@ func (e *Engine) connsLocked(id string) int {
 
 // download.Env
 
-// Usable are the paths a download in VPN mode m may use: bare interfaces, the
-// tunnels that are up, or both.
-func (e *Engine) Usable(m download.VPNMode) []download.Iface {
+// Paths are the paths a download in VPN mode m may use, the main path first.
+func (e *Engine) Paths(m paths.Mode) []download.Iface {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var out []download.Iface
-	if m != download.VPNOnly {
-		for id, ent := range e.ifaces {
-			if ent.present && e.enabledLocked(ent) {
-				out = append(out, download.Iface{ID: id, Client: ent.binding.HTTPClient(), Conns: e.connsLocked(id)})
-			}
+	for _, id := range paths.For(m, e.pathSnapshotLocked()).Paths {
+		base, tun := paths.IfaceOf(id)
+		var client *http.Client
+		if tun {
+			client = e.tunnelUpLocked(base).client
+		} else {
+			client = e.ifaces[id].binding.HTTPClient()
 		}
-		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	}
-	if m != download.VPNOff {
-		out = append(out, e.tunnelPathsLocked()...)
+		out = append(out, download.Iface{ID: id, Client: client, Conns: e.connsLocked(base)})
 	}
 	return out
 }
 
-// MainID is the main path under VPN mode m: the main interface, or under VPN
-// only its tunnel, else any tunnel that is up.
-func (e *Engine) MainID(m download.VPNMode) string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	main := e.mainIDLocked()
-	if m != download.VPNOnly {
-		return main
-	}
-	if e.tunnelUpLocked(main) != nil {
-		return tunnelPath(main)
-	}
-	if paths := e.tunnelPathsLocked(); len(paths) > 0 {
-		return paths[0].ID
-	}
-	return ""
-}
-
-// mainIDLocked: the chosen main interface, else the Windows default route, else any usable one.
-func (e *Engine) mainIDLocked() string {
-	if ent := e.ifaces[e.settings.MainInterface]; ent != nil && ent.present && e.enabledLocked(ent) {
-		return e.settings.MainInterface
-	}
-	var fallback string
+// pathSnapshotLocked is the interfaces and their tunnels as the path policy sees them.
+func (e *Engine) pathSnapshotLocked() paths.Snapshot {
+	s := paths.Snapshot{Main: e.settings.MainInterface}
 	for id, ent := range e.ifaces {
-		if !ent.present || !e.enabledLocked(ent) {
-			continue
-		}
-		if ent.info.IsDefault {
-			return id
-		}
-		if fallback == "" || id < fallback {
-			fallback = id
-		}
+		s.Ifaces = append(s.Ifaces, paths.Iface{
+			ID: id, Present: ent.present, Enabled: e.enabledLocked(ent), Default: ent.info.IsDefault,
+			TunnelUp: e.tunnelUpLocked(id) != nil,
+		})
 	}
-	return fallback
+	return s
 }
 
 func (e *Engine) ETAWindow() time.Duration {
@@ -780,7 +732,7 @@ func (e *Engine) ETAWindow() time.Duration {
 func (e *Engine) RequestResolve(id, ifaceID, pageURL string) {
 	e.mu.Lock()
 	req := resolveReq{ID: id, Iface: ifaceID, PageURL: pageURL}
-	if base, tun := ifaceOfPath(ifaceID); tun {
+	if base, tun := paths.IfaceOf(ifaceID); tun {
 		if te, ent := e.tunnels[base], e.ifaces[base]; te != nil && ent != nil {
 			req.IfaceName, req.SocksPort = "VPN via "+ent.info.Name, te.socks.Port()
 		}
@@ -892,7 +844,7 @@ func (e *Engine) chooseTorrentVPN(id, vpn string) (*torrent.Torrent, error) {
 		return nil, fmt.Errorf("%q isn't waiting for a VPN choice", id)
 	}
 	st := t.State()
-	st.VPN, st.AskVPN, st.Status = vpnMode(vpn, modeOff), false, download.StatusQueued
+	st.VPN, st.AskVPN, st.Status = paths.ParseMode(vpn, paths.Off), false, download.StatusQueued
 	nt, err := e.session(st.VPN).Add(st)
 	if err != nil {
 		return nil, err
@@ -956,7 +908,7 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	}
 	e.mu.Lock()
 	st := download.State{
-		VPN: vpnMode(r.VPN, e.settings.VPNHTTP),
+		VPN: paths.ParseMode(r.VPN, e.settings.VPNHTTP),
 		ID:  newID(), URL: r.URL, PageURL: strings.TrimSpace(r.PageURL),
 		Cookie: r.Cookie, Referer: r.Referer, UserAgent: r.UserAgent,
 		Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
@@ -1013,19 +965,13 @@ func fetchTorrentFile(ctx context.Context, c *http.Client, r AddRequest) ([]byte
 func (e *Engine) addTorrentURL(r AddRequest) (string, error) {
 	// Fetched the way the torrent will run: under VPN only, through a tunnel.
 	e.mu.Lock()
-	m := vpnMode(r.VPN, e.settings.VPNTorrent)
+	m := paths.ParseMode(r.VPN, e.settings.VPNTorrent)
 	e.mu.Unlock()
-	var client *http.Client
-	main := e.MainID(m)
-	for _, u := range e.Usable(m) {
-		if u.ID == main {
-			client = u.Client
-		}
-	}
-	if client == nil {
+	ps := e.Paths(m)
+	if len(ps) == 0 {
 		return "", errors.New("no connection to fetch the torrent file through")
 	}
-	b, err := fetchTorrentFile(context.Background(), client, r)
+	b, err := fetchTorrentFile(context.Background(), ps[0].Client, r)
 	if err != nil {
 		return "", err
 	}
@@ -1045,9 +991,9 @@ func (e *Engine) addTorrentFile(b []byte, vpn string) (string, error) {
 func (e *Engine) addTorrent(st torrent.State, vpn string) (string, error) {
 	e.mu.Lock()
 	st.Dir = e.settings.SaveDir
-	st.VPN = vpnMode(vpn, e.settings.VPNTorrent)
+	st.VPN = paths.ParseMode(vpn, e.settings.VPNTorrent)
 	// About to join the swarm on the bare connection, unasked: suggest a VPN first.
-	st.AskVPN = vpn == "" && st.VPN == download.VPNOff
+	st.AskVPN = vpn == "" && st.VPN == paths.Off
 	e.mu.Unlock()
 	st.ID, st.Choose, st.Added = newID(), true, time.Now()
 	t, err := e.session(st.VPN).Add(st)
@@ -1170,7 +1116,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		e.eta.Update(now, remaining, e.meter.Rate())
 	}
 
-	mainID := e.mainIDLocked()
+	mainID := paths.MainInterface(e.pathSnapshotLocked())
 	views := []IfaceView{}
 	for id, ent := range e.ifaces {
 		up, down := ent.shaper.Limits()

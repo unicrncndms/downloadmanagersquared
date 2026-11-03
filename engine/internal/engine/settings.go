@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"downloadmanagersquared/engine/internal/download"
+	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
@@ -29,32 +29,9 @@ type Settings struct {
 	DefaultConnections int                       `json:"defaultConnections"`
 	SeedRatio          float64                   `json:"seedRatio"`   // seed a torrent until uploaded/size reaches this; 0 = don't seed
 	TorrentPort        int                       `json:"torrentPort"` // where peers connect in, on every interface; picked once
-	VPNHTTP            string                    `json:"vpnHttp"`     // VPN mode an HTTP download gets unless chosen when added
-	VPNTorrent         string                    `json:"vpnTorrent"`  // the same for a torrent
+	VPNHTTP            paths.Mode                `json:"vpnHttp"`     // VPN mode an HTTP download gets unless chosen when added
+	VPNTorrent         paths.Mode                `json:"vpnTorrent"`  // the same for a torrent
 	PIARegion          string                    `json:"piaRegion"`   // "" = the lowest latency
-}
-
-// VPN modes as settings and the extension name them.
-const (
-	modeOff       = "off"
-	modeAlongside = "alongside"
-	modeVPNOnly   = "vpn"
-)
-
-// vpnMode reads a mode name, "" or unknown giving def.
-func vpnMode(s, def string) download.VPNMode {
-	switch s {
-	case modeOff:
-		return download.VPNOff
-	case modeAlongside:
-		return download.VPNAlongside
-	case modeVPNOnly:
-		return download.VPNOnly
-	}
-	if def != "" {
-		return vpnMode(def, "")
-	}
-	return download.VPNOff
 }
 
 func defaultSettings() Settings {
@@ -66,8 +43,8 @@ func defaultSettings() Settings {
 		ETAWindowSec:       60,
 		DefaultConnections: 4,
 		SeedRatio:          1,
-		VPNHTTP:            modeOff,
-		VPNTorrent:         modeOff, // each new torrent asks first
+		VPNHTTP:            paths.Off,
+		VPNTorrent:         paths.Off, // each new torrent asks first
 	}
 }
 
@@ -92,17 +69,8 @@ func (s *Settings) normalize() {
 	}
 	s.DefaultConnections = min(s.DefaultConnections, 32)
 	s.SeedRatio = min(max(s.SeedRatio, 0), 100)
-	for _, m := range []*string{&s.VPNHTTP, &s.VPNTorrent} {
-		if *m != modeOff && *m != modeAlongside && *m != modeVPNOnly {
-			*m = ""
-		}
-	}
-	if s.VPNHTTP == "" {
-		s.VPNHTTP = d.VPNHTTP
-	}
-	if s.VPNTorrent == "" {
-		s.VPNTorrent = d.VPNTorrent
-	}
+	s.VPNHTTP = paths.ParseMode(string(s.VPNHTTP), d.VPNHTTP)
+	s.VPNTorrent = paths.ParseMode(string(s.VPNTorrent), d.VPNTorrent)
 	if s.TorrentPort < 1024 || s.TorrentPort > 65535 {
 		s.TorrentPort = 20000 + mrand.IntN(40000)
 	}

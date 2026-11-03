@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/rate"
 	"downloadmanagersquared/engine/internal/winutil"
 )
@@ -46,15 +47,6 @@ const (
 	StatusFailed    Status = "failed"
 )
 
-// VPNMode is which paths a download may use, fixed when it is added.
-type VPNMode string
-
-const (
-	VPNOff       VPNMode = ""          // bare interfaces only
-	VPNAlongside VPNMode = "alongside" // bare interfaces and their tunnels
-	VPNOnly      VPNMode = "vpn"       // tunnels only; pause while none is up
-)
-
 type Range struct {
 	Start int64 `json:"start"`
 	End   int64 `json:"end"` // exclusive
@@ -75,7 +67,7 @@ type State struct {
 	RangeOK    bool             `json:"rangeOk"`
 	Probed     bool             `json:"probed"`
 	Stuck      bool             `json:"stuck,omitempty"` // paused because no connection could reach the file
-	VPN        VPNMode          `json:"vpn,omitempty"`
+	VPN        paths.Mode       `json:"vpn,omitempty"`
 	WaitVPN    bool             `json:"waitVpn,omitempty"` // paused because no tunnel is up under VPN only
 	Allocated  bool             `json:"allocated"`
 	SHA256     string           `json:"sha256,omitempty"`
@@ -95,11 +87,10 @@ type Iface struct {
 	Conns  int
 }
 
-// Env is the engine as a download sees it. Usable and MainID answer for a VPN
-// mode: tunnels count as interfaces of their own.
+// Env is the engine as a download sees it. Paths answers for a VPN mode:
+// tunnels count as interfaces of their own.
 type Env interface {
-	Usable(VPNMode) []Iface
-	MainID(VPNMode) string
+	Paths(paths.Mode) []Iface // the main path first
 	ETAWindow() time.Duration
 	RequestResolve(id, ifaceID, pageURL string)
 	Changed(d *Download)
@@ -128,7 +119,6 @@ type worker struct {
 type pauseError struct {
 	msg   string
 	stuck bool // no connection can reach the file
-	vpn   bool // no tunnel is up, under VPN only
 }
 
 func (e *pauseError) Error() string { return e.msg }
@@ -334,7 +324,7 @@ func (d *Download) run(ctx context.Context) {
 	case d.stopAs != "":
 		d.st.Status = d.stopAs
 	case errors.As(err, &pe):
-		d.st.Status, d.st.Error, d.st.Stuck, d.st.WaitVPN = StatusPaused, pe.msg, pe.stuck, pe.vpn
+		d.st.Status, d.st.Error, d.st.Stuck = StatusPaused, pe.msg, pe.stuck
 	case err != nil:
 		d.st.Status, d.st.Error, finished = StatusFailed, err.Error(), true
 	default:
@@ -371,12 +361,8 @@ func (d *Download) loop(ctx context.Context) error {
 }
 
 func (d *Download) tick(ctx context.Context) (bool, error) {
-	usable := d.env.Usable(d.st.VPN) // fixed when added: no lock needed
-	mainID := d.env.MainID(d.st.VPN)
-	if len(usable) == 0 && d.st.VPN == VPNOnly {
-		// Never fall back to a bare interface.
-		return false, &pauseError{msg: "Paused: no VPN tunnel is up. It resumes by itself once one is.", vpn: true}
-	}
+	usable := d.env.Paths(d.st.VPN) // fixed when added: no lock needed
+	mainID := mainOf(usable)
 	now := time.Now()
 	changed := false
 
@@ -493,6 +479,14 @@ func (d *Download) nothingLeftLocked(usable map[string]Iface, mainID string) boo
 	return seen
 }
 
+// mainOf is the main path of paths as Env.Paths orders them.
+func mainOf(paths []Iface) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	return paths[0].ID
+}
+
 // mainOnlyLocked: without range support only the main interface is used.
 func (d *Download) mainOnlyLocked(id, mainID string) bool {
 	return d.st.Probed && !d.st.RangeOK && id != mainID
@@ -510,10 +504,11 @@ func (d *Download) ifRun(id string) *ifaceRun {
 func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
 	res, err := probeLink(ctx, ifc.Client, l, d.st.UserAgent)
 	usable := map[string]Iface{}
-	for _, u := range d.env.Usable(d.st.VPN) {
+	all := d.env.Paths(d.st.VPN)
+	for _, u := range all {
 		usable[u.ID] = u
 	}
-	mainID := d.env.MainID(d.st.VPN)
+	mainID := mainOf(all)
 	d.mu.Lock()
 	delete(d.probing, ifc.ID)
 	cur := d.st.Links[ifc.ID]
@@ -1147,7 +1142,7 @@ type Summary struct {
 	Added    time.Time              `json:"added"`
 	Finished time.Time              `json:"finished,omitzero"`
 
-	VPN VPNMode `json:"vpn,omitempty"`
+	VPN paths.Mode `json:"vpn,omitempty"`
 
 	// Torrents only: the files to choose from (while choosing), then the upload once complete.
 	Files    []FileSummary `json:"files,omitempty"`
@@ -1166,6 +1161,26 @@ type FileSummary struct {
 	Path     string `json:"path"` // within the torrent, "/"-separated
 	Size     int64  `json:"size"`
 	Selected bool   `json:"selected"`
+}
+
+// VPN is the download's VPN mode.
+func (d *Download) VPN() paths.Mode { return d.st.VPN } // fixed when added: no lock needed
+
+// PauseForVPN pauses a running or queued download because, under VPN only, no
+// tunnel is up; the engine queues it again once one is. A paused, finished or
+// failed download is left as it is.
+func (d *Download) PauseForVPN() {
+	d.mu.Lock()
+	ok := d.running || d.st.Status == StatusQueued
+	d.mu.Unlock()
+	if !ok {
+		return
+	}
+	d.Stop(StatusPaused)
+	d.mu.Lock()
+	d.st.Error, d.st.WaitVPN = "Paused: no VPN tunnel is up. It resumes by itself once one is.", true
+	d.mu.Unlock()
+	d.env.Changed(d)
 }
 
 // WaitingForVPN is whether the download paused only because no tunnel was up.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"downloadmanagersquared/engine/internal/netif"
+	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/tunnel"
 	"downloadmanagersquared/engine/internal/winutil"
@@ -323,7 +324,7 @@ func (e *Engine) piaSession(ctx context.Context, p *piaState, api pia.API, regio
 // piaRegions lists the regions for the settings page, through the main interface.
 func (e *Engine) piaRegions() ([]map[string]any, error) {
 	e.mu.Lock()
-	ent := e.ifaces[e.mainIDLocked()]
+	ent := e.ifaces[paths.MainInterface(e.pathSnapshotLocked())]
 	api := e.piaAPI
 	e.mu.Unlock()
 	if ent == nil {
