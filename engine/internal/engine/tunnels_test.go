@@ -24,7 +24,8 @@ import (
 	"downloadmanagersquared/engine/internal/tunnel"
 )
 
-// vpnServer is a WireGuard server on loopback serving a file at 10.9.0.1,
+// vpnServer is a WireGuard server on loopback serving a file at 203.0.113.1 (a
+// documentation address, public as far as the proxies are concerned),
 // an address only reachable through the tunnel.
 type vpnServer struct {
 	t        *tunnel.Tunnel
@@ -39,7 +40,7 @@ func newVPNServer(t *testing.T, clientPub string) *vpnServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := tunnel.ParseConf(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.1/24\n[Peer]\nPublicKey = %s\nAllowedIPs = 10.9.0.2/32\n", priv, clientPub))
+	cfg, err := tunnel.ParseConf(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 203.0.113.1/24\n[Peer]\nPublicKey = %s\nAllowedIPs = 10.9.0.2/32\n", priv, clientPub))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +103,7 @@ func TestHTTPUnderVPNOnlyWaitsForATunnelThenUsesOnlyIt(t *testing.T) {
 	clientPriv, clientPub, _ := tunnel.GenerateKey()
 	srv := newVPNServer(t, clientPub)
 
-	id, err := e.Add(AddRequest{URL: "http://10.9.0.1/vpn.bin", VPN: "vpn"})
+	id, err := e.Add(AddRequest{URL: "http://203.0.113.1/vpn.bin", VPN: "vpn"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +149,7 @@ func TestTunnelGetsItsOwnProxyForResolving(t *testing.T) {
 	// The browser resolves landing pages through this proxy: it must reach what the tunnel reaches.
 	proxy, _ := url.Parse(fmt.Sprintf("socks5://127.0.0.1:%d", v.SocksPort))
 	c := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}, Timeout: 20 * time.Second}
-	req, _ := http.NewRequest(http.MethodGet, "http://10.9.0.1/vpn.bin", nil)
+	req, _ := http.NewRequest(http.MethodGet, "http://203.0.113.1/vpn.bin", nil)
 	req.Header.Set("Range", "bytes=0-9")
 	resp, err := c.Do(req)
 	if err != nil {
@@ -211,7 +212,7 @@ func TestVPNOnlyTorrentsGetNoBareSocket(t *testing.T) {
 	if ip := ln.Addr().(*net.TCPAddr).IP; !ip.Equal(net.IPv4(10, 9, 0, 2)) {
 		t.Fatalf("the VPN-only session listens on %v, not the tunnel", ip)
 	}
-	c, err := ifc.Dial(t.Context(), "tcp4", "10.9.0.1:80") // only reachable through the tunnel
+	c, err := ifc.Dial(t.Context(), "tcp4", "203.0.113.1:80") // only reachable through the tunnel
 	if err != nil {
 		t.Fatal(err)
 	}

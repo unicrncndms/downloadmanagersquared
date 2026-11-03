@@ -122,3 +122,15 @@ func defaultIndex() uint32 {
 	}
 	return idx
 }
+
+// PublicIPv4 is whether ip is reachable from the internet as it is: not private,
+// shared (carrier NAT), loopback, link-local (so not 169.254.169.254 either),
+// unspecified, multicast or reserved.
+func PublicIPv4(ip net.IP) bool {
+	ip = ip.To4()
+	if ip == nil || ip[0] == 0 || ip[0] >= 224 {
+		return false
+	}
+	cgnat := net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+	return !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !cgnat.Contains(ip)
+}

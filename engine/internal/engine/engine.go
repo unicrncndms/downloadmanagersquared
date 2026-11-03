@@ -347,7 +347,7 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 		seen[i.ID] = true
 		ent := e.ifaces[i.ID]
 		if ent == nil {
-			srv, err := socks.Listen(e.dialVia(i.ID))
+			srv, err := socks.Listen(e.socksPath(i.ID))
 			if err != nil {
 				log.Printf("socks for %s: %v", i.Name, err)
 				continue
@@ -431,7 +431,7 @@ func (e *Engine) refreshPortMaps(now time.Time) {
 		if !ent.present || !e.enabledLocked(ent) {
 			continue
 		}
-		if publicIPv4(ent.info.IPv4) { // no router in between to ask
+		if netif.PublicIPv4(ent.info.IPv4) { // no router in between to ask
 			in.checked, in.reachable = now, true
 			continue
 		}
@@ -469,13 +469,6 @@ func (e *Engine) refreshPortMaps(now time.Time) {
 	}
 }
 
-// publicIPv4 is whether ip is reachable from the internet as it is: not private,
-// shared (carrier NAT), loopback or link-local.
-func publicIPv4(ip net.IP) bool {
-	cgnat := net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
-	return ip.To4() != nil && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !cgnat.Contains(ip)
-}
-
 // dialVia dials through a path: an interface, or its tunnel.
 func (e *Engine) dialVia(id string) socks.DialFunc {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -494,6 +487,26 @@ func (e *Engine) dialVia(id string) socks.DialFunc {
 		}
 		return b.DialContext(ctx, network, addr)
 	}
+}
+
+// socksPath is a path as a resolve's SOCKS proxy sends its connections out.
+func (e *Engine) socksPath(id string) socks.Path {
+	return socks.Path{Dial: e.dialVia(id), Lookup: func(ctx context.Context, host string) ([]net.IP, error) {
+		if ifaceID, ok := paths.IfaceOf(id); ok {
+			e.mu.Lock()
+			te := e.tunnelUpLocked(ifaceID)
+			e.mu.Unlock()
+			if te == nil {
+				return nil, errors.New("the VPN tunnel is not up")
+			}
+			return te.t.LookupIP(ctx, host)
+		}
+		b, err := e.bindingOf(id)
+		if err != nil {
+			return nil, err
+		}
+		return b.LookupIP(ctx, host)
+	}}
 }
 
 func (e *Engine) bindingOf(id string) (*netif.Binding, error) {

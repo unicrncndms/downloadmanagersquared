@@ -94,7 +94,7 @@ func (e *Engine) setTunnel(ifaceID, conf string, save bool) error {
 		}
 	}
 	e.removeTunnelEntry(ifaceID)
-	srv, err := socks.Listen(e.dialVia(paths.Tunnel(ifaceID)))
+	srv, err := socks.Listen(e.socksPath(paths.Tunnel(ifaceID)))
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func (e *Engine) syncTunnels(now time.Time) {
 	wanted := e.piaWantedLocked()
 	e.mu.Unlock()
 	for _, id := range wanted {
-		srv, err := socks.Listen(e.dialVia(paths.Tunnel(id)))
+		srv, err := socks.Listen(e.socksPath(paths.Tunnel(id)))
 		if err != nil {
 			continue
 		}

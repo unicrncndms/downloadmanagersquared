@@ -38,7 +38,7 @@ type fakePIA struct {
 func newFakePIA(t *testing.T) *fakePIA { return newFakePIAForwarding(t, false) }
 
 // newFakePIAForwarding is newFakePIA in a region that may forward ports: then
-// the server answers port forwarding inside the tunnel at 10.9.0.1:19999.
+// the server answers port forwarding inside the tunnel at 203.0.113.1:19999.
 func newFakePIAForwarding(t *testing.T, forwards bool) *fakePIA {
 	t.Helper()
 	f := &fakePIA{password: "right"}
@@ -67,7 +67,7 @@ func newFakePIAForwarding(t *testing.T, forwards bool) *fakePIA {
 		}
 		f.keys.Add(1)
 		json.NewEncoder(w).Encode(map[string]any{"status": "OK", "server_key": srv.pub, "server_port": atoi(port),
-			"server_vip": "10.9.0.1", "peer_ip": "10.9.0.2", "dns_servers": []string{"10.9.0.1"}})
+			"server_vip": "203.0.113.1", "peer_ip": "10.9.0.2", "dns_servers": []string{"203.0.113.1"}})
 	}))
 	t.Cleanup(keys.Close)
 	ca := x509.NewCertPool()
