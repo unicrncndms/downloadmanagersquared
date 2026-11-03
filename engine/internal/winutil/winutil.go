@@ -99,6 +99,26 @@ func MessageBox(title, text string) {
 	windows.MessageBox(0, t, c, windows.MB_OK|windows.MB_ICONERROR)
 }
 
+// ProcessUser is the SID of the user a process runs as. The engine accepts
+// pipe and proxy clients only from processes of its own user.
+func ProcessUser(pid uint32) (string, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(h)
+	var tok windows.Token
+	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
+		return "", err
+	}
+	defer tok.Close()
+	u, err := tok.GetTokenUser()
+	if err != nil {
+		return "", err
+	}
+	return u.User.Sid.String(), nil
+}
+
 // CurrentUserSID is used to lock the engine's named pipe to this user.
 func CurrentUserSID() (string, error) {
 	tok, err := windows.OpenCurrentProcessToken()

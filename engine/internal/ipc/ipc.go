@@ -1,20 +1,34 @@
 // Package ipc is the engine's local API: newline-delimited JSON over a named
-// pipe that only the current Windows user can open.
+// pipe that only the current Windows user can open. Each user has a pipe of
+// their own, and clients only talk to a pipe served by their own user.
 package ipc
 
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/Microsoft/go-winio"
+	"golang.org/x/sys/windows"
 
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
-const PipeName = `\\.\pipe\downloadmanagersquared`
+// pipePrefix is followed by the user's SID; tests use a pipe of their own.
+var pipePrefix = `\\.\pipe\downloadmanagersquared-`
+
+// PipeName is the current user's engine pipe.
+func PipeName() (string, error) {
+	sid, err := winutil.CurrentUserSID()
+	if err != nil {
+		return "", err
+	}
+	return pipePrefix + sid, nil
+}
 
 // Request is a call from a client: {"id":1,"method":"add","params":{...}}.
 type Request struct {
@@ -80,7 +94,7 @@ func Listen() (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	return winio.ListenPipe(PipeName, &winio.PipeConfig{
+	return winio.ListenPipe(pipePrefix+sid, &winio.PipeConfig{
 		SecurityDescriptor: "D:P(A;;GA;;;" + sid + ")",
 		InputBufferSize:    64 << 10,
 		OutputBufferSize:   64 << 10,
@@ -122,7 +136,37 @@ func serveConn(c *Conn, h Handler) {
 	}
 }
 
-// Dial connects to a running engine.
+// Dial connects to the current user's running engine. It refuses a pipe whose
+// server runs as anyone else, so another user can't pose as the engine.
 func Dial(timeout time.Duration) (net.Conn, error) {
-	return winio.DialPipe(PipeName, &timeout)
+	sid, err := winutil.CurrentUserSID()
+	if err != nil {
+		return nil, err
+	}
+	c, err := winio.DialPipe(pipePrefix+sid, &timeout)
+	if err != nil {
+		return nil, err
+	}
+	owner, err := serverUser(c)
+	if err == nil && owner != sid {
+		err = fmt.Errorf("its process runs as %s", owner)
+	}
+	if err != nil {
+		c.Close()
+		return nil, fmt.Errorf("not talking to the engine's pipe: %w", err)
+	}
+	return c, nil
+}
+
+// serverUser is the user of the process serving the pipe c is connected to.
+var serverUser = func(c net.Conn) (string, error) {
+	f, ok := c.(interface{ Fd() uintptr })
+	if !ok {
+		return "", errors.New("no pipe handle")
+	}
+	var pid uint32
+	if err := windows.GetNamedPipeServerProcessId(windows.Handle(f.Fd()), &pid); err != nil {
+		return "", err
+	}
+	return winutil.ProcessUser(pid)
 }

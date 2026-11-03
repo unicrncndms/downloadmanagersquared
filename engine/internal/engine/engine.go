@@ -109,11 +109,17 @@ type Engine struct {
 	quitOnce sync.Once
 }
 
-// New claims the pipe (proving this is the only engine) and loads saved state.
+// New claims the pipe (proving this is the only engine of this user) and loads
+// saved state. It is ErrAlreadyRunning only when another engine answers on the
+// pipe; any other failure to open it is an error of its own.
 func New() (*Engine, error) {
 	ln, err := ipc.Listen()
 	if err != nil {
-		return nil, ErrAlreadyRunning
+		if c, derr := ipc.Dial(2 * time.Second); derr == nil {
+			c.Close()
+			return nil, ErrAlreadyRunning
+		}
+		return nil, fmt.Errorf("could not open the engine's pipe: %w", err)
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {
