@@ -63,11 +63,14 @@ $xpi = Join-Path $dist 'downloadmanagersquared.xpi'
 Remove-Item $xpi -ErrorAction SilentlyContinue
 Push-Location $stage
 try {
-    tar.exe -a -c -f $xpi manifest.json @parts
+    # -a picks the format from the extension and doesn't know .xpi (it writes a tar).
+    tar.exe --format zip -c -f $xpi manifest.json @parts
     if ($LASTEXITCODE) { throw 'packing the extension failed' }
 } finally {
     Pop-Location
 }
+$magic = [IO.File]::ReadAllBytes($xpi)[0..1]
+if ($magic[0] -ne 0x50 -or $magic[1] -ne 0x4B) { throw "$xpi is not a zip" }
 
 # The release zip: the two exes and what goes with them.
 $zipStage = Join-Path $dist 'zip'
