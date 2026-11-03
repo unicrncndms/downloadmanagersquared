@@ -7,14 +7,12 @@
 const Resolver = {
   containers: {},   // ifaceId -> cookieStoreId
   ifaceByStore: {}, // cookieStoreId -> ifaceId
-  recipes: {},      // landing-page host -> { steps, learned }
+  recipes: {},      // landing-page host -> recipe (lib/recipe.js)
   jobs: new Map(),  // "downloadId|ifaceId" -> job
   tabJobs: new Map(),
   creating: new Map(),
 
-  REPLAY_TIMEOUT: 120000,
   RECORD_TIMEOUT: 15 * 60000,
-  DOWNLOAD_WAIT: 60000,
   COLORS: ["blue", "turquoise", "green", "yellow", "orange", "red", "pink", "purple"],
 
   async init() {
@@ -87,7 +85,11 @@ const Resolver = {
       key, id: r.id, iface: r.iface, ifaceName: r.ifaceName || r.iface, pageUrl: r.pageUrl,
       host: hostOf(r.pageUrl), mode: "new", step: 0, recordFrom: 0, recorded: [],
       tabs: new Set(), tabId: null, windowId: null, loading: false, skipped: false, timers: {},
-      clicked: null, // during replay: { index, at, clicks, effects } of the step waiting for an effect
+      clicked: null,    // during replay: { index, at, clicks, effects, mark } of the step waiting for an effect
+      mark: 0,          // the page's load or the previous click: a step's wait counts from here
+      lastClick: 0,     // the download's wait counts from here
+      measured: { steps: [] }, // the waits this replay saw, saved when it succeeds
+      budgetFor: -1,    // the step whose budget runs
     };
     this.jobs.set(key, job);
     this.startOrQueue(job);
@@ -134,6 +136,8 @@ const Resolver = {
     job.step = 0;
     job.recordFrom = 0;
     job.recorded = [];
+    job.measured = { steps: [] };
+    job.budgetFor = -1;
     const visible = mode === "record";
     let win;
     try {
@@ -149,7 +153,7 @@ const Resolver = {
       notify("Show DMS² how to get the link",
         `Click through ${job.host} for ${job.ifaceName} as you normally would. Your clicks are remembered for next time.`);
     }
-    this.setTimer(job, "overall", visible ? this.RECORD_TIMEOUT : this.REPLAY_TIMEOUT,
+    this.setTimer(job, "overall", visible ? this.RECORD_TIMEOUT : replayTimeout(this.recipes[job.host]),
       () => this.fail(job, visible ? "nobody clicked through the page in time" : "timed out"));
   },
 
@@ -208,6 +212,7 @@ const Resolver = {
     if (info.status === "complete") {
       job.loading = false;
       job.lastUrl = tab.url;
+      job.mark = Date.now();
       // A new page means the captcha (if any) is behind us; the new page's script
       // reports straight away if there is another one.
       if (job.captcha) this.captchaDone(job);
@@ -244,7 +249,9 @@ const Resolver = {
   captchaShown(job) {
     if (job.captcha) return;
     job.captcha = true;
-    clearTimeout(job.timers.wait);
+    clearTimeout(job.timers.budget);
+    clearTimeout(job.timers.effect);
+    job.clicked = null;
     this.setTimer(job, "overall", this.RECORD_TIMEOUT, () => this.fail(job, "the captcha wasn't solved in time"));
     this.show(job, { drawAttention: true });
     notify("DMS² needs you to solve a captcha", `${job.host} asks for a captcha on ${job.ifaceName}. The window is open; DMS² continues once it's solved.`);
@@ -258,24 +265,32 @@ const Resolver = {
     }
     // Back out of the way; the page's script carries on with the next click by itself.
     browser.windows.update(job.windowId, { state: "minimized" }).catch(() => {});
-    this.setTimer(job, "overall", this.REPLAY_TIMEOUT, () => this.fail(job, "timed out"));
-    const steps = this.steps(job);
-    if (job.step >= steps.length) {
-      this.setTimer(job, "wait", this.DOWNLOAD_WAIT,
-        () => this.switchToRecord(job, steps.length, "The download didn't start"));
-    }
+    this.setTimer(job, "overall", replayTimeout(this.recipes[job.host]), () => this.fail(job, "timed out"));
+    job.budgetFor = -1; // the step gets its budget afresh
+    this.sendStep(job);
   },
 
+  // Sends the step to click, with its budget: twice its recorded wait plus 15 s
+  // to be clicked, counted from the page load or the previous click.
   sendStep(job) {
+    const recipe = this.recipes[job.host] || {};
     const steps = this.steps(job);
+    if (job.captcha) return; // continued once the captcha is solved
     if (job.step >= steps.length) {
       // All clicks done: the site's timer runs, then the download should start.
-      if (job.captcha) return; // armed once the captcha is solved
-      this.setTimer(job, "wait", this.DOWNLOAD_WAIT,
-        () => this.switchToRecord(job, steps.length, "The download didn't start"));
+      this.armBudget(job, steps.length, budget(recipe.downloadWait), "The download didn't start");
       return;
     }
-    browser.tabs.sendMessage(job.tabId, { cmd: "replay", step: steps[job.step], index: job.step, next: steps[job.step + 1] }).catch(() => {});
+    const ms = budget(steps[job.step].wait);
+    this.armBudget(job, job.step, ms + 1000, "The page didn't let DMS² click in time"); // the page reports first
+    browser.tabs.sendMessage(job.tabId, { cmd: "replay", step: steps[job.step], index: job.step, next: steps[job.step + 1], budget: ms }).catch(() => {});
+  },
+
+  // Starts the budget of step index (steps.length: the download) unless it runs already.
+  armBudget(job, index, ms, why) {
+    if (job.budgetFor === index) return;
+    job.budgetFor = index;
+    this.setTimer(job, "budget", ms, () => this.switchToRecord(job, index, why));
   },
 
   // A replayed click showed an effect: the step is done. After a navigation
@@ -287,6 +302,8 @@ const Resolver = {
     if (afterClick(c.effects, Date.now() - c.at, c.clicks) !== "done") return;
     job.clicked = null;
     clearTimeout(job.timers.effect);
+    job.measured.steps[c.index] = c.at - c.mark;
+    job.mark = c.at;
     job.step = c.index + 1;
     if (kind !== "navigation" && !job.loading) this.sendStep(job);
   },
@@ -326,8 +343,9 @@ const Resolver = {
     switch (msg.type) {
       case "clicked": {
         if (job.mode !== "replay") return;
-        const prev = job.clicked && job.clicked.index === msg.index ? job.clicked.clicks : 0;
-        job.clicked = { index: msg.index, at: Date.now(), clicks: prev + 1, effects: {} };
+        const prev = job.clicked && job.clicked.index === msg.index ? job.clicked : null;
+        job.clicked = { index: msg.index, at: Date.now(), clicks: prev ? prev.clicks + 1 : 1, effects: {}, mark: prev ? prev.mark : job.mark };
+        job.lastClick = job.clicked.at;
         this.setTimer(job, "effect", EFFECT_WAIT, () => this.judgeClick(job));
         break;
       }
@@ -356,7 +374,8 @@ const Resolver = {
         // The page of your first click is the real landing page: you may have had
         // to navigate there yourself if the page DMS² opened was the wrong one.
         if (job.recordFrom === 0 && job.recorded.length === 0) job.startUrl = sender.tab.url;
-        job.recorded.push(msg.step);
+        job.recorded.push({ ...msg.step, wait: Date.now() - job.mark });
+        job.mark = job.lastClick = Date.now();
         break;
     }
   },
@@ -396,6 +415,12 @@ const Resolver = {
     this.clearTimers(job);
     if (job.startUrl && job.startUrl !== job.pageUrl && isHttp(job.startUrl)) this.correctPage(job);
     if (job.mode === "record") this.saveRecipe(job);
+    if (job.mode === "replay" && this.recipes[job.host]) {
+      // The site's waits this time are the ones to expect next time.
+      job.measured.download = Date.now() - job.lastClick;
+      this.recipes[job.host] = withMeasuredWaits(this.recipes[job.host], job.measured);
+      browser.storage.local.set({ recipes: this.recipes });
+    }
     const cookie = await cookieHeader(url, this.containers[job.iface]);
     try {
       await Engine.call("resolved", { id: job.id, iface: job.iface, url, cookie, referer: job.lastUrl || job.pageUrl });
@@ -429,8 +454,8 @@ const Resolver = {
   },
 
   saveRecipe(job) {
-    const steps = mergeSteps(this.steps(job), job.recordFrom, job.recorded);
-    this.recipes[job.host] = { steps, learned: Date.now() };
+    const downloadWait = job.lastClick ? Date.now() - job.lastClick : 0;
+    this.recipes[job.host] = recorded(this.recipes[job.host], job.recordFrom, job.recorded, downloadWait, Date.now());
     browser.storage.local.set({ recipes: this.recipes });
   },
 

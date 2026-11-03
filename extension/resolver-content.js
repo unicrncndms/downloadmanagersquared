@@ -8,7 +8,6 @@
   window.__dmsResolver = true;
 
   const CLICKABLE = "a,button,input[type=submit],input[type=button],input[type=image],[role=button],[onclick]";
-  const FIND_TIMEOUT = 10000;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // Widgets of the common captcha services, plus generic captcha markers.
   const CAPTCHA = [
@@ -124,12 +123,13 @@
 
   // Clicks a step's element as soon as the page makes it ready, then watches
   // whether the next step's element shows up (the background sees the rest).
-  async function replay(step, index, next) {
+  // budget: how long the element may take to appear, from the recipe's waits.
+  async function replay(step, index, next, budget) {
     const run = ++replaying;
     await untilNoCaptcha();
     const start = Date.now();
     let el = null;
-    while (!(el = find(step)) && Date.now() - start < FIND_TIMEOUT) {
+    while (!(el = find(step)) && Date.now() - start < budget) {
       await sleep(300);
       if (run !== replaying) return;
     }
@@ -141,7 +141,7 @@
     while (!isReady(factsOf(el)) || captchaPending()) {
       await sleep(250);
       if (run !== replaying) return;
-      if (!el.isConnected && !(el = find(step))) return replay(step, index, next);
+      if (!el.isConnected && !(el = find(step))) return replay(step, index, next, budget - (Date.now() - start));
     }
     browser.runtime.sendMessage({ resolver: true, type: "clicked", index });
     el.click();
@@ -188,7 +188,7 @@
   }
 
   browser.runtime.onMessage.addListener((msg) => {
-    if (msg.cmd === "replay") replay(msg.step, msg.index, msg.next);
+    if (msg.cmd === "replay") replay(msg.step, msg.index, msg.next, msg.budget);
     if (msg.cmd === "record") startRecording(msg.ifaceName, msg.prev);
   });
 })();
