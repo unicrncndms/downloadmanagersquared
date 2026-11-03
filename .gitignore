@@ -1,3 +1,5 @@
 dist/
 .scratch/
 .claude/
+CLAUDE.md
+docs/agents/
