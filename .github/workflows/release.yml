@@ -1,0 +1,67 @@
+name: Release
+
+# A tag vX.Y.Z builds a draft release with the engine zip, has AMO sign the
+# extension (unlisted) and publishes the release with the signed .xpi. If AMO
+# takes longer than the wait, the draft stays and release-signed.yml publishes
+# it later. A release is never public without its .xpi.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: windows-latest
+    environment: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Third-party notices
+        run: ./.github/scripts/notices.ps1
+
+      - name: Build
+        run: ./build.ps1 -Version $env:TAG -Repo $env:GITHUB_REPOSITORY
+
+      - name: Draft release with the engine
+        run: gh release create $env:TAG dist/downloadmanagersquared-windows.zip --draft --verify-tag --title $env:TAG --notes "Download downloadmanagersquared-windows.zip, extract it and run dms-engine.exe. It then shows how to add the Firefox extension."
+
+      - name: Sign the extension (unlisted)
+        id: sign
+        continue-on-error: true # a timeout leaves the draft for release-signed.yml
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          npx --yes web-ext@10.8.0 sign --channel=unlisted --source-dir dist/extension --artifacts-dir dist/signed --api-key $env:AMO_JWT_ISSUER --api-secret $env:AMO_JWT_SECRET --approval-timeout 1800000
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Publish with the signed extension
+        if: steps.sign.outcome == 'success'
+        run: |
+          $xpi = Get-ChildItem dist/signed/*.xpi | Select-Object -First 1
+          ./.github/scripts/publish.ps1 -Tag $env:TAG -Xpi $xpi.FullName
+
+      - name: Signing still in review
+        if: steps.sign.outcome != 'success'
+        run: echo "::warning::AMO hasn't signed $env:TAG within 30 minutes. The release stays a draft; run the 'Publish a signed release' workflow with this tag once AMO has signed it."

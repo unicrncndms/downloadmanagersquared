@@ -1,0 +1,40 @@
+name: Publish a signed release
+
+# For a draft whose signing outlasted release.yml's wait: fetches the signed
+# .xpi from AMO, attaches it and updates.json, and publishes the release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The draft release's tag, e.g. v0.3.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    environment: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Check the release is a draft
+        run: |
+          $draft = gh release view $env:TAG --json isDraft --jq .isDraft
+          if ($draft -ne 'true') { throw "$env:TAG is not a draft release" }
+
+      - name: Fetch the signed extension from AMO
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: ./.github/scripts/amo-fetch.ps1 -Version $env:TAG.TrimStart('v') -Out signed.xpi
+
+      - name: Publish with the signed extension
+        run: ./.github/scripts/publish.ps1 -Tag $env:TAG -Xpi (Resolve-Path signed.xpi).Path

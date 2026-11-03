@@ -40,6 +40,10 @@ $parts = 'background', 'content', 'ui', 'icons', 'resolver-content.js'
 foreach ($p in $parts) { Copy-Item -Recurse (Join-Path $root "extension\$p") $stage }
 $manifest = Get-Content -Raw -Encoding UTF8 (Join-Path $root 'extension\manifest.json')
 $manifest = $manifest -replace '"version":\s*"[^"]*"', "`"version`": `"$Version`""
+if ($Repo) {
+    # Firefox updates a self-hosted extension from the latest release's updates.json.
+    $manifest = $manifest -replace '("id":\s*"downloadmanagersquared@dms",)', "`$1`n      `"update_url`": `"https://github.com/$Repo/releases/latest/download/updates.json`","
+}
 [IO.File]::WriteAllText((Join-Path $stage 'manifest.json'), $manifest, (New-Object Text.UTF8Encoding $false))
 
 # Zip with forward slashes (Compress-Archive writes backslashes, which AMO rejects).
