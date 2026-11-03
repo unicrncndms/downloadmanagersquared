@@ -59,11 +59,6 @@ func ShowInFolder(path string) error {
 	return cmd.Start()
 }
 
-// LaunchFirefox starts Firefox through its App Paths registration.
-func LaunchFirefox() error {
-	return Hidden(exec.Command("cmd.exe", "/c", "start", "", "firefox")).Start()
-}
-
 func Autostart() bool {
 	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.QUERY_VALUE)
 	if err != nil {

@@ -95,6 +95,7 @@ type Engine struct {
 	resolves  map[string]resolveReq   // waiting for an extension to pick them up
 	openWant  *string                 // view to open once Firefox connects ("#settings" or downloads)
 	userAgent string                  // the browser's, from its latest hello; not saved
+	browser   string                  // the browser's exe, from its latest hello; not saved
 
 	cum      float64 // bytes moved since start, integrated from speed (for the global ETA)
 	meter    rate.Meter
@@ -704,20 +705,21 @@ func (e *Engine) broadcast(name string, data any) {
 }
 
 // OpenManager shows the downloads (or, with "#settings", the settings page) in
-// Firefox, starting Firefox if needed.
+// the browser, starting the one the extension last ran in if needed.
 func (e *Engine) OpenManager(hash string) {
 	e.mu.Lock()
 	c := e.extensionLocked()
 	if c == nil {
 		e.openWant = &hash
 	}
+	browser := e.browser
 	e.mu.Unlock()
 	if c != nil {
 		c.Emit("openManager", map[string]string{"hash": hash})
 		return
 	}
-	if err := winutil.LaunchFirefox(); err != nil {
-		log.Printf("starting firefox: %v", err)
+	if err := winutil.OpenBrowser(browser, ""); err != nil {
+		log.Printf("starting the browser: %v", err)
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"downloadmanagersquared/engine/internal/ipc"
+	"downloadmanagersquared/engine/internal/winutil"
 )
 
 func main() {
@@ -35,6 +36,11 @@ func main() {
 		return
 	}
 	defer conn.Close()
+	// The engine opens pages in the browser that started this host.
+	browser, err := winutil.ParentExe()
+	if err != nil {
+		browser = ""
+	}
 
 	done := make(chan struct{}, 2)
 	go func() { // Firefox -> engine
@@ -44,7 +50,7 @@ func main() {
 				break
 			}
 			var buf bytes.Buffer
-			if json.Compact(&buf, msg) != nil {
+			if json.Compact(&buf, withBrowser(msg, browser)) != nil {
 				continue
 			}
 			buf.WriteByte('\n')
@@ -68,6 +74,30 @@ func main() {
 		done <- struct{}{}
 	}()
 	<-done
+}
+
+// withBrowser adds the browser's exe to the extension's hello.
+func withBrowser(msg []byte, exe string) []byte {
+	if exe == "" {
+		return msg
+	}
+	var req struct {
+		ID     json.RawMessage            `json:"id"`
+		Method string                     `json:"method"`
+		Params map[string]json.RawMessage `json:"params"`
+	}
+	if json.Unmarshal(msg, &req) != nil || req.Method != "hello" {
+		return msg
+	}
+	if req.Params == nil {
+		req.Params = map[string]json.RawMessage{}
+	}
+	req.Params["browser"], _ = json.Marshal(exe)
+	b, err := json.Marshal(req)
+	if err != nil {
+		return msg
+	}
+	return b
 }
 
 func connect() (net.Conn, error) {

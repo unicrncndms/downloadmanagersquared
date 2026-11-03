@@ -83,6 +83,11 @@ type ifacePatch struct {
 	DownloadLimit *int64 `json:"downloadLimit"`
 }
 
+type helloParams struct {
+	UserAgent string `json:"userAgent"` // the extension's navigator.userAgent
+	Browser   string `json:"browser"`   // the browser's exe, added by dms-host
+}
+
 type hello struct {
 	Settings  Settings   `json:"settings"`
 	State     StateEvent `json:"state"`
@@ -102,13 +107,11 @@ func decode[T any](raw json.RawMessage) (T, error) {
 func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, error) {
 	switch method {
 	case "hello":
-		p, err := decode[struct {
-			UserAgent string `json:"userAgent"`
-		}](raw)
+		p, err := decode[helloParams](raw)
 		if err != nil {
 			return nil, err
 		}
-		return e.hello(c, p.UserAgent), nil
+		return e.hello(c, p), nil
 	case "getState":
 		return e.Snapshot(), nil
 	case "add":
@@ -369,13 +372,17 @@ func (e *Engine) applySettings(f func(*Settings)) Settings {
 
 // hello registers the caller as the browser extension and hands it anything it
 // missed. The browser's user agent is kept for downloads added without one.
-func (e *Engine) hello(c *ipc.Conn, userAgent string) hello {
+// The browser's exe is kept to open pages in that browser.
+func (e *Engine) hello(c *ipc.Conn, p helloParams) hello {
 	e.mu.Lock()
 	if cl := e.clients[c]; cl != nil {
 		cl.extension = true
 	}
-	if userAgent != "" {
-		e.userAgent = userAgent
+	if p.UserAgent != "" {
+		e.userAgent = p.UserAgent
+	}
+	if p.Browser != "" {
+		e.browser = p.Browser
 	}
 	pending := make([]resolveReq, 0, len(e.resolves))
 	for _, r := range e.resolves {
