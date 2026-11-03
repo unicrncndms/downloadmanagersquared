@@ -119,3 +119,9 @@ _Avoid_: Kill switch (it is what VPN only does, not a separate setting)
 
 **Provider**:
 Where tunnel configs come from: imported WireGuard `.conf` files, or PIA, which generates one config per interface through its API.
+
+### Browser
+
+**Capture**:
+The extension taking a download away from the browser and handing it to the engine. It happens to every download at or above the capture threshold, and to every torrent file.
+_Avoid_: Intercept, grab, take over (except in user-facing text)
