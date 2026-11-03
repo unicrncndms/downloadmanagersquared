@@ -31,12 +31,19 @@ try {
     Pop-Location
 }
 
+if (Get-Command node -ErrorAction SilentlyContinue) {
+    node --test (Join-Path $root 'extension	est')
+    if ($LASTEXITCODE) { throw 'extension tests failed' }
+} else {
+    Write-Host 'node is not on PATH: extension tests skipped'
+}
+
 # The extension is packed from a staged copy whose manifest carries the version;
 # the repo's manifest stays at 0.0.0.
 $stage = Join-Path $dist 'extension'
 Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $stage | Out-Null
-$parts = 'background', 'content', 'ui', 'icons', 'resolver-content.js'
+$parts = 'lib', 'background', 'content', 'ui', 'icons', 'resolver-content.js'
 foreach ($p in $parts) { Copy-Item -Recurse (Join-Path $root "extension\$p") $stage }
 $manifest = Get-Content -Raw -Encoding UTF8 (Join-Path $root 'extension\manifest.json')
 $manifest = $manifest -replace '"version":\s*"[^"]*"', "`"version`": `"$Version`""

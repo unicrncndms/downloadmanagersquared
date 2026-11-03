@@ -64,14 +64,12 @@ const Capture = {
     if (Resolver.ownsStore(d.cookieStoreId)) return Resolver.onHeaders(d);
     if (d.method !== "GET") return {};
     const h = headerMap(d.responseHeaders);
-    if (isPage(h)) return {};
     if (!Engine.connected || !Engine.settings) return {};
-    if (d.statusCode !== 200 && d.statusCode !== 206) return {};
+    const kind = captureResponse(h, d.url, d.statusCode, Engine.settings.thresholdBytes);
+    if (!kind) return {};
     if (this.bypass.delete(d.url)) return {};
-    const torrent = isTorrentFile(h, d.url);
-    if (!torrent && (responseSize(h, d.statusCode) < Engine.settings.thresholdBytes || !looksLikeDownload(h))) return {};
     this.handOff({
-      torrent,
+      torrent: kind === "torrent",
       url: d.url,
       pages: this.pagesFor(d.tabId, d.url, [d.originUrl, d.documentUrl]),
       filename: dispositionName(h),
@@ -87,12 +85,11 @@ const Capture = {
     if (Resolver.ownsStore(item.cookieStoreId)) return Resolver.onDownload(item);
     if (!Engine.connected || !Engine.settings || item.byExtensionId === browser.runtime.id) return;
     if (this.bypass.delete(item.url)) return;
-    const size = item.totalBytes > 0 ? item.totalBytes : item.fileSize;
-    const torrent = item.mime === "application/x-bittorrent" || /\.torrent$/i.test(item.filename || "");
-    if (!torrent && !(size >= Engine.settings.thresholdBytes)) return;
+    const kind = captureDownload(item, Engine.settings.thresholdBytes);
+    if (!kind) return;
     await discardDownload(item.id);
     this.handOff({
-      torrent,
+      torrent: kind === "torrent",
       url: item.finalUrl || item.url,
       pages: this.pagesFor(-1, item.finalUrl || item.url, [item.referrer]),
       filename: (item.filename || "").split(/[\\/]/).pop(),
@@ -107,31 +104,13 @@ const Capture = {
     this.history.set(tabId, h);
   },
 
-  // Pages leading up to the download, oldest first, ending with the page that
-  // started it. Never includes the download link itself.
+  // Pages leading up to the download in a tab (-1: none known), oldest first.
   pagesFor(tabId, downloadUrl, hints) {
-    const pages = ((tabId >= 0 && this.history.get(tabId)) || []).slice();
-    for (const u of hints) {
-      if (u && !pages.includes(u)) pages.push(u);
-    }
-    // Extend backwards through referrers for pages from before we were watching.
-    for (let i = 0; i < 5 && pages.length; i++) {
-      const ref = this.referers.get(pages[0]);
-      if (!ref || pages.includes(ref)) break;
-      pages.unshift(ref);
-    }
-    return pages.filter((u) => u && u !== downloadUrl && isHttp(u));
+    return pagesFor(tabId >= 0 ? this.history.get(tabId) : [], this.referers, hints, downloadUrl);
   },
 
-  // The landing page: the page that started the download is usually generated for
-  // this IP only, so step back (landingBack pages), staying on the same site.
-  // Starting too early is harmless (you click through more); too late gets stuck.
   landingPage(pages) {
-    if (!pages.length) return "";
-    let i = pages.length - 1;
-    const site = siteOf(pages[i]);
-    for (let n = this.landingBack; n > 0 && i > 0 && siteOf(pages[i - 1]) === site; n--) i--;
-    return pages[i];
+    return landingPage(pages, this.landingBack);
   },
 
   async handOff({ url, pageUrl, pages, filename, cookieStoreId, tabId, closeBlankTab, torrent }) {

@@ -371,8 +371,7 @@ const Resolver = {
   },
 
   saveRecipe(job) {
-    const old = this.steps(job);
-    const steps = old.slice(0, job.recordFrom).concat(job.recorded);
+    const steps = mergeSteps(this.steps(job), job.recordFrom, job.recorded);
     this.recipes[job.host] = { steps, learned: Date.now() };
     browser.storage.local.set({ recipes: this.recipes });
   },

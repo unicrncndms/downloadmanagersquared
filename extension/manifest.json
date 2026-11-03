@@ -30,6 +30,8 @@
   ],
   "background": {
     "scripts": [
+      "lib/capture-rules.js",
+      "lib/recipe.js",
       "background/util.js",
       "background/engine.js",
       "background/resolver.js",
