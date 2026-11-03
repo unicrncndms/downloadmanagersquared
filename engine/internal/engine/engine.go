@@ -37,7 +37,8 @@ import (
 
 var ErrAlreadyRunning = errors.New("engine already running")
 
-const Version = "0.1.0"
+// Version is the release, set at build time from the git tag (build.ps1 -Version).
+var Version = "dev"
 
 const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
 

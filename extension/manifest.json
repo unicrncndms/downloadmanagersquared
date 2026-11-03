@@ -2,12 +2,15 @@
   "manifest_version": 2,
   "name": "downloadmanagersquared",
   "short_name": "DMS²",
-  "version": "0.2.0",
+  "version": "0.0.0",
   "description": "Downloads large files over all your network connections at once, including sites that give each IP its own link.",
   "browser_specific_settings": {
     "gecko": {
       "id": "downloadmanagersquared@dms",
-      "strict_min_version": "115.0"
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["browsingActivity", "websiteActivity", "websiteContent"]
+      }
     }
   },
   "permissions": [

@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # build.ps1 reads the version from the latest tag
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: go vet
+        working-directory: engine
+        run: go vet ./...
+
+      - name: go test
+        working-directory: engine
+        run: go test ./...
+
+      - name: Licences of linked Go modules
+        working-directory: engine
+        run: |
+          go install github.com/google/go-licenses@v1.6.0
+          go-licenses check ./... --ignore downloadmanagersquared/engine --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,MPL-2.0
+
+      - name: Lint the extension
+        run: npx --yes web-ext@10.8.0 lint --source-dir extension
+
+      - name: Build
+        run: ./build.ps1
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: dist
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.xpi
