@@ -86,3 +86,16 @@ test("recording learns how many pages back the first click's page was", () => {
   assert.equal(r.learnedStepBack(pages, "https://elsewhere/"), null);
   assert.equal(r.learnedStepBack([], "https://host.com/a"), null);
 });
+
+test("the cookie fallback keeps only the download site's first-party cookies", () => {
+  const cookies = [
+    { name: "a", value: "1", firstPartyDomain: "" },
+    { name: "b", value: "2", firstPartyDomain: "example.com" },
+    { name: "c", value: "3", firstPartyDomain: "dl.example.com" },
+    { name: "d", value: "4", firstPartyDomain: "tracker.net" },
+    { name: "e", value: "5", firstPartyDomain: "ample.com" },
+    { name: "f", value: "6" },
+  ];
+  assert.equal(r.cookieHeaderFor(cookies, "dl.example.com"), "a=1; b=2; c=3; f=6");
+  assert.equal(r.cookieHeaderFor([], "x"), "");
+});

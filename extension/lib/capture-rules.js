@@ -115,6 +115,16 @@ function landingPage(pages, back) {
   return pages[i];
 }
 
+// The Cookie header from a cookies.getAll() result, for a download on host:
+// with first-party isolation on, only cookies of that site (or of no first
+// party) count. SameSite is not filtered.
+function cookieHeaderFor(cookies, host) {
+  return cookies
+    .filter((c) => !c.firstPartyDomain || host === c.firstPartyDomain || host.endsWith("." + c.firstPartyDomain))
+    .map((c) => `${c.name}=${c.value}`)
+    .join("; ");
+}
+
 // How many pages back from the one that started a download its landing page
 // is: what recording learned for that host (stepBacks: host -> pages back),
 // else one page.
@@ -134,6 +144,6 @@ if (typeof module !== "undefined") {
   module.exports = {
     headerMap, mediaType, isPage, isAttachment, looksLikeDownload, isTorrentFile, responseSize,
     dispositionName, hostOf, siteOf, isHttp, captureResponse, captureDownload, pagesFor, landingPage,
-    stepBackFor, learnedStepBack,
+    stepBackFor, learnedStepBack, cookieHeaderFor,
   };
 }

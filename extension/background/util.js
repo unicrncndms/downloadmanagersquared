@@ -11,7 +11,32 @@ async function discardDownload(id) {
   } catch (e) { /* already gone */ }
 }
 
-// Cookie header the site would get from this container for this URL.
+// The Cookie header the browser sent with each request still being looked
+// at, by requestId: the last one across redirects. Filled from onSendHeaders;
+// take() hands it over once the response has been handled.
+const SentCookies = {
+  byRequest: new Map(),
+
+  init() {
+    const filter = { urls: ["<all_urls>"], types: ["main_frame", "sub_frame"] };
+    browser.webRequest.onSendHeaders.addListener((d) => {
+      const h = (d.requestHeaders || []).find((x) => x.name.toLowerCase() === "cookie");
+      if (h) this.byRequest.set(d.requestId, h.value);
+      else this.byRequest.delete(d.requestId);
+    }, filter, ["requestHeaders"]);
+    browser.webRequest.onErrorOccurred.addListener((d) => this.byRequest.delete(d.requestId), filter);
+  },
+
+  // The header sent for a request whose response is handled now, or undefined.
+  take(requestId) {
+    const v = this.byRequest.get(requestId);
+    this.byRequest.delete(requestId);
+    return v;
+  },
+};
+
+// Fallback where no request passed by (context menu, browser downloads): the
+// cookies this container holds for the URL, first-party filtered.
 async function cookieHeader(url, storeId) {
   let cookies = [];
   try {
@@ -19,7 +44,7 @@ async function cookieHeader(url, storeId) {
   } catch (e) {
     try { cookies = await browser.cookies.getAll({ url, storeId }); } catch (e2) { /* none */ }
   }
-  return cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+  return cookieHeaderFor(cookies, hostOf(url));
 }
 
 function notify(title, message) {

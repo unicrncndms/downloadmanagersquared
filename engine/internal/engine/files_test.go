@@ -1,7 +1,10 @@
 package engine
 
 import (
+	"bytes"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,5 +175,37 @@ func TestQuitSavesStateBeforeThePipeCloses(t *testing.T) {
 	e.Shutdown() // what the tray does on quit
 	if !ln.saved {
 		t.Fatal("the pipe closed before the download's state was saved")
+	}
+}
+
+func TestACompletedDownloadKeepsNoCookie(t *testing.T) {
+	data := bytes.Repeat([]byte("dms"), 100000)
+	var sent []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Header.Get("Cookie"))
+		http.ServeContent(w, r, "a.bin", time.Time{}, bytes.NewReader(data))
+	}))
+	defer srv.Close()
+	e := loopbackEngine(t)
+	id, err := e.Add(AddRequest{URL: srv.URL + "/a.bin", Cookie: "session=secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.queue.Save()
+	state := filepath.Join(e.dir, "downloads", id+".json")
+	if b, _ := os.ReadFile(state); !bytes.Contains(b, []byte("session=secret")) {
+		t.Fatal("a queued download doesn't keep its cookie to resume with")
+	}
+	d, _ := e.get(id)
+	waitFor(t, "the download", 30*time.Second, func() bool {
+		e.schedule()
+		return d.Status() == download.StatusCompleted
+	})
+	if len(sent) == 0 || sent[0] != "session=secret" {
+		t.Fatalf("the server got cookies %q", sent)
+	}
+	e.queue.Save()
+	if b, _ := os.ReadFile(state); bytes.Contains(b, []byte("secret")) {
+		t.Fatalf("the completed download's state still holds the cookie:\n%s", b)
 	}
 }

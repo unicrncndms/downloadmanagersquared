@@ -74,6 +74,7 @@ browser.windows.onRemoved.addListener((id) => {
 Engine.on("openManager", ({ hash } = {}) => (hash === "#settings" ? openSettings("") : openDownloads()));
 
 (async () => {
+  SentCookies.init();
   await Resolver.init();
   Capture.init();
   Engine.connect();

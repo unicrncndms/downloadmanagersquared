@@ -451,14 +451,14 @@ const Resolver = {
   },
 
   // Called by Capture for responses inside one of our containers.
-  onHeaders(d) {
+  onHeaders(d, cookie) {
     const h = headerMap(d.responseHeaders);
     if (d.statusCode >= 300 || isPage(h) || !looksLikeDownload(h)) return {};
     const size = responseSize(h, d.statusCode);
     if (!isAttachment(h) && size >= 0 && size < (1 << 20)) return {};
     const job = this.jobForStore(d.cookieStoreId, d.tabId);
     if (!job) return {};
-    this.finish(job, d.url);
+    this.finish(job, d.url, cookie);
     return { cancel: true };
   },
 
@@ -468,7 +468,8 @@ const Resolver = {
     if (job) this.finish(job, item.finalUrl || item.url);
   },
 
-  async finish(job, url) {
+  // cookie: the header sent with the download's request, if one passed by.
+  async finish(job, url, cookie) {
     if (job.done) return;
     job.done = true;
     this.clearTimers(job);
@@ -482,7 +483,7 @@ const Resolver = {
       this.recipes[job.host] = withMeasuredWaits(this.recipes[job.host], job.measured);
       browser.storage.local.set({ recipes: this.recipes });
     }
-    const cookie = await cookieHeader(url, this.containers[job.iface]);
+    if (cookie === undefined) cookie = await cookieHeader(url, this.containers[job.iface]);
     try {
       await Engine.call("resolved", { id: job.id, iface: job.iface, url, cookie, referer: job.lastUrl || job.pageUrl });
     } catch (e) {

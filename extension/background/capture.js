@@ -58,7 +58,8 @@ const Capture = {
   },
 
   onHeaders(d) {
-    if (Resolver.ownsStore(d.cookieStoreId)) return Resolver.onHeaders(d);
+    const cookie = SentCookies.take(d.requestId); // dropped whatever happens to the response
+    if (Resolver.ownsStore(d.cookieStoreId)) return Resolver.onHeaders(d, cookie);
     if (d.method !== "GET") return {};
     const h = headerMap(d.responseHeaders);
     if (!Engine.connected || !Engine.settings) return {};
@@ -71,6 +72,7 @@ const Capture = {
       pages: this.pagesFor(d.tabId, d.url, [d.originUrl, d.documentUrl]),
       filename: dispositionName(h),
       cookieStoreId: d.cookieStoreId,
+      cookie: cookie || "",
       tabId: d.tabId,
       closeBlankTab: d.type === "main_frame",
     });
@@ -122,11 +124,13 @@ const Capture = {
     browser.storage.local.set({ stepBacks: this.stepBacks });
   },
 
-  async handOff({ url, pageUrl, pages, filename, cookieStoreId, tabId, closeBlankTab, torrent }) {
+  // cookie: the header the browser sent with the download's request; without
+  // a request (context menu, browser downloads) the container's cookies.
+  async handOff({ url, pageUrl, pages, filename, cookieStoreId, cookie, tabId, closeBlankTab, torrent }) {
     pages = pages || (pageUrl ? [pageUrl] : []);
     if (pageUrl === undefined) pageUrl = this.landingPage(pages);
     const referer = pages[pages.length - 1] || pageUrl;
-    const cookie = await cookieHeader(url, cookieStoreId);
+    if (cookie === undefined) cookie = await cookieHeader(url, cookieStoreId);
     try {
       const { id } = await Engine.call("add", { url, pageUrl, filename, cookie, referer, userAgent: navigator.userAgent, torrent: !!torrent });
       if (torrent) {

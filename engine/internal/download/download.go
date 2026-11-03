@@ -330,6 +330,11 @@ func (d *Download) run(ctx context.Context) {
 		d.st.Status, d.st.Error, finished = StatusFailed, err.Error(), true
 	default:
 		d.st.Status, d.st.Finished, d.st.Remaining, finished = StatusCompleted, time.Now(), nil, true
+		// Nothing left to resume: the site's cookies needn't stay on disk.
+		d.st.Cookie = ""
+		for _, l := range d.st.Links {
+			l.Cookie = ""
+		}
 	}
 	d.speed = 0
 	d.eta.Clear()
