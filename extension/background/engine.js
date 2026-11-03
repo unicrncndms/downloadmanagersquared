@@ -26,7 +26,7 @@ const Engine = {
       setTimeout(() => this.connect(), this.retryDelay);
       this.retryDelay = Math.min(this.retryDelay * 2, 30000);
     });
-    this.call("hello")
+    this.call("hello", { userAgent: navigator.userAgent })
       .then((h) => {
         this.settings = h.settings;
         this.state = h.state;

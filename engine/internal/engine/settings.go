@@ -13,9 +13,9 @@ import (
 
 type IfaceSettings struct {
 	Name          string `json:"name,omitempty"`    // last seen name, for display while absent
-	Enabled       *bool  `json:"enabled,omitempty"` // nil: default (on unless metered or VPN)
+	Enabled       *bool  `json:"enabled,omitempty"` // nil: default (on unless VPN)
 	Connections   int    `json:"connections,omitempty"`
-	Upload        *bool  `json:"upload,omitempty"`        // nil: default (on unless metered)
+	Upload        *bool  `json:"upload,omitempty"`        // nil: default (on)
 	UploadLimit   int64  `json:"uploadLimit,omitempty"`   // bytes per second, 0 = none
 	DownloadLimit int64  `json:"downloadLimit,omitempty"` // bytes per second, 0 = none
 }
@@ -38,7 +38,7 @@ type Settings struct {
 func defaultSettings() Settings {
 	return Settings{
 		Interfaces:         map[string]*IfaceSettings{},
-		ThresholdBytes:     30_000_000_000, // 30 GB, as shown in the settings page
+		ThresholdBytes:     100_000_000, // 100 MB, shown in GB on the settings page
 		SaveDir:            winutil.DownloadsFolder(),
 		MaxParallel:        1,
 		ETAWindowSec:       60,

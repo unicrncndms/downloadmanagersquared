@@ -94,6 +94,7 @@ type Engine struct {
 	tunnels   map[string]*tunnelEntry // by interface ID
 	resolves  map[string]resolveReq   // waiting for an extension to pick them up
 	openWant  *string                 // view to open once Firefox connects ("#settings" or downloads)
+	userAgent string                  // the browser's, from its latest hello; not saved
 
 	cum      float64 // bytes moved since start, integrated from speed (for the global ETA)
 	meter    rate.Meter
@@ -554,20 +555,22 @@ func (e *Engine) torrentIfacesFor(m paths.Mode) []torrent.Iface {
 	return ifs
 }
 
-// uploadLocked is whether peers may download from us through the interface.
+// uploadLocked is whether peers may download from us through the interface: on
+// unless the user switched it off.
 func (e *Engine) uploadLocked(id string) bool {
 	if s := e.settings.Interfaces[id]; s != nil && s.Upload != nil {
 		return *s.Upload
 	}
-	ent := e.ifaces[id]
-	return ent == nil || !ent.info.Metered
+	return true
 }
 
+// enabledLocked: every interface is used unless the user switched it off,
+// except VPN adapters, which only the user switches on.
 func (e *Engine) enabledLocked(ent *ifaceEntry) bool {
 	if s := e.settings.Interfaces[ent.info.ID]; s != nil && s.Enabled != nil {
 		return *s.Enabled
 	}
-	return !ent.info.Metered && !ent.info.VPN
+	return !ent.info.VPN
 }
 
 func (e *Engine) connsLocked(id string) int {
@@ -756,7 +759,12 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		return "", errors.New("only http, https and magnet links are supported")
 	}
 	if r.UserAgent == "" {
-		// Some servers drop clients with Go's default user agent.
+		// Some servers drop clients with Go's default user agent: use the browser's.
+		e.mu.Lock()
+		r.UserAgent = e.userAgent
+		e.mu.Unlock()
+	}
+	if r.UserAgent == "" {
 		r.UserAgent = defaultUserAgent
 	}
 	if r.Torrent || isTorrentURL(r.URL) {
@@ -880,7 +888,6 @@ type IfaceView struct {
 	IP          string  `json:"ip"`
 	Present     bool    `json:"present"`
 	Enabled     bool    `json:"enabled"`
-	Metered     bool    `json:"metered"`
 	VPN         bool    `json:"vpn"`
 	IsDefault   bool    `json:"isDefault"`
 	IsMain      bool    `json:"isMain"`
@@ -952,7 +959,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		up, down := ent.shaper.Limits()
 		views = append(views, IfaceView{
 			ID: id, Name: ent.info.Name, Description: ent.info.Description, IP: ent.info.IPv4.String(),
-			Present: ent.present, Enabled: e.enabledLocked(ent), Metered: ent.info.Metered, VPN: ent.info.VPN,
+			Present: ent.present, Enabled: e.enabledLocked(ent), VPN: ent.info.VPN,
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
 			SocksPort: ent.socks.Port(), Speed: speeds[id],
 			Upload: e.uploadLocked(id), UploadLimit: up, DownloadLimit: down,

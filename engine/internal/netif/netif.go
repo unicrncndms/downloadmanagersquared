@@ -5,16 +5,11 @@ package netif
 import (
 	"fmt"
 	"net"
-	"os/exec"
 	"regexp"
 	"strings"
-	"sync"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-
-	"downloadmanagersquared/engine/internal/winutil"
 )
 
 // Interface is one adapter with its own route to the internet.
@@ -26,7 +21,6 @@ type Interface struct {
 	IPv4        net.IP   `json:"ip"`
 	Gateway     net.IP   `json:"gateway"`
 	DNS         []net.IP `json:"dns"`
-	Metered     bool     `json:"metered"`
 	VPN         bool     `json:"vpn"`
 	IsDefault   bool     `json:"isDefault"` // carries the Windows default route
 }
@@ -35,8 +29,6 @@ const (
 	ifTypeSoftwareLoopback = 24
 	ifTypePropVirtual      = 53
 	ifTypeTunnel           = 131
-	ifTypeWWANPP           = 243
-	ifTypeWWANPP2          = 244
 )
 
 var vpnPattern = regexp.MustCompile(`(?i)vpn|wintun|wireguard|\btap\b|tap-|tunnel|zerotier|tailscale|anyconnect`)
@@ -48,7 +40,6 @@ func List() ([]Interface, error) {
 		return nil, err
 	}
 	defIdx := defaultIndex()
-	metered := meteredAdapters()
 
 	var out []Interface
 	for a := head; a != nil; a = a.Next {
@@ -72,7 +63,6 @@ func List() ([]Interface, error) {
 			Gateway:     gw,
 			DNS:         dnsServers(a.FirstDnsServerAddress),
 			VPN:         a.IfType == ifTypePropVirtual || a.IfType == ifTypeTunnel || vpnPattern.MatchString(desc) || vpnPattern.MatchString(name),
-			Metered:     a.IfType == ifTypeWWANPP || a.IfType == ifTypeWWANPP2 || metered[id],
 			IsDefault:   a.IfIndex == defIdx,
 		}
 		out = append(out, iface)
@@ -131,36 +121,4 @@ func defaultIndex() uint32 {
 		return 0
 	}
 	return idx
-}
-
-var meteredCache struct {
-	sync.Mutex
-	at  time.Time
-	ids map[string]bool
-}
-
-// meteredAdapters asks Windows (via the WinRT connectivity API) which adapters
-// sit on a network flagged as metered. Cached for a minute because it spawns PowerShell.
-func meteredAdapters() map[string]bool {
-	meteredCache.Lock()
-	defer meteredCache.Unlock()
-	if meteredCache.ids != nil && time.Since(meteredCache.at) < time.Minute {
-		return meteredCache.ids
-	}
-	const script = `[Windows.Networking.Connectivity.NetworkInformation,Windows.Networking.Connectivity,ContentType=WindowsRuntime] > $null
-foreach ($p in [Windows.Networking.Connectivity.NetworkInformation]::GetConnectionProfiles()) {
-  if ($p.NetworkAdapter) { '{0}|{1}' -f $p.NetworkAdapter.NetworkAdapterId, $p.GetConnectionCost().NetworkCostType }
-}`
-	cmd := winutil.Hidden(exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script))
-	ids := map[string]bool{}
-	if out, err := cmd.Output(); err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			id, cost, ok := strings.Cut(strings.TrimSpace(line), "|")
-			if ok && (cost == "Fixed" || cost == "Variable") {
-				ids[strings.ToLower(strings.Trim(id, "{}"))] = true
-			}
-		}
-	}
-	meteredCache.ids, meteredCache.at = ids, time.Now()
-	return ids
 }

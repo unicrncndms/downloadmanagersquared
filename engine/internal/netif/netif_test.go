@@ -23,7 +23,7 @@ func TestListAndBind(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, i := range list {
-		t.Logf("%s | %s | ip=%s gw=%s dns=%v metered=%v vpn=%v default=%v", i.Name, i.Description, i.IPv4, i.Gateway, i.DNS, i.Metered, i.VPN, i.IsDefault)
+		t.Logf("%s | %s | ip=%s gw=%s dns=%v vpn=%v default=%v", i.Name, i.Description, i.IPv4, i.Gateway, i.DNS, i.VPN, i.IsDefault)
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.ipify.org", nil)
 		resp, err := NewBinding(i, rate.NewShaper()).HTTPClient().Do(req)

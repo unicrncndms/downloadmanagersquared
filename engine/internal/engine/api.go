@@ -102,7 +102,13 @@ func decode[T any](raw json.RawMessage) (T, error) {
 func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, error) {
 	switch method {
 	case "hello":
-		return e.hello(c), nil
+		p, err := decode[struct {
+			UserAgent string `json:"userAgent"`
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		return e.hello(c, p.UserAgent), nil
 	case "getState":
 		return e.Snapshot(), nil
 	case "add":
@@ -361,11 +367,15 @@ func (e *Engine) applySettings(f func(*Settings)) Settings {
 	return s
 }
 
-// hello registers the caller as the browser extension and hands it anything it missed.
-func (e *Engine) hello(c *ipc.Conn) hello {
+// hello registers the caller as the browser extension and hands it anything it
+// missed. The browser's user agent is kept for downloads added without one.
+func (e *Engine) hello(c *ipc.Conn, userAgent string) hello {
 	e.mu.Lock()
 	if cl := e.clients[c]; cl != nil {
 		cl.extension = true
+	}
+	if userAgent != "" {
+		e.userAgent = userAgent
 	}
 	pending := make([]resolveReq, 0, len(e.resolves))
 	for _, r := range e.resolves {

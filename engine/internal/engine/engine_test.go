@@ -270,20 +270,27 @@ func queuedTorrent(t *testing.T, e *Engine, n int) string {
 	return tor.ID()
 }
 
-func TestMeteredInterfaceUploadsOnlyOnceSwitchedOn(t *testing.T) {
+func TestEveryNonVPNInterfaceIsOnWithUploadByDefault(t *testing.T) {
 	e, err := open(t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer e.Shutdown()
-	on := true
-	e.settings.Interfaces["lte"] = &IfaceSettings{Enabled: &on} // metered: off unless enabled
+	off := false
+	e.settings.Interfaces["lte"] = &IfaceSettings{Upload: &off}
 	e.mu.Lock()
 	e.refreshInterfacesLocked([]netif.Interface{
 		{ID: "eth", Name: "Ethernet", IPv4: net.IPv4(127, 0, 0, 1)},
-		{ID: "lte", Name: "Phone", IPv4: net.IPv4(127, 0, 0, 1), Metered: true},
+		{ID: "lte", Name: "Phone", IPv4: net.IPv4(127, 0, 0, 1)},
+		{ID: "vpn", Name: "Corporate VPN", IPv4: net.IPv4(127, 0, 0, 1), VPN: true},
 	})
 	e.mu.Unlock()
+	if v := ifaceView(t, e, "eth"); !v.Enabled || !v.Upload {
+		t.Fatalf("Ethernet shown as %+v, want enabled with upload", v)
+	}
+	if v := ifaceView(t, e, "vpn"); v.Enabled {
+		t.Fatal("a VPN adapter is enabled by default")
+	}
 	upload := func() map[string]bool {
 		out := map[string]bool{}
 		for _, i := range e.torrentIfacesFor(paths.Off) {
@@ -292,7 +299,7 @@ func TestMeteredInterfaceUploadsOnlyOnceSwitchedOn(t *testing.T) {
 		return out
 	}
 	if u := upload(); !u["eth"] || u["lte"] {
-		t.Fatalf("upload by default: %v, want on for Ethernet and off for the metered phone", u)
+		t.Fatalf("upload: %v, want on for Ethernet and off for the phone the user switched off", u)
 	}
 	if _, err := e.Call(nil, "setInterface", []byte(`{"id":"lte","upload":true,"downloadLimit":500000,"uploadLimit":100000}`)); err != nil {
 		t.Fatal(err)
@@ -451,4 +458,35 @@ func TestTorrentsListenOnAnInterfacesNewAddress(t *testing.T) {
 	e.mu.Unlock()
 	e.syncTorrentIfaces()
 	waitFor(t, "peers to reach the interface's new address", 5*time.Second, reachable("127.0.0.2"))
+}
+
+func TestAddWithoutAUserAgentUsesTheBrowsers(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	ua := func(id string) string {
+		d, err := e.get(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.State().UserAgent
+	}
+	first, _ := e.Add(AddRequest{URL: "https://example.com/a.iso"})
+	if got := ua(first); got != defaultUserAgent {
+		t.Fatalf("before any browser said hello: %q, want the built-in one", got)
+	}
+	const firefox = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0"
+	if _, err := e.Call(nil, "hello", []byte(`{"userAgent":"`+firefox+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := e.Add(AddRequest{URL: "https://example.com/b.iso"})
+	own, _ := e.Add(AddRequest{URL: "https://example.com/c.iso", UserAgent: "curl/8"})
+	if got := ua(second); got != firefox {
+		t.Fatalf("after hello: %q, want the browser's", got)
+	}
+	if got := ua(own); got != "curl/8" {
+		t.Fatalf("an add with its own user agent got %q", got)
+	}
 }

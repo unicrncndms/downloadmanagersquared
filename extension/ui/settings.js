@@ -65,7 +65,6 @@ function ifaceRow(i, tun, settings) {
   // What the connection is, then the few facts worth a badge.
   const badges = [
     i.isDefault ? badge("Windows default") : null,
-    i.metered ? badge("Metered", "warn") : null,
     i.vpn ? badge("System VPN", "warn") : null,
     i.incoming ? badge(i.incoming === "reachable" ? "Reachable" : "Outgoing only", i.incoming === "reachable" ? "ok" : "dim", INCOMING_TITLE[i.incoming]) : null,
   ].filter(Boolean);
