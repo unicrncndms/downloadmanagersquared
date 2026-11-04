@@ -71,18 +71,28 @@ var balloon struct {
 // SetBalloonIcon gives balloons the app's icon (ICO bytes holding one PNG
 // image, as the tray uses).
 func SetBalloonIcon(ico []byte) {
-	if len(ico) < 22 {
+	h := Icon(ico, 32)
+	if h == 0 {
 		return
+	}
+	balloon.Lock()
+	balloon.icon = h
+	balloon.Unlock()
+}
+
+// Icon is an icon of size×size pixels made from ICO bytes holding one PNG
+// image, as the tray uses; 0 if they don't hold one.
+func Icon(ico []byte, size int) windows.Handle {
+	if len(ico) < 22 {
+		return 0
 	}
 	off := int(uint32(ico[18]) | uint32(ico[19])<<8 | uint32(ico[20])<<16 | uint32(ico[21])<<24)
 	if off >= len(ico) {
-		return
+		return 0
 	}
 	img := ico[off:]
-	h, _, _ := pCreateIconFromResEx.Call(uintptr(unsafe.Pointer(&img[0])), uintptr(len(img)), 1, 0x00030000, 32, 32, 0)
-	balloon.Lock()
-	balloon.icon = windows.Handle(h)
-	balloon.Unlock()
+	h, _, _ := pCreateIconFromResEx.Call(uintptr(unsafe.Pointer(&img[0])), uintptr(len(img)), 1, 0x00030000, uintptr(size), uintptr(size), 0)
+	return windows.Handle(h)
 }
 
 // Notify shows a balloon on the tray icon.

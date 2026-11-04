@@ -115,6 +115,11 @@ func Serve(ln net.Listener, h Handler) {
 	}
 }
 
+// ServeConn serves one client already connected, e.g. the far end of the
+// Downloads window's in-memory pipe, the same as one on the named pipe. It
+// returns when the client hangs up.
+func ServeConn(c net.Conn, h Handler) { serveConn(NewConn(c), h) }
+
 func serveConn(c *Conn, h Handler) {
 	defer c.c.Close()
 	h.Connected(c)

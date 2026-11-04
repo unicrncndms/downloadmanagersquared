@@ -16,7 +16,7 @@ var embedded embed.FS
 var Pages, _ = fs.Sub(embedded, "files")
 
 // The files without which the window has nothing to show.
-var required = []string{"ui/popup.html", "ui/settings.html", "lib/version.js"}
+var required = []string{"ui/popup.html", "ui/settings.html", "ui/host.js", "lib/version.js"}
 
 // Present says whether the exe carries the pages, i.e. was built by build.ps1.
 func Present() bool { return present(Pages) }

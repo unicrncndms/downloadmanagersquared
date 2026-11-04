@@ -91,3 +91,128 @@ test("loaded as a page script, host.js sets window.Host", () => {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../ui/host.js"), "utf8"), ctx);
   assert.equal(ctx.Host.version, "1.2.3");
 });
+
+// The Downloads window's bridge (window.dmsWindow, set up by the engine): the
+// test plays the engine, reading the lines sent and writing lines back.
+function fakeWindow() {
+  const sent = [];
+  const opened = [];
+  const timers = [];
+  const win = {
+    chrome: { webview: {} },
+    location: { href: "https://dms.invalid/ui/popup.html?window" },
+    setTimeout: (f, ms) => { timers.push({ f, ms }); return timers.length; },
+    dmsWindow: {
+      send: (line) => sent.push(JSON.parse(line)),
+      openUrl: (url) => opened.push(url),
+      onLine: null,
+    },
+  };
+  const engine = (m) => win.dmsWindow.onLine(JSON.stringify(m));
+  const answer = (method, result) => {
+    const req = sent.find((r) => r.method === method && !r.answered);
+    req.answered = true;
+    engine({ id: req.id, result });
+  };
+  return { win, sent, opened, timers, engine, answer };
+}
+
+const tick = () => new Promise((r) => setImmediate(r));
+
+test("chrome.webview means the Downloads window", () => {
+  const { win } = fakeWindow();
+  const host = pickHost(win);
+  assert.equal(host.userAgent, null);
+  assert.equal(host.recipesHere, false);
+});
+
+test("the window's calls are correlated with their answers by id", async () => {
+  const f = fakeWindow();
+  const host = pickHost(f.win);
+  const a = host.call("pause", { id: "a" });
+  const b = host.call("resume", { id: "b" });
+  assert.deepEqual(f.sent.map((r) => [r.method, r.params]), [["pause", { id: "a" }], ["resume", { id: "b" }]]);
+  assert.notEqual(f.sent[0].id, f.sent[1].id);
+  f.engine({ id: f.sent[1].id, result: "B" }); // out of order
+  f.engine({ id: f.sent[0].id, error: "no such download" });
+  assert.equal(await b, "B");
+  await assert.rejects(a, /no such download/);
+});
+
+test("a call the engine doesn't answer fails after 60 s", async () => {
+  const f = fakeWindow();
+  const host = pickHost(f.win);
+  const p = host.call("getState");
+  assert.equal(f.timers.at(-1).ms, 60000);
+  f.timers.at(-1).f();
+  await assert.rejects(p, /did not answer/);
+  f.engine({ id: f.sent[0].id, result: {} }); // too late: ignored
+});
+
+test("the window's subscribe sends the extension's message shape, connected once the first state and settings are in", async () => {
+  const f = fakeWindow();
+  const host = pickHost(f.win);
+  const got = [];
+  host.subscribe((m) => got.push(m));
+  assert.equal(got.length, 1);
+  assert.equal(got[0].connected, false);
+  assert.deepEqual(f.sent.map((r) => r.method).sort(), ["getAutostart", "getSettings", "getState", "version"]);
+  f.answer("getState", { downloads: [] });
+  f.answer("getSettings", { maxParallel: 3 });
+  f.answer("getAutostart", true);
+  f.answer("version", "1.4.0");
+  await tick();
+  assert.deepEqual(got.at(-1), {
+    connected: true, error: "", notInstalled: false, engineVersion: "1.4.0",
+    state: { downloads: [] }, settings: { maxParallel: 3 }, autostart: true, recipes: null,
+  });
+  assert.equal(host.version, "1.4.0");
+});
+
+test("the window's subscribers get each state and settings broadcast, and nothing else", async () => {
+  const f = fakeWindow();
+  const host = pickHost(f.win);
+  const got = [];
+  const stop = host.subscribe((m) => got.push(m));
+  for (const m of ["getState", "getSettings", "getAutostart", "version"]) f.answer(m, m === "version" ? "1.0.0" : {});
+  await tick();
+  const n = got.length;
+  f.engine({ event: "state", data: { active: 2 } });
+  f.engine({ event: "settings", data: { maxParallel: 5 } });
+  f.engine({ event: "resolve", data: {} }); // the extension's, never sent here; ignored
+  f.engine("not json");
+  assert.equal(got.length, n + 2);
+  assert.deepEqual(got.at(-2).state, { active: 2 });
+  assert.deepEqual(got.at(-1).settings, { maxParallel: 5 });
+  stop();
+  f.engine({ event: "state", data: { active: 3 } });
+  assert.equal(got.length, n + 2);
+});
+
+test("the window keeps autostart after setAutostart, as the background does", async () => {
+  const f = fakeWindow();
+  const host = pickHost(f.win);
+  const got = [];
+  host.subscribe((m) => got.push(m));
+  for (const m of ["getState", "getSettings", "version"]) f.answer(m, {});
+  f.answer("getAutostart", undefined); // false is left out of the answer
+  await tick();
+  assert.equal(got.at(-1).autostart, false);
+  const p = host.call("setAutostart", { on: true });
+  f.answer("setAutostart", undefined);
+  await p;
+  f.engine({ event: "state", data: {} });
+  assert.equal(got.at(-1).autostart, true);
+});
+
+test("the window switches views by navigating, and opens links in the default browser", () => {
+  const f = fakeWindow();
+  const host = pickHost(f.win);
+  host.openSettings("#pia");
+  assert.equal(f.win.location.href, "settings.html#pia");
+  host.openDownloads();
+  assert.equal(f.win.location.href, "popup.html?window");
+  host.openUrl("https://example.com/releases");
+  assert.deepEqual(f.opened, ["https://example.com/releases"]);
+  assert.equal(host.forgetRecipe, undefined);
+});

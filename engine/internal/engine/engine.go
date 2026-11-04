@@ -153,6 +153,27 @@ func DataDir() (string, error) {
 	return filepath.Join(base, "downloadmanagersquared"), nil
 }
 
+// Open loads the engine kept in dir without claiming the pipe, so it runs
+// beside an installed engine: its only clients are those of Dial. For checking
+// the Downloads window by hand (cmd/dms-window-dev).
+func Open(dir string) (*Engine, error) {
+	e, err := open(dir, nil)
+	if err != nil {
+		return nil, err
+	}
+	e.refreshInterfaces()
+	e.updateSnapshot(0)
+	return e, nil
+}
+
+// Dial connects a client in this process, served the same as one on the pipe:
+// the Downloads window's. Closing the returned end disconnects it.
+func (e *Engine) Dial() net.Conn {
+	ours, theirs := net.Pipe()
+	go ipc.ServeConn(theirs, e)
+	return ours
+}
+
 // open loads the engine kept in dir, with no interfaces yet. ln may be nil.
 func open(dir string, ln net.Listener) (*Engine, error) {
 	os.MkdirAll(filepath.Join(dir, "downloads"), 0o755)
@@ -274,7 +295,9 @@ func readStates[S interface{ download.State | torrent.State }](dir string) (out 
 
 // Run serves the API and drives the queue until Shutdown.
 func (e *Engine) Run() {
-	go ipc.Serve(e.ln, e)
+	if e.ln != nil {
+		go ipc.Serve(e.ln, e)
+	}
 	go e.mapPorts()
 	go e.forwardLoop()
 	t := time.NewTicker(time.Second)

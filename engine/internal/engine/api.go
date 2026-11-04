@@ -357,6 +357,10 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 	case "refreshInterfaces":
 		e.refreshInterfaces()
 		return nil, nil
+	case "getAutostart":
+		return winutil.Autostart(), nil
+	case "version":
+		return Version, nil
 	case "setAutostart":
 		p, err := decode[struct {
 			On bool `json:"on"`

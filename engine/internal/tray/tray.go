@@ -3,6 +3,7 @@ package tray
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -15,12 +16,19 @@ import (
 
 const ifaceRows = 6
 
-// Run blocks until the user quits from the tray menu.
-func Run(e *engine.Engine) {
-	systray.Run(func() { onReady(e) }, e.Shutdown)
+// Window is the Downloads window (internal/window).
+type Window interface {
+	Open(view string) error
+	Close()
 }
 
-func onReady(e *engine.Engine) {
+// Run blocks until the user quits from the tray menu. An open window is
+// closed first.
+func Run(e *engine.Engine, w Window) {
+	systray.Run(func() { onReady(e, w) }, e.Shutdown)
+}
+
+func onReady(e *engine.Engine, w Window) {
 	systray.SetIcon(Icon())
 	winutil.SetBalloonIcon(Icon())
 	systray.SetTooltip(winutil.AppName)
@@ -39,6 +47,8 @@ func onReady(e *engine.Engine) {
 	pause := systray.AddMenuItem("Pause all", "")
 	resume := systray.AddMenuItem("Resume all", "")
 	settings := systray.AddMenuItem("Connections & settings", "")
+	// For now, until "Open downloads" and "Connections & settings" open it.
+	window := systray.AddMenuItem("Downloads window", "Show the downloads here, without Firefox")
 	systray.AddSeparator()
 	autostart := systray.AddMenuItemCheckbox("Start with Windows", "", winutil.Autostart())
 	quit := systray.AddMenuItem("Quit", "Stop all downloads and exit")
@@ -50,6 +60,10 @@ func onReady(e *engine.Engine) {
 				e.OpenManager("")
 			case <-settings.ClickedCh:
 				e.OpenManager("#settings")
+			case <-window.ClickedCh:
+				if err := w.Open(""); err != nil {
+					log.Printf("the Downloads window: %v", err)
+				}
 			case <-pause.ClickedCh:
 				go e.PauseAll()
 			case <-resume.ClickedCh:
@@ -64,9 +78,11 @@ func onReady(e *engine.Engine) {
 					}
 				}
 			case <-quit.ClickedCh:
+				w.Close()
 				systray.Quit()
 				return
 			case <-e.QuitRequested():
+				w.Close()
 				systray.Quit()
 				return
 			}

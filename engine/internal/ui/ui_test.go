@@ -17,6 +17,7 @@ func TestPresentWithThePages(t *testing.T) {
 	pages := fstest.MapFS{
 		"ui/popup.html":    {Data: []byte("<!doctype html>")},
 		"ui/settings.html": {Data: []byte("<!doctype html>")},
+		"ui/host.js":       {Data: []byte("")},
 		"lib/version.js":   {Data: []byte("")},
 	}
 	if !present(pages) {

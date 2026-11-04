@@ -11,6 +11,11 @@ let recipesSig = "";
 let latestSettings = null;
 let latestState = {};
 
+// In the Downloads window, the way back to the downloads.
+if (Host.openDownloads) {
+  document.querySelector("header h1").before(el("button", { class: "small", onclick: () => Host.openDownloads() }, "← Downloads"));
+}
+
 // --- connections ---
 
 $("refreshIfaces").onclick = () => act("refreshInterfaces", {}, "Connections refreshed");

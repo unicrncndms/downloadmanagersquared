@@ -22,7 +22,8 @@ import (
 	"downloadmanagersquared/engine/internal/ipc"
 	"downloadmanagersquared/engine/internal/setup"
 	"downloadmanagersquared/engine/internal/tray"
-	_ "downloadmanagersquared/engine/internal/ui" // carried for the Downloads window, which comes next
+	"downloadmanagersquared/engine/internal/ui"
+	"downloadmanagersquared/engine/internal/window"
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
@@ -127,8 +128,17 @@ func run(l install.Layout) {
 		winutil.Notify("Updated", "DMS² is updated to v"+engine.Version+".")
 	}
 	go e.Run()
-	tray.Run(e)
+	tray.Run(e, downloadsWindow(e))
 	log.Printf("engine stopped")
+}
+
+// downloadsWindow is the engine's own window, showing the pages it carries.
+func downloadsWindow(e *engine.Engine) *window.Window {
+	cfg := window.Config{DataDir: e.Dir(), Dial: e.Dial, Icon: tray.Icon()}
+	if ui.Present() {
+		cfg.Pages = ui.Pages
+	}
+	return window.New(cfg)
 }
 
 // installFrom installs (first: what the user chose to set up) or, with first

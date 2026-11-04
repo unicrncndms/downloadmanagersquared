@@ -9,6 +9,7 @@ require (
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
 	github.com/anacrolix/torrent v1.61.0
 	github.com/anacrolix/utp v0.1.0
+	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
 	golang.org/x/crypto v0.44.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/time v0.14.0
@@ -49,6 +50,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/huandu/xstrings v1.3.2 // indirect
+	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.3 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
