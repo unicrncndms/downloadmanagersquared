@@ -6,7 +6,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"log"
@@ -56,7 +55,7 @@ func main() {
 		src := filepath.Dir(self)
 		if installed { // an upgrade goes where the install is, without asking
 			if err := installFrom(l, src, nil); err != nil {
-				if !errors.Is(err, install.ErrShown) {
+				if !errors.Is(err, winutil.ErrShown) {
 					winutil.MessageBox(title, "Could not install: "+err.Error())
 				}
 				os.Exit(1)
@@ -66,11 +65,7 @@ func main() {
 		setup.Run(setup.Choice{Dir: l.Dir, StartMenu: true, Autostart: true}, tray.Icon(), setup.Steps{
 			Install: func(c setup.Choice) error {
 				l.Dir = c.Dir
-				err := installFrom(l, src, &install.Options{StartMenu: c.StartMenu, Desktop: c.Desktop, Autostart: c.Autostart})
-				if errors.Is(err, install.ErrShown) {
-					return setup.ErrReported
-				}
-				return err
+				return installFrom(l, src, &install.Options{StartMenu: c.StartMenu, Desktop: c.Desktop, Autostart: c.Autostart})
 			},
 			Browsers: winutil.FirefoxBrowsers,
 			AddExtension: func(b winutil.Browser) {
@@ -115,7 +110,7 @@ func run(l install.Layout) {
 	e, err := engine.New()
 	if errors.Is(err, engine.ErrAlreadyRunning) {
 		// Launched twice (e.g. from the Start menu): bring up the downloads instead.
-		call("openManager")
+		ipc.Call("openManager")
 		return
 	}
 	if err != nil {
@@ -192,7 +187,7 @@ func uninstall(l install.Layout) {
 // quitEngine asks this user's running engine to quit and waits until it has
 // exited, so its files can be replaced. False if none answered.
 func quitEngine() bool {
-	res, err := call("quit")
+	res, err := ipc.Call("quit")
 	if err != nil {
 		return false
 	}
@@ -204,39 +199,6 @@ func quitEngine() bool {
 		log.Printf("the engine didn't exit in time")
 	}
 	return true
-}
-
-// call sends one request to the running engine and returns its result.
-func call(method string) (json.RawMessage, error) {
-	c, err := ipc.Dial(2 * time.Second)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-	b, _ := json.Marshal(ipc.Request{ID: 1, Method: method})
-	if _, err := c.Write(append(b, '\n')); err != nil {
-		return nil, err
-	}
-	c.SetReadDeadline(time.Now().Add(10 * time.Second))
-	r := bufio.NewReader(c)
-	for {
-		line, err := r.ReadBytes('\n')
-		if err != nil {
-			return nil, err
-		}
-		var resp struct {
-			ID     int64           `json:"id"`
-			Result json.RawMessage `json:"result"`
-			Error  string          `json:"error"`
-		}
-		if json.Unmarshal(line, &resp) != nil || resp.ID != 1 {
-			continue // an event
-		}
-		if resp.Error != "" {
-			return nil, errors.New(resp.Error)
-		}
-		return resp.Result, nil
-	}
 }
 
 func fail(err error) {

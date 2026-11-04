@@ -26,15 +26,12 @@ type Choice struct {
 
 // Steps are what the window does for the user.
 type Steps struct {
-	Install      func(Choice) error       // runs off the window's thread
+	Install      func(Choice) error       // runs off the window's thread; winutil.ErrShown if it told the user why it failed
 	Browsers     func() []winutil.Browser // the installed browsers the extension runs in
 	AddExtension func(winutil.Browser)    // opens the extension in that browser to add
 	GetFirefox   func()                   // opens Firefox's download page, when there is no browser for it
 	Uninstall    func()                   // removes the install again, when there is no browser for it
 }
-
-// ErrReported is an Install failure the user was already told about.
-var ErrReported = errors.New("already reported")
 
 // Control IDs. IDOK and IDCANCEL are what Enter and Esc send.
 const (
@@ -631,7 +628,7 @@ func installDone() {
 			pEnableWindow.Call(uintptr(h), 1)
 		}
 		pSetWindowText.Call(uintptr(w.install), str("Install"))
-		if errors.Is(err, ErrReported) {
+		if errors.Is(err, winutil.ErrShown) {
 			setNote("Not installed.", true)
 		} else {
 			setNote("Could not install: "+err.Error(), true)

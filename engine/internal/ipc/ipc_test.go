@@ -1,6 +1,7 @@
 package ipc
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -51,6 +52,41 @@ func listen(t *testing.T) net.Listener {
 		}
 	}()
 	return ln
+}
+
+// eventsFirst answers each call after pushing an event, as the engine does
+// when something changes between a request and its response.
+type eventsFirst struct{}
+
+func (eventsFirst) Connected(*Conn)    {}
+func (eventsFirst) Disconnected(*Conn) {}
+func (eventsFirst) Call(c *Conn, method string, _ json.RawMessage) (any, error) {
+	c.Emit("progress", map[string]int{"id": 1})
+	if method == "fail" {
+		return nil, errors.New("no such method")
+	}
+	return map[string]string{"got": method}, nil
+}
+
+func TestCallReturnsTheResultPastEvents(t *testing.T) {
+	testPipe(t)
+	ln, err := Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go Serve(ln, eventsFirst{})
+
+	res, err := Call("quit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(res) != `{"got":"quit"}` {
+		t.Fatalf("result %s", res)
+	}
+	if _, err := Call("fail"); err == nil || err.Error() != "no such method" {
+		t.Fatalf("error %v", err)
+	}
 }
 
 func TestDialReachesAnEngineOfTheSameUser(t *testing.T) {

@@ -162,6 +162,40 @@ func Dial(timeout time.Duration) (net.Conn, error) {
 	return c, nil
 }
 
+// Call sends one request to the current user's running engine and returns its
+// result, skipping the events the engine pushes meanwhile.
+func Call(method string) (json.RawMessage, error) {
+	c, err := Dial(2 * time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	b, _ := json.Marshal(Request{ID: 1, Method: method})
+	c.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := c.Write(append(b, '\n')); err != nil {
+		return nil, err
+	}
+	r := bufio.NewReader(c)
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			return nil, err
+		}
+		var resp struct {
+			ID     int64           `json:"id"`
+			Result json.RawMessage `json:"result"`
+			Error  string          `json:"error"`
+		}
+		if json.Unmarshal(line, &resp) != nil || resp.ID != 1 {
+			continue // an event
+		}
+		if resp.Error != "" {
+			return nil, errors.New(resp.Error)
+		}
+		return resp.Result, nil
+	}
+}
+
 // serverUser is the user of the process serving the pipe c is connected to.
 var serverUser = func(c net.Conn) (string, error) {
 	f, ok := c.(interface{ Fd() uintptr })

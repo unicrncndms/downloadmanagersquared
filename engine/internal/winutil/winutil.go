@@ -2,6 +2,7 @@
 package winutil
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +88,10 @@ func SetAutostart(on bool) error {
 	}
 	return k.SetStringValue(runValue, `"`+exe+`"`)
 }
+
+// ErrShown is a failure the user was already told about, in a message box of
+// its own, so whoever gets it shows nothing more.
+var ErrShown = errors.New("already shown to the user")
 
 func MessageBox(title, text string) {
 	t, _ := windows.UTF16PtrFromString(text)

@@ -120,9 +120,6 @@ func (l Layout) Contains(exe string) bool {
 	return strings.EqualFold(filepath.Clean(filepath.Dir(exe)), filepath.Clean(l.Dir))
 }
 
-// ErrShown is a failure the user was already told about.
-var ErrShown = errors.New("already reported")
-
 // Install copies both exes from src into the install folder and registers
 // them. first is what a first install sets up; nil on an upgrade, which
 // leaves start at login and the shortcuts as the user has them.
@@ -182,7 +179,7 @@ func (l Layout) PutFiles(src string) error {
 const FlagPutFiles = "--put-files"
 
 func (l Layout) putFilesElevated(src string) error {
-	code, err := winutil.RunElevated(filepath.Join(src, "dms-engine.exe"), FlagPutFiles+` "`+l.Dir+`"`, true)
+	code, err := winutil.RunElevated(filepath.Join(src, "dms-engine.exe"), FlagPutFiles+" "+syscall.EscapeArg(l.Dir), true)
 	if errors.Is(err, winutil.ErrElevationDeclined) {
 		return fmt.Errorf("installing into %s needs administrator rights. Allow it when Windows asks, or choose a folder of your own", l.Dir)
 	}
@@ -190,7 +187,7 @@ func (l Layout) putFilesElevated(src string) error {
 		return err
 	}
 	if code != 0 {
-		return ErrShown // the elevated copy said what went wrong
+		return winutil.ErrShown // the elevated copy said what went wrong
 	}
 	return nil
 }
