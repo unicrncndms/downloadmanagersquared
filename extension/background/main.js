@@ -71,6 +71,11 @@ browser.windows.onRemoved.addListener((id) => {
   if (id === downloadsWindow) downloadsWindow = null;
 });
 
+// Once after upgrading: the VPN provider choice moves from browser.storage to the engine.
+Engine.on("connection", ({ connected }) => {
+  if (connected) handOverProvider(browser.storage.local, Engine.settings, (m, p) => Engine.call(m, p)).catch(() => {});
+});
+
 Engine.on("openManager", ({ hash } = {}) => (hash === "#settings" ? openSettings("") : openDownloads()));
 
 (async () => {

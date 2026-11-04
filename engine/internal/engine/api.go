@@ -73,6 +73,7 @@ type settingsPatch struct {
 	SeedRatio          *float64 `json:"seedRatio"`
 	VPNHTTP            *string  `json:"vpnHttp"`
 	VPNTorrent         *string  `json:"vpnTorrent"`
+	VPNProvider        *string  `json:"vpnProvider"`
 }
 
 type ifacePatch struct {
@@ -269,6 +270,9 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			}
 			if p.VPNTorrent != nil {
 				s.VPNTorrent = paths.ParseMode(*p.VPNTorrent, s.VPNTorrent)
+			}
+			if p.VPNProvider != nil {
+				s.VPNProvider = *p.VPNProvider
 			}
 		}), nil
 	case "setInterface":

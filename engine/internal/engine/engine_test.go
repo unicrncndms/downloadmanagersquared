@@ -490,3 +490,41 @@ func TestAddWithoutAUserAgentUsesTheBrowsers(t *testing.T) {
 		t.Fatalf("an add with its own user agent got %q", got)
 	}
 }
+
+func TestVPNProviderIsSetThroughSetSettings(t *testing.T) {
+	dir := t.TempDir()
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := func(p string) string {
+		t.Helper()
+		r, err := e.Call(nil, "setSettings", []byte(`{"vpnProvider":"`+p+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.(Settings).VPNProvider
+	}
+	if got := e.settings.VPNProvider; got != "" {
+		t.Fatalf("a new engine has provider %q, want none", got)
+	}
+	for _, p := range []string{"pia", "conf", ""} {
+		if got := set(p); got != p {
+			t.Fatalf("set %q, got %q", p, got)
+		}
+	}
+	set("pia")
+	if got := set("nordvpn"); got != "" {
+		t.Fatalf("an unknown provider became %q, want none", got)
+	}
+	set("conf")
+	e.Shutdown()
+	e, err = open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	if got := e.settings.VPNProvider; got != "conf" {
+		t.Fatalf("after a restart: %q, want conf", got)
+	}
+}

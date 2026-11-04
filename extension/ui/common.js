@@ -1,15 +1,19 @@
 "use strict";
 
-// Shared by the downloads popup and the settings page.
+// Shared by the downloads popup and the settings page. They reach the engine
+// and their surroundings only through Host (host.js).
 
 function call(method, params) {
-  return browser.runtime.sendMessage({ type: "call", method, params });
+  return Host.call(method, params);
 }
 
 function connectUI(onUpdate) {
-  const port = browser.runtime.connect({ name: "ui" });
-  port.onMessage.addListener(onUpdate);
-  return port;
+  return Host.subscribe(onUpdate);
+}
+
+// A link that leaves DMS²: Host opens it (a new tab, or the default browser).
+function link(url, text) {
+  return el("a", { href: url, onclick: (e) => { e.preventDefault(); Host.openUrl(url); } }, text);
 }
 
 // Where the engine and the extension are released (build.ps1 -Repo sets the repo).

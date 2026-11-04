@@ -1,7 +1,9 @@
 "use strict";
 
-// A browser for the UI pages outside Firefox: the background's port feeds them
-// the fixture from dev/fixtures.js, and what they send is kept in window.calls.
+// The harness's Host (see ui/host.js), set before host.js loads so it is kept:
+// the pages are fed the fixture from dev/fixtures.js, and what they ask for is
+// kept in window.calls. A fixture's `host` overrides version, userAgent and
+// recipesHere (e.g. the Downloads window's).
 
 window.calls = [];
 window.errs = [];
@@ -9,40 +11,24 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
 
 (() => {
   const listeners = [];
-  const store = {};
-  const changed = [];
+  const record = (m) => { window.calls.push(m); return Promise.resolve(); };
+  const hostFixture = () => Object.assign({ version: "0.3.0", userAgent: navigator.userAgent, recipesHere: true }, window.fixture().host);
 
-  // Hands every open port a message, as the background does on each change.
+  // Hands every subscriber a message, as the background does on each change.
   window.feed = (m) => { for (const f of listeners) f(m); };
 
-  window.browser = {
-    runtime: {
-      connect: () => {
-        const port = {
-          onMessage: { addListener: (f) => { listeners.push(f); setTimeout(() => f(window.fixture()), 0); } },
-          onDisconnect: { addListener() {} },
-          postMessage() {},
-        };
-        return port;
-      },
-      sendMessage: (m) => { window.calls.push(m); return Promise.resolve(); },
-      getURL: (p) => "/" + p.replace(/^\//, ""),
-      getManifest: () => ({ version: window.fixtureExtensionVersion || "0.3.0" }),
+  window.Host = {
+    call: (method, params) => record({ call: method, params }),
+    subscribe(fn) {
+      listeners.push(fn);
+      setTimeout(() => fn(window.fixture()), 0);
+      return () => listeners.splice(listeners.indexOf(fn), 1);
     },
-    storage: {
-      local: {
-        get: async (keys) => {
-          const out = {};
-          for (const k of [].concat(keys || Object.keys(store))) if (k in store) out[k] = store[k];
-          return out;
-        },
-        set: async (o) => {
-          Object.assign(store, o);
-          for (const f of changed) f(Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { newValue: v }])), "local");
-        },
-      },
-      onChanged: { addListener: (f) => changed.push(f) },
-    },
-    tabs: { create: async (o) => { window.calls.push({ tabsCreate: o }); } },
+    openSettings: (hash) => record({ openSettings: hash }),
+    openUrl: (url) => record({ openUrl: url }),
+    forgetRecipe: (host) => record({ forgetRecipe: host }),
+    get version() { return hostFixture().version; },
+    get userAgent() { return hostFixture().userAgent; },
+    get recipesHere() { return hostFixture().recipesHere; },
   };
 })();

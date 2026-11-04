@@ -133,10 +133,9 @@ function fillSettings(s) {
 
 // --- VPN provider ---
 
-// The chosen provider is only remembered here; being signed in to one wins.
+// The engine keeps the chosen provider (settings.vpnProvider); being signed in to one wins.
 let provider = "";
 let piaSignedIn = false;
-browser.storage.local.get("vpnProvider").then((v) => { if (!piaSignedIn) showProvider(v.vpnProvider || ""); });
 
 function showProvider(p) {
   provider = p;
@@ -151,7 +150,7 @@ $("vpnProvider").addEventListener("change", async () => {
     await act("clearPia", {}, "Signed out of PIA");
   }
   showProvider(p);
-  await browser.storage.local.set({ vpnProvider: p });
+  await act("setSettings", { vpnProvider: p });
 });
 
 // --- PIA ---
@@ -193,10 +192,14 @@ $("piaClear").onclick = () => act("clearPia", {}, "Signed out of PIA");
 // --- learned sites ---
 
 function renderRecipes(recipes) {
+  const box = $("recipes");
+  if (!Host.recipesHere) {
+    if (!box.childElementCount) box.replaceChildren(el("div", { class: "muted" }, "Recipes are kept in Firefox, where they are learned and replayed."));
+    return;
+  }
   const sig = JSON.stringify(recipes);
   if (sig === recipesSig) return;
   recipesSig = sig;
-  const box = $("recipes");
   const hosts = Object.keys(recipes || {}).sort();
   if (!hosts.length) {
     box.replaceChildren(el("div", { class: "muted" }, "None yet. The first time a site needs it, DMS² asks you to click through once."));
@@ -207,7 +210,7 @@ function renderRecipes(recipes) {
       el("td", { style: "padding:6px 8px 6px 0" }, h),
       el("td", { class: "muted", style: "padding:6px 8px" }, recipes[h].steps.map((s) => s.text || s.tag).join(" → ") || "no clicks (the download starts by itself)"),
       el("td", { class: "muted", style: "padding:6px 8px;white-space:nowrap" }, new Date(recipes[h].learned).toLocaleDateString()),
-      el("td", { style: "padding:6px 0;text-align:right" }, el("button", { class: "small", onclick: () => browser.runtime.sendMessage({ type: "forgetRecipe", host: h }).then(() => toast("Forgotten")) }, "Forget"))))))));
+      el("td", { style: "padding:6px 0;text-align:right" }, el("button", { class: "small", onclick: () => Host.forgetRecipe(h).then(() => toast("Forgotten")) }, "Forget"))))))));
 }
 
 // --- wiring ---
@@ -222,6 +225,7 @@ connectUI((m) => {
   if (JSON.stringify(m.settings) !== JSON.stringify(latestSettings)) {
     latestSettings = m.settings;
     fillSettings(m.settings);
+    if (!piaSignedIn && document.activeElement !== $("vpnProvider")) showProvider(m.settings.vpnProvider || "");
   }
   if (document.activeElement !== $("sAuto")) $("sAuto").checked = m.autostart;
 });

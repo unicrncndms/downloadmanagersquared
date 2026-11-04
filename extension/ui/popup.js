@@ -8,7 +8,7 @@ const cards = new Map(); // download id -> card controller
 if (new URLSearchParams(location.search).has("window")) document.body.classList.add("windowed");
 
 $("openSettings").onclick = () => {
-  browser.runtime.sendMessage({ type: "openSettings" });
+  Host.openSettings("");
   if (!document.body.classList.contains("windowed")) window.close();
 };
 $("pauseAll").onclick = () => act("pauseAll");
@@ -19,7 +19,9 @@ $("toggleAdd").onclick = () => {
 };
 $("addBox").addEventListener("submit", (e) => {
   e.preventDefault();
-  act("add", { url: $("addUrl").value, pageUrl: $("addPage").value, vpn: $("addVpn").value, userAgent: navigator.userAgent }, "Added").then(() => {
+  const add = { url: $("addUrl").value, pageUrl: $("addPage").value, vpn: $("addVpn").value };
+  if (Host.userAgent !== null) add.userAgent = Host.userAgent; // else the engine uses the browser's
+  act("add", add, "Added").then(() => {
     $("addUrl").value = "";
     $("addPage").value = "";
     $("addBox").hidden = true;
@@ -179,7 +181,7 @@ function makeCard(id) {
       el("div", {}, el("b", {}, "Join the swarm through a VPN?"), " Every peer sees the address you join from."),
       el("label", {}, el("input", { type: "radio", name: "vpn-" + id, value: "vpn", checked: hasVpn(), disabled: !hasVpn() }),
         hasVpn() ? " Use the VPN (recommended)" : " Use a VPN: none is set up yet ",
-        hasVpn() ? null : el("a", { href: "#", onclick: (e) => { e.preventDefault(); browser.runtime.sendMessage({ type: "openSettings", hash: "#pia" }); } }, "Set one up")),
+        hasVpn() ? null : el("a", { href: "#", onclick: (e) => { e.preventDefault(); Host.openSettings("#pia"); } }, "Set one up")),
       el("label", {}, el("input", { type: "radio", name: "vpn-" + id, value: "off", checked: !hasVpn() }), " Stay on the current connection")) : null;
     const vpnValue = () => (pick.querySelector(`input[name="vpn-${id}"]:checked`) || {}).value;
     if (!files.length) { // a magnet link: the question comes before fetching the files
@@ -243,12 +245,12 @@ function renderDownloads(state) {
 
 // A line under the header when engine and extension may not work together.
 function renderVersion(m) {
-  const ext = browser.runtime.getManifest().version;
+  const ext = Host.version;
   const clash = m.connected && versionsClash(m.engineVersion, ext);
   $("versionWarn").hidden = !clash;
   if (clash) {
     $("versionWarn").replaceChildren(`Engine v${m.engineVersion} and extension v${ext} may not work together: `,
-      el("a", { href: RELEASES_URL, target: "_blank" }, "update both"));
+      link(RELEASES_URL, "update both"));
   }
 }
 
@@ -261,7 +263,7 @@ connectUI((m) => {
       ? el("div", { class: "offline" },
         el("b", {}, "Engine not installed. "),
         "DMS² needs its download engine on this PC. Download the zip from the ",
-        el("a", { href: RELEASES_URL, target: "_blank" }, "release page"),
+        link(RELEASES_URL, "release page"),
         ", extract it and run dms-engine.exe.")
       : el("div", { class: "offline" },
         "The download engine isn't reachable. Make sure it's running in the tray, or run dms-engine.exe from the release zip again.",

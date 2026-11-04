@@ -34,6 +34,7 @@
       "lib/recipe.js",
       "lib/ready.js",
       "lib/route.js",
+      "lib/provider.js",
       "background/util.js",
       "background/engine.js",
       "background/resolver.js",

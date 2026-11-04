@@ -33,6 +33,7 @@ type Settings struct {
 	VPNHTTP            paths.Mode                `json:"vpnHttp"`     // VPN mode an HTTP download gets unless chosen when added
 	VPNTorrent         paths.Mode                `json:"vpnTorrent"`  // the same for a torrent
 	PIARegion          string                    `json:"piaRegion"`   // "" = the lowest latency
+	VPNProvider        string                    `json:"vpnProvider"` // the settings page's provider choice: "", "conf" or "pia"
 }
 
 func defaultSettings() Settings {
@@ -72,6 +73,11 @@ func (s *Settings) normalize() {
 	s.SeedRatio = min(max(s.SeedRatio, 0), 100)
 	s.VPNHTTP = paths.ParseMode(string(s.VPNHTTP), d.VPNHTTP)
 	s.VPNTorrent = paths.ParseMode(string(s.VPNTorrent), d.VPNTorrent)
+	switch s.VPNProvider {
+	case "", "conf", "pia":
+	default:
+		s.VPNProvider = ""
+	}
 	if s.TorrentPort < 1024 || s.TorrentPort > 65535 {
 		s.TorrentPort = 20000 + mrand.IntN(40000)
 	}

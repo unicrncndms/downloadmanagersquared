@@ -15,7 +15,7 @@ const IFACES = [
 const SETTINGS = {
   interfaces: { eth: { name: "Ethernet" }, wifi: { name: "Wi-Fi" }, corp: { name: "Corporate VPN" } },
   mainInterface: "", thresholdBytes: 100e6, saveDir: "C:\\Users\\you\\Downloads", maxParallel: 1,
-  etaWindowSec: 60, defaultConnections: 4, seedRatio: 1, torrentPort: 41234, vpnHttp: "off", vpnTorrent: "off", piaRegion: "",
+  etaWindowSec: 60, defaultConnections: 4, seedRatio: 1, torrentPort: 41234, vpnHttp: "off", vpnTorrent: "off", piaRegion: "", vpnProvider: "",
 };
 
 const DOWNLOADS = [
@@ -46,6 +46,9 @@ const FIXTURES = {
   offline: { connected: false, error: "engine disconnected", state: null, settings: null, recipes: RECIPES },
   notInstalled: { connected: false, notInstalled: true, error: "No such native application downloadmanagersquared", state: null, settings: null, recipes: {} },
   otherVersion: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.4.1" },
+  // The Downloads window: no recipes or user agent here, and the versions always match.
+  window: { connected: true, state: STATE, settings: { ...SETTINGS, vpnProvider: "pia" }, autostart: true, recipes: null, engineVersion: "0.3.0",
+    host: { version: "0.3.0", userAgent: null, recipesHere: false } },
 };
 
 window.fixture = () => FIXTURES[new URLSearchParams(location.search).get("fixture") || "downloads"] || FIXTURES.downloads;

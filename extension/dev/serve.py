@@ -1,4 +1,4 @@
-"""Serves the extension's real pages with a fake browser, for working on the UI
+"""Serves the extension's real pages with a fake Host, for working on the UI
 without Firefox or the engine.
 
     python extension/dev/serve.py 8765
