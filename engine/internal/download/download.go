@@ -80,6 +80,7 @@ type State struct {
 	Allocated  bool             `json:"allocated"`
 	SHA256     string           `json:"sha256,omitempty"`
 	MD5        string           `json:"md5,omitempty"`
+	HashResult string           `json:"hashResult,omitempty"` // "match", or why the checksums don't match the finished file
 	Status     Status           `json:"status"`
 	Error      string           `json:"error,omitempty"`
 	Links      map[string]*Link `json:"links"`
@@ -137,12 +138,13 @@ type Download struct {
 	mu  sync.Mutex
 	st  State
 
-	running bool
-	cancel  context.CancelFunc
-	done    chan struct{}
-	stopAs  Status
-	fatal   chan error
-	wg      sync.WaitGroup
+	running  bool
+	checking bool // a finished file is being checked against new checksums
+	cancel   context.CancelFunc
+	done     chan struct{}
+	stopAs   Status
+	fatal    chan error
+	wg       sync.WaitGroup
 
 	file    *os.File
 	plan    *plan // nil unless running with the file open
@@ -275,11 +277,73 @@ func (d *Download) RetryLink(ifaceID string) {
 	d.env.Changed(d)
 }
 
-func (d *Download) SetHashes(sha, md string) {
+// SetHashes sets the checksums the file must have ("" for none). An
+// unfinished download checks them when it finishes; a finished one checks its
+// file now.
+func (d *Download) SetHashes(sha, md string) error {
+	sha, md = strings.ToLower(strings.TrimSpace(sha)), strings.ToLower(strings.TrimSpace(md))
+	if err := checkHex(sha, sha256.Size, "SHA-256"); err != nil {
+		return err
+	}
+	if err := checkHex(md, md5.Size, "MD5"); err != nil {
+		return err
+	}
 	d.mu.Lock()
-	d.st.SHA256, d.st.MD5 = strings.ToLower(strings.TrimSpace(sha)), strings.ToLower(strings.TrimSpace(md))
+	d.st.SHA256, d.st.MD5, d.st.HashResult = sha, md, ""
+	check := d.st.Status == StatusCompleted && (sha != "" || md != "") && !d.checking
+	path := filepath.Join(d.st.Dir, d.st.Filename)
+	if check {
+		d.checking = true
+	}
 	d.mu.Unlock()
 	d.env.Changed(d)
+	if check {
+		go d.checkFinished(path)
+	}
+	return nil
+}
+
+// checkHex: s is empty or n bytes in hex.
+func checkHex(s string, n int, name string) error {
+	if s == "" {
+		return nil
+	}
+	if b, err := hex.DecodeString(s); err != nil || len(b) != n {
+		return fmt.Errorf("a %s checksum is %d hex characters (0-9, a-f)", name, 2*n)
+	}
+	return nil
+}
+
+// checkFinished checks a finished file against the checksums, again if they
+// changed meanwhile.
+func (d *Download) checkFinished(path string) {
+	for {
+		d.mu.Lock()
+		sha, md := d.st.SHA256, d.st.MD5
+		d.mu.Unlock()
+		res := "match"
+		if sha != "" || md != "" {
+			if err := verify(context.Background(), path, sha, md); err != nil {
+				res = err.Error()
+				if !errors.Is(err, errMismatch) {
+					res = "could not check the file: " + err.Error()
+				}
+			}
+		}
+		d.mu.Lock()
+		again := d.st.SHA256 != sha || d.st.MD5 != md
+		if !again {
+			d.checking = false
+			if sha != "" || md != "" {
+				d.st.HashResult = res
+			}
+		}
+		d.mu.Unlock()
+		d.env.Changed(d)
+		if !again {
+			return
+		}
+	}
 }
 
 // SetPageURL sets the landing page and retries interfaces that were waiting for one.
@@ -1044,8 +1108,14 @@ func (d *Download) complete(ctx context.Context) error {
 		d.mu.Unlock()
 		d.env.Changed(d)
 		if err := verify(ctx, part, sha, md); err != nil {
+			if errors.Is(err, errMismatch) {
+				return fmt.Errorf("%w: remove the download and add it again, or check the value", err)
+			}
 			return err
 		}
+		d.mu.Lock()
+		d.st.HashResult = "match"
+		d.mu.Unlock()
 	}
 	final := filepath.Join(dir, uniqueName(dir, name, ""))
 	if err := os.Rename(part, final); err != nil {
@@ -1077,13 +1147,15 @@ func verify(ctx context.Context, path, wantSHA, wantMD5 string) error {
 		return err
 	}
 	if sh != nil && hex.EncodeToString(sh.Sum(nil)) != wantSHA {
-		return errors.New("SHA-256 does not match")
+		return fmt.Errorf("SHA-256 %w", errMismatch)
 	}
 	if mh != nil && hex.EncodeToString(mh.Sum(nil)) != wantMD5 {
-		return errors.New("MD5 does not match")
+		return fmt.Errorf("MD5 %w", errMismatch)
 	}
 	return nil
 }
+
+var errMismatch = errors.New("does not match")
 
 type ctxReader struct {
 	ctx context.Context
@@ -1205,6 +1277,9 @@ type Summary struct {
 	UpSpeed  float64       `json:"upSpeed,omitempty"`
 	InSwarm  bool          `json:"inSwarm,omitempty"` // exchanging pieces with peers right now
 
+	hashResult string // State.HashResult, for the label and note
+	checking   bool   // a finished file is being checked against new checksums
+
 	// Filled in by present.
 	Label       string  `json:"label"`
 	Tone        string  `json:"tone,omitempty"`
@@ -1314,6 +1389,7 @@ func (d *Download) Summary() Summary {
 		Size: d.st.Size, Done: d.doneLocked(), Status: d.st.Status, Error: d.st.Error,
 		Speed: d.speed, ETA: -1, RangeOK: d.st.RangeOK, Probed: d.st.Probed,
 		SHA256: d.st.SHA256, MD5: d.st.MD5, Links: map[string]LinkSummary{},
+		hashResult: d.st.HashResult, checking: d.checking,
 		Added: d.st.Added, Finished: d.st.Finished, VPN: d.st.VPN,
 	}
 	if d.running {

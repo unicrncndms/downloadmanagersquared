@@ -57,13 +57,14 @@ function makeCard(id) {
   let picking = ""; // what the add step shows: the VPN question and/or the files
 
   const page = el("input", { type: "url" });
-  const sha = el("input", { type: "text", class: "mono", placeholder: "optional" });
-  const md5 = el("input", { type: "text", class: "mono", placeholder: "optional" });
+  const sha = el("input", { type: "text", class: "mono", placeholder: "64 hex characters (optional)", spellcheck: "false" });
+  const md5 = el("input", { type: "text", class: "mono", placeholder: "32 hex characters (optional)", spellcheck: "false" });
   const urlText = el("div", { class: "mono muted", style: "grid-column:1/-1" });
   const httpDetails = el("div", { class: "form" },
     el("label", {}, "Landing page"), page,
     el("button", { class: "small", onclick: () => act("setPageUrl", { id, pageUrl: page.value }, "Saved") }, "Save"),
-    el("label", {}, "Expected SHA-256 / MD5"), sha, el("span"), md5,
+    el("label", {}, "SHA-256"), sha, el("span"),
+    el("label", {}, "MD5"), md5,
     el("button", { class: "small", onclick: () => act("setHashes", { id, sha256: sha.value, md5: md5.value }, "Checksums saved") }, "Save"),
     el("label", {}, "Original link"), urlText);
   const facts = el("dl", { class: "facts" });

@@ -62,6 +62,13 @@ func Present(s Summary) Summary {
 	if torrent && s.Status == StatusCompleted {
 		s.Label = "Finished" // done seeding
 	}
+	mismatch := s.hashResult != "" && s.hashResult != "match"
+	switch {
+	case s.Status == StatusCompleted && s.checking:
+		s.Label, s.Tone = statusText[StatusVerifying], toneNone
+	case s.Status == StatusCompleted && mismatch:
+		s.Label, s.Tone, s.Error = "Checksum mismatch", toneBad, s.hashResult
+	}
 
 	switch s.Status {
 	case StatusRunning, StatusVerifying, StatusQueued, StatusMetadata, StatusChecking, StatusSeeding:
@@ -81,6 +88,11 @@ func Present(s Summary) Summary {
 		s.Note = ""
 	case finished:
 		s.Note = "complete"
+	case s.Status == StatusCompleted:
+		s.Note = ""
+		if s.hashResult == "match" && !s.checking {
+			s.Note = matched(s.SHA256 != "", s.MD5 != "")
+		}
 	case !known && torrent:
 		s.Note = "Asking peers for the torrent's files…"
 	case !known:
@@ -95,6 +107,19 @@ func Present(s Summary) Summary {
 	}
 	s.Links = links
 	return s
+}
+
+// matched is the note for checksums that match the finished file.
+func matched(sha, md bool) string {
+	switch {
+	case sha && md:
+		return "SHA-256 and MD5 match"
+	case sha:
+		return "SHA-256 matches"
+	case md:
+		return "MD5 matches"
+	}
+	return ""
 }
 
 func presentLink(l LinkSummary, s Summary) LinkSummary {

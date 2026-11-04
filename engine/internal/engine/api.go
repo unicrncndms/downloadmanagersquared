@@ -201,8 +201,7 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		if err != nil {
 			return nil, err
 		}
-		d.SetHashes(p.SHA256, p.MD5)
-		return nil, nil
+		return nil, d.SetHashes(p.SHA256, p.MD5)
 	case "setPageUrl":
 		p, err := decode[pageParams](raw)
 		if err != nil {
