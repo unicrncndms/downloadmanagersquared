@@ -54,23 +54,13 @@ function el(tag, attrs, ...children) {
   return e;
 }
 
-const STATUS_TEXT = {
-  queued: "Queued", running: "Downloading", paused: "Paused", verifying: "Verifying",
-  completed: "Completed", failed: "Failed", metadata: "Finding files", checking: "Checking files",
-  seeding: "Seeding", choosing: "Waiting for you",
-};
-const STATUS_CLASS = { completed: "ok", seeding: "ok", failed: "bad", paused: "dim", queued: "dim" };
-
-function statusText(d) {
-  if (d.kind === "torrent" && d.status === "completed") return "Finished"; // done seeding
-  return STATUS_TEXT[d.status] || d.status;
+// The progress line: the numbers, then the engine's note (or the note alone
+// while the size is unknown).
+function progressText(d) {
+  const nums = d.size > 0 ? `${fmtBytes(d.done)} of ${fmtBytes(d.size)} (${percent(d).toFixed(1)}%)`
+    : d.done > 0 ? fmtBytes(d.done) : "";
+  return [nums, d.note].filter(Boolean).join(" · ");
 }
-
-const LINK_TEXT = {
-  pending: "Waiting", probing: "Checking link", ready: "Ready", resolving: "Getting link in browser",
-  "needs-page": "Needs landing page", retrying: "Retrying soon", failed: "Failed", mismatch: "Different file: excluded",
-};
-const LINK_CLASS = { failed: "bad", mismatch: "bad", resolving: "warn", "needs-page": "warn", retrying: "warn", ready: "ok" };
 
 // Whether torrent peers can connect in through an interface.
 const INCOMING_TEXT = { reachable: "reachable", outgoing: "outgoing only" };

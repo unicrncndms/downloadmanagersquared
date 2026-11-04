@@ -22,13 +22,12 @@ import (
 	"downloadmanagersquared/engine/internal/rate"
 )
 
-// Statuses a torrent has beyond an HTTP download's. A finished torrent (done
-// seeding) is download.StatusCompleted.
+// Statuses a torrent has beyond an HTTP download's, defined with the others.
 const (
-	StatusMetadata download.Status = "metadata" // a magnet link learning the torrent's files from peers
-	StatusChoosing download.Status = "choosing" // waiting for the user to pick files and a folder
-	StatusChecking download.Status = "checking" // hashing data already on disk
-	StatusSeeding  download.Status = "seeding"  // complete, uploading until the ratio target
+	StatusMetadata = download.StatusMetadata
+	StatusChoosing = download.StatusChoosing
+	StatusChecking = download.StatusChecking
+	StatusSeeding  = download.StatusSeeding
 )
 
 // State is everything needed to resume a torrent after a restart.
@@ -116,7 +115,7 @@ func (t *Torrent) Summary() download.Summary {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	s := download.Summary{
-		Kind: "torrent", ID: t.st.ID, URL: t.st.Magnet, Filename: t.st.Name, Dir: t.st.Dir,
+		Kind: download.KindTorrent, ID: t.st.ID, URL: t.st.Magnet, Filename: t.st.Name, Dir: t.st.Dir,
 		Size: t.st.Size, Status: t.st.Status, Error: t.st.Error, Speed: t.speed.Value(), ETA: -1,
 		Links: map[string]download.LinkSummary{}, Added: t.st.Added, Finished: t.st.Finished,
 		Uploaded: t.st.Uploaded, VPN: t.st.VPN, AskVPN: t.st.AskVPN, InfoHash: t.hash,
@@ -138,6 +137,7 @@ func (t *Torrent) Summary() download.Summary {
 		}
 	}
 	if t.active {
+		s.InSwarm = true
 		s.UpSpeed = t.upSpeed.Value()
 		s.Peers, s.Seeds, s.Swarm = t.peers, t.seeds, t.swarm
 		for id, p := range t.paths {
@@ -147,7 +147,7 @@ func (t *Torrent) Summary() download.Summary {
 			}
 		}
 	}
-	return s
+	return download.Present(s)
 }
 
 func (t *Torrent) ID() string { return t.st.ID }

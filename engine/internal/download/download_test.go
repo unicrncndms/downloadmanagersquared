@@ -602,10 +602,10 @@ func TestBusyServerDuringProbeIsWaitedOut(t *testing.T) {
 	d := New(env, State{ID: "t12", URL: srv.URL + "/big.bin", Dir: dir, Size: -1})
 	d.Start()
 	deadline := time.Now().Add(900 * time.Millisecond)
-	for !d.Summary().Links["eth"].Busy && time.Now().Before(deadline) {
+	for !d.Summary().Links["eth"].busy && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
-	if l := d.Summary().Links["eth"]; !l.Busy || l.Allowed != 1 || l.Status != LinkRetrying {
+	if l := d.Summary().Links["eth"]; !l.busy || l.allowed != 1 || l.Status != LinkRetrying {
 		t.Errorf("during the server's pause eth is %+v, want busy, retrying, 1 connection allowed", l)
 	}
 	waitFinished(t, env, d, 15*time.Second)

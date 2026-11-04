@@ -45,6 +45,12 @@ const (
 	StatusVerifying Status = "verifying"
 	StatusCompleted Status = "completed"
 	StatusFailed    Status = "failed"
+
+	// A torrent's statuses beyond an HTTP download's. A torrent done seeding is StatusCompleted.
+	StatusMetadata Status = "metadata" // a magnet link learning the torrent's files from peers
+	StatusChoosing Status = "choosing" // waiting for the user to pick files and a folder
+	StatusChecking Status = "checking" // hashing data already on disk
+	StatusSeeding  Status = "seeding"  // complete, uploading until the ratio target
 )
 
 type Range struct {
@@ -1120,16 +1126,23 @@ type LinkSummary struct {
 	Error    string     `json:"error,omitempty"`
 	Speed    float64    `json:"speed"`
 	Conns    int        `json:"conns"`
-	Allowed  int        `json:"allowed,omitempty"`  // connections backoff allows right now
-	MaxConns int        `json:"maxConns,omitempty"` // connections the settings allow
-	Busy     bool       `json:"busy,omitempty"`     // holding back because the server pushed back
-	Resolved bool       `json:"resolved"`           // fetched by the browser for this interface
-	Up       float64    `json:"up,omitempty"`       // torrents: upload speed to the peers on this path
+	Resolved bool       `json:"resolved"`     // fetched by the browser for this interface
+	Up       float64    `json:"up,omitempty"` // torrents: upload speed to the peers on this path
+
+	// Filled in by present.
+	Label    string `json:"label"`
+	Tone     string `json:"tone,omitempty"`
+	CanRetry bool   `json:"canRetry,omitempty"`
+
+	// Backoff, only for the label.
+	allowed  int  // connections backoff allows right now
+	maxConns int  // connections the settings allow
+	busy     bool // holding back because the server pushed back
 }
 
 // Summary is what the UI shows for a download.
 type Summary struct {
-	Kind     string                 `json:"kind,omitempty"` // "torrent"; empty for HTTP
+	Kind     string                 `json:"kind,omitempty"` // KindTorrent; empty for HTTP
 	ID       string                 `json:"id"`
 	URL      string                 `json:"url"`
 	PageURL  string                 `json:"pageUrl,omitempty"`
@@ -1161,6 +1174,14 @@ type Summary struct {
 	Uploaded int64         `json:"uploaded,omitempty"`
 	Ratio    float64       `json:"ratio,omitempty"`
 	UpSpeed  float64       `json:"upSpeed,omitempty"`
+	InSwarm  bool          `json:"inSwarm,omitempty"` // exchanging pieces with peers right now
+
+	// Filled in by present.
+	Label       string  `json:"label"`
+	Tone        string  `json:"tone,omitempty"`
+	Note        string  `json:"note,omitempty"` // after the progress numbers, or alone when there are none
+	Actions     Actions `json:"actions"`
+	PartialFile bool    `json:"partialFile"` // Remove asks whether to delete it
 }
 
 // FileSummary is one file of a torrent.
@@ -1251,9 +1272,9 @@ func (d *Download) Summary() Summary {
 		ls := LinkSummary{Status: l.Status, Error: l.Error, Resolved: l.URL != d.st.URL}
 		if ir := d.ifs[id]; ir != nil && d.running {
 			ls.Speed, ls.Conns = ir.ewma.Value(), ir.active
-			ls.Allowed, ls.MaxConns, ls.Busy = ir.backoff.target(), ir.backoff.conns, ir.backoff.busy(now)
+			ls.allowed, ls.maxConns, ls.busy = ir.backoff.target(), ir.backoff.conns, ir.backoff.busy(now)
 		}
 		s.Links[id] = ls
 	}
-	return s
+	return Present(s)
 }

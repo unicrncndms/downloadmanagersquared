@@ -82,40 +82,32 @@ function makeCard(id) {
 
   function update(d) {
     const torrent = d.kind === "torrent";
-    const known = torrent ? d.size > 0 : d.probed;
     name.textContent = d.filename || d.url;
     vpn.textContent = VPN_TEXT[d.vpn] || "";
     vpn.hidden = !VPN_TEXT[d.vpn];
     name.title = d.filename || d.url;
-    status.textContent = statusText(d);
-    status.className = "badge " + (STATUS_CLASS[d.status] || "");
+    status.textContent = d.label;
+    status.className = "badge " + (d.tone || "");
     fill.style.width = percent(d) + "%";
-    const seeded = torrent && d.finished; // complete: what counts now is the upload
     const choosing = d.status === "choosing";
     const files = d.files || [];
-    sizeText.textContent = choosing && !files.length
-      ? "Not in the swarm yet: finding the files needs peers"
-      : choosing
-        ? `${files.length} file${files.length === 1 ? "" : "s"} · ${fmtBytes(files.reduce((n, f) => n + f.size, 0))}`
-      : seeded
-        ? `${fmtBytes(d.size)} · complete`
-      : known
-        ? `${fmtBytes(d.done)} of ${fmtBytes(d.size)} (${percent(d).toFixed(1)}%)${torrent || d.rangeOk ? "" : " · main connection only"}`
-        : torrent ? "Asking peers for the torrent's files…" : "Checking the link…";
+    sizeText.textContent = choosing && files.length
+      ? `${files.length} file${files.length === 1 ? "" : "s"} · ${fmtBytes(files.reduce((n, f) => n + f.size, 0))}`
+      : progressText(d);
     speedText.textContent = d.status === "running" ? `↓ ${fmtSpeed(d.speed)} · ${fmtETA(d.eta)} left` : "";
 
     // The swarm: who we're connected to, and what we've given back.
-    const inSwarm = torrent && ["running", "seeding", "checking", "metadata"].includes(d.status);
+    const inSwarm = !!d.inSwarm;
     swarm.hidden = !torrent || choosing || !(inSwarm || d.uploaded > 0);
     peersText.textContent = !inSwarm ? ""
       : `${plural(d.peers || 0, "peer")} · ${plural(d.seeds || 0, "seed")}${d.swarm > (d.peers || 0) ? ` · ${d.swarm} known` : ""}`;
     upText.textContent = `↑ ${inSwarm ? fmtSpeed(d.upSpeed || 0) + " · " : ""}${fmtBytes(d.uploaded || 0)} sent · ratio ${(d.ratio || 0).toFixed(2)}`;
     err.textContent = d.error || "";
-    const running = ["running", "verifying", "queued", "metadata", "checking", "seeding"].includes(d.status);
-    pause.hidden = !running;
-    resume.hidden = running || choosing || d.status === "completed";
-    folder.hidden = !known || choosing;
-    remove.hidden = choosing; // the add step has its own Cancel
+    const can = d.actions || {};
+    pause.hidden = !can.pause;
+    resume.hidden = !can.resume;
+    folder.hidden = !can.showInFolder;
+    remove.hidden = !can.remove; // a torrent being added has its own Cancel
     pick.hidden = !choosing;
     const step = choosing ? `${d.askVpn}|${files.length}|${hasVpn()}` : "";
     if (step && step !== picking) renderPick(d);
@@ -151,23 +143,17 @@ function makeCard(id) {
       }
       conns.append(r.name, r.state, r.info, r.speed, r.why);
       r.name.textContent = ifaceName(ifc, latest.state, latest.settings);
-      let label = LINK_TEXT[l.status] || l.status;
-      if (l.status === "ready" && d.status === "running" && l.conns > 0) label = "Downloading";
-      if (torrent && l.status === "ready") label = d.status === "seeding" ? "Seeding" : d.status === "running" ? "Downloading" : "Connected";
-      const busy = l.busy && (l.status === "ready" || l.status === "retrying");
-      if (busy) label = `Server busy · ${l.allowed} of ${l.maxConns} connections`;
       r.state.replaceChildren(...[
-        el("span", { class: "badge " + (busy ? "warn" : LINK_CLASS[l.status] || "dim") }, label),
+        el("span", { class: "badge " + (l.tone || "dim") }, l.label),
         l.resolved ? el("span", { class: "muted" }, " own link") : null,
       ].filter(Boolean));
       r.info.textContent = !l.conns ? "" : torrent ? plural(l.conns, "peer") : `${l.conns}×`;
       r.speed.textContent = torrent
         ? [l.speed > 0 ? "↓ " + fmtSpeed(l.speed) : "", l.up > 0 ? "↑ " + fmtSpeed(l.up) : ""].filter(Boolean).join(" ")
         : l.speed > 0 ? fmtSpeed(l.speed) : "";
-      const canRetry = ["retrying", "failed", "mismatch"].includes(l.status);
-      r.why.hidden = !l.error && !canRetry;
+      r.why.hidden = !l.error && !l.canRetry;
       r.whyText.textContent = l.error || "";
-      r.retry.hidden = !canRetry;
+      r.retry.hidden = !l.canRetry;
     }
     // Point straight at the field that fixes it.
     const needsPage = ids.some((ifc) => d.links[ifc].status === "needs-page");
@@ -225,8 +211,7 @@ function hasVpn() {
 function removeDownload(id, actions, ask) {
   const d = (latest.state.downloads || []).find((x) => x.id === id);
   if (!d) return;
-  // A torrent whose download completed (seeding or finished) keeps its files without asking.
-  if (d.status === "completed" || (d.kind === "torrent" && d.finished)) return act("remove", { id, deleteFile: false }, "Removed from list (files kept)");
+  if (!d.partialFile) return act("remove", { id, deleteFile: false }, "Removed from list (files kept)");
   actions.hidden = true;
   ask.hidden = false;
 }

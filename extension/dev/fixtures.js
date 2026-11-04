@@ -21,13 +21,17 @@ const SETTINGS = {
 const DOWNLOADS = [
   { kind: "http", id: "a", url: "https://files.example.com/dl/abc", pageUrl: "https://example.com/file/abc", filename: "ubuntu-24.04.iso",
     dir: "C:\\Users\\you\\Downloads", size: 6.1e9, done: 2.4e9, status: "running", speed: 11.5e6, eta: 322, probed: true, rangeOk: true,
-    links: { eth: { status: "ready", conns: 4, speed: 7.1e6, resolved: false }, wifi: { status: "ready", conns: 4, speed: 4.4e6, resolved: true } },
+    label: "Downloading", actions: { pause: true, showInFolder: true, remove: true }, partialFile: true,
+    links: { eth: { status: "ready", conns: 4, speed: 7.1e6, resolved: false, label: "Downloading", tone: "ok" },
+      wifi: { status: "ready", conns: 2, speed: 4.4e6, resolved: true, label: "Server busy · 2 of 4 connections", tone: "warn" } },
     added: "2026-11-03T20:00:00Z" },
   { kind: "http", id: "b", url: "https://cdn.example.org/big.zip", filename: "big.zip", dir: "C:\\Users\\you\\Downloads",
-    size: 3e9, done: 3e9, status: "completed", speed: 0, eta: -1, probed: true, rangeOk: true, links: {}, added: "2026-11-03T19:00:00Z" },
+    size: 3e9, done: 3e9, status: "completed", speed: 0, eta: -1, probed: true, rangeOk: true, links: {},
+    label: "Completed", tone: "ok", actions: { showInFolder: true, remove: true }, partialFile: false, added: "2026-11-03T19:00:00Z" },
   { kind: "torrent", id: "c", url: "magnet:?xt=urn:btih:2da0", filename: "debian-13.iso", dir: "C:\\Users\\you\\Downloads", size: 7.9e8, done: 7.9e8,
     status: "seeding", speed: 0, upSpeed: 3e5, eta: -1, uploaded: 1.2e8, ratio: 0.15, peers: 6, seeds: 0, swarm: 40, finished: "2026-11-03T18:00:00Z",
-    links: { eth: { status: "ready", conns: 3 }, wifi: { status: "ready", conns: 2 } }, added: "2026-11-03T18:00:00Z" },
+    inSwarm: true, label: "Seeding", tone: "ok", note: "complete", actions: { pause: true, showInFolder: true, remove: true }, partialFile: false,
+    links: { eth: { status: "ready", conns: 3, label: "Seeding", tone: "ok" }, wifi: { status: "ready", conns: 2, label: "Seeding", tone: "ok" } }, added: "2026-11-03T18:00:00Z" },
 ];
 
 const STATE = { downloads: DOWNLOADS, interfaces: IFACES, pia: { state: "off" }, speed: 11.5e6, eta: 322, active: 1 };
