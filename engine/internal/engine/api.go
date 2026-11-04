@@ -416,8 +416,6 @@ func (e *Engine) hello(c *ipc.Conn, p helloParams) hello {
 			pending = append(pending, r)
 		}
 	}
-	open := e.openWant
-	e.openWant = nil
 	h := hello{Settings: e.settings, State: e.snapshot, Version: Version}
 	e.mu.Unlock()
 	h.Autostart = winutil.Autostart()
@@ -425,9 +423,6 @@ func (e *Engine) hello(c *ipc.Conn, p helloParams) hello {
 	go func() {
 		for _, r := range pending {
 			c.Emit("resolve", r)
-		}
-		if open != nil {
-			c.Emit("openManager", map[string]string{"hash": *open})
 		}
 	}()
 	return h

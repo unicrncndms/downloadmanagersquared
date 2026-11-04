@@ -112,7 +112,10 @@ func putFiles(src, dir string) {
 func run(l install.Layout) {
 	e, err := engine.New()
 	if errors.Is(err, engine.ErrAlreadyRunning) {
-		// Launched twice (e.g. from the Start menu): bring up the downloads instead.
+		// Launched twice (e.g. from the Start menu): the running engine shows
+		// its Downloads window instead. Windows lets a process take the
+		// foreground only if the one in front allows it, as this one may.
+		winutil.AllowForeground()
 		ipc.Call("openManager")
 		return
 	}
@@ -127,8 +130,10 @@ func run(l install.Layout) {
 	if slices.Contains(os.Args[1:], flagUpdated) {
 		winutil.Notify("Updated", "DMS² is updated to v"+engine.Version+".")
 	}
+	w := downloadsWindow(e)
+	e.SetWindow(w)
 	go e.Run()
-	tray.Run(e, downloadsWindow(e))
+	tray.Run(e, w)
 	log.Printf("engine stopped")
 }
 

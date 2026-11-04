@@ -89,3 +89,13 @@ const (
 	IDOK  = 1
 	IDYES = 6
 )
+
+var pAllowSetForegroundWindow = user32.NewProc("AllowSetForegroundWindow")
+
+// AllowForeground lets any process bring a window to the front, as this one
+// (started by the user) may: so the running engine's window, asked for by a
+// second launch, comes up in front rather than flashing in the taskbar.
+func AllowForeground() {
+	const asfwAny = ^uintptr(0) // ASFW_ANY, (DWORD)-1
+	pAllowSetForegroundWindow.Call(asfwAny & 0xFFFFFFFF)
+}

@@ -97,9 +97,12 @@ type Engine struct {
 	tunnels   map[string]*tunnelEntry // by interface ID
 	resolves  map[string]resolveReq   // waiting for an extension to pick them up
 	started   map[string]time.Time    // browsers started for a resolve, by exe, so not twice at once
-	openWant  *string                 // view to open once Firefox connects ("#settings" or downloads)
 	userAgent string                  // the browser's, from its latest hello; not saved
 	browser   string                  // the browser's exe, from its latest hello; not saved
+
+	// Also under mu.
+	window       Window // the Downloads window; nil until SetWindow
+	windowFailed bool   // its Open has failed (logged once)
 
 	cum      float64 // bytes moved since start, integrated from speed (for the global ETA)
 	meter    rate.Meter
@@ -741,7 +744,8 @@ func (e *Engine) notifyFinished(s download.Summary, path string) {
 	}
 }
 
-// extensionLocked is the most recently connected browser extension.
+// extensionLocked is the most recently connected browser extension. Only
+// OpenManager's fallback (WebView2 missing) still needs it.
 func (e *Engine) extensionLocked() *ipc.Conn { return e.extensionForLocked("") }
 
 // extensionForLocked is the most recently connected extension in the browser
@@ -776,21 +780,59 @@ func (e *Engine) broadcast(name string, data any) {
 	}
 }
 
-// OpenManager shows the downloads (or, with "#settings", the settings page) in
-// the browser, starting the one the extension last ran in if needed.
-func (e *Engine) OpenManager(hash string) {
+// Window is the Downloads window (internal/window), or a fake in tests.
+type Window interface {
+	// Open shows view: "" the downloads, "#settings" (or another "#hash") the
+	// settings page. It fails only if the window can't be created.
+	Open(view string) error
+}
+
+// SetWindow gives the engine the Downloads window, for OpenManager.
+func (e *Engine) SetWindow(w Window) {
+	e.mu.Lock()
+	e.window = w
+	e.mu.Unlock()
+}
+
+// OpenManager shows view ("" the downloads, "#settings" or another "#hash" the
+// settings page) in the Downloads window. Only if the window can't be created
+// (WebView2 missing) does it fall back to the browser the extension last ran in.
+func (e *Engine) OpenManager(view string) {
+	e.mu.Lock()
+	w := e.window
+	e.mu.Unlock()
+	if w == nil {
+		e.openInBrowser(view)
+		return
+	}
+	err := w.Open(view)
+	if err == nil {
+		return
+	}
+	e.mu.Lock()
+	first := !e.windowFailed
+	e.windowFailed = true
+	e.mu.Unlock()
+	if first {
+		log.Printf("the Downloads window: %v; showing it in the browser instead", err)
+	}
+	e.openInBrowser(view)
+}
+
+// openInBrowser is OpenManager's fallback, the only path left that asks a
+// browser to show the UI: a connected extension is told to show view;
+// otherwise the browser the extension last ran in is started (its toolbar
+// button then shows the downloads).
+func (e *Engine) openInBrowser(view string) {
 	e.mu.Lock()
 	c := e.extensionLocked()
-	if c == nil {
-		e.openWant = &hash
-	}
 	browser := e.browser
 	e.mu.Unlock()
 	if c != nil {
-		c.Emit("openManager", map[string]string{"hash": hash})
+		c.Emit("openManager", map[string]string{"hash": view})
 		return
 	}
-	if err := winutil.OpenBrowser(browser, ""); err != nil {
+	if err := startBrowser(browser, ""); err != nil {
 		log.Printf("starting the browser: %v", err)
 	}
 }

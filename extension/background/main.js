@@ -33,7 +33,6 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 
 const SETTINGS_URL = browser.runtime.getURL("ui/settings.html");
 const DOWNLOADS_URL = browser.runtime.getURL("ui/popup.html");
-let downloadsWindow = null;
 
 // The settings page lives in a tab; reuse it if it's already open.
 async function openSettings(hash) {
@@ -49,34 +48,18 @@ async function openSettings(hash) {
   else await browser.windows.create({ url });
 }
 
-// Downloads are shown in the toolbar popup. Firefox only opens that on a user's
-// click, so when asked from the tray it falls back to a small popup window.
-async function openDownloads() {
-  try {
-    await browser.browserAction.openPopup();
-    return;
-  } catch (e) { /* not allowed without a click here */ }
-  if (downloadsWindow !== null) {
-    try {
-      await browser.windows.update(downloadsWindow, { focused: true });
-      return;
-    } catch (e) {
-      downloadsWindow = null;
-    }
-  }
-  const w = await browser.windows.create({ type: "popup", url: DOWNLOADS_URL + "?window", width: 520, height: 680 });
-  downloadsWindow = w.id;
-}
-browser.windows.onRemoved.addListener((id) => {
-  if (id === downloadsWindow) downloadsWindow = null;
-});
-
 // Once after upgrading: the VPN provider choice moves from browser.storage to the engine.
 Engine.on("connection", ({ connected }) => {
   if (connected) handOverProvider(browser.storage.local, Engine.settings, (m, p) => Engine.call(m, p)).catch(() => {});
 });
 
-Engine.on("openManager", ({ hash } = {}) => (hash === "#settings" ? openSettings("") : openDownloads()));
+// The engine shows the downloads and settings in its own Downloads window. It
+// asks this extension only when that window can't be created (WebView2
+// missing): this listener is all that's left for that fallback.
+Engine.on("openManager", ({ hash } = {}) => {
+  if (hash) return openSettings(hash === "#settings" ? "" : hash);
+  return browser.windows.create({ type: "popup", url: DOWNLOADS_URL + "?window", width: 520, height: 680 });
+});
 
 (async () => {
   SentCookies.init();

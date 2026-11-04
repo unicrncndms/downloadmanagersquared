@@ -165,7 +165,7 @@ const Capture = {
   // A torrent waits for its files to be chosen, so show the add step.
   torrentAdded() {
     notify("Torrent added to DMS²", "Choose its files in the DMS² downloads list.");
-    openDownloads().catch(() => {});
+    Engine.call("openManager", {}).catch(() => {}); // the engine's Downloads window
   },
 
   rememberPages(id, pages) {

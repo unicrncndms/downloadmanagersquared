@@ -34,12 +34,9 @@ func main() {
 		log.Fatal(err)
 	}
 	w := window.New(window.Config{DataDir: *dir, Dial: e.Dial, Icon: tray.Icon(), Pages: os.DirFS(*pages)})
+	e.SetWindow(w)
 	go e.Run()
-	go func() {
-		if err := w.Open(""); err != nil {
-			log.Printf("opening the window: %v", err)
-		}
-	}()
+	go e.OpenManager("")
 	tray.Run(e, w)
 	log.Printf("stopped")
 }

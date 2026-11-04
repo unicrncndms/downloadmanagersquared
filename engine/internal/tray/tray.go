@@ -3,7 +3,6 @@ package tray
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"strings"
 	"time"
@@ -11,14 +10,15 @@ import (
 	"fyne.io/systray"
 
 	"downloadmanagersquared/engine/internal/engine"
+	"downloadmanagersquared/engine/internal/window"
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
 const ifaceRows = 6
 
-// Window is the Downloads window (internal/window).
+// Window is the Downloads window (internal/window). The menu opens it
+// through the engine (Engine.OpenManager), which is given it with SetWindow.
 type Window interface {
-	Open(view string) error
 	Close()
 }
 
@@ -43,12 +43,10 @@ func onReady(e *engine.Engine, w Window) {
 		rows = append(rows, r)
 	}
 	systray.AddSeparator()
-	open := systray.AddMenuItem("Open downloads", "Show the downloads in Firefox")
+	open := systray.AddMenuItem("Open downloads", "Show the downloads")
 	pause := systray.AddMenuItem("Pause all", "")
 	resume := systray.AddMenuItem("Resume all", "")
-	settings := systray.AddMenuItem("Connections & settings", "")
-	// For now, until "Open downloads" and "Connections & settings" open it.
-	window := systray.AddMenuItem("Downloads window", "Show the downloads here, without Firefox")
+	settings := systray.AddMenuItem("Connections & settings", "Show the connections and settings")
 	systray.AddSeparator()
 	autostart := systray.AddMenuItemCheckbox("Start with Windows", "", winutil.Autostart())
 	quit := systray.AddMenuItem("Quit", "Stop all downloads and exit")
@@ -57,13 +55,9 @@ func onReady(e *engine.Engine, w Window) {
 		for {
 			select {
 			case <-open.ClickedCh:
-				e.OpenManager("")
+				go openDownloads(e)
 			case <-settings.ClickedCh:
-				e.OpenManager("#settings")
-			case <-window.ClickedCh:
-				if err := w.Open(""); err != nil {
-					log.Printf("the Downloads window: %v", err)
-				}
+				go openSettings(e)
 			case <-pause.ClickedCh:
 				go e.PauseAll()
 			case <-resume.ClickedCh:
@@ -123,6 +117,12 @@ func onReady(e *engine.Engine, w Window) {
 		}
 	}()
 }
+
+// openDownloads is "Open downloads": the Downloads window's downloads view.
+func openDownloads(e *engine.Engine) { e.OpenManager("") }
+
+// openSettings is "Connections & settings": the Downloads window's settings view.
+func openSettings(e *engine.Engine) { e.OpenManager(window.Settings) }
 
 func Speed(bps float64) string {
 	if bps < 1 {
