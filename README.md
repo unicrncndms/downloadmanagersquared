@@ -9,7 +9,7 @@ Windows 10/11, with Firefox or a Firefox-based browser (LibreWolf, Waterfox, Flo
 1. Download `downloadmanagersquared-windows.zip` from the [latest release](https://github.com/unicrncndms/downloadmanagersquared/releases/latest) and **extract the whole zip** to a folder.
 2. Run `dms-engine.exe`. Windows SmartScreen warns about it, because the program isn't code-signed: click **More info → Run anyway**.
 
-   The engine installs itself for your Windows user only (no admin rights) into `%LOCALAPPDATA%\downloadmanagersquared`, starts with Windows and runs in the tray, next to the clock. You can delete the extracted folder afterwards.
+   Setup asks where to install (`C:\Program Files\downloadmanagersquared` unless you pick another folder) and whether to add a Start menu entry, a desktop shortcut and start with Windows. Windows asks for administrator rights only if the folder needs them, as Program Files does, and only to copy the files there. Everything else stays with your Windows user. The engine then runs in the tray, next to the clock. You can delete the extracted folder afterwards.
 3. A message then offers to open the Firefox extension. Click OK and let Firefox install it. Using LibreWolf, Waterfox or Floorp? Open the link it shows in that browser instead:
    `https://github.com/unicrncndms/downloadmanagersquared/releases/latest/download/downloadmanagersquared.xpi`
 
@@ -37,11 +37,11 @@ Unfinished files end in `.dms.part` and are renamed when done. Progress is saved
 
 ## Upgrade
 
-Run the `dms-engine.exe` of a newer zip, as when installing. It replaces the installed engine and keeps your downloads and settings. The extension updates itself through Firefox.
+Run the `dms-engine.exe` of a newer zip, as when installing. It updates the install where it is, without asking again, and keeps your downloads and settings. In Program Files, Windows asks for administrator rights to replace the files. The extension updates itself through Firefox.
 
 ## Uninstall
 
-*Settings → Apps → Installed apps → downloadmanagersquared → Uninstall.* Your downloaded files are always kept, including unfinished ones; you choose whether settings and the download list go too. Then remove the extension in Firefox under *Add-ons and themes*.
+*Settings → Apps → Installed apps → downloadmanagersquared → Uninstall.* Your downloaded files are always kept, including unfinished ones; you choose whether settings and the download list go too. Only DMS²'s own files are removed from the install folder, and the folder itself only if nothing else is in it. Then remove the extension in Firefox under *Add-ons and themes*.
 
 ## Who it protects you from
 
@@ -84,7 +84,7 @@ node --test extension/test
 ## Files and logs
 
 - Settings, download list and log: `%APPDATA%\downloadmanagersquared\` (`settings.json`, `downloads\`, `torrents\`, `engine.log`). A file that can't be read is renamed to `….broken` and you get a notification.
-- The installed programs: `%LOCALAPPDATA%\downloadmanagersquared\`.
+- The installed programs: the folder you chose in setup, `C:\Program Files\downloadmanagersquared\` by default. Installs from before setup asked stay in `%LOCALAPPDATA%\downloadmanagersquared\`.
 
 ## Known limitations
 

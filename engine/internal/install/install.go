@@ -1,6 +1,8 @@
-// Package install puts the engine where it lives for the current user and
-// registers it: the native-messaging host for the browser, start at login and
-// the entry in Windows' Installed apps. No admin rights, no installer.
+// Package install puts the engine in its folder (Program Files unless the user
+// picks another) and registers it for the current user: the native-messaging
+// host for the browser, start at login, shortcuts and the entry in Windows'
+// Installed apps. Only copying into a folder the user can't write to runs as
+// administrator; everything else stays per-user.
 package install
 
 import (
@@ -8,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +22,7 @@ import (
 	"golang.org/x/sys/windows/registry"
 
 	"downloadmanagersquared/engine/internal/atomicfile"
+	"downloadmanagersquared/engine/internal/winutil"
 )
 
 const (
@@ -38,63 +42,169 @@ func ExtensionURL() string {
 	return "https://github.com/" + Repo + "/releases/latest/download/downloadmanagersquared.xpi"
 }
 
-// Layout is where an install lives: its folder and its registry entries under
-// HKEY_CURRENT_USER. Tests point it at a temp folder and a test key.
+// Layout is where an install lives: its folder, its shortcuts and its
+// registry entries under HKEY_CURRENT_USER. Tests point it at temp folders
+// and a test key.
 type Layout struct {
 	Dir          string
+	StartMenuDir string // the user's Start menu programs folder
+	DesktopDir   string
 	MozillaKey   string // the native-messaging host for the Firefox family
 	RunKey       string // holds the start-at-login value
 	UninstallKey string // the Installed apps entry
+	Icon         []byte // the app icon (ICO), written next to the exes for the shortcuts
 }
 
-// Default is the current user's install.
+// Options are what a first install sets up besides the engine.
+type Options struct {
+	StartMenu, Desktop, Autostart bool
+}
+
+// Default is a new install for the current user, in Program Files.
 func Default() (Layout, error) {
-	local, err := windows.KnownFolderPath(windows.FOLDERID_LocalAppData, 0)
-	if err != nil {
-		return Layout{}, err
+	var dirs [3]string
+	for i, id := range []*windows.KNOWNFOLDERID{windows.FOLDERID_ProgramFiles, windows.FOLDERID_Programs, windows.FOLDERID_Desktop} {
+		d, err := windows.KnownFolderPath(id, 0)
+		if err != nil {
+			return Layout{}, err
+		}
+		dirs[i] = d
 	}
 	return Layout{
-		Dir:          filepath.Join(local, Name),
+		Dir:          filepath.Join(dirs[0], Name),
+		StartMenuDir: dirs[1],
+		DesktopDir:   dirs[2],
 		MozillaKey:   `Software\Mozilla\NativeMessagingHosts\` + Name,
 		RunKey:       `Software\Microsoft\Windows\CurrentVersion\Run`,
 		UninstallKey: `Software\Microsoft\Windows\CurrentVersion\Uninstall\` + Name,
 	}, nil
 }
 
-func (l Layout) Engine() string { return filepath.Join(l.Dir, "dms-engine.exe") }
-func (l Layout) Host() string   { return filepath.Join(l.Dir, "dms-host.exe") }
+// Find is l moved to the folder this user installed into, read from the
+// Installed apps entry. False if there is no install (l is then unchanged).
+func (l Layout) Find() (Layout, bool) {
+	dir := readValue(l.UninstallKey, "InstallLocation")
+	if dir == "" {
+		return l, false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dms-engine.exe")); err != nil {
+		return l, false
+	}
+	l.Dir = dir
+	return l, true
+}
+
+func (l Layout) Engine() string        { return filepath.Join(l.Dir, "dms-engine.exe") }
+func (l Layout) Host() string          { return filepath.Join(l.Dir, "dms-host.exe") }
+func (l Layout) StartMenuLink() string { return filepath.Join(l.StartMenuDir, Name+".lnk") }
+func (l Layout) DesktopLink() string   { return filepath.Join(l.DesktopDir, Name+".lnk") }
+func (l Layout) manifest() string      { return filepath.Join(l.Dir, "native-host.json") }
+func (l Layout) iconFile() string      { return filepath.Join(l.Dir, "dms.ico") }
+
+// files are everything an install puts in its folder. Uninstalling removes
+// only these, as the folder may be one the user keeps other things in.
+func (l Layout) files() []string {
+	return []string{l.Engine(), l.Host(), l.manifest(), l.iconFile()}
+}
 
 // Contains is whether exe sits in the install folder.
 func (l Layout) Contains(exe string) bool {
 	return strings.EqualFold(filepath.Clean(filepath.Dir(exe)), filepath.Clean(l.Dir))
 }
 
+// ErrShown is a failure the user was already told about.
+var ErrShown = errors.New("already reported")
+
 // Install copies both exes from src into the install folder and registers
-// them. Only a first install switches start at login on: after that the
-// tray's toggle owns it.
-func (l Layout) Install(src, version string, first bool) error {
+// them. first is what a first install sets up; nil on an upgrade, which
+// leaves start at login and the shortcuts as the user has them.
+func (l Layout) Install(src, version string, first *Options) error {
 	for _, f := range []string{"dms-engine.exe", "dms-host.exe"} {
 		if _, err := os.Stat(filepath.Join(src, f)); err != nil {
 			return fmt.Errorf("%s is missing next to this program: extract the whole zip first, then run dms-engine.exe from there", f)
 		}
 	}
-	if err := os.MkdirAll(l.Dir, 0o755); err != nil {
-		return err
-	}
-	for _, f := range []string{"dms-engine.exe", "dms-host.exe"} {
-		if err := copyRetrying(filepath.Join(src, f), filepath.Join(l.Dir, f), 10*time.Second); err != nil {
+	if winutil.CanWrite(l.Dir) {
+		if err := l.PutFiles(src); err != nil {
 			return err
 		}
+	} else if err := l.putFilesElevated(src); err != nil {
+		return err
 	}
 	if err := l.Register(); err != nil {
 		return err
 	}
-	if first {
-		if err := l.setRun(); err != nil {
+	if first != nil {
+		if err := l.setUp(*first); err != nil {
 			return err
 		}
 	}
 	return l.writeUninstallEntry(version)
+}
+
+// PutFiles writes the install folder: both exes from src, the native host
+// manifest and the icon. It touches no registry, so it can run as an
+// administrator who isn't the user installing.
+func (l Layout) PutFiles(src string) error {
+	if err := os.MkdirAll(l.Dir, 0o755); err != nil {
+		return err
+	}
+	if !strings.EqualFold(filepath.Clean(src), filepath.Clean(l.Dir)) { // else installing where it was extracted
+		for _, f := range []string{"dms-engine.exe", "dms-host.exe"} {
+			if err := copyRetrying(filepath.Join(src, f), filepath.Join(l.Dir, f), 10*time.Second); err != nil {
+				return err
+			}
+		}
+	}
+	if len(l.Icon) > 0 {
+		if err := atomicfile.Write(l.iconFile(), l.Icon, 0o644); err != nil {
+			return err
+		}
+	}
+	return l.writeManifest()
+}
+
+// FlagPutFiles makes dms-engine.exe run PutFiles from its own folder into the
+// folder that follows the flag. Install starts it so, as administrator.
+const FlagPutFiles = "--put-files"
+
+func (l Layout) putFilesElevated(src string) error {
+	code, err := winutil.RunElevated(filepath.Join(src, "dms-engine.exe"), FlagPutFiles+` "`+l.Dir+`"`, true)
+	if errors.Is(err, winutil.ErrElevationDeclined) {
+		return fmt.Errorf("installing into %s needs administrator rights. Allow it when Windows asks, or choose a folder of your own", l.Dir)
+	}
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return ErrShown // the elevated copy said what went wrong
+	}
+	return nil
+}
+
+// setUp does what the user chose on a first install.
+func (l Layout) setUp(o Options) error {
+	if o.Autostart {
+		if err := l.setRun(); err != nil {
+			return err
+		}
+	}
+	icon := ""
+	if _, err := os.Stat(l.iconFile()); err == nil {
+		icon = l.iconFile()
+	}
+	for _, s := range []struct {
+		on   bool
+		path string
+	}{{o.StartMenu, l.StartMenuLink()}, {o.Desktop, l.DesktopLink()}} {
+		if !s.on {
+			continue
+		}
+		if err := winutil.CreateShortcut(s.path, l.Engine(), l.Dir, "Downloads over all your connections at once", icon); err != nil {
+			return fmt.Errorf("creating the shortcut %s: %w", s.path, err)
+		}
+	}
+	return nil
 }
 
 // copyRetrying copies a file, retrying while the target is still in use (a
@@ -134,10 +244,19 @@ func (l Layout) Register() error {
 	return l.registerFirefox()
 }
 
-// registerFirefox writes the host manifest and the one HKCU Mozilla key that
-// Firefox, LibreWolf, Waterfox and Floorp all read.
+// registerFirefox points the one HKCU Mozilla key that Firefox, LibreWolf,
+// Waterfox and Floorp all read at the host manifest. It rewrites the manifest
+// too if that is missing or points elsewhere, which in a folder only an
+// administrator can write to only the install does.
 func (l Layout) registerFirefox() error {
-	manifest := filepath.Join(l.Dir, "native-host.json")
+	err := l.writeManifest()
+	if err != nil && !errors.Is(err, fs.ErrPermission) {
+		return err
+	}
+	return errors.Join(err, setValue(l.MozillaKey, "", l.manifest()))
+}
+
+func (l Layout) writeManifest() error {
 	want, _ := json.MarshalIndent(map[string]any{
 		"name":               Name,
 		"description":        "downloadmanagersquared engine",
@@ -145,12 +264,10 @@ func (l Layout) registerFirefox() error {
 		"type":               "stdio",
 		"allowed_extensions": []string{ExtensionID},
 	}, "", "  ")
-	if have, err := os.ReadFile(manifest); err != nil || string(have) != string(want) {
-		if err := atomicfile.Write(manifest, want, 0o644); err != nil {
-			return err
-		}
+	if have, err := os.ReadFile(l.manifest()); err == nil && string(have) == string(want) {
+		return nil
 	}
-	return setValue(l.MozillaKey, "", manifest)
+	return atomicfile.Write(l.manifest(), want, 0o644)
 }
 
 func (l Layout) setRun() error {
@@ -184,8 +301,8 @@ func (l Layout) writeUninstallEntry(version string) error {
 	return nil
 }
 
-// Unregister removes start at login, the browser registration and the
-// Installed apps entry.
+// Unregister removes start at login, the shortcuts, the browser registration
+// and the Installed apps entry.
 func (l Layout) Unregister() error {
 	var errs []error
 	if k, err := registry.OpenKey(registry.CURRENT_USER, l.RunKey, registry.SET_VALUE); err == nil {
@@ -193,6 +310,11 @@ func (l Layout) Unregister() error {
 			errs = append(errs, err)
 		}
 		k.Close()
+	}
+	for _, lnk := range []string{l.StartMenuLink(), l.DesktopLink()} {
+		if err := os.Remove(lnk); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
+		}
 	}
 	for _, key := range []string{l.MozillaKey, l.UninstallKey} {
 		if err := registry.DeleteKey(registry.CURRENT_USER, key); err != nil && !errors.Is(err, registry.ErrNotExist) {
@@ -202,14 +324,19 @@ func (l Layout) Unregister() error {
 	return errors.Join(errs...)
 }
 
-// RemoveLater deletes the install folder once this process (which runs from
-// it) has exited: a detached cmd waits a few seconds, then removes it, trying
-// again a few times while a file is still in use (a dms-host still exiting).
+// RemoveLater deletes the install's files once this process (which runs from
+// the folder) has exited, then the folder if nothing else is left in it: a
+// cmd waits a few seconds and tries a few times while a file is still in use
+// (a dms-host still exiting). It runs as administrator if the folder needs it.
 func (l Layout) RemoveLater() error {
-	try := `ping -n 3 127.0.0.1 >nul & if exist "` + l.Dir + `" rmdir /s /q "` + l.Dir + `"`
-	cmd := exec.Command("cmd.exe")
+	cmdExe := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+	if !winutil.CanWrite(l.Dir) {
+		_, err := winutil.RunElevated(cmdExe, l.removeCommand(), false)
+		return err
+	}
+	cmd := exec.Command(cmdExe)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CmdLine:       `cmd.exe /d /c ` + try + ` & ` + try + ` & ` + try + ` & ` + try,
+		CmdLine:       `cmd.exe ` + l.removeCommand(),
 		HideWindow:    true,
 		CreationFlags: windows.CREATE_NO_WINDOW | windows.DETACHED_PROCESS,
 	}
@@ -218,6 +345,28 @@ func (l Layout) RemoveLater() error {
 		return err
 	}
 	return cmd.Process.Release()
+}
+
+// removeCommand is cmd's arguments for RemoveLater. It deletes the install's
+// own files by name, and the folder without /s, so it never takes anything
+// the user keeps there.
+func (l Layout) removeCommand() string {
+	try := `ping -n 3 127.0.0.1 >nul & del /f /q`
+	for _, f := range l.files() {
+		try += ` "` + f + `"`
+	}
+	try += ` 2>nul & rmdir "` + l.Dir + `" 2>nul`
+	return `/d /c ` + try + ` & ` + try + ` & ` + try + ` & ` + try
+}
+
+func readValue(key, name string) string {
+	k, err := registry.OpenKey(registry.CURRENT_USER, key, registry.QUERY_VALUE)
+	if err != nil {
+		return ""
+	}
+	defer k.Close()
+	v, _, _ := k.GetStringValue(name)
+	return v
 }
 
 func setValue(key, name, v string) error {

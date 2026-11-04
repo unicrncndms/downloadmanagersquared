@@ -1,6 +1,7 @@
 // dms-engine is the background download engine with its tray icon. It also
-// installs itself: started from anywhere but the install folder, it copies
-// itself there (or upgrades the copy there) and starts that one instead.
+// installs itself: started from anywhere but the install folder, it asks
+// where to install (or upgrades the install there), copies itself there and
+// starts that copy instead.
 // Build with -ldflags "-H windowsgui" so no console window appears.
 package main
 
@@ -19,6 +20,7 @@ import (
 	"downloadmanagersquared/engine/internal/engine"
 	"downloadmanagersquared/engine/internal/install"
 	"downloadmanagersquared/engine/internal/ipc"
+	"downloadmanagersquared/engine/internal/setup"
 	"downloadmanagersquared/engine/internal/tray"
 	"downloadmanagersquared/engine/internal/winutil"
 )
@@ -27,32 +29,73 @@ const title = "downloadmanagersquared"
 
 // Flags the installing copy passes to the installed one.
 const (
-	flagInstalled = "--installed" // first install: show how to add the extension
 	flagUpdated   = "--updated"   // upgrade: say so in a balloon
 	flagUninstall = "--uninstall" // from Installed apps
 )
 
 func main() {
-	l, err := install.Default()
-	if err != nil {
-		fail(err)
-	}
 	self, err := os.Executable()
 	if err != nil {
 		fail(err)
 	}
+	if len(os.Args) == 3 && os.Args[1] == install.FlagPutFiles {
+		putFiles(filepath.Dir(self), os.Args[2])
+		return
+	}
+	l, err := install.Default()
+	if err != nil {
+		fail(err)
+	}
+	l.Icon = tray.Icon()
+	l, installed := l.Find()
 	if slices.Contains(os.Args[1:], flagUninstall) {
 		uninstall(l)
 		return
 	}
 	if !l.Contains(self) {
-		if err := installFrom(l, filepath.Dir(self)); err != nil {
-			winutil.MessageBox(title, "Could not install: "+err.Error())
-			os.Exit(1)
+		src := filepath.Dir(self)
+		if installed { // an upgrade goes where the install is, without asking
+			if err := installFrom(l, src, nil); err != nil {
+				if !errors.Is(err, install.ErrShown) {
+					winutil.MessageBox(title, "Could not install: "+err.Error())
+				}
+				os.Exit(1)
+			}
+			return
 		}
+		setup.Run(setup.Choice{Dir: l.Dir, StartMenu: true, Autostart: true}, tray.Icon(), setup.Steps{
+			Install: func(c setup.Choice) error {
+				l.Dir = c.Dir
+				err := installFrom(l, src, &install.Options{StartMenu: c.StartMenu, Desktop: c.Desktop, Autostart: c.Autostart})
+				if errors.Is(err, install.ErrShown) {
+					return setup.ErrReported
+				}
+				return err
+			},
+			AddExtension: func() {
+				if err := winutil.OpenInFirefox(install.ExtensionURL()); err != nil {
+					winutil.MessageBox(title, "Could not open Firefox: "+err.Error())
+				}
+			},
+			ExtensionURL: install.ExtensionURL(),
+		})
 		return
 	}
 	run(l)
+}
+
+// putFiles is the part of an install that runs as administrator, started by
+// the user's own install into a folder only an administrator can write to.
+// It writes the files only: the registry belongs to the user installing.
+func putFiles(src, dir string) {
+	if !filepath.IsAbs(dir) {
+		os.Exit(2)
+	}
+	l := install.Layout{Dir: filepath.Clean(dir), Icon: tray.Icon()}
+	if err := l.PutFiles(src); err != nil {
+		winutil.MessageBox(title, "Could not copy DMS² into "+l.Dir+": "+err.Error())
+		os.Exit(1)
+	}
 }
 
 // run is the installed engine.
@@ -71,10 +114,7 @@ func run(l install.Layout) {
 	if err := l.Register(); err != nil { // a browser can't start us without it
 		log.Printf("registering the native host: %v", err)
 	}
-	switch {
-	case slices.Contains(os.Args[1:], flagInstalled):
-		go installedBox()
-	case slices.Contains(os.Args[1:], flagUpdated):
+	if slices.Contains(os.Args[1:], flagUpdated) {
 		winutil.Notify("Updated", "DMS² is updated to v"+engine.Version+".")
 	}
 	go e.Run()
@@ -82,45 +122,25 @@ func run(l install.Layout) {
 	log.Printf("engine stopped")
 }
 
-// installedBox is the one thing a first install shows.
-func installedBox() {
-	url := install.ExtensionURL()
-	r := winutil.Dialog(title, "DMS² is installed and running in the tray, next to the clock.\n\n"+
-		"One step left: add the Firefox extension. OK opens it in Firefox:\n\n"+url+"\n\n"+
-		"Using LibreWolf, Waterfox or Floorp? Open the link there instead.",
-		windows.MB_OKCANCEL|windows.MB_ICONINFORMATION)
-	if r == winutil.IDOK {
-		if err := winutil.OpenInFirefox(url); err != nil {
-			log.Printf("opening %s: %v", url, err)
-		}
-	}
-}
-
-// installFrom installs or upgrades from the folder this exe was started in,
-// then starts the installed engine.
-func installFrom(l install.Layout, src string) error {
-	upgrade := false
-	if quitEngine() {
-		upgrade = true
-	} else if len(winutil.ProcessesOf(l.Engine())) > 0 {
+// installFrom installs (first: what the user chose to set up) or, with first
+// nil, upgrades from the folder this exe was started in, then starts the
+// installed engine.
+func installFrom(l install.Layout, src string, first *install.Options) error {
+	if !quitEngine() && len(winutil.ProcessesOf(l.Engine())) > 0 {
 		// An engine from before the quit method and the per-user pipe.
 		winutil.Dialog(title, "An older DMS² engine is running. Quit it from its tray icon (right-click → Quit), then press OK to update.",
 			windows.MB_OK|windows.MB_ICONINFORMATION)
 		for _, pid := range winutil.ProcessesOf(l.Engine()) {
 			winutil.WaitExit(pid, 30*time.Second)
 		}
-		upgrade = true
-	} else if _, err := os.Stat(l.Engine()); err == nil {
-		upgrade = true // installed, but not running
 	}
-	if err := l.Install(src, engine.Version, !upgrade); err != nil {
+	if err := l.Install(src, engine.Version, first); err != nil {
 		return err
 	}
-	flag := flagInstalled
-	if upgrade {
-		flag = flagUpdated
+	if first != nil {
+		return winutil.StartDetached(l.Engine()) // setup's window says the rest
 	}
-	return winutil.StartDetached(l.Engine(), flag)
+	return winutil.StartDetached(l.Engine(), flagUpdated)
 }
 
 // uninstall removes the install after asking, keeping the downloads.

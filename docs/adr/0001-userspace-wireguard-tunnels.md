@@ -16,7 +16,7 @@ There are two ways to run WireGuard on Windows:
 
 Run tunnels in userspace inside the engine.
 
-- The install stays per-user with no admin rights. Creating adapters needs admin, every time a tunnel is added.
+- The engine runs as the user, with no admin rights. Creating adapters needs admin, every time a tunnel is added. (Copying the files into Program Files at install time is the one elevated step, see 0002.)
 - Each tunnel's outer UDP socket comes from its interface's existing `netif.Binding`, so pinning a tunnel to an interface needs no new mechanism.
 - Windows routing never changes. Adapters would add routes that compete with the default route, and keeping them from taking over the whole machine's traffic is fiddly and fails open.
 - The kill switch is structural: under VPN only, a torrent's dialers and listeners exist only on the tunnels' stacks, so there is no bare socket to leak through.

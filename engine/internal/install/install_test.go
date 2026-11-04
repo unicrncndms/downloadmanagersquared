@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -19,6 +21,8 @@ func testLayout(t *testing.T) Layout {
 	t.Cleanup(func() { deleteTree(registry.CURRENT_USER, base) })
 	return Layout{
 		Dir:          filepath.Join(t.TempDir(), "downloadmanagersquared"),
+		StartMenuDir: t.TempDir(),
+		DesktopDir:   t.TempDir(),
 		MozillaKey:   base + `\Mozilla\NativeMessagingHosts\downloadmanagersquared`,
 		RunKey:       base + `\Run`,
 		UninstallKey: base + `\Uninstall\downloadmanagersquared`,
@@ -47,7 +51,7 @@ func value(t *testing.T, key, name string) string {
 
 func TestFirstInstallCopiesAndRegistersEverything(t *testing.T) {
 	l := testLayout(t)
-	if err := l.Install(release(t, "v1"), "0.3.0", true); err != nil {
+	if err := l.Install(release(t, "v1"), "0.3.0", &Options{Autostart: true}); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(l.Host()); string(b) != "v1 dms-host.exe" {
@@ -76,13 +80,13 @@ func TestFirstInstallCopiesAndRegistersEverything(t *testing.T) {
 
 func TestAnUpgradeLeavesStartAtLoginAlone(t *testing.T) {
 	l := testLayout(t)
-	if err := l.Install(release(t, "v1"), "0.3.0", true); err != nil {
+	if err := l.Install(release(t, "v1"), "0.3.0", &Options{Autostart: true}); err != nil {
 		t.Fatal(err)
 	}
 	k, _ := registry.OpenKey(registry.CURRENT_USER, l.RunKey, registry.SET_VALUE)
 	k.DeleteValue(Name) // switched off in the tray
 	k.Close()
-	if err := l.Install(release(t, "v2"), "0.4.0", false); err != nil {
+	if err := l.Install(release(t, "v2"), "0.4.0", nil); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(l.Engine()); string(b) != "v2 dms-engine.exe" {
@@ -98,7 +102,7 @@ func TestAnUpgradeLeavesStartAtLoginAlone(t *testing.T) {
 
 func TestRegisterRestoresAMissingOrMovedRegistration(t *testing.T) {
 	l := testLayout(t)
-	if err := l.Install(release(t, "v1"), "0.3.0", true); err != nil {
+	if err := l.Install(release(t, "v1"), "0.3.0", &Options{Autostart: true}); err != nil {
 		t.Fatal(err)
 	}
 	deleteTree(registry.CURRENT_USER, l.MozillaKey)
@@ -122,7 +126,7 @@ func TestRegisterRestoresAMissingOrMovedRegistration(t *testing.T) {
 
 func TestUnregisterRemovesEveryEntry(t *testing.T) {
 	l := testLayout(t)
-	if err := l.Install(release(t, "v1"), "0.3.0", true); err != nil {
+	if err := l.Install(release(t, "v1"), "0.3.0", &Options{Autostart: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.Unregister(); err != nil {
@@ -136,6 +140,107 @@ func TestUnregisterRemovesEveryEntry(t *testing.T) {
 	}
 	if value(t, l.RunKey, Name) != "" {
 		t.Error("start at login is still on")
+	}
+}
+
+func TestUnregisterRemovesTheShortcuts(t *testing.T) {
+	l := testLayout(t)
+	if err := l.Install(release(t, "v1"), "0.3.0", &Options{StartMenu: true, Desktop: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Unregister(); err != nil {
+		t.Fatal(err)
+	}
+	for _, lnk := range []string{l.StartMenuLink(), l.DesktopLink()} {
+		if _, err := os.Stat(lnk); err == nil {
+			t.Errorf("%s is still there", lnk)
+		}
+	}
+}
+
+func TestFirstInstallSetsUpWhatWasChosen(t *testing.T) {
+	l := testLayout(t)
+	l.Icon = []byte("icon")
+	if err := l.Install(release(t, "v1"), "0.3.0", &Options{StartMenu: true}); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(l.StartMenuLink()); err != nil || fi.Size() == 0 {
+		t.Errorf("no Start menu shortcut: %v", err)
+	}
+	if _, err := os.Stat(l.DesktopLink()); err == nil {
+		t.Error("a desktop shortcut nobody asked for")
+	}
+	if got := value(t, l.RunKey, Name); got != "" {
+		t.Errorf("start at login is on: %q", got)
+	}
+	if b, _ := os.ReadFile(filepath.Join(l.Dir, "dms.ico")); string(b) != "icon" {
+		t.Errorf("the icon file holds %q", b)
+	}
+}
+
+func TestFindUsesTheFolderOfTheInstalledAppsEntry(t *testing.T) {
+	l := testLayout(t)
+	elsewhere := l
+	elsewhere.Dir = filepath.Join(t.TempDir(), "picked")
+	if _, ok := l.Find(); ok {
+		t.Fatal("found an install before installing")
+	}
+	if err := elsewhere.Install(release(t, "v1"), "0.3.0", &Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := l.Find()
+	if !ok || got.Dir != elsewhere.Dir {
+		t.Fatalf("Find gave %q (%v), want %q", got.Dir, ok, elsewhere.Dir)
+	}
+	os.Remove(elsewhere.Engine())
+	if _, ok := l.Find(); ok {
+		t.Error("an entry whose engine is gone still counts as installed")
+	}
+}
+
+func TestInstallingIntoTheFolderItWasExtractedTo(t *testing.T) {
+	l := testLayout(t)
+	src := release(t, "v1")
+	l.Dir = src
+	if err := l.Install(src, "0.3.0", &Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(l.Engine()); string(b) != "v1 dms-engine.exe" {
+		t.Fatalf("dms-engine.exe holds %q", b)
+	}
+}
+
+// The folder may be one the user keeps other things in (D:\Apps): removing
+// the install must leave those alone, and the folder with them.
+func TestRemoveLaterKeepsWhatTheUserPutInTheFolder(t *testing.T) {
+	l := testLayout(t)
+	l.Icon = []byte("icon")
+	if err := l.Install(release(t, "v1"), "0.3.0", &Options{}); err != nil {
+		t.Fatal(err)
+	}
+	mine := filepath.Join(l.Dir, "notes.txt")
+	os.WriteFile(mine, []byte("keep me"), 0o644)
+	if strings.Contains(l.removeCommand(), "/s") {
+		t.Fatalf("the command deletes recursively: %s", l.removeCommand())
+	}
+	run := func() {
+		cmd := exec.Command(filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe"))
+		cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd.exe ` + strings.ReplaceAll(l.removeCommand(), "ping -n 3", "ping -n 1")}
+		cmd.Run() // its exit code is the last rmdir's, which fails while the folder isn't empty
+	}
+	run()
+	for _, f := range l.files() {
+		if _, err := os.Stat(f); err == nil {
+			t.Errorf("%s is still there", f)
+		}
+	}
+	if b, _ := os.ReadFile(mine); string(b) != "keep me" {
+		t.Fatalf("the user's file is gone or changed: %q", b)
+	}
+	os.Remove(mine)
+	run()
+	if _, err := os.Stat(l.Dir); err == nil {
+		t.Error("the emptied folder is still there")
 	}
 }
 
@@ -153,7 +258,7 @@ func TestInstallWithoutTheHostSaysToExtractTheZip(t *testing.T) {
 	l := testLayout(t)
 	src := release(t, "v1")
 	os.Remove(filepath.Join(src, "dms-host.exe"))
-	err := l.Install(src, "0.3.0", true)
+	err := l.Install(src, "0.3.0", &Options{Autostart: true})
 	if err == nil || !strings.Contains(err.Error(), "zip") {
 		t.Fatalf("error %v, want one about extracting the zip", err)
 	}
