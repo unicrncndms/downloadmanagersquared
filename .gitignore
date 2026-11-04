@@ -5,3 +5,5 @@ CLAUDE.md
 docs/agents/
 engine/internal/bundle/files/*
 !engine/internal/bundle/files/.gitkeep
+engine/internal/ui/files/*
+!engine/internal/ui/files/.gitkeep

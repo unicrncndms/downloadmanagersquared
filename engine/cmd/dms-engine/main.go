@@ -22,6 +22,7 @@ import (
 	"downloadmanagersquared/engine/internal/ipc"
 	"downloadmanagersquared/engine/internal/setup"
 	"downloadmanagersquared/engine/internal/tray"
+	_ "downloadmanagersquared/engine/internal/ui" // carried for the Downloads window, which comes next
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
