@@ -120,6 +120,14 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		if err != nil {
 			return nil, err
 		}
+		e.mu.Lock()
+		if cl := e.clients[c]; cl != nil { // from an extension: its browser's
+			p.Browser = cl.browser
+			if p.UserAgent == "" {
+				p.UserAgent = cl.userAgent
+			}
+		}
+		e.mu.Unlock()
 		id, err := e.Add(p)
 		return map[string]string{"id": id}, err
 	case "pause", "resume", "remove", "retryLink", "showInFolder":
@@ -381,7 +389,7 @@ func (e *Engine) applySettings(f func(*Settings)) Settings {
 func (e *Engine) hello(c *ipc.Conn, p helloParams) hello {
 	e.mu.Lock()
 	if cl := e.clients[c]; cl != nil {
-		cl.extension = true
+		cl.extension, cl.browser, cl.userAgent = true, p.Browser, p.UserAgent
 	}
 	if p.UserAgent != "" {
 		e.userAgent = p.UserAgent
@@ -391,7 +399,9 @@ func (e *Engine) hello(c *ipc.Conn, p helloParams) hello {
 	}
 	pending := make([]resolveReq, 0, len(e.resolves))
 	for _, r := range e.resolves {
-		pending = append(pending, r)
+		if r.Browser == "" || strings.EqualFold(r.Browser, p.Browser) {
+			pending = append(pending, r)
+		}
 	}
 	open := e.openWant
 	e.openWant = nil

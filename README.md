@@ -34,6 +34,8 @@ Settings worth knowing (all under **Connections & settings**):
 - **VPN**: give each connection its own WireGuard tunnel, either by importing a `.conf` per connection or by signing in to Private Internet Access, which gives every connection without a `.conf` a tunnel. Choose separately for downloads and torrents whether to use the bare connections only, the tunnels as well, or the tunnels only (nothing runs while no tunnel is up). The tunnels live inside the engine: no admin rights, and other programs aren't affected.
 - **Learned sites**: the clicks DMS² remembers per site; *Forget* teaches a site again.
 
+Using the extension in more than one browser? The settings above live in the engine, so every browser shows and changes the same ones, and the download list is shared. Learned sites are kept by each browser, and a download's clicking-through always runs in the browser it came from (DMS² starts that browser if it isn't open).
+
 Unfinished files end in `.dms.part` and are renamed when done. Progress is saved every few seconds, so downloads continue after a crash, sleep or restart.
 
 ## Upgrade

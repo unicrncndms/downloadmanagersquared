@@ -70,6 +70,10 @@ func (c *Conn) WriteRaw(line []byte) error {
 	return err
 }
 
+// NewConn wraps an accepted connection; Serve does this for each client, and
+// tests for one end of a net.Pipe.
+func NewConn(c net.Conn) *Conn { return &Conn{c: c} }
+
 // Emit pushes an event to this client.
 func (c *Conn) Emit(name string, data any) error { return c.send(event{name, data}) }
 
@@ -107,7 +111,7 @@ func Serve(ln net.Listener, h Handler) {
 		if err != nil {
 			return
 		}
-		go serveConn(&Conn{c: c}, h)
+		go serveConn(NewConn(c), h)
 	}
 }
 

@@ -67,7 +67,9 @@ const (
 
 type client struct {
 	extension bool
-	seq       int64 // higher = connected later
+	seq       int64  // higher = connected later
+	browser   string // the exe of the browser the extension runs in, from its hello
+	userAgent string // that browser's, from its hello
 }
 
 type resolveReq struct {
@@ -76,6 +78,7 @@ type resolveReq struct {
 	IfaceName string `json:"ifaceName"`
 	PageURL   string `json:"pageUrl"`
 	SocksPort int    `json:"socksPort"`
+	Browser   string `json:"-"` // only the extension in this browser gets it ("" = any)
 }
 
 type Engine struct {
@@ -93,6 +96,7 @@ type Engine struct {
 	clientSeq int64
 	tunnels   map[string]*tunnelEntry // by interface ID
 	resolves  map[string]resolveReq   // waiting for an extension to pick them up
+	started   map[string]time.Time    // browsers started for a resolve, by exe, so not twice at once
 	openWant  *string                 // view to open once Firefox connects ("#settings" or downloads)
 	userAgent string                  // the browser's, from its latest hello; not saved
 	browser   string                  // the browser's exe, from its latest hello; not saved
@@ -165,6 +169,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		ifaces:   map[string]*ifaceEntry{},
 		clients:  map[*ipc.Conn]*client{},
 		resolves: map[string]resolveReq{},
+		started:  map[string]time.Time{},
 		tunnels:  map[string]*tunnelEntry{},
 		mapPort:  portmap.Map,
 		piaAPI:   pia.Default,
@@ -657,9 +662,18 @@ func (e *Engine) ETAWindow() time.Duration {
 	return time.Duration(e.settings.ETAWindowSec) * time.Second
 }
 
-func (e *Engine) RequestResolve(id, ifaceID, pageURL string) {
+// RequestResolve has the extension in the browser the download came from open
+// its page through ifaceID: the page's clicks are learned in that browser, and
+// its cookies are there. If that browser isn't running, it is started and
+// gets the request once its extension connects.
+func (e *Engine) RequestResolve(id, ifaceID, pageURL, browser string) {
+	if browser != "" {
+		if fi, err := os.Stat(browser); err != nil || fi.IsDir() {
+			browser = "" // uninstalled since: any browser will do
+		}
+	}
 	e.mu.Lock()
-	req := resolveReq{ID: id, Iface: ifaceID, PageURL: pageURL}
+	req := resolveReq{ID: id, Iface: ifaceID, PageURL: pageURL, Browser: browser}
 	if base, tun := paths.IfaceOf(ifaceID); tun {
 		if te, ent := e.tunnels[base], e.ifaces[base]; te != nil && ent != nil {
 			req.IfaceName, req.SocksPort = "VPN via "+ent.info.Name, te.socks.Port()
@@ -668,13 +682,25 @@ func (e *Engine) RequestResolve(id, ifaceID, pageURL string) {
 		req.IfaceName, req.SocksPort = ent.info.Name, ent.socks.Port()
 	}
 	e.resolves[id+"|"+ifaceID] = req
-	c := e.extensionLocked()
+	c := e.extensionForLocked(browser)
+	start := c == nil && browser != "" && time.Since(e.started[strings.ToLower(browser)]) > time.Minute
+	if start {
+		e.started[strings.ToLower(browser)] = time.Now()
+	}
 	e.mu.Unlock()
 	log.Printf("resolve %s via %s", id, req.IfaceName)
-	if c != nil {
+	switch {
+	case c != nil:
 		c.Emit("resolve", req)
+	case start:
+		if err := startBrowser(browser, ""); err != nil {
+			log.Printf("starting the browser for a resolve: %v", err)
+		}
 	}
 }
+
+// startBrowser starts a browser so its extension connects; tests replace it.
+var startBrowser = winutil.OpenBrowser
 
 func (e *Engine) Changed(d *download.Download) { e.queue.MarkDirty(d.ID()) }
 
@@ -693,11 +719,15 @@ func (e *Engine) notifyFinished(s download.Summary, path string) {
 }
 
 // extensionLocked is the most recently connected browser extension.
-func (e *Engine) extensionLocked() *ipc.Conn {
+func (e *Engine) extensionLocked() *ipc.Conn { return e.extensionForLocked("") }
+
+// extensionForLocked is the most recently connected extension in the browser
+// at exe ("" = in any browser).
+func (e *Engine) extensionForLocked(exe string) *ipc.Conn {
 	var best *ipc.Conn
 	var seq int64 = -1
 	for c, cl := range e.clients {
-		if cl.extension && cl.seq > seq {
+		if cl.extension && cl.seq > seq && (exe == "" || strings.EqualFold(cl.browser, exe)) {
 			best, seq = c, cl.seq
 		}
 	}
@@ -784,6 +814,7 @@ type AddRequest struct {
 	UserAgent string `json:"userAgent"`
 	Torrent   bool   `json:"torrent"` // the URL serves a .torrent file
 	VPN       string `json:"vpn"`     // "off", "alongside" or "vpn"; "" = the default for its type
+	Browser   string `json:"-"`       // the exe of the browser that sent it, known from its connection
 }
 
 func (e *Engine) Add(r AddRequest) (string, error) {
@@ -814,7 +845,7 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	st := download.State{
 		VPN: paths.ParseMode(r.VPN, e.settings.VPNHTTP),
 		ID:  newID(), URL: r.URL, PageURL: strings.TrimSpace(r.PageURL),
-		Cookie: r.Cookie, Referer: r.Referer, UserAgent: r.UserAgent,
+		Cookie: r.Cookie, Referer: r.Referer, UserAgent: r.UserAgent, Browser: r.Browser,
 		Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(),
 	}

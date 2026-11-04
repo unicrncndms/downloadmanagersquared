@@ -60,6 +60,7 @@ type State struct {
 	Cookie     string           `json:"cookie,omitempty"`
 	Referer    string           `json:"referer,omitempty"`
 	UserAgent  string           `json:"userAgent,omitempty"`
+	Browser    string           `json:"browser,omitempty"` // exe of the browser that handed it over; its pages open there
 	Dir        string           `json:"dir"`
 	Filename   string           `json:"filename"`
 	RemoteName string           `json:"remoteName,omitempty"` // name the server reports; must match across links
@@ -92,7 +93,7 @@ type Iface struct {
 type Env interface {
 	Paths(paths.Mode) []Iface // the main path first
 	ETAWindow() time.Duration
-	RequestResolve(id, ifaceID, pageURL string)
+	RequestResolve(id, ifaceID, pageURL, browser string)
 	Changed(d *Download)
 	Finished(d *Download)
 }
@@ -654,8 +655,8 @@ func (d *Download) settleHeldLocked(usable map[string]Iface, mainID string) {
 
 func (d *Download) needResolveLocked(ifaceID string, l *Link, reason string) {
 	if l.needResolve(d.st.PageURL != "", reason) {
-		id, page := d.st.ID, d.st.PageURL
-		go d.env.RequestResolve(id, ifaceID, page)
+		id, page, browser := d.st.ID, d.st.PageURL, d.st.Browser
+		go d.env.RequestResolve(id, ifaceID, page, browser)
 	}
 }
 

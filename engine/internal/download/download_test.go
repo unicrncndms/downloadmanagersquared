@@ -73,7 +73,7 @@ func (e *testEnv) Paths(m paths.Mode) []Iface {
 func (e *testEnv) ETAWindow() time.Duration { return 10 * time.Second }
 func (e *testEnv) Changed(*Download)        {}
 func (e *testEnv) Finished(*Download)       { close(e.finished) }
-func (e *testEnv) RequestResolve(id, iface, page string) {
+func (e *testEnv) RequestResolve(id, iface, page, browser string) {
 	if e.resolve != nil {
 		e.resolve(id, iface, page)
 	}
