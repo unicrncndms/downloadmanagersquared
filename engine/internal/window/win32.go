@@ -6,6 +6,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"downloadmanagersquared/engine/internal/winutil"
 )
 
 var (
@@ -47,6 +49,7 @@ const (
 	wmActivate      = 0x0006
 	wmClose         = 0x0010
 	wmGetMinMaxInfo = 0x0024
+	wmSettingChange = 0x001A
 	wmSetIcon       = 0x0080
 	wmMoving        = 0x0216
 	wmApp           = 0x8000
@@ -134,6 +137,8 @@ func wndProc(hwnd, m, wp uintptr, lp unsafe.Pointer) uintptr {
 		if wp&0xFFFF != 0 { // not WA_INACTIVE: the page gets the keyboard
 			v.chromium.Focus()
 		}
+	case wmSettingChange: // maybe light or dark mode changed; the page follows by itself
+		matchTitleBar(hwnd)
 	case wmClose:
 		pDestroyWindow.Call(hwnd)
 		return 0
@@ -166,4 +171,20 @@ func centred(cx, cy int) (x, y, w, h int) {
 	aw, ah := int(wa.right-wa.left), int(wa.bottom-wa.top)
 	w, h = min(cx, aw), min(cy, ah)
 	return int(wa.left) + (aw-w)/2, int(wa.top) + (ah-h)/2, w, h
+}
+
+// The title bar takes the colours of the pages' header (ui.css --panel and
+// --text), light or dark as Windows is set, so it doesn't stay white over a
+// dark page.
+const (
+	lightPanel, lightText = 0xffffff, 0x16181d
+	darkPanel, darkText   = 0x1d2026, 0xe8eaee
+)
+
+func matchTitleBar(hwnd uintptr) {
+	if winutil.AppsDark() {
+		winutil.SetTitleBar(hwnd, true, darkPanel, darkText)
+	} else {
+		winutil.SetTitleBar(hwnd, false, lightPanel, lightText)
+	}
 }

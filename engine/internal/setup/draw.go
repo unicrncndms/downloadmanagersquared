@@ -5,7 +5,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/registry"
+
+	"downloadmanagersquared/engine/internal/winutil"
 )
 
 // The window is drawn in the colours of the extension's ui.css, light or dark
@@ -31,13 +32,7 @@ func appsDark() bool {
 	if forceTheme != "" {
 		return forceTheme == "dark"
 	}
-	k, err := registry.OpenKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`, registry.QUERY_VALUE)
-	if err != nil {
-		return false
-	}
-	defer k.Close()
-	v, _, err := k.GetIntegerValue("AppsUseLightTheme")
-	return err == nil && v == 0
+	return winutil.AppsDark()
 }
 
 func colorref(c uint32) uintptr { return uintptr(c>>16&0xff | c&0xff00 | (c&0xff)<<16) }
@@ -70,20 +65,7 @@ func applyTheme() {
 	w.brushPanel = windows.Handle(b)
 	b, _, _ = pCreateSolidBrush.Call(colorref(w.pal.bg))
 	w.brushBg = windows.Handle(b)
-	if w.main == 0 || pDwmSetWindowAttribute.Find() != nil {
-		return
-	}
-	dark := uint32(0)
-	if w.dark {
-		dark = 1
-	}
-	caption, captionText := uint32(colorref(w.pal.panel)), uint32(colorref(w.pal.text))
-	for _, a := range []struct {
-		attr uintptr
-		v    *uint32
-	}{{20, &dark}, {35, &caption}, {36, &captionText}} { // immersive dark mode, caption colour, caption text colour
-		pDwmSetWindowAttribute.Call(uintptr(w.main), a.attr, uintptr(unsafe.Pointer(a.v)), 4)
-	}
+	winutil.SetTitleBar(uintptr(w.main), w.dark, w.pal.panel, w.pal.text)
 }
 
 var (

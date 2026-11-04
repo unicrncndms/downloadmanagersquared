@@ -14,7 +14,6 @@ var (
 	user32   = windows.NewLazySystemDLL("user32.dll")
 	gdi32    = windows.NewLazySystemDLL("gdi32.dll")
 	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
-	dwmapi   = windows.NewLazySystemDLL("dwmapi.dll")
 
 	pRegisterClassEx     = user32.NewProc("RegisterClassExW")
 	pCreateWindowEx      = user32.NewProc("CreateWindowExW")
@@ -68,8 +67,6 @@ var (
 	pGetModuleHandle = kernel32.NewProc("GetModuleHandleW")
 	pCreateActCtx    = kernel32.NewProc("CreateActCtxW")
 	pActivateActCtx  = kernel32.NewProc("ActivateActCtx")
-
-	pDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 )
 
 const (
