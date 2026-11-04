@@ -3,3 +3,5 @@ dist/
 .claude/
 CLAUDE.md
 docs/agents/
+engine/internal/bundle/files/*
+!engine/internal/bundle/files/.gitkeep

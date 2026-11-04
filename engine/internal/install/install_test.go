@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"golang.org/x/sys/windows/registry"
@@ -280,12 +281,50 @@ func TestContainsTellsAnInstalledExeFromAnotherCopy(t *testing.T) {
 	}
 }
 
-func TestInstallWithoutTheHostSaysToExtractTheZip(t *testing.T) {
+// Double-clicking dms-engine.exe inside the zip makes Explorer extract that
+// one exe to a temp folder: the host and notices come from inside the exe.
+func TestInstallFromALoneEngineWritesWhatItCarries(t *testing.T) {
+	l := testLayout(t)
+	l.Bundled = fstest.MapFS{
+		"dms-host.exe":        {Data: []byte("bundled host")},
+		"LICENSE":             {Data: []byte("licence")},
+		"THIRD-PARTY-NOTICES": {Data: []byte("notices")},
+	}
+	src := t.TempDir()
+	os.WriteFile(filepath.Join(src, "dms-engine.exe"), []byte("v1 engine"), 0o755)
+	if err := l.Install(src, "0.3.0", &Options{}); err != nil {
+		t.Fatal(err)
+	}
+	for f, want := range map[string]string{"dms-engine.exe": "v1 engine", "dms-host.exe": "bundled host", "LICENSE": "licence", "THIRD-PARTY-NOTICES": "notices"} {
+		if b, _ := os.ReadFile(filepath.Join(l.Dir, f)); string(b) != want {
+			t.Errorf("%s holds %q, want %q", f, b, want)
+		}
+	}
+}
+
+// What the exe carries wins over loose files next to it, which may be left
+// over from another version.
+func TestTheBundledHostWinsOverOneNextToTheExe(t *testing.T) {
+	l := testLayout(t)
+	l.Bundled = fstest.MapFS{"dms-host.exe": {Data: []byte("bundled host")}}
+	if err := l.Install(release(t, "old"), "0.3.0", &Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(l.Host()); string(b) != "bundled host" {
+		t.Fatalf("dms-host.exe holds %q", b)
+	}
+}
+
+// A dev build carries nothing; without dms-host.exe next to it there is no install.
+func TestInstallWithoutAnyHostSaysWhatIsMissing(t *testing.T) {
 	l := testLayout(t)
 	src := release(t, "v1")
 	os.Remove(filepath.Join(src, "dms-host.exe"))
 	err := l.Install(src, "0.3.0", &Options{Autostart: true})
-	if err == nil || !strings.Contains(err.Error(), "zip") {
-		t.Fatalf("error %v, want one about extracting the zip", err)
+	if err == nil || !strings.Contains(err.Error(), "dms-host.exe") {
+		t.Fatalf("error %v, want one naming dms-host.exe", err)
+	}
+	if _, err := os.Stat(l.Dir); err == nil {
+		t.Error("the install folder was made anyway")
 	}
 }

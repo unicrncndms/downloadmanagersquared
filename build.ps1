@@ -24,19 +24,26 @@ if (-not $go) { throw 'Go is not on PATH. Install it (winget install GoLang.Go) 
 $env:CGO_ENABLED = '0'
 $ldflags = "-X downloadmanagersquared/engine/internal/engine.Version=$Version"
 if ($Repo) { $ldflags += " -X downloadmanagersquared/engine/internal/install.Repo=$Repo" }
+# Every zip carries the licences of what is linked in (MIT/BSD/MPL require it).
+& (Join-Path $root '.github\scripts\notices.ps1')
+
+# dms-engine.exe carries the host and the notices (internal\bundle), so it
+# installs on its own, e.g. double-clicked inside the zip, where Explorer
+# extracts only that exe. The bundle folder is emptied again afterwards.
+$bundle = Join-Path $root 'engine\internal\bundle\files'
 Push-Location (Join-Path $root 'engine')
 try {
     & $go test ./...
     if ($LASTEXITCODE) { throw 'tests failed' }
     & $go build -trimpath -ldflags "$ldflags" -o "$dist\dms-host.exe" ./cmd/dms-host
     if ($LASTEXITCODE) { throw 'building dms-host failed' }
+    Copy-Item "$dist\dms-host.exe", (Join-Path $root 'LICENSE'), "$dist\THIRD-PARTY-NOTICES" $bundle
     & $go build -trimpath -ldflags "-H windowsgui -s -w $ldflags" -o "$dist\dms-engine.exe" ./cmd/dms-engine
     if ($LASTEXITCODE) { throw 'building dms-engine failed' }
 } finally {
+    Get-ChildItem $bundle -Exclude '.gitkeep' | Remove-Item -Force
     Pop-Location
 }
-# Every zip carries the licences of what is linked in (MIT/BSD/MPL require it).
-& (Join-Path $root '.github\scripts\notices.ps1')
 
 if (Get-Command node -ErrorAction SilentlyContinue) {
     node --test (Join-Path $root 'extension\test\*.test.js') # a glob: Node 24 doesn't take a folder

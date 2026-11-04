@@ -53,6 +53,11 @@ type Layout struct {
 	RunKey       string // holds the start-at-login value
 	UninstallKey string // the Installed apps entry
 	Icon         []byte // the app icon (ICO), written next to the exes for the shortcuts
+	// Bundled holds the files the engine exe carries (dms-host.exe and the
+	// notices), so it installs on its own, e.g. run straight from the zip.
+	// They win over files next to the exe. Nil, or empty in a dev build:
+	// the files next to the exe are used.
+	Bundled fs.FS
 }
 
 // Options are what a first install sets up besides the engine.
@@ -124,10 +129,11 @@ func (l Layout) Contains(exe string) bool {
 // them. first is what a first install sets up; nil on an upgrade, which
 // leaves start at login and the shortcuts as the user has them.
 func (l Layout) Install(src, version string, first *Options) error {
-	for _, f := range []string{"dms-engine.exe", "dms-host.exe"} {
-		if _, err := os.Stat(filepath.Join(src, f)); err != nil {
-			return fmt.Errorf("%s is missing next to this program: extract the whole zip first, then run dms-engine.exe from there", f)
-		}
+	if _, err := os.Stat(filepath.Join(src, "dms-engine.exe")); err != nil {
+		return fmt.Errorf("dms-engine.exe is missing in %s", src)
+	}
+	if !l.has(src, "dms-host.exe") {
+		return errors.New("dms-host.exe is missing: this build doesn't carry it and it isn't next to dms-engine.exe")
 	}
 	if winutil.CanWrite(l.Dir) {
 		if err := l.PutFiles(src); err != nil {
@@ -147,23 +153,23 @@ func (l Layout) Install(src, version string, first *Options) error {
 	return l.writeUninstallEntry(version)
 }
 
-// PutFiles writes the install folder: both exes and the licence files from
-// src, the native host manifest and the icon. It touches no registry, so it can
-// run as an administrator who isn't the user installing.
+// PutFiles writes the install folder: the engine from src, the host and the
+// licence files from what the engine carries (else from src), the native host
+// manifest and the icon. It touches no registry, so it can run as an
+// administrator who isn't the user installing.
 func (l Layout) PutFiles(src string) error {
 	if err := os.MkdirAll(l.Dir, 0o755); err != nil {
 		return err
 	}
-	if !strings.EqualFold(filepath.Clean(src), filepath.Clean(l.Dir)) { // else installing where it was extracted
-		for _, f := range []string{"dms-engine.exe", "dms-host.exe"} {
-			if err := copyRetrying(filepath.Join(src, f), filepath.Join(l.Dir, f), 10*time.Second); err != nil {
-				return err
-			}
+	inPlace := strings.EqualFold(filepath.Clean(src), filepath.Clean(l.Dir)) // installing where it was extracted
+	if !inPlace {
+		if err := retrying(func() error { return copyFile(filepath.Join(src, "dms-engine.exe"), l.Engine()) }); err != nil {
+			return err
 		}
-		for _, f := range Notices { // a dev build run from dist\ has none
-			if err := copyFile(filepath.Join(src, f), filepath.Join(l.Dir, f)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
+	}
+	for _, f := range append([]string{"dms-host.exe"}, Notices...) {
+		if err := l.place(src, f, inPlace); err != nil && !(errors.Is(err, fs.ErrNotExist) && f != "dms-host.exe") {
+			return err // a dev build run from dist\ has no notices
 		}
 	}
 	if len(l.Icon) > 0 {
@@ -217,13 +223,40 @@ func (l Layout) setUp(o Options) error {
 	return nil
 }
 
-// copyRetrying copies a file, retrying while the target is still in use (a
-// dms-host that hasn't exited yet).
-func copyRetrying(src, dst string, wait time.Duration) error {
-	deadline := time.Now().Add(wait)
+// has is whether name is carried by the engine or lies in src.
+func (l Layout) has(src, name string) bool {
+	if l.Bundled != nil {
+		if _, err := fs.Stat(l.Bundled, name); err == nil {
+			return true
+		}
+	}
+	_, err := os.Stat(filepath.Join(src, name))
+	return err == nil
+}
+
+// place writes name into the install folder from what the engine carries,
+// else from src. In place (src is the install folder) a file already there stays.
+func (l Layout) place(src, name string, inPlace bool) error {
+	dst := filepath.Join(l.Dir, name)
+	if l.Bundled != nil {
+		if b, err := fs.ReadFile(l.Bundled, name); err == nil {
+			return retrying(func() error { return os.WriteFile(dst, b, 0o755) })
+		}
+	}
+	if inPlace {
+		_, err := os.Stat(dst)
+		return err
+	}
+	return retrying(func() error { return copyFile(filepath.Join(src, name), dst) })
+}
+
+// retrying retries write for a few seconds: a host that is still exiting
+// holds its exe open. A file that isn't there fails at once.
+func retrying(write func() error) error {
+	deadline := time.Now().Add(10 * time.Second)
 	for {
-		err := copyFile(src, dst)
-		if err == nil || time.Now().After(deadline) {
+		err := write()
+		if err == nil || errors.Is(err, fs.ErrNotExist) || time.Now().After(deadline) {
 			return err
 		}
 		time.Sleep(250 * time.Millisecond)

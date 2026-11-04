@@ -8,8 +8,8 @@ Downloads files over **all your network connections at once** (Ethernet, Wi‑Fi
 
 ## Install
 
-1. Download `downloadmanagersquared-windows.zip` from the [latest release](https://github.com/unicrncndms/downloadmanagersquared/releases/latest) and extract it.
-2. Run `dms-engine.exe`. SmartScreen warns because the program isn't code-signed: **More info → Run anyway**.
+1. Download `downloadmanagersquared-windows.zip` from the [latest release](https://github.com/unicrncndms/downloadmanagersquared/releases/latest) and open it. Extracting it is optional.
+2. Run `dms-engine.exe`. If Windows says it might depend on other files in the zip, choose **Run**: it carries what it needs. SmartScreen warns because the program isn't code-signed: **More info → Run anyway**.
 3. Pick the install folder (Program Files by default) and shortcuts, then **Install**. Windows asks for administrator rights only if the folder needs them.
 4. Click **Add to …** for your browser and confirm.
 

@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"downloadmanagersquared/engine/internal/bundle"
 	"downloadmanagersquared/engine/internal/engine"
 	"downloadmanagersquared/engine/internal/install"
 	"downloadmanagersquared/engine/internal/ipc"
@@ -45,7 +46,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	l.Icon = tray.Icon()
+	l.Icon, l.Bundled = tray.Icon(), bundle.Files
 	l, installed := l.Find()
 	if slices.Contains(os.Args[1:], flagUninstall) {
 		uninstall(l)
@@ -98,7 +99,7 @@ func putFiles(src, dir string) {
 	if !filepath.IsAbs(dir) {
 		os.Exit(2)
 	}
-	l := install.Layout{Dir: filepath.Clean(dir), Icon: tray.Icon()}
+	l := install.Layout{Dir: filepath.Clean(dir), Icon: tray.Icon(), Bundled: bundle.Files}
 	if err := l.PutFiles(src); err != nil {
 		winutil.MessageBox(title, "Could not copy DMS² into "+l.Dir+": "+err.Error())
 		os.Exit(1)
