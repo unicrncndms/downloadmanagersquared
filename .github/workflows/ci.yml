@@ -8,6 +8,8 @@ on:
 jobs:
   check:
     runs-on: windows-latest
+    env:
+      CGO_ENABLED: "0" # pure Go, as build.ps1 builds; the runner's gcc would otherwise link sqlite via cgo
     steps:
       - uses: actions/checkout@v5
         with:

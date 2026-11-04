@@ -1,6 +1,7 @@
 # Writes dist\THIRD-PARTY-NOTICES: every licence linked into the engine, then
 # Go's own (the standard library and runtime are in every exe) and the PIA CA.
 $ErrorActionPreference = 'Stop'
+$env:CGO_ENABLED = '0' # the modules a pure-Go build links, as build.ps1 builds
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $out = Join-Path $root 'dist\THIRD-PARTY-NOTICES'
 New-Item -ItemType Directory -Force (Split-Path $out) | Out-Null

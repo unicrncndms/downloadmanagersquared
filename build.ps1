@@ -17,6 +17,9 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "version '$Version' is not X.Y
 $go = (Get-Command go -ErrorAction SilentlyContinue).Source
 if (-not $go) { throw 'Go is not on PATH. Install it (winget install GoLang.Go) and open a new terminal.' }
 
+# Pure Go, as the licence notices assume: with a C compiler on PATH (GitHub's
+# runners have one) cgo would link sqlite modules the notices don't list.
+$env:CGO_ENABLED = '0'
 $ldflags = "-X downloadmanagersquared/engine/internal/engine.Version=$Version"
 if ($Repo) { $ldflags += " -X downloadmanagersquared/engine/internal/install.Repo=$Repo" }
 Push-Location (Join-Path $root 'engine')
