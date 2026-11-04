@@ -52,10 +52,6 @@ var (
 	pKillTimer           = user32.NewProc("KillTimer")
 	pGetCursorPos        = user32.NewProc("GetCursorPos")
 	pWindowFromPoint     = user32.NewProc("WindowFromPoint")
-	pOpenClipboard       = user32.NewProc("OpenClipboard")
-	pEmptyClipboard      = user32.NewProc("EmptyClipboard")
-	pSetClipboardData    = user32.NewProc("SetClipboardData")
-	pCloseClipboard      = user32.NewProc("CloseClipboard")
 
 	pCreateFont       = gdi32.NewProc("CreateFontW")
 	pSetTextColor     = gdi32.NewProc("SetTextColor")
@@ -72,9 +68,6 @@ var (
 	pGetModuleHandle = kernel32.NewProc("GetModuleHandleW")
 	pCreateActCtx    = kernel32.NewProc("CreateActCtxW")
 	pActivateActCtx  = kernel32.NewProc("ActivateActCtx")
-	pGlobalAlloc     = kernel32.NewProc("GlobalAlloc")
-	pGlobalLock      = kernel32.NewProc("GlobalLock")
-	pGlobalUnlock    = kernel32.NewProc("GlobalUnlock")
 
 	pDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 )
@@ -184,25 +177,6 @@ func invalidate(h windows.Handle) { pInvalidateRect.Call(uintptr(h), 0, 0) }
 
 func enabled(h windows.Handle) bool {
 	r, _, _ := pIsWindowEnabled.Call(uintptr(h))
-	return r != 0
-}
-
-// copyText puts s on the clipboard.
-func copyText(owner windows.Handle, s string) bool {
-	u, _ := windows.UTF16FromString(s)
-	if r, _, _ := pOpenClipboard.Call(uintptr(owner)); r == 0 {
-		return false
-	}
-	defer pCloseClipboard.Call()
-	pEmptyClipboard.Call()
-	mem, _, _ := pGlobalAlloc.Call(0x0002 /* GMEM_MOVEABLE */, uintptr(len(u)*2))
-	if mem == 0 {
-		return false
-	}
-	p, _, _ := pGlobalLock.Call(mem)
-	copy(unsafe.Slice(*(**uint16)(unsafe.Pointer(&p)), len(u)), u)
-	pGlobalUnlock.Call(mem)
-	r, _, _ := pSetClipboardData.Call(13 /* CF_UNICODETEXT */, mem)
 	return r != 0
 }
 

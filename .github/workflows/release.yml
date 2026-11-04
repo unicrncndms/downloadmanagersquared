@@ -44,7 +44,7 @@ jobs:
         run: ./build.ps1 -Version $env:TAG -Repo $env:GITHUB_REPOSITORY
 
       - name: Draft release with the engine
-        run: gh release create $env:TAG dist/downloadmanagersquared-windows.zip --draft --verify-tag --title $env:TAG --notes "Download downloadmanagersquared-windows.zip, extract it and run dms-engine.exe. It then shows how to add the Firefox extension."
+        run: gh release create $env:TAG dist/downloadmanagersquared-windows.zip --draft --verify-tag --title $env:TAG --notes "Download downloadmanagersquared-windows.zip, extract it and run dms-engine.exe. Setup then adds the extension to your browser."
 
       - name: Sign the extension (unlisted)
         id: sign

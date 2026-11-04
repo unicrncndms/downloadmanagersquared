@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"unsafe"
 
@@ -25,9 +26,11 @@ type Choice struct {
 
 // Steps are what the window does for the user.
 type Steps struct {
-	Install      func(Choice) error // runs off the window's thread
-	AddExtension func()             // the finished page's button
-	ExtensionURL string             // shown to copy into another browser
+	Install      func(Choice) error       // runs off the window's thread
+	Browsers     func() []winutil.Browser // the installed browsers the extension runs in
+	AddExtension func(winutil.Browser)    // opens the extension in that browser to add
+	GetFirefox   func()                   // opens Firefox's download page, when there is no browser for it
+	Uninstall    func()                   // removes the install again, when there is no browser for it
 }
 
 // ErrReported is an Install failure the user was already told about.
@@ -35,18 +38,20 @@ var ErrReported = errors.New("already reported")
 
 // Control IDs. IDOK and IDCANCEL are what Enter and Esc send.
 const (
-	idOK        = 1
-	idCancel    = 2
-	idBrowse    = 100
-	idDir       = 101
-	idStartMenu = 102
-	idDesktop   = 103
-	idAutostart = 104
-	idURL       = 105
-	idCopy      = 106
+	idOK         = 1
+	idCancel     = 2
+	idBrowse     = 100
+	idDir        = 101
+	idStartMenu  = 102
+	idDesktop    = 103
+	idAutostart  = 104
+	idGetFirefox = 105
+	idUninstall  = 106
+	idBrowser    = 200 // + the browser's index
 
-	timerHover  = 1
-	timerCopied = 2
+	timerHover = 1
+
+	wmActivate = 0x0006
 )
 
 // Layout, in 96-DPI pixels.
@@ -87,7 +92,8 @@ type field struct {
 // The window's state; there is only ever one.
 var w struct {
 	main                                      windows.Handle
-	dir, url, install, copy                   windows.Handle
+	dir, install                              windows.Handle
+	browsers                                  []winutil.Browser // on the finished page
 	children                                  []windows.Handle
 	ctls                                      map[windows.Handle]*ctl
 	labels                                    []label
@@ -216,7 +222,12 @@ func choosePage(d Choice) {
 	pSendMessage.Call(uintptr(w.dir), emSetSel, 0, ^uintptr(0))
 }
 
-// donePage is the last page: the extension, the one step left.
+// maxBrowsers is how many browsers the finished page has room for.
+const maxBrowsers = 6
+
+// donePage is the last page: the one step left, adding the extension to a
+// browser. Without a browser for it, it says so and offers Firefox or
+// uninstalling.
 func donePage() {
 	for _, h := range w.children {
 		pDestroyWindow.Call(uintptr(h))
@@ -224,17 +235,43 @@ func donePage() {
 	w.children, w.labels, w.fields, w.hover = nil, nil, nil, 0
 	w.ctls = map[windows.Handle]*ctl{}
 	w.done = true
+	w.browsers = w.steps.Browsers()
+	if len(w.browsers) > maxBrowsers {
+		w.browsers = w.browsers[:maxBrowsers]
+	}
+	text := func() uint32 { return w.pal.text }
 	header("DMS² is installed", "It runs in the tray, next to the clock.")
-	addLabel(rect{pad, 100, width - pad, 140}, "One step left: add the Firefox extension. It takes over your downloads and shows them.",
-		w.fontBody, func() uint32 { return w.pal.text }, dtWordBreak)
-	add := addButton("Add to Firefox", idOK, primary, rect{pad, 146, pad + 150, 178})
-	addLabel(rect{pad, 206, width - pad, 226}, "Using LibreWolf, Waterfox or Floorp? Open this link in that browser instead:",
-		w.fontSmall, func() uint32 { return w.pal.muted }, dtSingleLine|dtEndEllipsis)
-	w.url = addField(rect{pad, 230, width - pad - 100, 262}, w.steps.ExtensionURL, idURL, true)
-	w.copy = addButton("Copy", idCopy, button, rect{width - pad - 92, 230, width - pad, 262})
+	var first windows.Handle
+	if len(w.browsers) == 0 {
+		addLabel(rect{pad, 100, width - pad, 160}, "DMS² works through Firefox or a browser based on it, such as LibreWolf, Waterfox or Floorp, "+
+			"and none is installed. Install one, then come back to this window.", w.fontBody, text, dtWordBreak)
+		first = addButton("Download Firefox", idGetFirefox, primary, rect{pad, 170, pad + 170, 202})
+		addButton("Uninstall DMS²", idUninstall, button, rect{pad + 178, 170, pad + 348, 202})
+	} else {
+		addLabel(rect{pad, 100, width - pad, 140}, "One step left: add the DMS² extension to your browser. It takes over your downloads and shows them.",
+			w.fontBody, text, dtWordBreak)
+		const bw, gap = (width - 2*pad - 8) / 2, 8
+		y := int32(146)
+		for i, b := range w.browsers {
+			x := int32(pad + (i%2)*(bw+gap))
+			k := button
+			if i == 0 {
+				k = primary
+			}
+			h := addButton("Add to "+b.Name, idBrowser+i, k, rect{x, y, x + bw, y + 32})
+			if i == 0 {
+				first = h
+			}
+			if i%2 == 1 || i == len(w.browsers)-1 {
+				y += 40
+			}
+		}
+		addLabel(rect{pad, y + 2, width - pad, y + 22}, "The browser asks once whether to add it.",
+			w.fontSmall, func() uint32 { return w.pal.muted }, dtSingleLine)
+	}
 	addButton("Close", idCancel, button, footerButton(0))
 	invalidate(w.main)
-	pSetFocus.Call(uintptr(add))
+	pSetFocus.Call(uintptr(first))
 }
 
 func header(title, sub string) {
@@ -384,7 +421,7 @@ func drawCtl(c canvas, d *drawItemStruct, k *ctl) {
 		} else {
 			c.roundRect(0, 0, wd, ht, radius, fill, 0, 0)
 		}
-		c.text(text(d.hwndItem), rect{0, 0, r.right, r.bottom}, w.fontBody, color, dtSingleLine|dtVCenter|dtCenter)
+		c.text(text(d.hwndItem), rect{0, 0, r.right, r.bottom}, w.fontBody, color, dtSingleLine|dtVCenter|dtCenter|dtEndEllipsis)
 
 	default:
 		fill, border, color := w.pal.panel, w.pal.line, w.pal.text
@@ -401,7 +438,7 @@ func drawCtl(c canvas, d *drawItemStruct, k *ctl) {
 			border, sw = w.pal.accent, float32(px(2))
 		}
 		c.roundRect(0, 0, wd, ht, radius, fill, border, sw)
-		c.text(text(d.hwndItem), rect{0, 0, r.right, r.bottom}, w.fontBody, color, dtSingleLine|dtVCenter|dtCenter)
+		c.text(text(d.hwndItem), rect{0, 0, r.right, r.bottom}, w.fontBody, color, dtSingleLine|dtVCenter|dtCenter|dtEndEllipsis)
 	}
 }
 
@@ -476,11 +513,12 @@ func wndProc(hwnd windows.Handle, m uint32, wParam, lParam uintptr) uintptr {
 				pKillTimer.Call(uintptr(hwnd), timerHover)
 				setHover(0)
 			}
-		case timerCopied:
-			pKillTimer.Call(uintptr(hwnd), timerCopied)
-			pSetWindowText.Call(uintptr(w.copy), str("Copy"))
 		}
 		return 0
+	case wmActivate: // back from installing a browser, maybe
+		if wParam&0xffff != 0 && w.done && !slices.Equal(w.steps.Browsers(), w.browsers) {
+			donePage()
+		}
 	case wmSettingChange: // maybe light or dark mode changed
 		applyTheme()
 		invalidate(w.main)
@@ -504,10 +542,14 @@ func wndProc(hwnd windows.Handle, m uint32, wParam, lParam uintptr) uintptr {
 }
 
 func command(id int, code uint32) {
-	if id == idDir || id == idURL {
+	if id == idDir {
 		if code == enSetFocus || code == enKillFocus {
 			invalidate(w.main) // the field's outline
 		}
+		return
+	}
+	if i := id - idBrowser; i >= 0 && i < len(w.browsers) {
+		w.steps.AddExtension(w.browsers[i])
 		return
 	}
 	switch id {
@@ -520,8 +562,10 @@ func command(id int, code uint32) {
 		}
 	case idOK:
 		switch {
+		case w.done && len(w.browsers) > 0: // Enter: the first browser
+			w.steps.AddExtension(w.browsers[0])
 		case w.done:
-			w.steps.AddExtension()
+			w.steps.GetFirefox()
 		case w.installing:
 		default:
 			dir, problem := checkDir(text(w.dir))
@@ -532,12 +576,11 @@ func command(id int, code uint32) {
 			}
 			startInstall(Choice{Dir: dir, StartMenu: checked(idStartMenu), Desktop: checked(idDesktop), Autostart: checked(idAutostart)})
 		}
-	case idCopy:
-		if copyText(w.main, w.steps.ExtensionURL) {
-			pSetWindowText.Call(uintptr(w.copy), str("Copied"))
-			invalidate(w.copy)
-			pSetTimer.Call(uintptr(w.main), timerCopied, 1500, 0)
-		}
+	case idGetFirefox:
+		w.steps.GetFirefox()
+	case idUninstall:
+		w.steps.Uninstall() // it asks for itself, in its own windows
+		pDestroyWindow.Call(uintptr(w.main))
 	case idCancel:
 		if !w.installing {
 			pDestroyWindow.Call(uintptr(w.main))

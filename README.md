@@ -10,8 +10,9 @@ Windows 10/11, with Firefox or a Firefox-based browser (LibreWolf, Waterfox, Flo
 2. Run `dms-engine.exe`. Windows SmartScreen warns about it, because the program isn't code-signed: click **More info → Run anyway**.
 
    Setup asks where to install (`C:\Program Files\downloadmanagersquared` unless you pick another folder) and whether to add a Start menu entry, a desktop shortcut and start with Windows. Windows asks for administrator rights only if the folder needs them, as Program Files does, and only to copy the files there. Everything else stays with your Windows user. The engine then runs in the tray, next to the clock. You can delete the extracted folder afterwards.
-3. A message then offers to open the Firefox extension. Click OK and let Firefox install it. Using LibreWolf, Waterfox or Floorp? Open the link it shows in that browser instead:
-   `https://github.com/unicrncndms/downloadmanagersquared/releases/latest/download/downloadmanagersquared.xpi`
+3. Setup then shows an **Add to …** button for each Firefox-family browser you have (Firefox, LibreWolf, Waterfox, Floorp). Click yours and confirm adding the extension; it comes from the zip, so it always matches the engine. If you have none of them, setup says so and offers to download Firefox or to uninstall again.
+
+   To add the extension to another browser later, open `downloadmanagersquared.xpi` from the zip in it, or [the one in the latest release](https://github.com/unicrncndms/downloadmanagersquared/releases/latest/download/downloadmanagersquared.xpi).
 
 The extension asks to enable containers: DMS² uses one per connection while it gets a site's link through it.
 

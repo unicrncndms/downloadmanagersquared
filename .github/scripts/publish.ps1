@@ -28,7 +28,23 @@ $updates = [ordered]@{
 $json = Join-Path $dir 'updates.json'
 [IO.File]::WriteAllText($json, ($updates | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding $false))
 
-gh release upload $Tag $asset $json --clobber --repo $repo
+# The engine zip carries the signed extension too, so setup can open it in the
+# browser straight from disk: one install prompt, the version that matches.
+$zipName = 'downloadmanagersquared-windows.zip'
+gh release download $Tag --pattern $zipName --dir $dir --clobber --repo $repo
+if ($LASTEXITCODE) { throw 'downloading the engine zip failed' }
+$zip = Join-Path $dir $zipName
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+$archive = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Update)
+try {
+    $old = $archive.GetEntry('downloadmanagersquared.xpi')
+    if ($old) { $old.Delete() }
+    [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $asset, 'downloadmanagersquared.xpi') | Out-Null
+} finally {
+    $archive.Dispose()
+}
+
+gh release upload $Tag $asset $json $zip --clobber --repo $repo
 if ($LASTEXITCODE) { throw 'uploading the extension failed' }
 gh release edit $Tag --draft=false --latest --repo $repo
 if ($LASTEXITCODE) { throw 'publishing the release failed' }

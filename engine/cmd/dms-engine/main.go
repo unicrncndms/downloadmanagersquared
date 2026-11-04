@@ -72,12 +72,24 @@ func main() {
 				}
 				return err
 			},
-			AddExtension: func() {
-				if err := winutil.OpenInFirefox(install.ExtensionURL()); err != nil {
-					winutil.MessageBox(title, "Could not open Firefox: "+err.Error())
+			Browsers: winutil.FirefoxBrowsers,
+			AddExtension: func(b winutil.Browser) {
+				// The signed extension the release zip carries: the browser asks
+				// once to add it. A build without one gets it from the release.
+				target := filepath.Join(src, "downloadmanagersquared.xpi")
+				if _, err := os.Stat(target); err != nil {
+					target = install.ExtensionURL()
+				}
+				if err := winutil.OpenBrowser(b.Exe, target); err != nil {
+					winutil.MessageBox(title, "Could not open "+b.Name+": "+err.Error())
 				}
 			},
-			ExtensionURL: install.ExtensionURL(),
+			GetFirefox: func() { winutil.ShellOpen("https://www.mozilla.org/firefox/new/") },
+			Uninstall: func() {
+				if err := winutil.StartDetached(l.Engine(), flagUninstall); err != nil {
+					winutil.MessageBox(title, "Could not start uninstalling: "+err.Error())
+				}
+			},
 		})
 		return
 	}

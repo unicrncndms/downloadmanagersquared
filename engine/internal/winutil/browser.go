@@ -18,10 +18,17 @@ const (
 )
 
 // browserLaunch picks how to open pages given the exe of the browser the
-// extension runs in ("" if unknown). Store apps under \WindowsApps\ can't be
-// started by path.
+// extension runs in ("" if unknown). Store apps inside a package under
+// \WindowsApps\ can't be started by path; their aliases in the user's
+// Microsoft\WindowsApps folder can.
 func browserLaunch(exe string) launch {
-	if exe == "" || strings.Contains(strings.ToLower(exe), `\windowsapps\`) {
+	lower := strings.ToLower(exe)
+	switch {
+	case exe == "":
+		return launchDefault
+	case strings.HasSuffix(filepath.Dir(lower), `\microsoft\windowsapps`):
+		return launchExe
+	case strings.Contains(lower, `\windowsapps\`):
 		return launchDefault
 	}
 	return launchExe
