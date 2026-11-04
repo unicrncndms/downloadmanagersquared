@@ -125,3 +125,9 @@ Where tunnel configs come from: imported WireGuard `.conf` files, or PIA, which 
 **Capture**:
 The extension taking a download away from the browser and handing it to the engine. It happens to every download at or above the capture threshold, and to every torrent file.
 _Avoid_: Intercept, grab, take over (except in user-facing text)
+
+### Engine
+
+**Downloads window**:
+The engine's own window, opened from the tray, with the downloads list and the settings. It works whether or not a browser is running, and closing it leaves the engine running in the tray.
+_Avoid_: GUI, app, manager, popup (the popup is the extension's toolbar panel)
