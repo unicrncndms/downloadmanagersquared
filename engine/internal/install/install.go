@@ -101,10 +101,18 @@ func (l Layout) DesktopLink() string   { return filepath.Join(l.DesktopDir, Name
 func (l Layout) manifest() string      { return filepath.Join(l.Dir, "native-host.json") }
 func (l Layout) iconFile() string      { return filepath.Join(l.Dir, "dms.ico") }
 
+// Notices are the licence files the release zip carries next to the exes. The
+// install folder gets them too, so the installed copy keeps its notices.
+var Notices = []string{"LICENSE", "THIRD-PARTY-NOTICES"}
+
 // files are everything an install puts in its folder. Uninstalling removes
 // only these, as the folder may be one the user keeps other things in.
 func (l Layout) files() []string {
-	return []string{l.Engine(), l.Host(), l.manifest(), l.iconFile()}
+	out := []string{l.Engine(), l.Host(), l.manifest(), l.iconFile()}
+	for _, f := range Notices {
+		out = append(out, filepath.Join(l.Dir, f))
+	}
+	return out
 }
 
 // Contains is whether exe sits in the install folder.
@@ -142,9 +150,9 @@ func (l Layout) Install(src, version string, first *Options) error {
 	return l.writeUninstallEntry(version)
 }
 
-// PutFiles writes the install folder: both exes from src, the native host
-// manifest and the icon. It touches no registry, so it can run as an
-// administrator who isn't the user installing.
+// PutFiles writes the install folder: both exes and the licence files from
+// src, the native host manifest and the icon. It touches no registry, so it can
+// run as an administrator who isn't the user installing.
 func (l Layout) PutFiles(src string) error {
 	if err := os.MkdirAll(l.Dir, 0o755); err != nil {
 		return err
@@ -152,6 +160,11 @@ func (l Layout) PutFiles(src string) error {
 	if !strings.EqualFold(filepath.Clean(src), filepath.Clean(l.Dir)) { // else installing where it was extracted
 		for _, f := range []string{"dms-engine.exe", "dms-host.exe"} {
 			if err := copyRetrying(filepath.Join(src, f), filepath.Join(l.Dir, f), 10*time.Second); err != nil {
+				return err
+			}
+		}
+		for _, f := range Notices { // a dev build run from dist\ has none
+			if err := copyFile(filepath.Join(src, f), filepath.Join(l.Dir, f)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return err
 			}
 		}

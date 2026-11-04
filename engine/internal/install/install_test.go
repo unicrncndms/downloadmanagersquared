@@ -78,6 +78,32 @@ func TestFirstInstallCopiesAndRegistersEverything(t *testing.T) {
 	}
 }
 
+func TestInstallCopiesTheLicences(t *testing.T) {
+	l := testLayout(t)
+	src := release(t, "v1")
+	for _, f := range Notices {
+		os.WriteFile(filepath.Join(src, f), []byte("text of "+f), 0o644)
+	}
+	if err := l.Install(src, "0.3.0", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range Notices {
+		if b, _ := os.ReadFile(filepath.Join(l.Dir, f)); string(b) != "text of "+f {
+			t.Fatalf("%s holds %q", f, b)
+		}
+		if !strings.Contains(l.removeCommand(), filepath.Join(l.Dir, f)) {
+			t.Fatalf("uninstalling leaves %s behind", f)
+		}
+	}
+}
+
+func TestInstallWithoutTheLicencesStillWorks(t *testing.T) {
+	l := testLayout(t) // a dev build in dist\ has no LICENSE next to the exes
+	if err := l.Install(release(t, "v1"), "0.3.0", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAnUpgradeLeavesStartAtLoginAlone(t *testing.T) {
 	l := testLayout(t)
 	if err := l.Install(release(t, "v1"), "0.3.0", &Options{Autostart: true}); err != nil {

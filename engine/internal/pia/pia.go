@@ -25,7 +25,8 @@ import (
 )
 
 // PIA's own CA, which signs its WireGuard and port forwarding servers
-// (ca.rsa.4096.crt from pia-foss/manual-connections, valid until 2034).
+// (ca.rsa.4096.crt from pia-foss/manual-connections, valid until 2034; MIT,
+// see LICENSE.manual-connections, which notices.ps1 puts in THIRD-PARTY-NOTICES).
 //
 //go:embed ca.rsa.4096.crt
 var caPEM []byte

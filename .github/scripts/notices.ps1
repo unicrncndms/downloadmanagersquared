@@ -1,5 +1,5 @@
 # Writes dist\THIRD-PARTY-NOTICES: every licence linked into the engine, then
-# Go's own (the standard library and runtime are in every exe).
+# Go's own (the standard library and runtime are in every exe) and the PIA CA.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $out = Join-Path $root 'dist\THIRD-PARTY-NOTICES'
@@ -17,7 +17,11 @@ try {
 }
 $goVersion = (go env GOVERSION)
 $goLicense = Get-Content -Raw (Join-Path (go env GOROOT) 'LICENSE')
-$text = ($report -join "`n") + "`n================================================================================`nThe Go standard library and runtime ($goVersion)`nLicense: BSD-3-Clause`n`n" + $goLicense
+$piaLicense = Get-Content -Raw (Join-Path $root 'engine\internal\pia\LICENSE.manual-connections')
+$sep = "`n================================================================================`n"
+$text = ($report -join "`n") +
+    $sep + "The Go standard library and runtime ($goVersion)`nLicense: BSD-3-Clause`n`n" + $goLicense +
+    $sep + "ca.rsa.4096.crt from github.com/pia-foss/manual-connections (embedded in the engine)`nLicense: MIT`n`n" + $piaLicense
 [IO.File]::WriteAllText($out, $text, (New-Object Text.UTF8Encoding $false))
 $mpl = ($report | Select-String '^License: MPL-2.0').Count
 Write-Host "Wrote $out ($mpl MPL-2.0 modules)"

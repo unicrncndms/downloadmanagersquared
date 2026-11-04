@@ -30,6 +30,8 @@ try {
 } finally {
     Pop-Location
 }
+# Every zip carries the licences of what is linked in (MIT/BSD/MPL require it).
+& (Join-Path $root '.github\scripts\notices.ps1')
 
 if (Get-Command node -ErrorAction SilentlyContinue) {
     node --test (Join-Path $root 'extension\test')
@@ -78,7 +80,8 @@ Remove-Item -Recurse -Force $zipStage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $zipStage | Out-Null
 Copy-Item "$dist\dms-engine.exe", "$dist\dms-host.exe", (Join-Path $root 'LICENSE') $zipStage
 Copy-Item (Join-Path $root 'installer\README.txt') $zipStage
-if (Test-Path "$dist\THIRD-PARTY-NOTICES") { Copy-Item "$dist\THIRD-PARTY-NOTICES" $zipStage }
+if (-not (Test-Path "$dist\THIRD-PARTY-NOTICES")) { throw 'THIRD-PARTY-NOTICES is missing: no zip without it' }
+Copy-Item "$dist\THIRD-PARTY-NOTICES" $zipStage
 $zip = Join-Path $dist 'downloadmanagersquared-windows.zip'
 Remove-Item $zip -ErrorAction SilentlyContinue
 Push-Location $zipStage

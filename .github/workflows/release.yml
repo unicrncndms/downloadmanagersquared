@@ -37,9 +37,6 @@ jobs:
         with:
           node-version: 24
 
-      - name: Third-party notices
-        run: ./.github/scripts/notices.ps1
-
       - name: Build
         run: ./build.ps1 -Version $env:TAG -Repo $env:GITHUB_REPOSITORY
 
