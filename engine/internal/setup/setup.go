@@ -1,7 +1,7 @@
 // Package setup is the window a first install shows: where to install and
 // what to set up besides the engine, then, once installed, the one step left
-// (adding the browser extension). It is plain Win32, drawn with the system's
-// current controls.
+// (adding the browser extension). It is Win32, drawn in the extension's
+// colours and following Windows' light or dark mode.
 package setup
 
 import (
@@ -9,9 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
-	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -35,132 +33,84 @@ type Steps struct {
 // ErrReported is an Install failure the user was already told about.
 var ErrReported = errors.New("already reported")
 
-var (
-	user32   = windows.NewLazySystemDLL("user32.dll")
-	gdi32    = windows.NewLazySystemDLL("gdi32.dll")
-	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
+// Control IDs. IDOK and IDCANCEL are what Enter and Esc send.
+const (
+	idOK        = 1
+	idCancel    = 2
+	idBrowse    = 100
+	idDir       = 101
+	idStartMenu = 102
+	idDesktop   = 103
+	idAutostart = 104
+	idURL       = 105
+	idCopy      = 106
 
-	pRegisterClassEx     = user32.NewProc("RegisterClassExW")
-	pCreateWindowEx      = user32.NewProc("CreateWindowExW")
-	pDefWindowProc       = user32.NewProc("DefWindowProcW")
-	pDestroyWindow       = user32.NewProc("DestroyWindow")
-	pGetMessage          = user32.NewProc("GetMessageW")
-	pIsDialogMessage     = user32.NewProc("IsDialogMessageW")
-	pTranslateMessage    = user32.NewProc("TranslateMessage")
-	pDispatchMessage     = user32.NewProc("DispatchMessageW")
-	pPostQuitMessage     = user32.NewProc("PostQuitMessage")
-	pSendMessage         = user32.NewProc("SendMessageW")
-	pGetWindowText       = user32.NewProc("GetWindowTextW")
-	pGetWindowTextLength = user32.NewProc("GetWindowTextLengthW")
-	pSetWindowText       = user32.NewProc("SetWindowTextW")
-	pShowWindow          = user32.NewProc("ShowWindow")
-	pSetForeground       = user32.NewProc("SetForegroundWindow")
-	pSetFocus            = user32.NewProc("SetFocus")
-	pPostMessage         = user32.NewProc("PostMessageW")
-	pEnableWindow        = user32.NewProc("EnableWindow")
-	pAdjustWindowRectEx  = user32.NewProc("AdjustWindowRectEx")
-	pGetSystemMetrics    = user32.NewProc("GetSystemMetrics")
-	pLoadCursor          = user32.NewProc("LoadCursorW")
-	pGetSysColorBrush    = user32.NewProc("GetSysColorBrush")
-	pGetSysColor         = user32.NewProc("GetSysColor")
-	pCreateIconFromRes   = user32.NewProc("CreateIconFromResourceEx")
-	pSetDpiAwareness     = user32.NewProc("SetProcessDpiAwarenessContext")
-	pGetDpiForSystem     = user32.NewProc("GetDpiForSystem")
-	pCreateFont          = gdi32.NewProc("CreateFontW")
-	pSetTextColor        = gdi32.NewProc("SetTextColor")
-	pSetBkMode           = gdi32.NewProc("SetBkMode")
-	pGetModuleHandle     = kernel32.NewProc("GetModuleHandleW")
-	pCreateActCtx        = kernel32.NewProc("CreateActCtxW")
-	pActivateActCtx      = kernel32.NewProc("ActivateActCtx")
+	timerHover  = 1
+	timerCopied = 2
 )
+
+// Layout, in 96-DPI pixels.
+const (
+	width, height = 520, 364
+	pad           = 24
+	footer        = 64 // the band with the buttons at the bottom
+)
+
+type kind int
 
 const (
-	wmDestroy         = 0x0002
-	wmClose           = 0x0010
-	wmSetFont         = 0x0030
-	wmSetIcon         = 0x0080
-	wmCommand         = 0x0111
-	wmCtlColorStatic  = 0x0138
-	wmInstalled       = 0x8000 + 1 // WM_APP+1: the install finished
-	esReadOnly        = 0x0800
-	bmGetCheck        = 0x00F0
-	bmSetCheck        = 0x00F1
-	emSetSel          = 0x00B1
-	wsChild           = 0x40000000
-	wsVisible         = 0x10000000
-	wsTabStop         = 0x00010000
-	wsGroup           = 0x00020000
-	wsCaption         = 0x00C00000
-	wsSysMenu         = 0x00080000
-	wsMinimizeBox     = 0x00020000
-	wsExClientEdge    = 0x00000200
-	wsExControlParent = 0x00010000
-	esAutoHScroll     = 0x0080
-	bsDefPushButton   = 0x0001
-	bsAutoCheckbox    = 0x0003
-	colorBtnFace      = 15
-	colorGrayText     = 17
-	idOK              = 1
-	idCancel          = 2
-	idBrowse          = 100
-	idDir             = 101
-	idStartMenu       = 102
-	idDesktop         = 103
-	idAutostart       = 104
-	idNote            = 105
-	idAddExtension    = 106
-	idURL             = 107
+	button kind = iota
+	primary
+	checkbox
 )
 
-type wndClassEx struct {
-	size       uint32
-	style      uint32
-	wndProc    uintptr
-	clsExtra   int32
-	wndExtra   int32
-	instance   windows.Handle
-	icon       windows.Handle
-	cursor     windows.Handle
-	background windows.Handle
-	menuName   *uint16
-	className  *uint16
-	iconSm     windows.Handle
+// ctl is how to draw one of the window's buttons.
+type ctl struct {
+	kind    kind
+	checked bool
+	footer  bool // sits on the footer band
 }
 
-type msg struct {
-	hwnd    windows.Handle
-	message uint32
-	wParam  uintptr
-	lParam  uintptr
-	time    uint32
-	pt      [2]int32
-	private uint32
+type label struct {
+	r     rect
+	text  string
+	font  windows.Handle
+	color func() uint32
+	flags uintptr
 }
 
-type rect struct{ left, top, right, bottom int32 }
+type field struct {
+	r    rect
+	edit windows.Handle
+}
 
 // The window's state; there is only ever one.
 var w struct {
-	main, dir     windows.Handle
-	install       windows.Handle   // the Install button
-	page          []windows.Handle // the controls of the page showing
-	grays         []windows.Handle // statics in gray
-	boxes         map[int]windows.Handle
-	steps         Steps
-	installing    bool
-	installErr    chan error
-	installed     bool
-	folderName    string
-	dpi           int32
-	font, heading windows.Handle
-}
-
-func str(s string) uintptr {
-	p, _ := windows.UTF16PtrFromString(s)
-	return uintptr(unsafe.Pointer(p))
+	main                                      windows.Handle
+	dir, url, install, copy                   windows.Handle
+	children                                  []windows.Handle
+	ctls                                      map[windows.Handle]*ctl
+	labels                                    []label
+	fields                                    []field
+	note                                      int // index of the label under the folder field
+	hover                                     windows.Handle
+	done                                      bool // on the finished page
+	icon                                      windows.Handle
+	pal                                       palette
+	dark                                      bool
+	brushPanel, brushBg                       windows.Handle
+	fontBody, fontSmall, fontLabel, fontTitle windows.Handle
+	steps                                     Steps
+	installing                                bool
+	installErr                                chan error
+	installed                                 bool
+	folderName                                string
+	dpi                                       int32
 }
 
 func px(v int32) int32 { return v * w.dpi / 96 }
+
+func scaled(r rect) rect { return rect{px(r.left), px(r.top), px(r.right), px(r.bottom)} }
 
 // Run shows the window until the user closes it, and says whether it
 // installed. defaults fills it in; the last part of defaults.Dir is the folder
@@ -169,6 +119,7 @@ func Run(defaults Choice, icon []byte, steps Steps) bool {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	modernControls()
+	startGDIPlus()
 	if pSetDpiAwareness.Find() == nil {
 		pSetDpiAwareness.Call(^uintptr(1)) // DPI_AWARENESS_CONTEXT_SYSTEM_AWARE (-2)
 	}
@@ -179,26 +130,25 @@ func Run(defaults Choice, icon []byte, steps Steps) bool {
 		}
 	}
 	w.steps, w.folderName, w.installErr = steps, filepath.Base(defaults.Dir), make(chan error, 1)
-	w.boxes = map[int]windows.Handle{}
-	w.font = font(9, 400, "Segoe UI")
-	w.heading = font(12, 600, "Segoe UI")
+	w.ctls = map[windows.Handle]*ctl{}
+	w.fontBody, w.fontSmall = newFont(14, 400), newFont(13, 400)
+	w.fontLabel, w.fontTitle = newFont(13, 600), newFont(20, 600)
+	w.icon = iconHandle(icon, px(32))
+	applyTheme()
 
 	inst, _, _ := pGetModuleHandle.Call(0)
 	cursor, _, _ := pLoadCursor.Call(0, 32512) // IDC_ARROW
-	brush, _, _ := pGetSysColorBrush.Call(colorBtnFace)
 	class := wndClassEx{
-		wndProc:    windows.NewCallback(wndProc),
-		instance:   windows.Handle(inst),
-		cursor:     windows.Handle(cursor),
-		background: windows.Handle(brush),
-		className:  windows.StringToUTF16Ptr("DMSSetup"),
+		wndProc:   windows.NewCallback(wndProc),
+		instance:  windows.Handle(inst),
+		cursor:    windows.Handle(cursor),
+		className: windows.StringToUTF16Ptr("DMSSetup"),
 	}
 	class.size = uint32(unsafe.Sizeof(class))
 	pRegisterClassEx.Call(uintptr(unsafe.Pointer(&class)))
 
 	const style = wsCaption | wsSysMenu | wsMinimizeBox
-	cw, ch := px(width), px(height)
-	r := rect{0, 0, cw, ch}
+	r := rect{0, 0, px(width), px(height)}
 	pAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&r)), style, 0, wsExControlParent)
 	ww, wh := r.right-r.left, r.bottom-r.top
 	sw, _, _ := pGetSystemMetrics.Call(0)
@@ -209,180 +159,337 @@ func Run(defaults Choice, icon []byte, steps Steps) bool {
 		return false
 	}
 	w.main = windows.Handle(main)
-	if ico := iconHandle(icon); ico != 0 {
-		pSendMessage.Call(main, wmSetIcon, 0, uintptr(ico))
-		pSendMessage.Call(main, wmSetIcon, 1, uintptr(ico))
+	applyTheme() // again, for the title bar now there is one
+	if small := iconHandle(icon, int32(16*w.dpi/96)); small != 0 {
+		pSendMessage.Call(main, wmSetIcon, 0, uintptr(small))
 	}
+	if w.icon != 0 {
+		pSendMessage.Call(main, wmSetIcon, 1, uintptr(w.icon))
+	}
+	choosePage(defaults)
+	pShowWindow.Call(main, 1) // SW_SHOWNORMAL
+	pSetForeground.Call(main)
 
-	y := int32(margin)
-	h := control("STATIC", "Downloads over all your connections at once.", 0, 0, 0, margin, y, width-2*margin, 24)
-	pSendMessage.Call(uintptr(h), wmSetFont, uintptr(w.heading), 1)
-	y += 36
-	control("STATIC", "Install folder", 0, 0, 0, margin, y, 300, 18)
-	y += 22
-	w.dir = control("EDIT", defaults.Dir, idDir, wsTabStop|wsGroup|esAutoHScroll, wsExClientEdge, margin, y, width-2*margin-96, 25)
-	control("BUTTON", "Browse…", idBrowse, wsTabStop, 0, width-margin-88, y, 88, 25)
-	y += 31
-	w.grays = append(w.grays, control("STATIC", "If the folder needs administrator rights, Windows asks for them once.", idNote, 0, 0, margin, y, width-2*margin, 18))
-	y += 32
+	var m msg
+	for {
+		r, _, _ := pGetMessage.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
+		if int32(r) <= 0 {
+			break
+		}
+		if r, _, _ := pIsDialogMessage.Call(main, uintptr(unsafe.Pointer(&m))); r != 0 {
+			continue
+		}
+		pTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
+		pDispatchMessage.Call(uintptr(unsafe.Pointer(&m)))
+	}
+	return w.installed
+}
+
+// --- pages ---
+
+// choosePage is the first page: where to install, and what else.
+func choosePage(d Choice) {
+	header("Install DMS²", "Downloads over all your connections at once.")
+	addLabel(rect{pad, 100, width - pad, 120}, "Install folder", w.fontLabel, func() uint32 { return w.pal.text }, dtSingleLine)
+	w.dir = addField(rect{pad, 124, width - pad - 100, 156}, d.Dir, idDir, false)
+	addButton("Browse…", idBrowse, button, rect{width - pad - 92, 124, width - pad, 156})
+	w.note = len(w.labels)
+	addLabel(rect{pad, 162, width - pad, 196}, "", w.fontSmall, nil, dtWordBreak)
+	setNote("If the folder needs administrator rights, Windows asks for them once.", false)
+	y := int32(200)
 	for _, b := range []struct {
 		id   int
 		text string
 		on   bool
 	}{
-		{idStartMenu, "Add to the Start menu", defaults.StartMenu},
-		{idDesktop, "Add a shortcut on the desktop", defaults.Desktop},
-		{idAutostart, "Start with Windows (runs in the tray, next to the clock)", defaults.Autostart},
+		{idStartMenu, "Add to the Start menu", d.StartMenu},
+		{idDesktop, "Add a shortcut on the desktop", d.Desktop},
+		{idAutostart, "Start with Windows (runs in the tray, next to the clock)", d.Autostart},
 	} {
-		style := uint32(wsTabStop | bsAutoCheckbox)
-		if b.id == idStartMenu {
-			style |= wsGroup
-		}
-		c := control("BUTTON", b.text, b.id, style, 0, margin, y, width-2*margin, 22)
-		if b.on {
-			pSendMessage.Call(uintptr(c), bmSetCheck, 1, 0)
-		}
-		w.boxes[b.id] = c
-		y += 26
+		h := addButton(b.text, b.id, checkbox, rect{pad - 2, y, width - pad, y + 28})
+		w.ctls[h].checked = b.on
+		y += 30
 	}
-	y = height - margin - 30
-	w.install = control("BUTTON", "Install", idOK, wsTabStop|wsGroup|bsDefPushButton, 0, width-margin-2*96-8, y, 96, 30)
-	control("BUTTON", "Cancel", idCancel, wsTabStop, 0, width-margin-96, y, 96, 30)
-
-	pShowWindow.Call(main, 1) // SW_SHOWNORMAL
-	pSetForeground.Call(main)
+	w.install = addButton("Install", idOK, primary, footerButton(1))
+	addButton("Cancel", idCancel, button, footerButton(0))
 	pSetFocus.Call(uintptr(w.dir))
 	pSendMessage.Call(uintptr(w.dir), emSetSel, 0, ^uintptr(0))
-
-	var mm msg
-	for {
-		r, _, _ := pGetMessage.Call(uintptr(unsafe.Pointer(&mm)), 0, 0, 0)
-		if int32(r) <= 0 {
-			break
-		}
-		if r, _, _ := pIsDialogMessage.Call(main, uintptr(unsafe.Pointer(&mm))); r != 0 {
-			continue
-		}
-		pTranslateMessage.Call(uintptr(unsafe.Pointer(&mm)))
-		pDispatchMessage.Call(uintptr(unsafe.Pointer(&mm)))
-	}
-	return w.installed
 }
 
-// The window's client size and margin in 96-DPI pixels.
-const width, height, margin = 460, 280, 16
-
-// control creates a child of the main window on the page showing, laid out in
-// 96-DPI pixels.
-func control(class, text string, id int, style, exStyle uint32, x, y, cx, cy int32) windows.Handle {
-	h, _, _ := pCreateWindowEx.Call(uintptr(exStyle), str(class), str(text), uintptr(wsChild|wsVisible|style),
-		uintptr(px(x)), uintptr(px(y)), uintptr(px(cx)), uintptr(px(cy)), uintptr(w.main), uintptr(id), 0, 0)
-	pSendMessage.Call(h, wmSetFont, uintptr(w.font), 1)
-	w.page = append(w.page, windows.Handle(h))
-	return windows.Handle(h)
-}
-
-// startInstall installs what the window shows, off its thread so it keeps
-// painting (and Windows' administrator prompt can come up over it).
-func startInstall(c Choice) {
-	w.installing = true
-	for _, h := range w.page {
-		pEnableWindow.Call(uintptr(h), 0)
-	}
-	pSetWindowText.Call(uintptr(w.install), str("Installing…"))
-	go func() {
-		w.installErr <- w.steps.Install(c)
-		pPostMessage.Call(uintptr(w.main), wmInstalled, 0, 0)
-	}()
-}
-
-// installDone shows the finished page, or brings the first page back after
-// saying what went wrong.
-func installDone() {
-	w.installing = false
-	if err := <-w.installErr; err != nil {
-		for _, h := range w.page {
-			pEnableWindow.Call(uintptr(h), 1)
-		}
-		pSetWindowText.Call(uintptr(w.install), str("Install"))
-		if !errors.Is(err, ErrReported) {
-			windows.MessageBox(windows.HWND(w.main), windows.StringToUTF16Ptr("Could not install: "+err.Error()),
-				windows.StringToUTF16Ptr("Install downloadmanagersquared"), windows.MB_OK|windows.MB_ICONERROR)
-		}
-		return
-	}
-	w.installed = true
-	for _, h := range w.page {
+// donePage is the last page: the extension, the one step left.
+func donePage() {
+	for _, h := range w.children {
 		pDestroyWindow.Call(uintptr(h))
 	}
-	w.page, w.grays = nil, nil
-	pSetWindowText.Call(uintptr(w.main), str("downloadmanagersquared is installed"))
-
-	y := int32(margin)
-	h := control("STATIC", "DMS² is installed.", 0, 0, 0, margin, y, width-2*margin, 24)
-	pSendMessage.Call(uintptr(h), wmSetFont, uintptr(w.heading), 1)
-	y += 36
-	control("STATIC", "It runs in the tray, next to the clock. One step left: add the Firefox extension, which takes over your downloads and shows them.", 0, 0, 0, margin, y, width-2*margin, 36)
-	y += 48
-	add := control("BUTTON", "Add to Firefox", idAddExtension, wsTabStop|wsGroup|bsDefPushButton, 0, margin, y, 140, 30)
-	y += 48
-	w.grays = append(w.grays, control("STATIC", "Using LibreWolf, Waterfox or Floorp? Open this link in that browser instead:", 0, 0, 0, margin, y, width-2*margin, 18))
-	y += 22
-	control("EDIT", w.steps.ExtensionURL, idURL, wsTabStop|esAutoHScroll|esReadOnly, wsExClientEdge, margin, y, width-2*margin, 25)
-	control("BUTTON", "Close", idCancel, wsTabStop, 0, width-margin-96, height-margin-30, 96, 30)
+	w.children, w.labels, w.fields, w.hover = nil, nil, nil, 0
+	w.ctls = map[windows.Handle]*ctl{}
+	w.done = true
+	header("DMS² is installed", "It runs in the tray, next to the clock.")
+	addLabel(rect{pad, 100, width - pad, 140}, "One step left: add the Firefox extension. It takes over your downloads and shows them.",
+		w.fontBody, func() uint32 { return w.pal.text }, dtWordBreak)
+	add := addButton("Add to Firefox", idOK, primary, rect{pad, 146, pad + 150, 178})
+	addLabel(rect{pad, 206, width - pad, 226}, "Using LibreWolf, Waterfox or Floorp? Open this link in that browser instead:",
+		w.fontSmall, func() uint32 { return w.pal.muted }, dtSingleLine|dtEndEllipsis)
+	w.url = addField(rect{pad, 230, width - pad - 100, 262}, w.steps.ExtensionURL, idURL, true)
+	w.copy = addButton("Copy", idCopy, button, rect{width - pad - 92, 230, width - pad, 262})
+	addButton("Close", idCancel, button, footerButton(0))
+	invalidate(w.main)
 	pSetFocus.Call(uintptr(add))
 }
 
-func font(points, weight int32, face string) windows.Handle {
-	h, _, _ := pCreateFont.Call(uintptr(-points*w.dpi/72), 0, 0, 0, uintptr(weight), 0, 0, 0,
-		1 /* DEFAULT_CHARSET */, 0, 0, 5 /* CLEARTYPE_QUALITY */, 0, str(face))
+func header(title, sub string) {
+	addLabel(rect{68, 22, width - pad, 50}, title, w.fontTitle, func() uint32 { return w.pal.text }, dtSingleLine)
+	addLabel(rect{68, 50, width - pad, 72}, sub, w.fontBody, func() uint32 { return w.pal.muted }, dtSingleLine|dtEndEllipsis)
+}
+
+// footerButton is the place of the i-th button from the right in the footer.
+func footerButton(i int32) rect {
+	right := width - pad - i*(100+8)
+	top := int32(height - footer + 16)
+	return rect{right - 100, top, right, top + 32}
+}
+
+func addLabel(r rect, text string, font windows.Handle, color func() uint32, flags uintptr) {
+	w.labels = append(w.labels, label{r, text, font, color, flags})
+}
+
+func setNote(s string, bad bool) {
+	l := &w.labels[w.note]
+	l.text = s
+	l.color = func() uint32 { return w.pal.muted }
+	if bad {
+		l.color = func() uint32 { return w.pal.bad }
+	}
+	invalidate(w.main)
+}
+
+func child(class, text string, id int, style uint32, r rect) windows.Handle {
+	r = scaled(r)
+	h, _, _ := pCreateWindowEx.Call(0, str(class), str(text), uintptr(wsChild|wsVisible|style),
+		uintptr(r.left), uintptr(r.top), uintptr(r.right-r.left), uintptr(r.bottom-r.top), uintptr(w.main), uintptr(id), 0, 0)
+	pSendMessage.Call(h, wmSetFont, uintptr(w.fontBody), 1)
+	w.children = append(w.children, windows.Handle(h))
 	return windows.Handle(h)
 }
 
-func text(h windows.Handle) string {
-	n, _, _ := pGetWindowTextLength.Call(uintptr(h))
-	buf := make([]uint16, n+1)
-	pGetWindowText.Call(uintptr(h), uintptr(unsafe.Pointer(&buf[0])), n+1)
-	return windows.UTF16ToString(buf)
+func addButton(text string, id int, k kind, r rect) windows.Handle {
+	style := uint32(wsTabStop | bsOwnerDraw)
+	if k != checkbox || id == idStartMenu {
+		style |= wsGroup
+	}
+	h := child("BUTTON", text, id, style, r)
+	w.ctls[h] = &ctl{kind: k, footer: r.top >= height-footer}
+	return h
 }
+
+// addField is a text field: an edit control without a border inside a box
+// the window draws.
+func addField(r rect, text string, id int, readOnly bool) windows.Handle {
+	style := uint32(wsTabStop | wsGroup | esAutoHScroll)
+	if readOnly {
+		style |= esReadOnly
+	}
+	h := child("EDIT", text, id, style, rect{r.left + 10, r.top + 6, r.right - 10, r.bottom - 6})
+	w.fields = append(w.fields, field{r, h})
+	return h
+}
+
+// --- painting ---
+
+func paint(c canvas) {
+	full := rect{0, 0, px(width), px(height)}
+	split := px(height - footer)
+	c.fill(rect{0, 0, full.right, split}, w.pal.panel)
+	c.fill(rect{0, split, full.right, full.bottom}, w.pal.bg)
+	c.fill(rect{0, split, full.right, split + max(1, px(1))}, w.pal.line)
+
+	if w.done {
+		c.ellipse(float32(px(pad)), float32(px(26)), float32(px(32)), float32(px(32)), w.pal.ok)
+		c.check(float32(px(pad)), float32(px(26)), float32(px(32)), float32(px(3)), w.pal.panel,
+			[3][2]float32{{0.28, 0.52}, {0.44, 0.67}, {0.72, 0.36}})
+	} else if w.icon != 0 {
+		pDrawIconEx.Call(uintptr(c.hdc), uintptr(px(pad)), uintptr(px(26)), uintptr(w.icon), uintptr(px(32)), uintptr(px(32)), 0, 0, 3 /* DI_NORMAL */)
+	}
+	for _, l := range w.labels {
+		c.text(l.text, scaled(l.r), l.font, l.color(), l.flags)
+	}
+	focus, _, _ := pGetFocus.Call()
+	for _, fl := range w.fields {
+		r := scaled(fl.r)
+		stroke, sw := w.pal.line, float32(max(1, px(1)))
+		if windows.Handle(focus) == fl.edit {
+			stroke, sw = w.pal.accent, float32(px(2))
+		}
+		c.roundRect(float32(r.left), float32(r.top), float32(r.right-r.left), float32(r.bottom-r.top), float32(px(6)), w.pal.panel, stroke, sw)
+	}
+}
+
+func drawCtl(c canvas, d *drawItemStruct, k *ctl) {
+	r := d.item
+	wd, ht := float32(r.right-r.left), float32(r.bottom-r.top)
+	bg := w.pal.panel
+	if k.footer {
+		bg = w.pal.bg
+	}
+	c.fill(r, bg)
+	disabled := d.itemState&odsDisabled != 0
+	pressed := d.itemState&odsSelected != 0
+	focused := d.itemState&odsFocus != 0 && d.itemState&odsNoFocusRect == 0
+	hover := w.hover == d.hwndItem && !disabled
+	radius, one := float32(px(6)), float32(max(1, px(1)))
+
+	switch k.kind {
+	case checkbox:
+		box := float32(px(18))
+		x, y := float32(px(3)), (ht-box)/2
+		if focused {
+			c.roundRect(x-2, y-2, box+4, box+4, float32(px(5)), bg, w.pal.accent, float32(px(2)))
+		}
+		switch {
+		case k.checked:
+			fill := w.pal.accent
+			if disabled {
+				fill = w.pal.muted
+			} else if hover {
+				fill = shade(fill, 0.12)
+			}
+			c.roundRect(x, y, box, box, float32(px(4)), fill, 0, 0)
+			c.check(x, y, box, float32(px(2)), 0xffffff, [3][2]float32{{0.24, 0.52}, {0.42, 0.7}, {0.76, 0.3}})
+		default:
+			border := mix(w.pal.muted, w.pal.panel, 0.3)
+			if hover {
+				border = w.pal.accent
+			}
+			c.roundRect(x, y, box, box, float32(px(4)), w.pal.panel, border, one)
+		}
+		color := w.pal.text
+		if disabled {
+			color = w.pal.muted
+		}
+		c.text(text(d.hwndItem), rect{px(32), 0, r.right, r.bottom}, w.fontBody, color, dtSingleLine|dtVCenter|dtEndEllipsis)
+		return
+
+	case primary:
+		fill, color := w.pal.accent, uint32(0xffffff)
+		switch {
+		case disabled:
+			fill, color = w.pal.line, w.pal.muted
+		case pressed:
+			fill = shade(fill, 0.22)
+		case hover:
+			fill = shade(fill, 0.12)
+		}
+		if focused {
+			c.roundRect(0, 0, wd, ht, radius, fill, w.pal.text, float32(px(2)))
+		} else {
+			c.roundRect(0, 0, wd, ht, radius, fill, 0, 0)
+		}
+		c.text(text(d.hwndItem), rect{0, 0, r.right, r.bottom}, w.fontBody, color, dtSingleLine|dtVCenter|dtCenter)
+
+	default:
+		fill, border, color := w.pal.panel, w.pal.line, w.pal.text
+		switch {
+		case disabled:
+			color = w.pal.muted
+		case pressed:
+			fill, border = w.pal.accentSoft, w.pal.accent
+		case hover:
+			border = w.pal.accent
+		}
+		sw := one
+		if focused {
+			border, sw = w.pal.accent, float32(px(2))
+		}
+		c.roundRect(0, 0, wd, ht, radius, fill, border, sw)
+		c.text(text(d.hwndItem), rect{0, 0, r.right, r.bottom}, w.fontBody, color, dtSingleLine|dtVCenter|dtCenter)
+	}
+}
+
+// shade darkens a colour on a light theme and lightens it on a dark one.
+func shade(c uint32, t float64) uint32 {
+	if w.dark {
+		return mix(c, 0xffffff, t)
+	}
+	return mix(c, 0x000000, t)
+}
+
+// setHover marks the button under the mouse, and watches for the mouse
+// leaving it (Windows doesn't tell the window when it leaves a child).
+func setHover(h windows.Handle) {
+	if h == w.hover {
+		return
+	}
+	if w.hover != 0 {
+		invalidate(w.hover)
+	}
+	w.hover = h
+	if h != 0 {
+		invalidate(h)
+		pSetTimer.Call(uintptr(w.main), timerHover, 50, 0)
+	}
+}
+
+// --- behaviour ---
 
 func wndProc(hwnd windows.Handle, m uint32, wParam, lParam uintptr) uintptr {
 	switch m {
 	case wmCommand:
-		switch int(wParam & 0xffff) {
-		case idBrowse:
-			browse()
-		case idOK:
-			if w.installed || w.installing {
-				break
+		command(int(wParam&0xffff), uint32(wParam>>16))
+		return 0
+	case wmDrawItem:
+		d := *(**drawItemStruct)(unsafe.Pointer(&lParam))
+		if k := w.ctls[d.hwndItem]; k != nil {
+			buffered(d.hdc, d.item, func(c canvas) { drawCtl(c, d, k) })
+		}
+		return 1
+	case wmPaint:
+		var ps paintStruct
+		hdc, _, _ := pBeginPaint.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&ps)))
+		var r rect
+		pGetClientRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&r)))
+		buffered(windows.Handle(hdc), r, paint)
+		pEndPaint.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&ps)))
+		return 0
+	case wmEraseBkgnd:
+		return 1
+	case wmCtlColorEdit, wmCtlColorStatic: // the text fields
+		color := w.pal.text
+		if !enabled(windows.Handle(lParam)) {
+			color = w.pal.muted
+		}
+		pSetTextColor.Call(wParam, colorref(color))
+		pSetBkColor.Call(wParam, colorref(w.pal.panel))
+		return uintptr(w.brushPanel)
+	case wmSetCursor:
+		if _, ok := w.ctls[windows.Handle(wParam)]; ok {
+			setHover(windows.Handle(wParam))
+		} else {
+			setHover(0)
+		}
+	case wmTimer:
+		switch wParam {
+		case timerHover:
+			var pt [2]int32
+			pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+			under, _, _ := pWindowFromPoint.Call(uintptr(uint32(pt[0])) | uintptr(uint32(pt[1]))<<32)
+			if windows.Handle(under) != w.hover {
+				pKillTimer.Call(uintptr(hwnd), timerHover)
+				setHover(0)
 			}
-			if dir, ok := validate(text(w.dir)); ok {
-				startInstall(Choice{
-					Dir:       dir,
-					StartMenu: checked(idStartMenu),
-					Desktop:   checked(idDesktop),
-					Autostart: checked(idAutostart),
-				})
-			}
-		case idAddExtension:
-			w.steps.AddExtension()
-		case idCancel:
-			if !w.installing {
-				pDestroyWindow.Call(uintptr(hwnd))
-			}
+		case timerCopied:
+			pKillTimer.Call(uintptr(hwnd), timerCopied)
+			pSetWindowText.Call(uintptr(w.copy), str("Copy"))
 		}
 		return 0
+	case wmSettingChange: // maybe light or dark mode changed
+		applyTheme()
+		invalidate(w.main)
+		for _, h := range w.children {
+			invalidate(h)
+		}
 	case wmInstalled:
 		installDone()
 		return 0
-	case wmCtlColorStatic:
-		if slices.Contains(w.grays, windows.Handle(lParam)) {
-			gray, _, _ := pGetSysColor.Call(colorGrayText)
-			pSetTextColor.Call(wParam, gray)
-			pSetBkMode.Call(wParam, 1) // TRANSPARENT
-			b, _, _ := pGetSysColorBrush.Call(colorBtnFace)
-			return b
-		}
 	case wmClose:
 		if !w.installing {
 			pDestroyWindow.Call(uintptr(hwnd))
@@ -396,9 +503,100 @@ func wndProc(hwnd windows.Handle, m uint32, wParam, lParam uintptr) uintptr {
 	return r
 }
 
+func command(id int, code uint32) {
+	if id == idDir || id == idURL {
+		if code == enSetFocus || code == enKillFocus {
+			invalidate(w.main) // the field's outline
+		}
+		return
+	}
+	switch id {
+	case idBrowse:
+		browse()
+	case idStartMenu, idDesktop, idAutostart:
+		if h := byID(id); h != 0 {
+			w.ctls[h].checked = !w.ctls[h].checked
+			invalidate(h)
+		}
+	case idOK:
+		switch {
+		case w.done:
+			w.steps.AddExtension()
+		case w.installing:
+		default:
+			dir, problem := checkDir(text(w.dir))
+			if problem != "" {
+				setNote(problem, true)
+				pSetFocus.Call(uintptr(w.dir))
+				return
+			}
+			startInstall(Choice{Dir: dir, StartMenu: checked(idStartMenu), Desktop: checked(idDesktop), Autostart: checked(idAutostart)})
+		}
+	case idCopy:
+		if copyText(w.main, w.steps.ExtensionURL) {
+			pSetWindowText.Call(uintptr(w.copy), str("Copied"))
+			invalidate(w.copy)
+			pSetTimer.Call(uintptr(w.main), timerCopied, 1500, 0)
+		}
+	case idCancel:
+		if !w.installing {
+			pDestroyWindow.Call(uintptr(w.main))
+		}
+	}
+}
+
+func byID(id int) windows.Handle {
+	for _, h := range w.children {
+		if r, _, _ := pGetDlgCtrlID.Call(uintptr(h)); int(r) == id {
+			return h
+		}
+	}
+	return 0
+}
+
+var (
+	pGetDlgCtrlID = user32.NewProc("GetDlgCtrlID")
+	pGetFocus     = user32.NewProc("GetFocus")
+)
+
 func checked(id int) bool {
-	r, _, _ := pSendMessage.Call(uintptr(w.boxes[id]), bmGetCheck, 0, 0)
-	return r == 1
+	h := byID(id)
+	return h != 0 && w.ctls[h].checked
+}
+
+// startInstall installs what the window shows, off its thread so it keeps
+// painting (and Windows' administrator prompt can come up over it).
+func startInstall(c Choice) {
+	w.installing = true
+	for _, h := range w.children {
+		pEnableWindow.Call(uintptr(h), 0)
+	}
+	pSetWindowText.Call(uintptr(w.install), str("Installing…"))
+	setNote("Installing…", false)
+	go func() {
+		w.installErr <- w.steps.Install(c)
+		pPostMessage.Call(uintptr(w.main), wmInstalled, 0, 0)
+	}()
+}
+
+// installDone shows the finished page, or brings the first page back saying
+// what went wrong.
+func installDone() {
+	w.installing = false
+	if err := <-w.installErr; err != nil {
+		for _, h := range w.children {
+			pEnableWindow.Call(uintptr(h), 1)
+		}
+		pSetWindowText.Call(uintptr(w.install), str("Install"))
+		if errors.Is(err, ErrReported) {
+			setNote("Not installed.", true)
+		} else {
+			setNote("Could not install: "+err.Error(), true)
+		}
+		return
+	}
+	w.installed = true
+	donePage()
 }
 
 // browse picks a folder and puts the program's own folder below it, as
@@ -413,6 +611,7 @@ func browse() {
 		p = filepath.Join(p, w.folderName)
 	}
 	pSetWindowText.Call(uintptr(w.dir), str(p))
+	setNote("If the folder needs administrator rights, Windows asks for them once.", false)
 }
 
 // existing is dir, or the nearest folder above it that exists.
@@ -430,17 +629,6 @@ func existing(dir string) string {
 	return ""
 }
 
-// validate checks the folder typed in, telling the user what's wrong.
-func validate(dir string) (string, bool) {
-	dir, problem := checkDir(dir)
-	if problem != "" {
-		windows.MessageBox(windows.HWND(w.main), windows.StringToUTF16Ptr(problem), windows.StringToUTF16Ptr("Install downloadmanagersquared"), windows.MB_OK|windows.MB_ICONWARNING)
-		pSetFocus.Call(uintptr(w.dir))
-		return "", false
-	}
-	return dir, true
-}
-
 // checkDir cleans the folder typed in, or says why it can't be installed to.
 func checkDir(dir string) (string, string) {
 	dir = strings.Trim(strings.TrimSpace(dir), `"`)
@@ -455,61 +643,4 @@ func checkDir(dir string) (string, string) {
 		return "", dir + " is a file, not a folder."
 	}
 	return dir, ""
-}
-
-func iconHandle(ico []byte) windows.Handle {
-	if len(ico) < 22 {
-		return 0
-	}
-	off := int(uint32(ico[18]) | uint32(ico[19])<<8 | uint32(ico[20])<<16 | uint32(ico[21])<<24)
-	if off >= len(ico) {
-		return 0
-	}
-	img := ico[off:]
-	h, _, _ := pCreateIconFromRes.Call(uintptr(unsafe.Pointer(&img[0])), uintptr(len(img)), 1, 0x00030000, 0, 0, 0)
-	return windows.Handle(h)
-}
-
-// modernControls makes this thread's windows use version 6 of the common
-// controls (themed buttons, checkboxes and edits) rather than the Windows 95
-// look an exe without a manifest gets: it activates a manifest asking for
-// them, then loads the library under it.
-func modernControls() {
-	const manifest = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <dependency><dependentAssembly>
-    <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
-  </dependentAssembly></dependency>
-</assembly>`
-	f, err := os.CreateTemp("", "dms-setup-*.manifest")
-	if err != nil {
-		return
-	}
-	defer os.Remove(f.Name())
-	f.WriteString(manifest)
-	f.Close()
-	type actCtx struct {
-		size         uint32
-		flags        uint32
-		source       *uint16
-		arch, langID uint16
-		assemblyDir  *uint16
-		resourceName *uint16
-		appName      *uint16
-		module       windows.Handle
-	}
-	ctx := actCtx{source: windows.StringToUTF16Ptr(f.Name())}
-	ctx.size = uint32(unsafe.Sizeof(ctx))
-	h, _, _ := pCreateActCtx.Call(uintptr(unsafe.Pointer(&ctx)))
-	if windows.Handle(h) == windows.InvalidHandle {
-		return
-	}
-	var cookie uintptr
-	pActivateActCtx.Call(h, uintptr(unsafe.Pointer(&cookie)))
-	// By name, so the activated manifest redirects it to version 6.
-	if lib, err := syscall.LoadLibrary("comctl32.dll"); err == nil {
-		if p, err := syscall.GetProcAddress(lib, "InitCommonControls"); err == nil {
-			syscall.SyscallN(p)
-		}
-	}
 }
