@@ -38,6 +38,16 @@ type Config struct {
 	Keepalive    int // seconds, 0 = none
 }
 
+// amneziaKeys are the [Interface] settings AmneziaWG adds to disguise its
+// packets. A server expecting them never answers plain WireGuard, so a config
+// with them is refused rather than imported as a tunnel that never comes up.
+var amneziaKeys = map[string]bool{
+	"jc": true, "jmin": true, "jmax": true,
+	"s1": true, "s2": true, "s3": true, "s4": true,
+	"h1": true, "h2": true, "h3": true, "h4": true,
+	"i1": true, "i2": true, "i3": true, "i4": true, "i5": true,
+}
+
 // ParseConf reads a WireGuard .conf file. IPv6 addresses are left out.
 func ParseConf(text string) (Config, error) {
 	cfg := Config{MTU: 1420}
@@ -67,6 +77,10 @@ func ParseConf(text string) (Config, error) {
 			return Config{}, fmt.Errorf("can't read %q", line)
 		}
 		k, v = strings.ToLower(strings.TrimSpace(k)), strings.TrimSpace(v)
+		if section == "interface" && amneziaKeys[k] {
+			return Config{}, errors.New("this is an AmneziaWG config (obfuscated WireGuard), which DMS² can't use: " +
+				"have your VPN provider make a plain WireGuard config instead")
+		}
 		var err error
 		switch section + "." + k {
 		case "interface.privatekey":

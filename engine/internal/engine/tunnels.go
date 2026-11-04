@@ -105,6 +105,30 @@ func (e *Engine) setTunnel(ifaceID, conf string, save bool) error {
 	return nil
 }
 
+// tunnelWithKey is the name of another interface whose imported config has
+// the same private key as conf ("" if none, or conf doesn't parse).
+func (e *Engine) tunnelWithKey(ifaceID, conf string) string {
+	cfg, err := tunnel.ParseConf(conf)
+	if err != nil {
+		return ""
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for id, te := range e.tunnels {
+		if id == ifaceID || te.pia || te.cfg.PrivateKey != cfg.PrivateKey {
+			continue
+		}
+		if ent := e.ifaces[id]; ent != nil && ent.info.Name != "" {
+			return ent.info.Name
+		}
+		if s := e.settings.Interfaces[id]; s != nil && s.Name != "" {
+			return s.Name
+		}
+		return "Another connection"
+	}
+	return ""
+}
+
 // removeTunnel takes an interface's tunnel down and forgets it.
 func (e *Engine) removeTunnel(ifaceID string) error {
 	e.removeTunnelEntry(ifaceID)

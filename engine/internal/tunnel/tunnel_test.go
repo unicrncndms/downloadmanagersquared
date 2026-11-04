@@ -197,3 +197,13 @@ func TestBadConfIsRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestAmneziaWGConfIsRefusedSayingWhy(t *testing.T) {
+	key, _, _ := GenerateKey()
+	_, pub, _ := GenerateKey()
+	conf := fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.8.0.2/32\nJc = 4\nJmin = 40\nJmax = 70\nS1 = 0\nS2 = 0\nH1 = 1\nH2 = 2\nH3 = 3\nH4 = 4\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 1.2.3.4:51820\n", key, pub)
+	_, err := ParseConf(conf)
+	if err == nil || !strings.Contains(err.Error(), "AmneziaWG") {
+		t.Fatalf("got %v, want a refusal naming AmneziaWG", err)
+	}
+}

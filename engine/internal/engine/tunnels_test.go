@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -321,5 +322,33 @@ func TestTorrentFileTakesTheVPNChoiceWithItsFiles(t *testing.T) {
 	j, _ := e.queue.Get(id)
 	if st := j.(*torrent.Torrent).State(); st.VPN != paths.VPNOnly || st.Status != download.StatusQueued {
 		t.Fatalf("after the add step: VPN %q, status %q", st.VPN, st.Status)
+	}
+}
+
+func TestAConfIsRefusedOnASecondConnection(t *testing.T) {
+	e := loopbackEngine(t)
+	priv, _, _ := tunnel.GenerateKey()
+	other, _, _ := tunnel.GenerateKey()
+	_, peer, _ := tunnel.GenerateKey()
+	conf := func(key string) string {
+		return fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 127.0.0.1:9\n", key, peer)
+	}
+	importOn := func(iface, conf string) error {
+		p, _ := json.Marshal(map[string]string{"iface": iface, "conf": conf})
+		_, err := e.Call(nil, "importTunnel", p)
+		return err
+	}
+	if err := importOn("lo", conf(priv)); err != nil {
+		t.Fatal(err)
+	}
+	err := importOn("wifi", conf(priv))
+	if err == nil || !strings.Contains(err.Error(), "Loopback already uses this config") {
+		t.Fatalf("the same config on a second connection: %v, want a refusal naming Loopback", err)
+	}
+	if err := importOn("lo", conf(priv)); err != nil {
+		t.Fatalf("importing it again on its own connection: %v", err)
+	}
+	if err := importOn("wifi", conf(other)); err != nil {
+		t.Fatalf("a config of its own on the second connection: %v", err)
 	}
 }

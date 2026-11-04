@@ -311,6 +311,11 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		if p.Iface == "" {
 			return nil, errors.New("no connection to carry the tunnel")
 		}
+		if other := e.tunnelWithKey(p.Iface, p.Conf); other != "" {
+			return nil, fmt.Errorf("%s already uses this config. Each connection needs its own: the VPN server "+
+				"keeps one location per key, so two tunnels with one key take each other's traffic. "+
+				"Have your VPN provider make another config (a separate device or key), ideally on another server", other)
+		}
 		if err := e.setTunnel(p.Iface, p.Conf, true); err != nil {
 			return nil, fmt.Errorf("not a usable WireGuard config: %w", err)
 		}

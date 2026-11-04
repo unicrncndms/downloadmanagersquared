@@ -102,12 +102,13 @@ function ifaceName(id, state, settings) {
 const $ = (id) => document.getElementById(id);
 
 // Short message at the bottom of the page (needs an element with id "toast").
+// It stays long enough to read: longer for longer text, up to 15 seconds.
 function toast(text) {
   const t = $("toast");
   t.textContent = text;
   t.classList.add("show");
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => t.classList.remove("show"), 2500);
+  toast.timer = setTimeout(() => t.classList.remove("show"), Math.min(15000, Math.max(2500, text.length * 60)));
 }
 
 // Calls the engine, reporting success or the error as a toast.
