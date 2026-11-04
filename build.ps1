@@ -8,8 +8,10 @@ $dist = Join-Path $root 'dist'
 New-Item -ItemType Directory -Force $dist | Out-Null
 
 if (-not $Version) {
-    $tag = git -C $root describe --tags --abbrev=0 2>$null
-    $Version = if ($LASTEXITCODE -eq 0 -and $tag) { $tag } else { '0.0.0' }
+    # Not `git describe`: with no tag it writes to stderr, which Windows
+    # PowerShell 5.1 turns into a terminating error under 'Stop'.
+    $tag = git -C $root tag --list 'v*' --merged HEAD --sort=-version:refname | Select-Object -First 1
+    $Version = if ($tag) { $tag } else { '0.0.0' }
 }
 $Version = $Version.TrimStart('v')
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "version '$Version' is not X.Y.Z" }
@@ -37,7 +39,7 @@ try {
 & (Join-Path $root '.github\scripts\notices.ps1')
 
 if (Get-Command node -ErrorAction SilentlyContinue) {
-    node --test (Join-Path $root 'extension\test')
+    node --test (Join-Path $root 'extension\test\*.test.js') # a glob: Node 24 doesn't take a folder
     if ($LASTEXITCODE) { throw 'extension tests failed' }
 } else {
     Write-Host 'node is not on PATH: extension tests skipped'
@@ -64,12 +66,14 @@ if ($Repo) {
 }
 
 # Zip with forward slashes (Compress-Archive writes backslashes, which AMO rejects).
+# Windows' own bsdtar: Git's GNU tar, often earlier on PATH, can't write zips.
+$tar = Join-Path $env:SystemRoot 'System32\tar.exe'
 $xpi = Join-Path $dist 'downloadmanagersquared.xpi'
 Remove-Item $xpi -ErrorAction SilentlyContinue
 Push-Location $stage
 try {
     # -a picks the format from the extension and doesn't know .xpi (it writes a tar).
-    tar.exe --format zip -c -f $xpi manifest.json @parts
+    & $tar --format zip -c -f $xpi manifest.json @parts
     if ($LASTEXITCODE) { throw 'packing the extension failed' }
 } finally {
     Pop-Location
@@ -89,7 +93,7 @@ $zip = Join-Path $dist 'downloadmanagersquared-windows.zip'
 Remove-Item $zip -ErrorAction SilentlyContinue
 Push-Location $zipStage
 try {
-    tar.exe -a -c -f $zip (Get-ChildItem -Name)
+    & $tar -a -c -f $zip (Get-ChildItem -Name)
     if ($LASTEXITCODE) { throw 'packing the release zip failed' }
 } finally {
     Pop-Location
