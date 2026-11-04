@@ -42,7 +42,7 @@ type State struct {
 	Name     string          `json:"name,omitempty"`
 	Size     int64           `json:"size"`               // of the files to download
 	Uploaded int64           `json:"uploaded,omitempty"` // across every run
-	VPN      paths.Mode      `json:"vpn,omitempty"`      // fixed when added: which session runs it
+	VPN      paths.Mode      `json:"vpn,omitempty"`      // which session runs it; a new mode means a new Torrent there
 	WaitVPN  bool            `json:"waitVpn,omitempty"`  // paused because no tunnel is up, under VPN only
 	Status   download.Status `json:"status"`
 	Error    string          `json:"error,omitempty"`
@@ -609,7 +609,7 @@ func (t *Torrent) Added() time.Time { return t.st.Added } // fixed when added: n
 func (t *Torrent) Saved() (string, any) { return "torrents", t.State() }
 
 // VPN is the torrent's VPN mode.
-func (t *Torrent) VPN() paths.Mode { return t.st.VPN } // fixed when added: no lock needed
+func (t *Torrent) VPN() paths.Mode { return t.st.VPN } // fixed for this Torrent: no lock needed
 
 // PauseForVPN leaves the swarm because no tunnel is up, under VPN only; the
 // engine queues it again once one is. Only a torrent in the swarm or waiting

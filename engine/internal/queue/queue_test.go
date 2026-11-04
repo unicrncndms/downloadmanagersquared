@@ -183,3 +183,33 @@ func TestLoadedEntriesComeBackInTheOrderAdded(t *testing.T) {
 		t.Fatalf("order %v, want %v", got, want)
 	}
 }
+
+func TestLoweringTheLimitQueuesTheNewestRunning(t *testing.T) {
+	a, b, c := queued(false), queued(false), queued(false)
+	q := newQueue(t, a, b, c)
+	q.Schedule(3, lo)
+	if !a.running || !b.running || !c.running {
+		t.Fatalf("all three should run at limit 3")
+	}
+	q.Schedule(1, lo)
+	if !a.running || b.running || c.running || b.status != download.StatusQueued || c.status != download.StatusQueued {
+		t.Fatalf("at limit 1 only the oldest runs; got a %v b %v/%s c %v/%s", a.running, b.running, b.status, c.running, c.status)
+	}
+	q.Schedule(1, lo)
+	if !a.running || b.running || c.running {
+		t.Fatal("the queued ones must stay queued at the same limit")
+	}
+}
+
+func TestLoweringTheLimitQueuesATorrentBeforeAnHTTPDownload(t *testing.T) {
+	h, tor := queued(false), queued(true)
+	q := newQueue(t, h, tor)
+	q.Schedule(2, lo)
+	if !h.running || !tor.running {
+		t.Fatalf("both should run at limit 2")
+	}
+	q.Schedule(1, lo)
+	if !h.running || tor.running || tor.status != download.StatusQueued {
+		t.Fatalf("the torrent gives up its slot first; got http %v torrent %v/%s", h.running, tor.running, tor.status)
+	}
+}

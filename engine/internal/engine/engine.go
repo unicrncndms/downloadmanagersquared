@@ -840,6 +840,54 @@ func (e *Engine) openInBrowser(view string) {
 func (e *Engine) PauseAll()  { e.queue.PauseAll() }
 func (e *Engine) ResumeAll() { e.queue.ResumeAll() }
 
+// setVPNAll gives every unfinished download (or, with torrents, every
+// torrent) VPN mode m. An HTTP download switches paths within a tick. A
+// torrent leaves the swarm and joins again through m's session; one still
+// asked about the VPN, or whose files are being chosen, keeps waiting for the user.
+func (e *Engine) setVPNAll(torrents bool, m paths.Mode) {
+	for _, j := range e.queue.List() {
+		var err error
+		switch j := j.(type) {
+		case *download.Download:
+			if !torrents && j.Status() != download.StatusCompleted {
+				err = j.SetVPN(m)
+			}
+		case *torrent.Torrent:
+			st := j.State()
+			if torrents && !st.AskVPN && st.Status != torrent.StatusChoosing && st.Status != download.StatusCompleted {
+				err = e.moveTorrent(j, m)
+			}
+		}
+		if err != nil {
+			log.Printf("VPN mode for %s: %v", j.ID(), err)
+		}
+	}
+	e.schedule() // pause them for a tunnel, or start them again, now
+}
+
+// moveTorrent puts a torrent in the session of VPN mode m, keeping its state
+// and its place in the queue.
+func (e *Engine) moveTorrent(t *torrent.Torrent, m paths.Mode) error {
+	st := t.State()
+	if st.VPN == m {
+		return nil
+	}
+	if t.Active() {
+		as := download.StatusQueued // back in line, keeping its place
+		if !st.Finished.IsZero() {
+			as = torrent.StatusSeeding
+		}
+		t.Stop(as)
+		st = t.State()
+	}
+	st.VPN, st.WaitVPN = m, false
+	nt, err := e.session(m).Add(st)
+	if err != nil {
+		return err
+	}
+	return e.queue.Replace(t, nt)
+}
+
 // chooseTorrentVPN answers a new torrent's VPN question, moving it to the
 // session of that mode before it joins the swarm.
 func (e *Engine) chooseTorrentVPN(id, vpn string) (*torrent.Torrent, error) {

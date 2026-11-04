@@ -352,3 +352,68 @@ func TestAConfIsRefusedOnASecondConnection(t *testing.T) {
 		t.Fatalf("a config of its own on the second connection: %v", err)
 	}
 }
+
+func setVPNSettings(t *testing.T, e *Engine, patch string) {
+	t.Helper()
+	if _, err := e.Call(nil, "setSettings", []byte(patch)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVPNForDownloadsMovesEveryUnfinishedDownload(t *testing.T) {
+	e := loopbackEngine(t)
+	a, _ := e.Add(AddRequest{URL: "http://203.0.113.1/a.bin", VPN: "off"})
+	b, _ := e.Add(AddRequest{URL: "http://203.0.113.1/b.bin", VPN: "alongside"})
+	da, _ := e.get(a)
+	db, _ := e.get(b)
+	e.schedule()
+
+	setVPNSettings(t, e, `{"vpnHttp":"vpn"}`)
+	if da.VPN() != paths.VPNOnly || db.VPN() != paths.VPNOnly {
+		t.Fatalf("after VPN only for downloads: a %q, b %q", da.VPN(), db.VPN())
+	}
+	waitFor(t, "the downloads to wait for a tunnel", 10*time.Second, func() bool {
+		e.schedule()
+		return da.WaitingForVPN() && db.WaitingForVPN()
+	})
+
+	setVPNSettings(t, e, `{"vpnHttp":"off"}`)
+	if da.VPN() != paths.Off || db.VPN() != paths.Off {
+		t.Fatalf("after Off for downloads: a %q, b %q", da.VPN(), db.VPN())
+	}
+	waitFor(t, "the downloads to leave the VPN wait", 10*time.Second, func() bool {
+		e.schedule()
+		return !da.WaitingForVPN() && !db.WaitingForVPN()
+	})
+}
+
+func TestVPNForTorrentsMovesEveryTorrentToThatSession(t *testing.T) {
+	e := loopbackEngine(t)
+	id, _ := e.Add(AddRequest{URL: testMagnet})
+	if _, err := e.Call(nil, "chooseVpn", []byte(`{"id":"`+id+`","vpn":"off"}`)); err != nil {
+		t.Fatal(err)
+	}
+	asking, _ := e.Add(AddRequest{URL: fmt.Sprintf("magnet:?xt=urn:btih:%040x", 6)}) // still asked about the VPN
+	j, _ := e.queue.Get(id)
+	old := j.(*torrent.Torrent)
+	if !old.Active() {
+		t.Fatal("the torrent should be in the swarm before the setting changes")
+	}
+
+	setVPNSettings(t, e, `{"vpnTorrent":"vpn"}`)
+	j, _ = e.queue.Get(id)
+	tor := j.(*torrent.Torrent)
+	if old.Active() || tor == old || tor.State().VPN != paths.VPNOnly {
+		t.Fatalf("after VPN only for torrents: old active %v, same object %v, mode %q", old.Active(), tor == old, tor.State().VPN)
+	}
+	e.schedule()
+	if !tor.WaitingForVPN() {
+		t.Fatalf("with no tunnel up the moved torrent is %q", tor.Status())
+	}
+	if s := summaryOf(t, e, asking); !s.AskVPN {
+		t.Fatal("a torrent still asked about the VPN lost its question")
+	}
+	if _, err := e.Call(nil, "setVpn", []byte(`{"id":"`+id+`","vpn":"off"}`)); err == nil {
+		t.Fatal("a single download's VPN mode can still be set on its own")
+	}
+}

@@ -243,7 +243,7 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		if err != nil {
 			return nil, err
 		}
-		return e.applySettings(func(s *Settings) {
+		s := e.applySettings(func(s *Settings) {
 			if p.MainInterface != nil {
 				s.MainInterface = *p.MainInterface
 			}
@@ -274,7 +274,15 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			if p.VPNProvider != nil {
 				s.VPNProvider = *p.VPNProvider
 			}
-		}), nil
+		})
+		// The VPN modes apply to every download of that type, not only new ones.
+		if p.VPNHTTP != nil {
+			e.setVPNAll(false, s.VPNHTTP)
+		}
+		if p.VPNTorrent != nil {
+			e.setVPNAll(true, s.VPNTorrent)
+		}
+		return s, nil
 	case "setInterface":
 		p, err := decode[ifacePatch](raw)
 		if err != nil {

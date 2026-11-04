@@ -164,6 +164,7 @@ func (q *Queue) ResumeAll() {
 func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 	running := 0
 	var queued, yielding, downloading []Entry // downloading: yielding entries holding a slot
+	var holding []Entry                       // HTTP downloads holding a slot, oldest first
 	for _, e := range q.List() {
 		if paths.For(e.VPN(), snap).Wait {
 			e.PauseForVPN() // never without a tunnel: under VPN only there is no other path
@@ -178,6 +179,8 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 			running++
 			if e.Yields() {
 				downloading = append(downloading, e)
+			} else {
+				holding = append(holding, e)
 			}
 		case e.Rejoins():
 			e.Start()
@@ -186,6 +189,19 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 		case e.Status() == download.StatusQueued:
 			queued = append(queued, e)
 		}
+	}
+	// The limit went down: the newest give their slots back, torrents first.
+	for running > limit {
+		var e Entry
+		if n := len(downloading); n > 0 {
+			e, downloading = downloading[n-1], downloading[:n-1]
+		} else if n := len(holding); n > 0 {
+			e, holding = holding[n-1], holding[:n-1]
+		} else {
+			break
+		}
+		e.Stop(download.StatusQueued)
+		running--
 	}
 	for _, e := range append(queued, yielding...) {
 		if running >= limit {

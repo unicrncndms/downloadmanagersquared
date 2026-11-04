@@ -50,6 +50,7 @@ func (s slowBody) Read(p []byte) (int, error) {
 }
 
 type testEnv struct {
+	mu       sync.Mutex
 	ifaces   []Iface
 	main     string
 	asked    atomic.Value // the VPN mode Paths was last asked for
@@ -59,6 +60,8 @@ type testEnv struct {
 
 func (e *testEnv) Paths(m paths.Mode) []Iface {
 	e.asked.Store(m)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	var out []Iface // the main path first
 	for _, i := range e.ifaces {
 		if i.ID == e.main {

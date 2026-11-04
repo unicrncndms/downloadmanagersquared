@@ -121,8 +121,8 @@ function makeCard(id) {
     if (torrent) {
       facts.replaceChildren(...[
         ["Save folder", d.dir],
-        ["VPN", VPN_TEXT[d.vpn] || "Off"],
         ["Info hash", d.infoHash],
+        ["VPN", VPN_TEXT[d.vpn] || "Off"],
         ["Magnet link", d.url],
       ].filter(([, v]) => v).flatMap(([k, v]) => [el("dt", {}, k), el("dd", { class: k === "Save folder" || k === "VPN" ? "" : "mono" }, v)]));
     }
@@ -131,6 +131,7 @@ function makeCard(id) {
     const ids = Object.keys(d.links).sort((a, b) =>
       ifaceName(a, latest.state, latest.settings).localeCompare(ifaceName(b, latest.state, latest.settings)));
     conns.hidden = d.status === "completed" || ids.length === 0;
+    let k = 0;
     for (const ifc of ids) {
       const l = d.links[ifc];
       let r = rows.get(ifc);
@@ -143,7 +144,7 @@ function makeCard(id) {
         r.why = el("div", { class: "why" }, r.whyText, " ", r.retry);
         rows.set(ifc, r);
       }
-      conns.append(r.name, r.state, r.info, r.speed, r.why);
+      for (const n of [r.name, r.state, r.info, r.speed, r.why]) place(conns, n, k++);
       r.name.textContent = ifaceName(ifc, latest.state, latest.settings);
       r.state.replaceChildren(...[
         el("span", { class: "badge " + (l.tone || "dim") }, l.label),
@@ -222,6 +223,7 @@ function renderDownloads(state) {
   const list = $("list");
   const downloads = (state.downloads || []).slice().reverse();
   const seen = new Set();
+  let i = 0;
   for (const d of downloads) {
     seen.add(d.id);
     let c = cards.get(d.id);
@@ -230,7 +232,7 @@ function renderDownloads(state) {
       cards.set(d.id, c);
     }
     c.update(d);
-    list.append(c.root); // keeps order newest first
+    place(list, c.root, i++); // newest first
   }
   for (const [id, c] of cards) {
     if (!seen.has(id)) {
@@ -241,6 +243,14 @@ function renderDownloads(state) {
   const empty = $("emptyList");
   if (!downloads.length && !empty) list.append(el("div", { class: "empty", id: "emptyList" }, "No downloads yet. Big downloads in Firefox are picked up automatically."));
   if (downloads.length && empty) empty.remove();
+}
+
+// place puts node at index in parent, moving it only if it isn't there:
+// moving an element takes the focus out of a field in it and closes a
+// dropdown, and the downloads are redrawn every second.
+function place(parent, node, index) {
+  const at = parent.children[index];
+  if (at !== node) parent.insertBefore(node, at || null);
 }
 
 // A line under the header when engine and extension may not work together.

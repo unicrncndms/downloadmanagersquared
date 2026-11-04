@@ -4,6 +4,7 @@
 package download
 
 import (
+	"cmp"
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
@@ -112,15 +113,16 @@ type ifaceRun struct {
 }
 
 type worker struct {
-	d      *Download
-	iface  string
-	client *http.Client
-	link   Link
-	ir     *ifaceRun
-	cancel context.CancelFunc
-	bytes  atomic.Int64
-	ewma   rate.EWMA
-	speed  float64
+	d       *Download
+	iface   string
+	client  *http.Client
+	link    Link
+	ir      *ifaceRun
+	cancel  context.CancelFunc
+	closing bool // cancelled because the interface's connection setting went down
+	bytes   atomic.Int64
+	ewma    rate.EWMA
+	speed   float64
 }
 
 type pauseError struct {
@@ -374,7 +376,7 @@ func (d *Download) loop(ctx context.Context) error {
 }
 
 func (d *Download) tick(ctx context.Context) (bool, error) {
-	usable := d.env.Paths(d.st.VPN) // fixed when added: no lock needed
+	usable := d.env.Paths(d.VPN())
 	mainID := mainOf(usable)
 	now := time.Now()
 	changed := false
@@ -437,6 +439,8 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 			w.cancel()
 		}
 	}
+
+	d.trimLocked(byID)
 
 	for _, ifc := range usable {
 		l := d.st.Links[ifc.ID]
@@ -517,7 +521,7 @@ func (d *Download) ifRun(id string) *ifaceRun {
 func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
 	res, err := probeLink(ctx, ifc.Client, l, d.st.UserAgent)
 	usable := map[string]Iface{}
-	all := d.env.Paths(d.st.VPN)
+	all := d.env.Paths(d.VPN())
 	for _, u := range all {
 		usable[u.ID] = u
 	}
@@ -781,6 +785,31 @@ func (d *Download) spawnLocked(ctx context.Context, ifc Iface, l Link, seg *segm
 	w.ir.active++
 	d.wg.Add(1)
 	go w.run(wctx, seg)
+}
+
+// trimLocked closes the connections an interface has beyond its setting, the
+// slowest first, so lowering the setting takes effect on a running download.
+// Their chunks go back to the plan for the others. Backoff never closes
+// working connections; only the setting does.
+func (d *Download) trimLocked(usable map[string]Iface) {
+	open := map[string][]*worker{}
+	for w := range d.workers {
+		if !w.closing {
+			open[w.iface] = append(open[w.iface], w)
+		}
+	}
+	for id, ws := range open {
+		ifc, ok := usable[id]
+		extra := len(ws) - max(ifc.Conns, 1)
+		if !ok || extra <= 0 {
+			continue
+		}
+		slices.SortFunc(ws, func(a, b *worker) int { return cmp.Compare(a.speed, b.speed) })
+		for _, w := range ws[:extra] {
+			w.closing = true
+			w.cancel()
+		}
+	}
 }
 
 // nextLocked lets a worker that finished a chunk keep going without waiting for a tick.
@@ -1228,7 +1257,30 @@ func (d *Download) Saved() (string, any) {
 }
 
 // VPN is the download's VPN mode.
-func (d *Download) VPN() paths.Mode { return d.st.VPN } // fixed when added: no lock needed
+func (d *Download) VPN() paths.Mode {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.st.VPN
+}
+
+// SetVPN changes which paths the download may use. A running download moves
+// within a tick: connections on paths the mode no longer allows close, and
+// paths it now allows are probed. Under VPN only with no tunnel up, the queue
+// pauses it until one is.
+func (d *Download) SetVPN(m paths.Mode) error {
+	d.mu.Lock()
+	if d.st.Status == StatusCompleted {
+		d.mu.Unlock()
+		return errors.New("the download is complete")
+	}
+	same := d.st.VPN == m
+	d.st.VPN = m
+	d.mu.Unlock()
+	if !same {
+		d.env.Changed(d)
+	}
+	return nil
+}
 
 // PauseForVPN pauses a running or queued download because, under VPN only, no
 // tunnel is up; the engine queues it again once one is. A paused, finished or

@@ -114,7 +114,7 @@ _Avoid_: Route, link (a link is one interface's access to a file)
 The path a download treats as its main interface: the main interface itself, or under VPN only its tunnel, else any tunnel that is up.
 
 **VPN mode**:
-Which paths a download may use: Off (bare interfaces only), Alongside (tunnels and bare interfaces) or VPN only (tunnels only, and pause when none is up). Each download type has a default, and a download's mode is fixed when it is added.
+Which paths a download may use: Off (bare interfaces only), Alongside (tunnels and bare interfaces) or VPN only (tunnels only, and pause when none is up). Each download type has one, set by the user: changing it moves every unfinished download of that type at once. A download can start in another mode (chosen when adding it, or a torrent's VPN question) until the type's mode next changes.
 _Avoid_: Kill switch (it is what VPN only does, not a separate setting)
 
 **Provider**:
