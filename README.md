@@ -30,6 +30,7 @@ Settings worth knowing (all under **Connections & settings**):
 
 - **Connections**: turn each one on or off, set how many parallel requests it gets, limit its speed, and choose the **main connection** (used alone for servers that can't split a file). VPN adapters start off.
 - **Settings**: the size from which downloads are taken over (100 MB), the save folder (your Downloads folder), how many downloads run at once (1), and start with Windows.
+- **VPN**: give each connection its own WireGuard tunnel, either by importing a `.conf` per connection or by signing in to Private Internet Access, which gives every connection without a `.conf` a tunnel. Choose separately for downloads and torrents whether to use the bare connections only, the tunnels as well, or the tunnels only (nothing runs while no tunnel is up). The tunnels live inside the engine: no admin rights, and other programs aren't affected.
 - **Learned sites**: the clicks DMS² remembers per site; *Forget* teaches a site again.
 
 Unfinished files end in `.dms.part` and are renamed when done. Progress is saved every few seconds, so downloads continue after a crash, sleep or restart.

@@ -42,7 +42,9 @@ func newFakePIA(t *testing.T) *fakePIA { return newFakePIAWith(t, false, 1) }
 
 // newFakePIAForwarding is newFakePIA in a region that may forward ports: then
 // the server answers port forwarding inside the tunnel at 203.0.113.1:19999.
-func newFakePIAForwarding(t *testing.T, forwards bool) *fakePIA { return newFakePIAWith(t, forwards, 1) }
+func newFakePIAForwarding(t *testing.T, forwards bool) *fakePIA {
+	return newFakePIAWith(t, forwards, 1)
+}
 
 // newFakePIAWith is a region of n WireGuard servers. Like PIA's, a server gives
 // every key of the account the same peer IP, so its latest key takes the IP over.
