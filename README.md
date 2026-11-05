@@ -6,6 +6,8 @@ Downloads files over **all your network connections at once** (Ethernet, Wi‑Fi
 - HTTP(S) downloads and torrents, optionally through a WireGuard VPN per connection.
 - Windows 10/11 with Firefox, LibreWolf, Waterfox or Floorp.
 
+It only speeds things up with connections that are really separate, such as your home line plus a phone hotspot. Wi‑Fi and Ethernet to the same router share one line, so together they are no faster than either.
+
 ## Install
 
 1. Download `downloadmanagersquared-windows.zip` from the [latest release](https://github.com/unicrncndms/downloadmanagersquared/releases/latest) and open it. Extracting it is optional.
@@ -20,6 +22,8 @@ DMS² then runs in the tray. The extension asks to enable containers, which it u
 Download a file of 100 MB or more as usual: DMS² takes it over, along with magnet links and `.torrent` files. The toolbar icon shows your downloads; **Connections & settings** is at the bottom of that list.
 
 **Sites with a link per IP:** the first time, a window opens with a blue bar. Click through the site until the download starts. DMS² remembers those clicks and repeats them by itself for each connection from then on. These windows start without cookies, so sites that need you logged in can't be clicked through.
+
+**Checksums:** paste a SHA-256 or MD5 into a download's details in the list. DMS² checks the file when it finishes (or right away if it already has), and a download that doesn't match is kept as `.dms.part` instead of finishing.
 
 Unfinished files end in `.dms.part`. Progress is saved every few seconds, so downloads survive crashes, sleep and restarts.
 
@@ -45,13 +49,30 @@ Settings and the download list live in DMS² itself, so every browser shares the
 
 ## Upgrade and uninstall
 
-**Upgrade:** run `dms-engine.exe` from a newer zip. It updates the existing install and keeps everything. The extension updates itself.
+**Upgrade:** run `dms-engine.exe` from a newer zip. It updates the existing install and keeps everything. The extension updates itself from this repository's releases, signed by Mozilla; to decide yourself, set **Allow automatic updates** to **Off** for it in `about:addons`.
 
 **Uninstall:** *Settings → Apps → Installed apps → downloadmanagersquared*. Downloaded files are always kept; you choose whether settings and the download list go. Then remove the extension in your browser.
 
 ## Privacy and security
 
-DMS² has no server and collects nothing; see [PRIVACY.md](PRIVACY.md). It only accepts requests from your own Windows user, and its proxies only reach the internet, never your local network. It doesn't protect you from programs running as you, or from the PC's administrators.
+DMS² has no server and collects nothing; see [PRIVACY.md](PRIVACY.md). It only accepts requests from your own Windows user, and its proxies only reach the internet, never your local network. It doesn't protect you from programs running as you, or from the PC's administrators. To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+The extension asks for these permissions:
+
+| Permission | What DMS² uses it for |
+|---|---|
+| `nativeMessaging` | Talking to the engine through `dms-host.exe` |
+| `downloads` | Taking over downloads from the browser, and handing back ones the engine can't take |
+| `webRequest`, `webRequestBlocking` | Seeing a download's headers and cookies as it starts, and cancelling any container request that has no connection to go through |
+| `webNavigation` | Following which page a download came from (its landing page) |
+| `proxy` | Sending each temporary container's traffic through its connection's proxy |
+| `contextualIdentities` | Creating the temporary containers that open a site through one connection |
+| `cookies` | Reading the cookies a download needs when the browser didn't send any with it |
+| `tabs` | Opening and closing the windows that click through landing pages, recording and replaying the clicks in them, and opening the settings page |
+| `storage` | Keeping the learned sites and containers in this browser |
+| `contextMenus` | The *Download with DMS²* entries on links and pages |
+| `notifications` | Telling you when a download is taken over or can't be, and when a site needs your clicks or a captcha |
+| `<all_urls>` | Seeing downloads, magnet links and landing pages on any site |
 
 ## Limitations
 
@@ -59,6 +80,7 @@ DMS² has no server and collects nothing; see [PRIVACY.md](PRIVACY.md). It only 
 - Replayed clicks are synthetic: sites that only accept real clicks ask every time.
 - Links a site creates through a form POST can't be fetched again.
 - Servers that fingerprint TLS may refuse DMS² despite your browser's User-Agent.
+- A torrent on the bare connections shows its peers the IP address of every connection it uses. That's why DMS² asks about the VPN before such a torrent starts.
 
 ## Development
 
