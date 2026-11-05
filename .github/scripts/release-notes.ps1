@@ -20,7 +20,10 @@ if ($LASTEXITCODE) { throw "reading the commits for $range failed" }
 
 $lines += if ($previous) { "## Changes since $previous" } else { '## Changes' }
 $lines += ''
-$lines += if ($subjects.Count) { $subjects | ForEach-Object { "- $_" } } else { '- No changes.' }
+# docs/releases/<tag>.md, when present, replaces the commit subjects with notes written for the release.
+$curated = Join-Path $PSScriptRoot "..\..\docs\releases\$Tag.md"
+$lines += if (Test-Path $curated) { (Get-Content -Raw -Encoding utf8 $curated).TrimEnd() }
+    elseif ($subjects.Count) { $subjects | ForEach-Object { "- $_" } } else { '- No changes.' }
 
 if ($Files.Count) {
     $lines += ''
