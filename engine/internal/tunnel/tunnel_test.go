@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -44,6 +45,7 @@ func pair(t *testing.T) (server, client *Tunnel, sent *atomic.Int64) {
 	srvCfg, err := ParseConf(fmt.Sprintf(`[Interface]
 PrivateKey = %s
 Address = 10.9.0.1/24
+DNS = 10.9.0.1
 
 [Peer]
 PublicKey = %s
@@ -165,7 +167,7 @@ func TestTunnelWithoutAServerIsDown(t *testing.T) {
 	_, pub := mustKey(t)
 	pc, _ := net.ListenPacket("udp4", "127.0.0.1:0") // nothing answers here
 	defer pc.Close()
-	cfg, err := ParseConf(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = %s\n", key, pub, pc.LocalAddr()))
+	cfg, err := ParseConf(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\nDNS = 10.9.0.1\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = %s\n", key, pub, pc.LocalAddr()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,5 +207,38 @@ func TestAmneziaWGConfIsRefusedSayingWhy(t *testing.T) {
 	_, err := ParseConf(conf)
 	if err == nil || !strings.Contains(err.Error(), "AmneziaWG") {
 		t.Fatalf("got %v, want a refusal naming AmneziaWG", err)
+	}
+}
+
+func TestConfWithoutIPv4DNSIsRefusedSayingWhy(t *testing.T) {
+	key, _, _ := GenerateKey()
+	_, pub, _ := GenerateKey()
+	for name, dns := range map[string]string{
+		"no DNS":               "",
+		"only IPv6 DNS":        "DNS = 2606:4700:4700::1111, fd00::1\n",
+		"only a search domain": "DNS = vpn.example\n",
+	} {
+		conf := fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.8.0.2/32\n%s[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 1.2.3.4:51820\n", key, dns, pub)
+		_, err := ParseConf(conf)
+		if !errors.Is(err, ErrNoDNS) {
+			t.Errorf("%s: got %v, want ErrNoDNS", name, err)
+			continue
+		}
+		if msg := err.Error(); !strings.Contains(msg, "DNS") || !strings.Contains(msg, "IPv6") {
+			t.Errorf("%s: %q doesn't say an IPv4 DNS server is needed", name, msg)
+		}
+	}
+}
+
+func TestTunnelWithoutDNSDoesntStart(t *testing.T) {
+	key, _, _ := GenerateKey()
+	_, pub, _ := GenerateKey()
+	cfg, _ := ParseConf(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.8.0.2/32\nDNS = 10.8.0.1\n[Peer]\nPublicKey = %s\nEndpoint = 127.0.0.1:9\n", key, pub))
+	cfg.DNS = nil
+	if tn, err := Start(cfg, listenLoopback(&atomic.Int64{}), nil); !errors.Is(err, ErrNoDNS) {
+		if tn != nil {
+			tn.Close()
+		}
+		t.Fatalf("got %v, want ErrNoDNS", err)
 	}
 }

@@ -40,7 +40,7 @@ Unfinished files end in `.dms.part`. Progress is saved every few seconds, so dow
 Each connection can get its own WireGuard tunnel, for downloads, torrents or both. Choose whether they use the bare connections, the tunnels too, or only the tunnels. The tunnels run inside DMS², so no admin rights are needed and other programs aren't affected.
 
 - **Private Internet Access:** sign in, and every connection without its own `.conf` gets a tunnel.
-- **Other providers:** import a `.conf` per connection. It must be plain WireGuard with an IPv4 address, one config per connection (a separate device or key at your provider). Obfuscated AmneziaWG configs don't work.
+- **Other providers:** import a `.conf` per connection. It must be plain WireGuard with an IPv4 address and an IPv4 DNS server (`DNS =`; IPv6 ones aren't used), one config per connection (a separate device or key at your provider). Obfuscated AmneziaWG configs don't work.
 - For sites with a link per IP, use a different server for each connection, or they may share one address.
 
 ### Several browsers
