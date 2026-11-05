@@ -11,10 +11,7 @@ let recipesSig = "";
 let latestSettings = null;
 let latestState = {};
 
-// In the Downloads window, the way back to the downloads.
-if (Host.openDownloads) {
-  document.querySelector("header h1").before(el("button", { class: "small", onclick: () => Host.openDownloads() }, "← Downloads"));
-}
+windowHeader("settings");
 
 // --- connections ---
 
@@ -231,7 +228,7 @@ function renderRecipes(recipes) {
 // --- wiring ---
 
 connectUI((m) => {
-  renderConn(m, "Engine connected");
+  renderConn(m);
   if (!m.state || !m.settings) return;
   latestState = m.state;
   renderIfaces(m.state, m.settings);

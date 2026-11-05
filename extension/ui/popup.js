@@ -7,6 +7,13 @@ const cards = new Map(); // download id -> card controller
 
 if (new URLSearchParams(location.search).has("window")) document.body.classList.add("windowed");
 
+// In the Downloads window the header matches the settings page's, and is two
+// lines: the interfaces' speeds share one with the buttons.
+if (windowHeader("downloads")) {
+  document.querySelector("footer").hidden = true;
+  $("toggleAdd").before($("chips"));
+}
+
 $("openSettings").onclick = () => {
   Host.openSettings("");
   if (!document.body.classList.contains("windowed")) window.close();
@@ -267,7 +274,7 @@ function renderVersion(m) {
 
 connectUI((m) => {
   latest = m;
-  renderConn(m, "Connected");
+  renderConn(m);
   renderVersion(m);
   if (!m.connected || !m.state) {
     $("list").replaceChildren(m.notInstalled

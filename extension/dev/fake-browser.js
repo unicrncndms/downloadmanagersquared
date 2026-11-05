@@ -3,7 +3,7 @@
 // The harness's Host (see ui/host.js), set before host.js loads so it is kept:
 // the pages are fed the fixture from dev/fixtures.js, and what they ask for is
 // kept in window.calls. A fixture's `host` overrides version, userAgent and
-// recipesHere (e.g. the Downloads window's).
+// recipesHere, and openDownloads (e.g. the Downloads window's).
 
 window.calls = [];
 window.errs = [];
@@ -26,6 +26,8 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
     },
     openSettings: (hash) => record({ openSettings: hash }),
     openUrl: (url) => record({ openUrl: url }),
+    // Only in the Downloads window.
+    get openDownloads() { return hostFixture().openDownloads ? () => record({ openDownloads: true }) : undefined; },
     forgetRecipe: (host) => record({ forgetRecipe: host }),
     get version() { return hostFixture().version; },
     get userAgent() { return hostFixture().userAgent; },
