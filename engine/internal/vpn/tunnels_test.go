@@ -194,7 +194,7 @@ func TestRemovingATunnelDeletesItsConfig(t *testing.T) {
 	if _, ok := r.Up("lo"); ok || len(r.Status(time.Now())) != 0 {
 		t.Fatal("the tunnel is still there")
 	}
-	if _, err := os.Stat(r.tunnelFile("lo")); err == nil {
+	if _, err := os.Stat(r.imported.file("lo")); err == nil {
 		t.Fatal("its config is still saved")
 	}
 	if p := r.open(t); len(p) != 0 || len(r.Status(time.Now())) != 0 {
@@ -236,7 +236,7 @@ func TestAConfWithoutDNSIsRefusedSayingWhy(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "DNS") {
 		t.Fatalf("got %v, want a refusal saying it needs DNS", err)
 	}
-	if _, err := os.Stat(r.tunnelFile("lo")); err == nil {
+	if _, err := os.Stat(r.imported.file("lo")); err == nil {
 		t.Fatal("the refused config was saved")
 	}
 }

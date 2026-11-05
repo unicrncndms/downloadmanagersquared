@@ -93,6 +93,9 @@ type PIA struct {
 	Binds      atomic.Int32
 	Password   string
 	VPN        *Server // the first server
+	// Unanswering hands out a server key no server has, so tunnels start but
+	// never get an answer. Set it before the first tunnel starts.
+	Unanswering bool
 }
 
 // NewPIA is a region "nl" (Netherlands) of n WireGuard servers. If it forwards
@@ -143,7 +146,11 @@ func NewPIA(t testing.TB, forwards bool, n int) *PIA {
 		}
 		f.Keys.Add(1)
 		_, port, _ := net.SplitHostPort(s.Endpoint)
-		json.NewEncoder(w).Encode(map[string]any{"status": "OK", "server_key": s.Pub, "server_port": atoi(port),
+		key := s.Pub
+		if f.Unanswering {
+			_, key, _ = tunnel.GenerateKey()
+		}
+		json.NewEncoder(w).Encode(map[string]any{"status": "OK", "server_key": key, "server_port": atoi(port),
 			"server_vip": "203.0.113.1", "peer_ip": "10.9.0.2", "dns_servers": []string{"203.0.113.1"}})
 	}))
 	t.Cleanup(keys.Close)

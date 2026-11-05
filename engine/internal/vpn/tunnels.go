@@ -9,20 +9,15 @@ package vpn
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"net/netip"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
-	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/socks"
@@ -60,49 +55,71 @@ type Problem struct {
 	Err   error
 }
 
-// Tunnels are the VPN tunnels of every interface.
+// Tunnels are the VPN tunnels of every interface. An interface with an
+// imported config uses it; PIA, once signed in, serves the interfaces without one.
 type Tunnels struct {
-	dir       string
-	api       pia.API
-	gatewayOK func(netip.Addr) bool
-	ctx       context.Context // cancelled by Close; every job takes it
-	cancel    context.CancelFunc
-	jobs      sync.WaitGroup
+	dir    string
+	ctx    context.Context // cancelled by Close; every job takes it
+	cancel context.CancelFunc
+	jobs   sync.WaitGroup
+
+	// The providers. Their state is under mu.
+	imported *imported
+	pia      *piaProvider
 
 	mu      sync.Mutex
 	tunnels map[string]*entry // by interface ID
 	ifaces  map[string]Iface  // as of the last Tick
-	pia     *piaState         // nil: PIA isn't set up
-	region  string
+}
+
+// provider is where a tunnel's config comes from. Its methods are called with
+// Tunnels.mu held, except config.
+type provider interface {
+	name() string // as Status shows it: "conf" or "pia"
+	// ready is whether te may start now. A provider that says no either waits
+	// for the user or has put the reason in te.err.
+	ready(te *entry) bool
+	// config is the config for a new start of te's tunnel through b, and the
+	// forwarder of that start, given its running tunnel. Called without the lock.
+	config(ctx context.Context, te *entry, b *netif.Binding) (tunnel.Config, func(*tunnel.Tunnel) forwarder, error)
+	lostHint() string     // added to the error when the server stops answering
+	takesTypedPort() bool // whether the user's typed-in port applies
+}
+
+// forwarder keeps a port forwarded to one start of a tunnel. It is dropped with
+// that start. Its methods are called with Tunnels.mu held.
+type forwarder interface {
+	// forward starts the work due at now, in the background.
+	forward(now time.Time)
+	// port is the forwarded port (0: none) and whether peers can reach it at
+	// now: "reachable", "outgoing", or "" while not known yet.
+	port(now time.Time) (int, string)
 }
 
 // entry is the tunnel configured for one interface.
 type entry struct {
-	pia      bool          // PIA makes a new config (and key) at each start
-	server   string        // PIA: the server's name, kept apart from other tunnels'
+	id       string
+	prov     provider
 	cfg      tunnel.Config // a .conf's, or PIA's latest
 	socks    *socks.Server // landing pages resolved through the tunnel
 	t        *tunnel.Tunnel
 	on       *netif.Binding // what t runs over
 	client   *http.Client
+	fw       forwarder // this start's
 	up       bool
 	gen      int // counts starts: torrent sockets of an older one are on a dead stack
 	starting bool
 	started  time.Time
 	retryAt  time.Time
 	err      string
+}
 
-	// PIA port forwarding, for this tunnel's server.
-	link    piaLink
-	sig     *pia.Signature
-	pfPort  int // forwarded to the tunnel, 0 if none
-	boundAt time.Time
-	pfTried time.Time
-	pfErr   string
-	pfBusy  bool
-
-	// NAT-PMP port forwarding, for an imported tunnel (pfPort holds its port).
-	pmp pmpState
+// stopLocked takes te's tunnel down, returning the device for the caller to
+// close once the lock is released (nil if it wasn't running).
+func (te *entry) stopLocked() *tunnel.Tunnel {
+	tn := te.t
+	te.t, te.on, te.client, te.fw, te.up = nil, nil, nil, nil, false
+	return tn
 }
 
 func New(o Options) *Tunnels {
@@ -113,37 +130,20 @@ func New(o Options) *Tunnels {
 		o.GatewayOK = privateGateway
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Tunnels{
-		dir: o.Dir, api: o.PIA, gatewayOK: o.GatewayOK, ctx: ctx, cancel: cancel,
-		tunnels: map[string]*entry{}, ifaces: map[string]Iface{}, region: o.PIARegion,
+	t := &Tunnels{
+		dir: o.Dir, ctx: ctx, cancel: cancel,
+		tunnels: map[string]*entry{}, ifaces: map[string]Iface{},
 	}
+	t.imported = &imported{t: t, gatewayOK: o.GatewayOK}
+	t.pia = &piaProvider{t: t, api: o.PIA, region: o.PIARegion, servers: map[*entry]string{}}
+	return t
 }
 
 // Load reads the saved configs and the PIA login. What can't be read is set
 // aside (renamed .broken) and returned, for the engine to tell the user.
 func (t *Tunnels) Load() []Problem {
-	var problems []Problem
-	files, _ := filepath.Glob(filepath.Join(t.dir, "tunnels", "*.conf"))
-	for _, f := range files {
-		id, err := hex.DecodeString(strings.TrimSuffix(filepath.Base(f), ".conf"))
-		if err != nil {
-			continue
-		}
-		b, err := os.ReadFile(f)
-		if err == nil {
-			_, err = tunnel.ParseConf(string(b))
-		}
-		if err != nil && !errors.Is(err, tunnel.ErrNoDNS) { // that one shows on the tunnel
-			log.Printf("tunnel for %s unreadable, set aside: %v", id, err)
-			setAside(f)
-			problems = append(problems, Problem{Iface: string(id), Err: err})
-			continue
-		}
-		if err := t.setTunnel(string(id), string(b), false); err != nil {
-			log.Printf("tunnel for %s: %v", id, err)
-		}
-	}
-	if err := t.loadPIA(); err != nil {
+	problems := t.imported.load()
+	if err := t.pia.load(); err != nil {
 		problems = append(problems, Problem{Err: err})
 	}
 	return problems
@@ -165,8 +165,7 @@ func (t *Tunnels) Tick(now time.Time, ifaces []Iface) {
 	}
 	t.mu.Unlock()
 	t.sync(now)
-	t.forwardPIA(now)
-	t.forwardPMP(now)
+	t.forward(now)
 }
 
 // Wait waits for the background work started so far: tunnel starts and port
@@ -188,7 +187,7 @@ func (t *Tunnels) Close() {
 	}
 }
 
-// go runs f as background work, cancelled by Close.
+// goJob runs f as background work, which takes t.ctx.
 func (t *Tunnels) goJob(f func()) {
 	t.jobs.Add(1)
 	go func() {
@@ -197,52 +196,15 @@ func (t *Tunnels) goJob(f func()) {
 	}()
 }
 
-// The .conf files hold private keys, so they live in the engine's folder and
-// never in the settings the extension gets.
-func (t *Tunnels) tunnelFile(ifaceID string) string {
-	return filepath.Join(t.dir, "tunnels", hex.EncodeToString([]byte(ifaceID))+".conf")
-}
-
-// Import makes conf the tunnel of an interface, replacing any it had, and
-// starts it. A config is refused if it isn't a usable WireGuard one, or if
-// another interface's imported tunnel has its key.
-func (t *Tunnels) Import(ifaceID, conf string) error {
-	if other := t.tunnelWithKey(ifaceID, conf); other != "" {
-		return fmt.Errorf("%s already uses this config. Each connection needs its own: the VPN server "+
-			"keeps one location per key, so two tunnels with one key take each other's traffic. "+
-			"Have your VPN provider make another config (a separate device or key), ideally on another server", other)
-	}
-	if err := t.setTunnel(ifaceID, conf, true); err != nil {
-		return fmt.Errorf("not a usable WireGuard config: %w", err)
-	}
-	t.sync(time.Now())
-	return nil
-}
-
-// setTunnel makes conf the tunnel of an interface, replacing any it had. A
-// saved config without DNS (from before that was required) is kept, its tunnel
-// down saying why.
-func (t *Tunnels) setTunnel(ifaceID, conf string, save bool) error {
-	cfg, err := tunnel.ParseConf(conf)
-	var cantRun string
-	if errors.Is(err, tunnel.ErrNoDNS) && !save {
-		cantRun, err = err.Error(), nil
-	}
-	if err != nil {
-		return err
-	}
-	if save {
-		if err := atomicfile.Write(t.tunnelFile(ifaceID), []byte(conf), 0o600); err != nil {
-			return err
-		}
-	}
+// addEntry makes a tunnel of prov for an interface, replacing any it had.
+func (t *Tunnels) addEntry(ifaceID string, prov provider, cfg tunnel.Config, err string) error {
 	t.removeEntry(ifaceID)
-	srv, err := socks.Listen(t.socksPath(ifaceID))
-	if err != nil {
-		return err
+	srv, lerr := socks.Listen(t.socksPath(ifaceID))
+	if lerr != nil {
+		return lerr
 	}
 	t.mu.Lock()
-	t.tunnels[ifaceID] = &entry{cfg: cfg, socks: srv, err: cantRun}
+	t.tunnels[ifaceID] = &entry{id: ifaceID, prov: prov, cfg: cfg, socks: srv, err: err}
 	t.mu.Unlock()
 	return nil
 }
@@ -267,46 +229,20 @@ func (t *Tunnels) socksPath(ifaceID string) socks.Path {
 	}
 }
 
-// tunnelWithKey is the name of another interface whose imported config has
-// the same private key as conf ("" if none, or conf doesn't parse).
-func (t *Tunnels) tunnelWithKey(ifaceID, conf string) string {
-	cfg, err := tunnel.ParseConf(conf)
-	if err != nil {
-		return ""
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	for id, te := range t.tunnels {
-		if id == ifaceID || te.pia || te.cfg.PrivateKey != cfg.PrivateKey {
-			continue
-		}
-		if i := t.ifaces[id]; i.Name != "" {
-			return i.Name
-		}
-		return "Another connection"
-	}
-	return ""
-}
-
-// Remove takes an interface's imported tunnel down and deletes its config.
-func (t *Tunnels) Remove(ifaceID string) error {
-	t.removeEntry(ifaceID)
-	if err := os.Remove(t.tunnelFile(ifaceID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
-}
-
 func (t *Tunnels) removeEntry(ifaceID string) {
 	t.mu.Lock()
 	te := t.tunnels[ifaceID]
 	delete(t.tunnels, ifaceID)
+	var tn *tunnel.Tunnel
+	if te != nil {
+		tn = te.stopLocked()
+	}
 	t.mu.Unlock()
 	if te != nil {
 		te.socks.Close()
-		if te.t != nil {
-			te.t.Close()
-		}
+	}
+	if tn != nil {
+		tn.Close()
 	}
 }
 
@@ -315,28 +251,10 @@ func (t *Tunnels) removeEntry(ifaceID string) {
 // answering, like an unreachable interface retrying.
 func (t *Tunnels) sync(now time.Time) {
 	type start struct {
-		id string
 		te *entry
 		b  *netif.Binding
 	}
-	t.mu.Lock()
-	wanted := t.piaWantedLocked()
-	t.mu.Unlock()
-	for _, id := range wanted {
-		srv, err := socks.Listen(t.socksPath(id))
-		if err != nil {
-			continue
-		}
-		t.mu.Lock()
-		if t.tunnels[id] == nil {
-			t.tunnels[id] = &entry{pia: true, socks: srv}
-			srv = nil
-		}
-		t.mu.Unlock()
-		if srv != nil {
-			srv.Close()
-		}
-	}
+	t.pia.addWanted()
 
 	var starts []start
 	var stops []*tunnel.Tunnel
@@ -349,20 +267,14 @@ func (t *Tunnels) sync(now time.Time) {
 			lost := !te.up && now.Sub(te.started) > tunnelGrace
 			if !usable || te.on != ifc.Binding || lost {
 				if lost {
-					te.err, te.retryAt = "the VPN server doesn't answer", now.Add(tunnelRetry)
-					if !te.pia { // PIA gets a new key each start; a .conf's can expire or be revoked
-						te.err += ". If this keeps happening, the config may have expired or been revoked at your provider: make a new one and import it again"
-					}
+					te.err, te.retryAt = "the VPN server doesn't answer"+te.prov.lostHint(), now.Add(tunnelRetry)
 				}
-				stops = append(stops, te.t)
-				te.t, te.on, te.client, te.up = nil, nil, nil, false
+				stops = append(stops, te.stopLocked())
 			}
 		}
-		waitsForUser := te.pia && (t.pia == nil || t.pia.refused)
-		cantRun := !te.pia && len(te.cfg.DNS) == 0 // its error says why
-		if usable && te.t == nil && !te.starting && !now.Before(te.retryAt) && !waitsForUser && !cantRun {
+		if usable && te.t == nil && !te.starting && !now.Before(te.retryAt) && te.prov.ready(te) {
 			te.starting = true
-			starts = append(starts, start{id, te, ifc.Binding})
+			starts = append(starts, start{te, ifc.Binding})
 		}
 	}
 	t.mu.Unlock()
@@ -370,20 +282,12 @@ func (t *Tunnels) sync(now time.Time) {
 		tn.Close()
 	}
 	for _, s := range starts {
-		t.goJob(func() { t.startTunnel(s.id, s.te, s.b) })
+		t.goJob(func() { t.startTunnel(s.te, s.b) })
 	}
 }
 
-func (t *Tunnels) startTunnel(id string, te *entry, b *netif.Binding) {
-	t.mu.Lock()
-	cfg := te.cfg
-	t.mu.Unlock()
-	var err error
-	var link piaLink
-	if te.pia {
-		// A new key each start: one PIA rejected or forgot is replaced this way.
-		cfg, link, err = t.piaConfig(te, b)
-	}
+func (t *Tunnels) startTunnel(te *entry, b *netif.Binding) {
+	cfg, newFw, err := te.prov.config(t.ctx, te, b)
 	var tn *tunnel.Tunnel
 	if err == nil {
 		tn, err = tunnel.Start(cfg, func() (net.PacketConn, error) { return b.ListenPacket(0) }, b.LookupIP)
@@ -393,27 +297,36 @@ func (t *Tunnels) startTunnel(id string, te *entry, b *netif.Binding) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if err == nil {
-		te.cfg = cfg
-		// A new server: the old forwarded port is gone with the old tunnel.
-		te.link, te.sig, te.pfPort, te.boundAt, te.pfErr = link, nil, 0, time.Time{}, ""
-		te.pmp = pmpState{} // asked again on this start
-	}
 	te.starting = false
-	if t.tunnels[id] != te || t.ctx.Err() != nil { // removed, replaced or closed meanwhile
+	if t.tunnels[te.id] != te || t.ctx.Err() != nil { // removed, replaced or closed meanwhile
 		if tn != nil {
 			tn.Close()
 		}
 		return
 	}
 	if err != nil {
-		log.Printf("tunnel for %s: %v", id, err)
+		log.Printf("tunnel for %s: %v", te.id, err)
 		te.err, te.retryAt = err.Error(), time.Now().Add(tunnelRetry)
 		return
 	}
+	te.cfg = cfg
 	te.t, te.on, te.started, te.err = tn, b, time.Now(), ""
 	te.gen++
 	te.client = netif.NewHTTPClient(tn.DialContext)
+	te.fw = newFw(tn)
+}
+
+// forward keeps the ports of the tunnels that are up forwarded. A port the
+// user typed in wins: its tunnel's forwarder isn't asked.
+func (t *Tunnels) forward(now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for id, te := range t.tunnels {
+		if t.upLocked(id) == nil || t.typedPortLocked(te) != 0 {
+			continue
+		}
+		te.fw.forward(now)
+	}
 }
 
 // upLocked is the running tunnel of an interface, nil unless it is up and the
@@ -448,8 +361,9 @@ func (t *Tunnels) Up(ifaceID string) (Tunnel, bool) {
 		return Tunnel{}, false
 	}
 	tn := te.t
+	port, _ := t.portLocked(te, time.Now())
 	return Tunnel{
-		Gen: te.gen, Port: t.portLocked(ifaceID, te), Client: te.client,
+		Gen: te.gen, Port: port, Client: te.client,
 		Dial: tn.DialContext, LookupIP: tn.LookupIP, Listen: tn.Listen, ListenPacket: tn.ListenPacket,
 	}, true
 }
@@ -472,59 +386,45 @@ func (t *Tunnels) Status(now time.Time) []Status {
 	defer t.mu.Unlock()
 	var out []Status
 	for id, te := range t.tunnels {
-		ifc := t.ifaces[id]
 		state := "connecting"
 		switch {
 		case te.t != nil && te.up:
 			state = "up"
-		case !ifc.Usable:
+		case !t.ifaces[id].Usable:
 			state = "off"
 		case te.err != "" && te.t == nil:
 			state = "down"
 		}
-		s := Status{Iface: id, State: state, Err: te.err, Provider: "conf", SocksPort: te.socks.Port()}
-		if te.pia {
-			s.Provider = "pia"
+		s := Status{
+			Iface: id, State: state, Err: te.err, Provider: te.prov.name(),
+			ForwardedPort: t.typedPortLocked(te), SocksPort: te.socks.Port(),
 		}
-		s.ForwardedPort = t.manualPortLocked(id, te)
 		if te.cfg.Address.IsValid() {
 			s.Address = te.cfg.Address.String()
 		}
 		if state == "up" {
-			switch {
-			case s.ForwardedPort != 0:
-				s.Incoming = "forwarded" // the engine can't check a typed-in port
-			case !te.pia && pmpReachableLocked(te, now):
-				s.Incoming = "reachable"
-			case !te.pia && (te.pmp.gen != te.gen || !te.pmp.probed):
-				// Not known until its gateway is asked about NAT-PMP.
-			case !te.pia || !te.link.forwards:
-				s.Incoming = "outgoing"
-			case te.pfPort != 0 && now.Sub(te.boundAt) < pfShown:
-				s.Incoming = "reachable"
-			case te.pfErr != "":
-				s.Incoming = "outgoing"
-			}
+			_, s.Incoming = t.portLocked(te, now)
 		}
 		out = append(out, s)
 	}
 	return out
 }
 
-// manualPortLocked is the port the user typed in for an imported tunnel, 0 if
-// none (or the tunnel is PIA's, which forwards its own).
-func (t *Tunnels) manualPortLocked(ifaceID string, te *entry) int {
-	if te.pia {
+// typedPortLocked is the port the user typed in for te's tunnel, 0 if none or
+// its provider forwards its own.
+func (t *Tunnels) typedPortLocked(te *entry) int {
+	if !te.prov.takesTypedPort() {
 		return 0
 	}
-	return t.ifaces[ifaceID].ForwardedPort
+	return t.ifaces[te.id].ForwardedPort
 }
 
-// portLocked is the port a tunnel's torrent listener uses: the one typed in,
-// else the one PIA or NAT-PMP forwarded (0: any).
-func (t *Tunnels) portLocked(ifaceID string, te *entry) int {
-	if p := t.manualPortLocked(ifaceID, te); p != 0 {
-		return p
+// portLocked is the port a running tunnel's torrent listener uses, and whether
+// peers reach it: the one typed in (which the engine can't check), else its
+// forwarder's.
+func (t *Tunnels) portLocked(te *entry, now time.Time) (int, string) {
+	if p := t.typedPortLocked(te); p != 0 {
+		return p, "forwarded"
 	}
-	return te.pfPort
+	return te.fw.port(now)
 }

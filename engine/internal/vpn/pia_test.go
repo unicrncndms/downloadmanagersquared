@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"downloadmanagersquared/engine/internal/tunnel"
 	"downloadmanagersquared/engine/internal/vpn/vpntest"
 )
 
@@ -193,5 +194,54 @@ func TestChangingThePIARegionReconnects(t *testing.T) {
 	r.waitUp(t)
 	if again, _ := r.Up("lo"); again.Gen == first.Gen || f.Keys.Load() < 2 {
 		t.Fatalf("after the region change: generation %d (was %d), %d keys", again.Gen, first.Gen, f.Keys.Load())
+	}
+}
+
+func TestAnImportedConfigWinsOverPIAAndRemovingItHandsBack(t *testing.T) {
+	f := vpntest.NewPIA(t, false, 1)
+	r := piaRig(t, f)
+	r.tick(time.Now())
+	if err := r.SetPIA("p0123456", "right"); err != nil {
+		t.Fatal(err)
+	}
+	r.waitUp(t)
+
+	priv, pub, _ := tunnel.GenerateKey()
+	if err := r.Import("lo", vpntest.NewServer(t, pub).Conf(priv)); err != nil {
+		t.Fatal(err)
+	}
+	r.waitUp(t)
+	if s := r.status(t, "lo", time.Now()); s.Provider != "conf" {
+		t.Fatalf("with an imported config the tunnel is %q's", s.Provider)
+	}
+	keys := f.Keys.Load()
+	r.tick(time.Now().Add(time.Hour))
+	if f.Keys.Load() != keys {
+		t.Fatal("PIA registered a key for an interface that has its own config")
+	}
+
+	if err := r.Remove("lo"); err != nil {
+		t.Fatal(err)
+	}
+	r.waitUp(t)
+	if s := r.status(t, "lo", time.Now()); s.Provider != "pia" {
+		t.Fatalf("after removing the config the tunnel is %q's, want PIA's again", s.Provider)
+	}
+}
+
+func TestALostPIATunnelSaysNothingAboutExpiredConfigs(t *testing.T) {
+	f := vpntest.NewPIA(t, false, 1)
+	f.Unanswering = true
+	r := piaRig(t, f)
+	r.tick(time.Now())
+	if err := r.SetPIA("p0123456", "right"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	r.tick(now) // started, never answered
+	r.tick(now.Add(tunnelGrace + time.Second))
+	s := r.status(t, "lo", time.Now())
+	if s.State != "down" || s.Err != "the VPN server doesn't answer" {
+		t.Fatalf("lost PIA tunnel: %q, %q; want down, saying only that the server doesn't answer", s.State, s.Err)
 	}
 }
