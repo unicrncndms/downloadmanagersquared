@@ -28,12 +28,12 @@ import (
 	"downloadmanagersquared/engine/internal/ipc"
 	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/paths"
-	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/portmap"
 	"downloadmanagersquared/engine/internal/queue"
 	"downloadmanagersquared/engine/internal/rate"
 	"downloadmanagersquared/engine/internal/socks"
 	"downloadmanagersquared/engine/internal/torrent"
+	"downloadmanagersquared/engine/internal/vpn"
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
@@ -95,11 +95,10 @@ type Engine struct {
 	ifaces    map[string]*ifaceEntry
 	clients   map[*ipc.Conn]*client
 	clientSeq int64
-	tunnels   map[string]*tunnelEntry // by interface ID
-	resolves  map[string]resolveReq   // waiting for an extension to pick them up
-	started   map[string]time.Time    // browsers started for a resolve, by exe, so not twice at once
-	userAgent string                  // the browser's, from its latest hello; not saved
-	browser   string                  // the browser's exe, from its latest hello; not saved
+	resolves  map[string]resolveReq // waiting for an extension to pick them up
+	started   map[string]time.Time  // browsers started for a resolve, by exe, so not twice at once
+	userAgent string                // the browser's, from its latest hello; not saved
+	browser   string                // the browser's exe, from its latest hello; not saved
 
 	// Also under mu.
 	window       Window // the Downloads window; nil until SetWindow
@@ -111,8 +110,7 @@ type Engine struct {
 	snapshot StateEvent
 
 	mapPort func(ctx context.Context, gw portmap.Gateway, port int, lifetime time.Duration) error
-	pia     *piaState
-	piaAPI  pia.API
+	vpn     *vpn.Tunnels
 
 	quit     chan struct{}
 	quitOnce sync.Once
@@ -184,6 +182,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	os.MkdirAll(filepath.Join(dir, "torrents"), 0o755)
 	atomicfile.RemoveStale(dir)
 	settings, broken := loadSettings(filepath.Join(dir, "settings.json"))
+	oldPorts := legacyForwardedPorts(filepath.Join(dir, "settings.json")) // gone from the settings at the next save
 	if broken {
 		notify("Settings reset", "Settings couldn't be read and were reset; the old file is settings.json.broken.", nil)
 	}
@@ -195,9 +194,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		clients:  map[*ipc.Conn]*client{},
 		resolves: map[string]resolveReq{},
 		started:  map[string]time.Time{},
-		tunnels:  map[string]*tunnelEntry{},
 		mapPort:  portmap.Map,
-		piaAPI:   pia.Default,
 		quit:     make(chan struct{}),
 		quitReq:  make(chan struct{}),
 	}
@@ -226,8 +223,10 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		e.sessions[m] = s
 	}
 	e.loadDownloads()
-	e.loadTunnels()
-	e.loadPIA()
+	e.loadVPN()
+	for id, port := range oldPorts {
+		e.vpn.AdoptForwardedPort(id, port)
+	}
 	return e, nil
 }
 
@@ -318,8 +317,6 @@ func (e *Engine) Run() {
 		go ipc.Serve(e.ln, e)
 	}
 	go e.mapPorts()
-	go e.forwardLoop()
-	go e.pmpLoop()
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	last := time.Now()
@@ -333,7 +330,7 @@ func (e *Engine) Run() {
 			if n%10 == 0 {
 				e.refreshInterfaces()
 			}
-			e.syncTunnels(now)
+			e.tickVPN(now)
 			e.syncTorrentIfaces()
 			e.schedule()
 			e.queue.Save()
@@ -360,7 +357,7 @@ func (e *Engine) Shutdown() {
 		for _, s := range e.sessions {
 			s.Close()
 		}
-		e.closeTunnels()
+		e.vpn.Close()
 		e.mu.Lock()
 		for _, ent := range e.ifaces {
 			ent.socks.Close()
@@ -405,6 +402,7 @@ func (e *Engine) refreshInterfaces() {
 	e.mu.Lock()
 	e.refreshInterfacesLocked(list)
 	e.mu.Unlock()
+	e.tickVPN(time.Now())
 	e.syncTorrentIfaces()
 }
 
@@ -541,13 +539,11 @@ func (e *Engine) refreshPortMaps(now time.Time) {
 func (e *Engine) dialVia(id string) socks.DialFunc {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if ifaceID, ok := paths.IfaceOf(id); ok {
-			e.mu.Lock()
-			te := e.tunnelUpLocked(ifaceID)
-			e.mu.Unlock()
-			if te == nil {
+			tn, ok := e.vpn.Up(ifaceID)
+			if !ok {
 				return nil, errors.New("the VPN tunnel is not up")
 			}
-			return te.t.DialContext(ctx, network, addr)
+			return tn.Dial(ctx, network, addr)
 		}
 		b, err := e.bindingOf(id)
 		if err != nil {
@@ -561,13 +557,11 @@ func (e *Engine) dialVia(id string) socks.DialFunc {
 func (e *Engine) socksPath(id string) socks.Path {
 	return socks.Path{Dial: e.dialVia(id), Lookup: func(ctx context.Context, host string) ([]net.IP, error) {
 		if ifaceID, ok := paths.IfaceOf(id); ok {
-			e.mu.Lock()
-			te := e.tunnelUpLocked(ifaceID)
-			e.mu.Unlock()
-			if te == nil {
+			tn, ok := e.vpn.Up(ifaceID)
+			if !ok {
 				return nil, errors.New("the VPN tunnel is not up")
 			}
-			return te.t.LookupIP(ctx, host)
+			return tn.LookupIP(ctx, host)
 		}
 		b, err := e.bindingOf(id)
 		if err != nil {
@@ -603,11 +597,13 @@ func (e *Engine) torrentIfacesFor(m paths.Mode) []torrent.Iface {
 	for _, id := range paths.For(m, e.pathSnapshotLocked()).Paths {
 		if base, tun := paths.IfaceOf(id); tun {
 			// Bound to this tunnel's stack: after a restart it is a new generation.
-			te := e.tunnelUpLocked(base)
-			t := te.t
+			tn, ok := e.vpn.Up(base)
+			if !ok { // went down since the snapshot
+				continue
+			}
 			ifs = append(ifs, torrent.Iface{
-				ID: id, Gen: te.gen, Port: e.tunnelPortLocked(base, te), Upload: e.uploadLocked(base),
-				Dial: t.DialContext, ListenPacket: t.ListenPacket, LookupIP: t.LookupIP, Listen: t.Listen,
+				ID: id, Gen: tn.Gen, Port: tn.Port, Upload: e.uploadLocked(base),
+				Dial: tn.Dial, ListenPacket: tn.ListenPacket, LookupIP: tn.LookupIP, Listen: tn.Listen,
 			})
 			continue
 		}
@@ -678,7 +674,11 @@ func (e *Engine) Paths(m paths.Mode) []download.Iface {
 		base, tun := paths.IfaceOf(id)
 		var client *http.Client
 		if tun {
-			client = e.tunnelUpLocked(base).client
+			tn, ok := e.vpn.Up(base)
+			if !ok { // went down since the snapshot
+				continue
+			}
+			client = tn.Client
 		} else {
 			client = e.ifaces[id].binding.HTTPClient()
 		}
@@ -693,7 +693,7 @@ func (e *Engine) pathSnapshotLocked() paths.Snapshot {
 	for id, ent := range e.ifaces {
 		s.Ifaces = append(s.Ifaces, paths.Iface{
 			ID: id, Present: ent.present, Enabled: e.enabledLocked(ent), Default: ent.info.IsDefault,
-			TunnelUp: e.tunnelUpLocked(id) != nil,
+			TunnelUp: e.tunnelUpLocked(id),
 		})
 	}
 	return s
@@ -718,8 +718,8 @@ func (e *Engine) RequestResolve(id, ifaceID, pageURL, browser string) {
 	e.mu.Lock()
 	req := resolveReq{ID: id, Iface: ifaceID, PageURL: pageURL, Browser: browser}
 	if base, tun := paths.IfaceOf(ifaceID); tun {
-		if te, ent := e.tunnels[base], e.ifaces[base]; te != nil && ent != nil {
-			req.IfaceName, req.SocksPort = "VPN via "+ent.info.Name, te.socks.Port()
+		if st, ok := e.tunnelStatus(base); ok && e.ifaces[base] != nil {
+			req.IfaceName, req.SocksPort = "VPN via "+e.ifaces[base].info.Name, st.SocksPort
 		}
 	} else if ent := e.ifaces[ifaceID]; ent != nil {
 		req.IfaceName, req.SocksPort = ent.info.Name, ent.socks.Port()
@@ -1114,7 +1114,7 @@ type IfaceView struct {
 type StateEvent struct {
 	Downloads  []download.Summary `json:"downloads"`
 	Interfaces []IfaceView        `json:"interfaces"`
-	PIA        PIAView            `json:"pia"`
+	PIA        vpn.PIAView        `json:"pia"`
 	Speed      float64            `json:"speed"`
 	ETA        float64            `json:"eta"`
 	Active     int                `json:"active"`
@@ -1156,6 +1156,11 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	}
 
 	mainID := paths.MainInterface(e.pathSnapshotLocked())
+	tunnels := e.vpn.Status(now)
+	hasTunnel := map[string]bool{}
+	for _, st := range tunnels {
+		hasTunnel[st.Iface] = true
+	}
 	views := []IfaceView{}
 	for id, ent := range e.ifaces {
 		up, down := ent.shaper.Limits()
@@ -1165,7 +1170,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
 			SocksPort: ent.socks.Port(), Speed: speeds[id],
 			Upload: e.uploadLocked(id), UploadLimit: up, DownloadLimit: down,
-			Incoming: incomingText(ent.incoming), HasTunnel: e.tunnels[id] != nil,
+			Incoming: incomingText(ent.incoming), HasTunnel: hasTunnel[id],
 		})
 	}
 	sort.Slice(views, func(i, j int) bool {
@@ -1174,10 +1179,10 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		}
 		return views[i].Name < views[j].Name
 	})
-	tviews := e.tunnelViewsLocked(speeds)
+	tviews := e.tunnelViewsLocked(tunnels, speeds)
 	sort.Slice(tviews, func(i, j int) bool { return tviews[i].Name < tviews[j].Name })
 	views = append(views, tviews...)
-	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, PIA: e.piaViewLocked(), Speed: total, ETA: e.eta.Seconds(), Active: active}
+	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, PIA: e.vpn.PIA(), Speed: total, ETA: e.eta.Seconds(), Active: active}
 }
 
 func incomingText(in incoming) string {

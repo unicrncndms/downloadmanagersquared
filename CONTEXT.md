@@ -118,10 +118,10 @@ Which paths a download may use: Off (bare interfaces only), Alongside (tunnels a
 _Avoid_: Kill switch (it is what VPN only does, not a separate setting)
 
 **Provider**:
-Where tunnel configs come from: imported WireGuard `.conf` files, or PIA, which generates one config per interface through its API.
+Where tunnel configs come from: imported WireGuard `.conf` files, or PIA, which generates one config per interface through its API. An interface with an imported config uses it; PIA serves the interfaces without one.
 
 **Forwarded port**:
-A port the VPN server forwards to a tunnel, so torrent peers can connect in ("reachable"). A PIA tunnel gets one through PIA's API. An imported tunnel gets one if its gateway answers NAT-PMP (Proton VPN does), or the user types in a port their provider forwards (AirVPN); otherwise it is outgoing only. A typed-in port shows as "forwarded", not "reachable": the engine can't check it.
+A port the VPN server forwards to a tunnel, so torrent peers can connect in ("reachable"). A PIA tunnel gets one through PIA's API. An imported tunnel gets one if its gateway answers NAT-PMP (Proton VPN does), or the user types in a port their provider forwards (AirVPN); otherwise it is outgoing only. A typed-in port shows as "forwarded", not "reachable": the engine can't check it. It belongs to the imported tunnel and goes when that tunnel is removed. A forwarded port lasts one tunnel start: a restarted tunnel gets a new one.
 
 ### Browser
 

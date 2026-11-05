@@ -20,7 +20,6 @@ type IfaceSettings struct {
 	Upload        *bool  `json:"upload,omitempty"`        // nil: default (on)
 	UploadLimit   int64  `json:"uploadLimit,omitempty"`   // bytes per second, 0 = none
 	DownloadLimit int64  `json:"downloadLimit,omitempty"` // bytes per second, 0 = none
-	ForwardedPort int    `json:"forwardedPort,omitempty"` // a port the VPN provider forwards to this connection's imported tunnel, 0 = none
 }
 
 type Settings struct {
@@ -90,6 +89,30 @@ func (s *Settings) normalize() {
 		}
 		is.UploadLimit, is.DownloadLimit = max(is.UploadLimit, 0), max(is.DownloadLimit, 0)
 	}
+}
+
+// legacyForwardedPorts are the ports typed in for imported tunnels that
+// settings.json held before they were kept with the tunnels, by interface ID.
+func legacyForwardedPorts(path string) map[string]int {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var s struct {
+		Interfaces map[string]struct {
+			ForwardedPort int `json:"forwardedPort"`
+		} `json:"interfaces"`
+	}
+	if json.Unmarshal(b, &s) != nil {
+		return nil
+	}
+	ports := map[string]int{}
+	for id, is := range s.Interfaces {
+		if is.ForwardedPort > 0 && is.ForwardedPort <= 65535 {
+			ports[id] = is.ForwardedPort
+		}
+	}
+	return ports
 }
 
 // loadSettings reads the settings. An unreadable file (any read or parse

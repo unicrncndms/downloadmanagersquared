@@ -2,7 +2,6 @@ package engine
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -23,45 +21,12 @@ import (
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/torrent"
 	"downloadmanagersquared/engine/internal/tunnel"
+	"downloadmanagersquared/engine/internal/vpn/vpntest"
 )
 
-// vpnServer is a WireGuard server on loopback serving a file at 203.0.113.1 (a
-// documentation address, public as far as the proxies are concerned),
-// an address only reachable through the tunnel.
-type vpnServer struct {
-	t        *tunnel.Tunnel
-	endpoint string
-	pub      string
-	data     []byte
-}
+type vpnServer = vpntest.Server
 
-func newVPNServer(t *testing.T, clientPub string) *vpnServer {
-	t.Helper()
-	priv, pub, err := tunnel.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := tunnel.ParseConf(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 203.0.113.1/24\nDNS = 203.0.113.1\n[Peer]\nPublicKey = %s\nAllowedIPs = 10.9.0.2/32\n", priv, clientPub))
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv, err := tunnel.Start(cfg, func() (net.PacketConn, error) { return net.ListenPacket("udp4", "127.0.0.1:0") }, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(srv.Close)
-	data := make([]byte, 3<<20)
-	rand.Read(data)
-	ln, err := srv.Listen(80)
-	if err != nil {
-		t.Fatal(err)
-	}
-	go http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Disposition", `attachment; filename="vpn.bin"`)
-		http.ServeContent(w, r, "vpn.bin", time.Time{}, bytes.NewReader(data))
-	}))
-	return &vpnServer{t: srv, endpoint: srv.LocalAddr().String(), pub: pub, data: data}
-}
+func newVPNServer(t *testing.T, clientPub string) *vpnServer { return vpntest.NewServer(t, clientPub) }
 
 // loopbackEngine is an engine whose only interface is this machine's loopback.
 func loopbackEngine(t *testing.T) *Engine {
@@ -79,21 +44,12 @@ func loopbackEngine(t *testing.T) *Engine {
 }
 
 func loopbackIfaces() []netif.Interface {
-	ifs, _ := net.Interfaces()
-	var idx uint32
-	for _, i := range ifs {
-		if i.Flags&net.FlagLoopback != 0 {
-			idx = uint32(i.Index)
-		}
-	}
-	return []netif.Interface{{ID: "lo", Name: "Loopback", Index: idx, IPv4: net.IPv4(127, 0, 0, 1)}}
+	return []netif.Interface{vpntest.Loopback("lo", "Loopback")}
 }
 
 func importConf(t *testing.T, e *Engine, srv *vpnServer, clientPriv string) {
 	t.Helper()
-	conf := fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\nDNS = 203.0.113.1\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = %s\nPersistentKeepalive = 25\n",
-		clientPriv, srv.pub, srv.endpoint)
-	p, _ := json.Marshal(map[string]string{"iface": "lo", "conf": conf})
+	p, _ := json.Marshal(map[string]string{"iface": "lo", "conf": srv.Conf(clientPriv)})
 	if _, err := e.Call(nil, "importTunnel", p); err != nil {
 		t.Fatal(err)
 	}
@@ -114,12 +70,12 @@ func TestHTTPUnderVPNOnlyWaitsForATunnelThenUsesOnlyIt(t *testing.T) {
 
 	importConf(t, e, srv, clientPriv)
 	waitFor(t, "the download over the tunnel", 60*time.Second, func() bool {
-		e.syncTunnels(time.Now())
+		e.tickVPN(time.Now())
 		e.schedule()
 		return d.Status() == download.StatusCompleted
 	})
 	got, err := os.ReadFile(filepath.Join(e.settings.SaveDir, "vpn.bin"))
-	if err != nil || !bytes.Equal(got, srv.data) {
+	if err != nil || !bytes.Equal(got, srv.Data) {
 		t.Fatalf("file over the tunnel: %d bytes, %v", len(got), err)
 	}
 	for path := range d.Summary().Links {
@@ -135,7 +91,7 @@ func TestTunnelGetsItsOwnProxyForResolving(t *testing.T) {
 	srv := newVPNServer(t, clientPub)
 	importConf(t, e, srv, clientPriv)
 	waitFor(t, "the tunnel to come up", 30*time.Second, func() bool {
-		e.syncTunnels(time.Now())
+		e.tickVPN(time.Now())
 		for _, u := range e.Paths(paths.VPNOnly) {
 			if u.ID == paths.Tunnel("lo") {
 				return true
@@ -158,7 +114,7 @@ func TestTunnelGetsItsOwnProxyForResolving(t *testing.T) {
 	}
 	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if !bytes.Equal(b, srv.data[:10]) {
+	if !bytes.Equal(b, srv.Data[:10]) {
 		t.Fatalf("through the tunnel's proxy: %q", b)
 	}
 }
@@ -178,7 +134,8 @@ func TestTunnelKeysStayOutOfTheSettings(t *testing.T) {
 func waitTunnelUp(t *testing.T, e *Engine) {
 	t.Helper()
 	waitFor(t, "the tunnel to come up", 30*time.Second, func() bool {
-		e.syncTunnels(time.Now())
+		e.tickVPN(time.Now())
+		e.vpn.Wait()
 		return len(e.Paths(paths.VPNOnly)) > 0
 	})
 }
@@ -325,34 +282,6 @@ func TestTorrentFileTakesTheVPNChoiceWithItsFiles(t *testing.T) {
 	}
 }
 
-func TestAConfIsRefusedOnASecondConnection(t *testing.T) {
-	e := loopbackEngine(t)
-	priv, _, _ := tunnel.GenerateKey()
-	other, _, _ := tunnel.GenerateKey()
-	_, peer, _ := tunnel.GenerateKey()
-	conf := func(key string) string {
-		return fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\nDNS = 203.0.113.1\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 127.0.0.1:9\n", key, peer)
-	}
-	importOn := func(iface, conf string) error {
-		p, _ := json.Marshal(map[string]string{"iface": iface, "conf": conf})
-		_, err := e.Call(nil, "importTunnel", p)
-		return err
-	}
-	if err := importOn("lo", conf(priv)); err != nil {
-		t.Fatal(err)
-	}
-	err := importOn("wifi", conf(priv))
-	if err == nil || !strings.Contains(err.Error(), "Loopback already uses this config") {
-		t.Fatalf("the same config on a second connection: %v, want a refusal naming Loopback", err)
-	}
-	if err := importOn("lo", conf(priv)); err != nil {
-		t.Fatalf("importing it again on its own connection: %v", err)
-	}
-	if err := importOn("wifi", conf(other)); err != nil {
-		t.Fatalf("a config of its own on the second connection: %v", err)
-	}
-}
-
 func setVPNSettings(t *testing.T, e *Engine, patch string) {
 	t.Helper()
 	if _, err := e.Call(nil, "setSettings", []byte(patch)); err != nil {
@@ -415,84 +344,5 @@ func TestVPNForTorrentsMovesEveryTorrentToThatSession(t *testing.T) {
 	}
 	if _, err := e.Call(nil, "setVpn", []byte(`{"id":"`+id+`","vpn":"off"}`)); err == nil {
 		t.Fatal("a single download's VPN mode can still be set on its own")
-	}
-}
-
-func TestAConfWithoutDNSIsRefusedSayingWhy(t *testing.T) {
-	e := loopbackEngine(t)
-	priv, _, _ := tunnel.GenerateKey()
-	_, peer, _ := tunnel.GenerateKey()
-	conf := fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 127.0.0.1:9\n", priv, peer)
-	p, _ := json.Marshal(map[string]string{"iface": "lo", "conf": conf})
-	_, err := e.Call(nil, "importTunnel", p)
-	if err == nil || !strings.Contains(err.Error(), "DNS") {
-		t.Fatalf("got %v, want a refusal saying it needs DNS", err)
-	}
-	if _, err := os.Stat(e.tunnelFile("lo")); err == nil {
-		t.Fatal("the refused config was saved")
-	}
-}
-
-func TestASavedConfWithoutDNSKeepsItsTunnelDownSayingWhy(t *testing.T) {
-	shown := balloons(t)
-	dir := t.TempDir()
-	e, err := open(dir, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	conf := e.tunnelFile("lo")
-	e.Shutdown()
-	priv, _, _ := tunnel.GenerateKey()
-	_, peer, _ := tunnel.GenerateKey()
-	os.MkdirAll(filepath.Dir(conf), 0o755)
-	os.WriteFile(conf, []byte(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 127.0.0.1:9\n", priv, peer)), 0o600)
-
-	e, err = open(dir, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer e.Shutdown()
-	e.mu.Lock()
-	e.refreshInterfacesLocked(loopbackIfaces())
-	e.mu.Unlock()
-	for i := 0; i < 3; i++ {
-		e.syncTunnels(time.Now().Add(time.Duration(i) * time.Hour))
-		time.Sleep(50 * time.Millisecond)
-	}
-	e.mu.Lock()
-	views := e.tunnelViewsLocked(nil)
-	te := e.tunnels["lo"]
-	e.mu.Unlock()
-	if len(views) != 1 || views[0].TunnelState != "down" || !strings.Contains(views[0].TunnelError, "DNS") {
-		t.Fatalf("views %+v, want one tunnel down saying it needs DNS", views)
-	}
-	if te == nil || te.t != nil || te.starting {
-		t.Fatal("a tunnel without DNS was started")
-	}
-	if _, err := os.Stat(conf); err != nil {
-		t.Fatalf("the saved config was set aside: %v", err)
-	}
-	if len(*shown) != 0 {
-		t.Fatalf("balloons %q, want none: the error shows on the tunnel", *shown)
-	}
-}
-
-func TestAConfTheServerNoLongerKnowsSaysItMayHaveExpired(t *testing.T) {
-	e := loopbackEngine(t)
-	clientPriv, _, _ := tunnel.GenerateKey()
-	_, otherPub, _ := tunnel.GenerateKey()
-	importConf(t, e, newVPNServer(t, otherPub), clientPriv) // the server knows another key: revoked or expired
-	waitFor(t, "the tunnel to start", 30*time.Second, func() bool {
-		e.syncTunnels(time.Now())
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		return e.tunnels["lo"].t != nil
-	})
-	e.syncTunnels(time.Now().Add(tunnelGrace + time.Second))
-	e.mu.Lock()
-	views := e.tunnelViewsLocked(nil)
-	e.mu.Unlock()
-	if len(views) != 1 || views[0].TunnelState != "down" || !strings.Contains(views[0].TunnelError, "expired or been revoked") {
-		t.Fatalf("views %+v, want the tunnel down saying its config may have expired", views)
 	}
 }

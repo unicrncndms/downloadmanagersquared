@@ -322,16 +322,7 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		if p.Iface == "" {
 			return nil, errors.New("no connection to carry the tunnel")
 		}
-		if other := e.tunnelWithKey(p.Iface, p.Conf); other != "" {
-			return nil, fmt.Errorf("%s already uses this config. Each connection needs its own: the VPN server "+
-				"keeps one location per key, so two tunnels with one key take each other's traffic. "+
-				"Have your VPN provider make another config (a separate device or key), ideally on another server", other)
-		}
-		if err := e.setTunnel(p.Iface, p.Conf, true); err != nil {
-			return nil, fmt.Errorf("not a usable WireGuard config: %w", err)
-		}
-		e.syncTunnels(time.Now())
-		return nil, nil
+		return nil, e.vpn.Import(p.Iface, p.Conf)
 	case "setPia":
 		p, err := decode[struct {
 			User   string  `json:"user"`
@@ -343,14 +334,14 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		}
 		if p.Region != nil {
 			e.applySettings(func(s *Settings) { s.PIARegion = *p.Region })
-			e.restartPIATunnels()
+			e.vpn.SetPIARegion(*p.Region)
 		}
 		if p.User != "" {
-			return nil, e.setPIA(strings.TrimSpace(p.User), p.Pass)
+			return nil, e.vpn.SetPIA(strings.TrimSpace(p.User), p.Pass)
 		}
 		return nil, nil
 	case "clearPia":
-		return nil, e.setPIA("", "")
+		return nil, e.vpn.SetPIA("", "")
 	case "piaRegions":
 		return e.piaRegions()
 	case "setForwardedPort":
@@ -407,6 +398,7 @@ func (e *Engine) applySettings(f func(*Settings)) Settings {
 	e.applyLimitsLocked()
 	s := e.settings
 	e.mu.Unlock()
+	e.tickVPN(time.Now()) // a tunnel follows its interface being switched off or on
 	e.syncTorrentIfaces() // enabled interfaces, upload or the main one may have changed
 	e.broadcast("settings", s)
 	return s
