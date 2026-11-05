@@ -73,6 +73,7 @@ type State struct {
 	RemoteName string           `json:"remoteName,omitempty"` // name the server reports; must match across links
 	Size       int64            `json:"size"`
 	RangeOK    bool             `json:"rangeOk"`
+	Version    Version          `json:"version,omitzero"` // the file's version on the server; every chunk must come from it
 	Probed     bool             `json:"probed"`
 	Stuck      bool             `json:"stuck,omitempty"` // paused because no connection could reach the file
 	VPN        paths.Mode       `json:"vpn,omitempty"`
@@ -477,6 +478,9 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 	d.decidePageHitsLocked(byID)
 	d.settleHeldLocked(byID, mainID)
 	if d.nothingLeftLocked(byID, mainID) {
+		if d.allMismatchedLocked(byID, mainID) {
+			return false, errChanged // resuming can't help: the file isn't there any more
+		}
 		msg := "Paused: no connection can reach the file; resume to try them again"
 		for _, l := range d.st.Links {
 			if l.Status == LinkNeedsPage {
@@ -644,6 +648,7 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 	}
 	if !d.st.Probed {
 		d.st.Size, d.st.RangeOK, d.st.RemoteName, d.st.Probed = r.size, r.rangeOK && r.size > 0, r.name, true
+		d.st.Version = r.version
 		if d.st.Filename == "" {
 			d.st.Filename = r.name
 		}
@@ -661,6 +666,10 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 		}
 		if d.st.RangeOK && !r.rangeOK {
 			l.fail("this link does not allow split downloading")
+			return
+		}
+		if d.st.RangeOK && !r.version.same(d.st.Version) {
+			l.mismatch(versionMsg) // its bytes don't belong with the ones on disk
 			return
 		}
 	}
@@ -912,6 +921,10 @@ func (d *Download) workerFailedLocked(w *worker, err error) {
 		if l != nil && l.URL == w.link.URL {
 			l.fail(fe.msg)
 		}
+	case kindChanged:
+		if l != nil && l.URL == w.link.URL {
+			l.mismatch(fe.msg)
+		}
 	case kindDisk:
 		select {
 		case d.fatal <- errors.New("writing to disk failed: " + fe.msg):
@@ -967,6 +980,7 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 	d := w.d
 	d.mu.Lock()
 	start, end, ranged := seg.pos, seg.end, d.plan.splittable
+	size, ver := d.st.Size, d.st.Version
 	d.mu.Unlock()
 	if start >= end {
 		return nil
@@ -995,6 +1009,12 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if ranged {
+		// Before anything else: data from another version must never reach the file.
+		if fe := changedError(resp, size, ver); fe != nil {
+			return fe
+		}
+	}
 	if fe := statusError(resp); fe != nil {
 		return fe
 	}
@@ -1015,16 +1035,14 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 			d.mu.Lock()
 			// The chunk's end may have moved down since the request was sent;
 			// never write past it, so nothing is fetched twice into the file.
-			allowed := min(int64(n), seg.end-seg.pos)
-			off := seg.pos
-			seg.pos += allowed
+			off, allowed := d.plan.take(seg, int64(n))
 			d.mu.Unlock()
 			if allowed > 0 {
 				if _, err := d.file.WriteAt(buf[:allowed], off); err != nil {
 					return &fetchError{kind: kindDisk, msg: err.Error()}
 				}
 				d.mu.Lock()
-				seg.written = off + allowed
+				d.plan.wrote(seg, off, allowed)
 				d.mu.Unlock()
 				w.bytes.Add(allowed)
 				ir.bytes.Add(allowed)

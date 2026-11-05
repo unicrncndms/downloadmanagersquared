@@ -19,6 +19,7 @@ type probeResult struct {
 	rangeOK bool
 	isPage  bool // the server sent an HTML page, not the file
 	name    string
+	version Version
 	wait    time.Duration // how long a busy server asked us to stay away
 }
 
@@ -83,6 +84,9 @@ func probeLink(ctx context.Context, client *http.Client, l Link, ua string) (pro
 		}
 	case http.StatusOK:
 		r.size = resp.ContentLength
+	}
+	if r.status == http.StatusOK || r.status == http.StatusPartialContent {
+		r.version = versionOf(resp.Header)
 	}
 	r.name = remoteName(resp)
 	if r.busy() {
@@ -162,6 +166,7 @@ const (
 	kindExpired         // link rejected: needs a new probe or resolve
 	kindBusy            // 429/503: the server pushed back
 	kindRange           // server does not honor ranges on this link
+	kindChanged         // the file on the server is no longer the one being downloaded
 	kindDisk
 	kindHTTP // any other error status
 )

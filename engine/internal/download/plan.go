@@ -93,6 +93,19 @@ func (p *plan) release(s *segment) {
 	s.pos = s.written
 }
 
+// take reserves the next n bytes of a chunk for its worker to write, or fewer
+// if the chunk's end has moved down since (another connection took it over).
+// k < n means the worker's chunk now ends at off+k.
+func (p *plan) take(s *segment, n int64) (off, k int64) {
+	k = max(min(n, s.end-s.pos), 0)
+	off = s.pos
+	s.pos += k
+	return off, k
+}
+
+// wrote records the k bytes take reserved at off as on disk.
+func (p *plan) wrote(s *segment, off, k int64) { s.written = off + k }
+
 // endHere settles a chunk of unknown length: the response has ended, so the file has.
 func (p *plan) endHere(s *segment) {
 	s.end = s.written
