@@ -43,9 +43,19 @@ function vpnCell(i, tun) {
       el("button", { class: "small", onclick: () => { confFor = i.id; $("confFile").click(); } }, "Import .conf"));
   }
   const pia = tun.provider === "pia";
+  // The port the VPN provider forwards to this tunnel, where it can't tell DMS² itself.
+  let port = null;
+  if (!pia) {
+    port = el("input", { type: "number", class: "port", min: 1, max: 65535, placeholder: "Port", title: "A port your VPN provider forwards to this connection, for torrent peers to connect in (empty: none, or found by NAT-PMP). AirVPN: leave the port's Local field empty, and with several connections give each its own port, linked to that connection's device.", value: tun.forwardedPort || "" });
+    port.addEventListener("change", () => {
+      const n = Number(port.value) || 0;
+      act("setForwardedPort", { iface: i.id, port: n }, n ? `Forwarded port ${n} set` : "Forwarded port cleared");
+    });
+  }
   return el("div", { class: "vpn" },
     badge((pia ? "PIA · " : "") + (TUNNEL_TEXT[tun.tunnelState] || tun.tunnelState).replace(/^VPN /, ""),
       TUNNEL_CLASS[tun.tunnelState], tun.tunnelError || tun.ip),
+    port,
     pia ? null : el("button", { class: "small", onclick: () => act("removeTunnel", { iface: i.id }, "VPN tunnel removed") }, "Remove"));
 }
 
@@ -91,7 +101,7 @@ function renderIfaces(state, settings) {
   const all = state.interfaces || [];
   const ifaces = all.filter((i) => !i.tunnel);
   const tunnels = new Map(all.filter((i) => i.tunnel).map((t) => [t.of, t]));
-  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError]), settings.mainInterface]);
+  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort]), settings.mainInterface]);
   const body = $("ifaces");
   if (sig !== ifaceSig && !body.contains(document.activeElement)) {
     ifaceSig = sig;

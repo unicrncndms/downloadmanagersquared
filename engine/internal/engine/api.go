@@ -353,6 +353,15 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		return nil, e.setPIA("", "")
 	case "piaRegions":
 		return e.piaRegions()
+	case "setForwardedPort":
+		p, err := decode[struct {
+			Iface string `json:"iface"`
+			Port  int    `json:"port"`
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.setForwardedPort(p.Iface, p.Port)
 	case "removeTunnel":
 		p, err := decode[struct {
 			Iface string `json:"iface"`

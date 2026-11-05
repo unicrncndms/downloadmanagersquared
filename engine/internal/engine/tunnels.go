@@ -48,6 +48,9 @@ type tunnelEntry struct {
 	pfTried time.Time
 	pfErr   string
 	pfBusy  bool
+
+	// NAT-PMP port forwarding, for an imported tunnel (pfPort holds its port).
+	pmp pmpState
 }
 
 // The .conf files hold private keys, so they live in the engine's folder and
@@ -135,9 +138,16 @@ func (e *Engine) tunnelWithKey(ifaceID, conf string) string {
 	return ""
 }
 
-// removeTunnel takes an interface's tunnel down and forgets it.
+// removeTunnel takes an interface's tunnel down and forgets it, with the port
+// typed in for it.
 func (e *Engine) removeTunnel(ifaceID string) error {
 	e.removeTunnelEntry(ifaceID)
+	e.mu.Lock()
+	had := e.settings.Interfaces[ifaceID] != nil && e.settings.Interfaces[ifaceID].ForwardedPort != 0
+	e.mu.Unlock()
+	if had {
+		e.applySettings(func(s *Settings) { s.Interfaces[ifaceID].ForwardedPort = 0 })
+	}
 	if err := os.Remove(e.tunnelFile(ifaceID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -244,6 +254,7 @@ func (e *Engine) startTunnel(id string, te *tunnelEntry, b *netif.Binding) {
 		te.cfg = cfg
 		// A new server: the old forwarded port is gone with the old tunnel.
 		te.link, te.sig, te.pfPort, te.boundAt, te.pfErr = link, nil, 0, time.Time{}, ""
+		te.pmp = pmpState{} // asked again on this start
 	}
 	te.starting = false
 	if e.tunnels[id] != te { // removed or replaced meanwhile
@@ -301,11 +312,18 @@ func (e *Engine) tunnelViewsLocked(speeds map[string]float64) []IfaceView {
 		if te.pia {
 			v.Provider = "pia"
 		}
+		v.ForwardedPort = e.manualPortLocked(id, te)
 		if te.cfg.Address.IsValid() {
 			v.IP = te.cfg.Address.String()
 		}
 		if state == "up" {
 			switch {
+			case e.manualPortLocked(id, te) != 0:
+				v.Incoming = "forwarded" // the engine can't check a typed-in port
+			case !te.pia && pmpReachableLocked(te, time.Now()):
+				v.Incoming = "reachable"
+			case !te.pia && (te.pmp.gen != te.gen || !te.pmp.probed):
+				// Not known until its gateway is asked about NAT-PMP.
 			case !te.pia || !te.link.forwards:
 				v.Incoming = "outgoing"
 			case te.pfPort != 0 && time.Since(te.boundAt) < pfShown:
@@ -334,4 +352,51 @@ func (e *Engine) closeTunnels() {
 	for _, id := range ids {
 		e.removeTunnelEntry(id)
 	}
+}
+
+// manualPortLocked is the port the user typed in for an imported tunnel, 0 if
+// none (or the tunnel is PIA's, which forwards its own).
+func (e *Engine) manualPortLocked(ifaceID string, te *tunnelEntry) int {
+	if te.pia {
+		return 0
+	}
+	if s := e.settings.Interfaces[ifaceID]; s != nil {
+		return s.ForwardedPort
+	}
+	return 0
+}
+
+// tunnelPortLocked is the port a tunnel's torrent listener uses: the one typed
+// in, else the one PIA or NAT-PMP forwarded (0: any).
+func (e *Engine) tunnelPortLocked(ifaceID string, te *tunnelEntry) int {
+	if p := e.manualPortLocked(ifaceID, te); p != 0 {
+		return p
+	}
+	return te.pfPort
+}
+
+// setForwardedPort records the port a VPN provider forwards to an interface's
+// imported tunnel (0 clears it). The tunnel's torrent listener moves to it.
+func (e *Engine) setForwardedPort(ifaceID string, port int) error {
+	if port < 0 || port > 65535 {
+		return errors.New("a port is a number from 1 to 65535")
+	}
+	e.mu.Lock()
+	te := e.tunnels[ifaceID]
+	e.mu.Unlock()
+	if te == nil {
+		return errors.New("this connection has no imported VPN tunnel")
+	}
+	if te.pia {
+		return errors.New("PIA forwards its own port")
+	}
+	e.applySettings(func(s *Settings) {
+		is := s.Interfaces[ifaceID]
+		if is == nil {
+			is = &IfaceSettings{}
+			s.Interfaces[ifaceID] = is
+		}
+		is.ForwardedPort = port
+	})
+	return nil
 }

@@ -20,6 +20,7 @@ type IfaceSettings struct {
 	Upload        *bool  `json:"upload,omitempty"`        // nil: default (on)
 	UploadLimit   int64  `json:"uploadLimit,omitempty"`   // bytes per second, 0 = none
 	DownloadLimit int64  `json:"downloadLimit,omitempty"` // bytes per second, 0 = none
+	ForwardedPort int    `json:"forwardedPort,omitempty"` // a port the VPN provider forwards to this connection's imported tunnel, 0 = none
 }
 
 type Settings struct {

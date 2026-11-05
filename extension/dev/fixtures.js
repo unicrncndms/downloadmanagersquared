@@ -10,6 +10,9 @@ const IFACES = [
     connections: 4, socksPort: 50002, speed: 4.4e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" },
   { id: "corp", name: "Corporate VPN", description: "WireGuard Tunnel", ip: "10.8.0.2", present: true, enabled: false, vpn: true,
     connections: 4, socksPort: 50003, speed: 0, upload: true, uploadLimit: 0, downloadLimit: 0 },
+  { id: "eth~vpn", name: "VPN via Ethernet", ip: "10.2.0.2/32", present: true, enabled: true, tunnel: true, of: "eth", provider: "conf",
+    tunnelState: "up", connections: 4, socksPort: 50004, speed: 2.1e6, upload: true, uploadLimit: 0, downloadLimit: 0,
+    incoming: "forwarded", forwardedPort: 41000 },
 ];
 
 const SETTINGS = {

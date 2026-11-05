@@ -51,35 +51,102 @@ func Map(ctx context.Context, gw Gateway, port int, lifetime time.Duration) erro
 }
 
 // mapNATPMP follows RFC 6886: one request per protocol, retried a few times.
+// A home router must forward the same port, the one the torrent client listens on.
 func mapNATPMP(ctx context.Context, gw Gateway, port int, lifetime time.Duration) error {
-	pc, err := gw.Listen()
-	if err != nil {
-		return err
-	}
-	defer pc.Close()
-	to := &net.UDPAddr{IP: gw.IP, Port: gw.pmpPort}
-	for _, op := range []byte{1, 2} { // UDP, TCP
-		req := make([]byte, 12)
-		req[1] = op
-		binary.BigEndian.PutUint16(req[4:], uint16(port))
-		binary.BigEndian.PutUint16(req[6:], uint16(port))
-		binary.BigEndian.PutUint32(req[8:], uint32(lifetime/time.Second))
-		if err := pmpRequest(ctx, pc, to, req); err != nil {
+	for _, proto := range []Proto{UDP, TCP} {
+		m, err := MapPMP(ctx, gw, proto, port, port, lifetime)
+		if err != nil {
 			return err
+		}
+		if m.Public != port {
+			return fmt.Errorf("router mapped external port %d instead", m.Public)
 		}
 	}
 	return nil
 }
 
-func pmpRequest(ctx context.Context, pc net.PacketConn, to net.Addr, req []byte) error {
+// Proto is a NAT-PMP mapping's protocol, as its request opcode.
+type Proto byte
+
+const (
+	UDP Proto = 1
+	TCP Proto = 2
+)
+
+func (p Proto) String() string {
+	if p == TCP {
+		return "TCP"
+	}
+	return "UDP"
+}
+
+// Mapping is what a NAT-PMP gateway granted.
+type Mapping struct {
+	Internal int // as the gateway states it; 0 if it says none
+	Public   int
+	Lifetime time.Duration // map again before it runs out
+}
+
+// MapPMP asks gw for one NAT-PMP mapping and nothing else (no UPnP), accepting
+// whatever public port it grants. internal 0 lets the gateway choose, as VPN
+// servers that forward ports this way expect; publicHint is the port asked for.
+func MapPMP(ctx context.Context, gw Gateway, proto Proto, internal, publicHint int, lifetime time.Duration) (Mapping, error) {
+	req := make([]byte, 12)
+	req[1] = byte(proto)
+	binary.BigEndian.PutUint16(req[4:], uint16(internal))
+	binary.BigEndian.PutUint16(req[6:], uint16(publicHint))
+	binary.BigEndian.PutUint32(req[8:], uint32(lifetime/time.Second))
+	resp, err := pmpExchange(ctx, gw, req)
+	if err != nil {
+		return Mapping{}, err
+	}
+	return Mapping{
+		Internal: int(binary.BigEndian.Uint16(resp[8:])),
+		Public:   int(binary.BigEndian.Uint16(resp[10:])),
+		Lifetime: time.Duration(binary.BigEndian.Uint32(resp[12:])) * time.Second,
+	}, nil
+}
+
+// ExternalAddress asks gw for its public address over NAT-PMP: whether it
+// speaks NAT-PMP at all.
+func ExternalAddress(ctx context.Context, gw Gateway) (net.IP, error) {
+	resp, err := pmpExchange(ctx, gw, []byte{0, 0})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp) < 12 {
+		return nil, errors.New("short NAT-PMP answer")
+	}
+	return net.IPv4(resp[8], resp[9], resp[10], resp[11]), nil
+}
+
+// pmpExchange sends req to gw's NAT-PMP port from a socket of its own and
+// returns the matching successful answer.
+func pmpExchange(ctx context.Context, gw Gateway, req []byte) ([]byte, error) {
+	if gw.pmpPort == 0 {
+		gw.pmpPort = 5351
+	}
+	pc, err := gw.Listen()
+	if err != nil {
+		return nil, err
+	}
+	defer pc.Close()
+	return pmpRequest(ctx, pc, &net.UDPAddr{IP: gw.IP, Port: gw.pmpPort}, req)
+}
+
+func pmpRequest(ctx context.Context, pc net.PacketConn, to net.Addr, req []byte) ([]byte, error) {
+	want := 16 // a mapping's answer; an address answer is 12
+	if req[1] == 0 {
+		want = 12
+	}
 	buf := make([]byte, 64)
 	wait := 250 * time.Millisecond
 	for range 3 {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 		if _, err := pc.WriteTo(req, to); err != nil {
-			return err
+			return nil, err
 		}
 		pc.SetReadDeadline(time.Now().Add(wait))
 		for {
@@ -87,20 +154,17 @@ func pmpRequest(ctx context.Context, pc net.PacketConn, to net.Addr, req []byte)
 			if err != nil {
 				break // timed out, or the router refused the packet: try again
 			}
-			if n < 16 || buf[0] != 0 || buf[1] != 128+req[1] {
+			if n < want || buf[0] != 0 || buf[1] != 128+req[1] {
 				continue
 			}
 			if code := binary.BigEndian.Uint16(buf[2:]); code != 0 {
-				return fmt.Errorf("router refused the mapping (result %d)", code)
+				return nil, fmt.Errorf("router refused the request (result %d)", code)
 			}
-			if got := binary.BigEndian.Uint16(buf[10:]); got != binary.BigEndian.Uint16(req[6:]) {
-				return fmt.Errorf("router mapped external port %d instead", got)
-			}
-			return nil
+			return append([]byte(nil), buf[:n]...), nil
 		}
 		wait *= 2
 	}
-	return errors.New("no answer from the router")
+	return nil, errors.New("no answer from the router")
 }
 
 func mapUPnP(ctx context.Context, gw Gateway, port int, lifetime time.Duration) error {
