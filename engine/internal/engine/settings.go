@@ -6,7 +6,9 @@ import (
 	"log"
 	mrand "math/rand/v2"
 	"os"
+	"regexp"
 
+	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/winutil"
 )
@@ -114,6 +116,32 @@ func loadSettings(path string) (s Settings, broken bool) {
 // older one, so the user can still look at it.
 func setAside(path string) {
 	if err := os.Rename(path, path+".broken"); err != nil {
+		log.Printf("setting aside %s: %v", path, err)
+	}
+}
+
+// cookieValue is a "cookie" member's string value, also one cut off by the end
+// of a damaged file.
+var cookieValue = regexp.MustCompile(`("cookie"\s*:\s*)"(?:[^"\\]|\\.)*(?:"|\\?$)`)
+
+// withoutCookies blanks every cookie value in a saved download, readable or
+// encrypted, as far as the damaged text still shows one.
+func withoutCookies(b []byte) []byte {
+	return cookieValue.ReplaceAll(b, []byte(`${1}""`))
+}
+
+// setAsideWithoutCookies sets aside an unreadable download state like
+// setAside, keeping the rest to look at but none of its cookies.
+func setAsideWithoutCookies(path string, b []byte) {
+	if b == nil {
+		setAside(path)
+		return
+	}
+	if err := atomicfile.Write(path+".broken", withoutCookies(b), 0o600); err != nil {
+		log.Printf("setting aside %s: %v", path, err)
+		return
+	}
+	if err := os.Remove(path); err != nil {
 		log.Printf("setting aside %s: %v", path, err)
 	}
 }

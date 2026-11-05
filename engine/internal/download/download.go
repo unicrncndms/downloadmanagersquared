@@ -88,6 +88,8 @@ type State struct {
 	Remaining  []Range          `json:"remaining,omitempty"`
 	Added      time.Time        `json:"added"`
 	Finished   time.Time        `json:"finished,omitzero"`
+
+	plainCookies bool // read with a cookie saved readable, before encryption
 }
 
 // Iface is an interface the engine currently allows downloads to use.

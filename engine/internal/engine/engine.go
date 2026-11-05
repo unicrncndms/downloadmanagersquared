@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -273,11 +274,26 @@ func (e *Engine) loadDownloads() {
 		all = append(all, t)
 	}
 	e.queue = queue.New(e.dir, all)
+	for _, st := range states {
+		if st.HasPlainCookies() {
+			e.queue.MarkDirty(st.ID) // saved encrypted at the next tick, not left readable
+		}
+	}
 }
 
 // readStates reads every saved state in dir that has an ID. The others are
 // set aside as <id>.json.broken; broken counts them.
 func readStates[S interface{ download.State | torrent.State }](dir string) (out []S, broken int) {
+	older, _ := filepath.Glob(filepath.Join(dir, "*.json.broken"))
+	for _, f := range older { // set aside by a version that kept their cookies
+		if b, err := os.ReadFile(f); err == nil {
+			if clean := withoutCookies(b); !bytes.Equal(clean, b) {
+				if err := atomicfile.Write(f, clean, 0o600); err != nil {
+					log.Printf("removing cookies from %s: %v", f, err)
+				}
+			}
+		}
+	}
 	files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
 	for _, f := range files {
 		var st S
@@ -287,7 +303,7 @@ func readStates[S interface{ download.State | torrent.State }](dir string) (out 
 		b, err := os.ReadFile(f)
 		if err != nil || json.Unmarshal(b, &st) != nil || json.Unmarshal(b, &id) != nil || id.ID == "" {
 			log.Printf("unreadable state %s, set aside", f)
-			setAside(f)
+			setAsideWithoutCookies(f, b)
 			broken++
 			continue
 		}

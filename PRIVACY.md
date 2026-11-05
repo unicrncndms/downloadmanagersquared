@@ -18,7 +18,7 @@ Pages DMS² opens to fetch a link run in a temporary container that only reaches
 
 ## What the engine keeps
 
-In `%APPDATA%\downloadmanagersquared\`: your settings, the download list (with the URLs, landing pages and, until each download completes, its cookies, encrypted with Windows so only your user can read them), torrents, the log (no URLs), imported WireGuard configs, and a PIA login if you use one, encrypted with Windows so only your user can read it. Uninstalling can delete all of it; your downloaded files are always kept.
+In `%APPDATA%\downloadmanagersquared\`: your settings, the download list (with the URLs, landing pages and, until each download completes, its cookies, encrypted with Windows so only your user can read them; cookies an older version saved readable are encrypted as soon as the engine starts, and a download file that can't be read is set aside as `….broken` without its cookies), torrents, the log (no URLs), imported WireGuard configs, and a PIA login if you use one, encrypted with Windows so only your user can read it. Uninstalling can delete all of it; your downloaded files are always kept.
 
 ## Other users of the PC
 

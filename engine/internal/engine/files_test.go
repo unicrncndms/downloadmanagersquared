@@ -103,6 +103,65 @@ func TestBrokenStateFilesAreSetAsideWhileTheOthersLoad(t *testing.T) {
 	}
 }
 
+// A download saved before cookies were encrypted is rewritten encrypted on the
+// first save after loading, not only once it changes or the engine exits.
+func TestPlainCookiesFromAnOlderVersionAreEncryptedRightAway(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "downloads", "old.json")
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	old := `{"id":"old","url":"https://example.com/a.iso","status":"paused","size":-1,` +
+		`"cookie":"session=PLAINMAIN","links":{"eth":{"url":"https://example.com/a.iso","cookie":"session=PLAINLINK"}}}`
+	os.WriteFile(path, []byte(old), 0o644)
+
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	e.queue.Save() // one tick of Run, without the download changing
+
+	b, _ := os.ReadFile(path)
+	if bytes.Contains(b, []byte("PLAIN")) {
+		t.Fatalf("still readable on disk after a save: %s", b)
+	}
+	if bytes.Count(b, []byte(`"dpapi:`)) != 2 {
+		t.Fatalf("no encrypted cookie on disk: %s", b)
+	}
+}
+
+// A download file that can't be read is set aside without its cookies, and
+// one set aside by an older version loses them at the next start.
+func TestSetAsideDownloadFilesKeepNoCookies(t *testing.T) {
+	dir := t.TempDir()
+	dl := filepath.Join(dir, "downloads")
+	os.MkdirAll(dl, 0o755)
+	os.WriteFile(filepath.Join(dl, "bad.json"), []byte(
+		`{"id":"bad","cookie":"session=SECRETMAIN","links":{"eth":{"cookie" : "dpapi:SECRETSEALED","url":"https://example.com/a`), 0o644)
+	os.WriteFile(filepath.Join(dl, "cut.json"), []byte(`{"id":"cut","cookie":"session=SECRETCUT`), 0o644)
+	os.WriteFile(filepath.Join(dl, "older.json.broken"), []byte(`{"id":"older","cookie":"a=SECRETOLD; b=\"q\"","url":"https://example.com/b"`), 0o644)
+
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	for _, f := range []string{"bad.json.broken", "cut.json.broken", "older.json.broken"} {
+		b, err := os.ReadFile(filepath.Join(dl, f))
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		if bytes.Contains(b, []byte("SECRET")) {
+			t.Errorf("%s still holds a cookie: %s", f, b)
+		}
+		if !bytes.Contains(b, []byte(`"id":"`)) {
+			t.Errorf("%s lost the rest of the file: %s", f, b)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(dl, "older.json.broken")); !bytes.Contains(b, []byte(`"url":"https://example.com/b"`)) {
+		t.Errorf("the text after the cookie is gone: %s", b)
+	}
+}
+
 func TestUnreadablePIALoginAndTunnelAreSetAside(t *testing.T) {
 	shown := balloons(t)
 	dir := t.TempDir()

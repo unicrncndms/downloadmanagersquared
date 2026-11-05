@@ -58,3 +58,31 @@ func (s *Secret) UnmarshalJSON(b []byte) error {
 	log.Printf("a saved cookie can't be decrypted, going on without it: %v", err)
 	return nil
 }
+
+// UnmarshalJSON notes whether a cookie was saved readable, by a version before
+// encryption, so the state can be saved again encrypted right away.
+func (st *State) UnmarshalJSON(b []byte) error {
+	type saved State // without this method
+	if err := json.Unmarshal(b, (*saved)(st)); err != nil {
+		return err
+	}
+	var raw struct {
+		Cookie string `json:"cookie"`
+		Links  map[string]struct {
+			Cookie string `json:"cookie"`
+		} `json:"links"`
+	}
+	if json.Unmarshal(b, &raw) != nil {
+		return nil
+	}
+	plain := func(c string) bool { return c != "" && !strings.HasPrefix(c, sealedPrefix) }
+	st.plainCookies = plain(raw.Cookie)
+	for _, l := range raw.Links {
+		st.plainCookies = st.plainCookies || plain(l.Cookie)
+	}
+	return nil
+}
+
+// HasPlainCookies: the state was read with a cookie saved readable, so it
+// should be saved again (encrypted) without waiting for a change.
+func (st State) HasPlainCookies() bool { return st.plainCookies }
