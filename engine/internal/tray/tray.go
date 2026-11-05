@@ -9,6 +9,7 @@ import (
 
 	"fyne.io/systray"
 
+	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/engine"
 	"downloadmanagersquared/engine/internal/window"
 	"downloadmanagersquared/engine/internal/winutil"
@@ -32,23 +33,29 @@ func onReady(e *engine.Engine, w Window) {
 	systray.SetIcon(Icon())
 	winutil.SetBalloonIcon(Icon())
 	systray.SetTooltip(winutil.AppName)
+	dark := winutil.AppsDark()
+	winutil.SetMenusDark(dark)
 
-	summary := systray.AddMenuItem("Idle", "")
-	summary.Disable()
-	var rows []*systray.MenuItem
+	// A left click opens the downloads; a right click shows the menu.
+	systray.SetOnTapped(func() { go openDownloads(e) })
+
+	status := newLine(systray.AddMenuItem("Idle", ""))
+	status.item.Disable()
+	var rows []*line
 	for range ifaceRows {
-		r := systray.AddMenuItem("", "")
-		r.Disable()
-		r.Hide()
+		r := newLine(systray.AddMenuItem("", ""))
+		r.item.Disable()
+		r.show(false)
 		rows = append(rows, r)
 	}
+	pause := newLine(systray.AddMenuItem("Pause all", ""))
+	resume := newLine(systray.AddMenuItem("Resume all", ""))
+	pause.enable(false)
+	resume.enable(false)
 	systray.AddSeparator()
-	open := systray.AddMenuItem("Open downloads", "Show the downloads")
-	pause := systray.AddMenuItem("Pause all", "")
-	resume := systray.AddMenuItem("Resume all", "")
+	open := systray.AddMenuItem("Show downloads", "Show the downloads")
 	settings := systray.AddMenuItem("Connections & settings", "Show the connections and settings")
 	systray.AddSeparator()
-	autostart := systray.AddMenuItemCheckbox("Start with Windows", "", winutil.Autostart())
 	quit := systray.AddMenuItem("Quit", "Stop all downloads and exit")
 
 	go func() {
@@ -58,19 +65,10 @@ func onReady(e *engine.Engine, w Window) {
 				go openDownloads(e)
 			case <-settings.ClickedCh:
 				go openSettings(e)
-			case <-pause.ClickedCh:
+			case <-pause.item.ClickedCh:
 				go e.PauseAll()
-			case <-resume.ClickedCh:
+			case <-resume.item.ClickedCh:
 				go e.ResumeAll()
-			case <-autostart.ClickedCh:
-				on := !autostart.Checked()
-				if winutil.SetAutostart(on) == nil {
-					if on {
-						autostart.Check()
-					} else {
-						autostart.Uncheck()
-					}
-				}
 			case <-quit.ClickedCh:
 				w.Close()
 				systray.Quit()
@@ -84,32 +82,26 @@ func onReady(e *engine.Engine, w Window) {
 	}()
 
 	go func() {
-		for range time.Tick(time.Second) {
-			s := e.Snapshot()
-			head := "Idle"
-			if s.Active > 0 {
-				head = fmt.Sprintf("%s  ·  %s left", Speed(s.Speed), Duration(s.ETA))
+		used := map[string]time.Time{}
+		for now := range time.Tick(time.Second) {
+			if d := winutil.AppsDark(); d != dark {
+				dark = d
+				winutil.SetMenusDark(dark)
 			}
-			summary.SetTitle(head)
+			m := menuFor(e.Snapshot(), used, now)
+			status.set(m.Status)
+			for i, r := range rows {
+				if i < len(m.Rows) {
+					r.set(m.Rows[i])
+				}
+				r.show(i < len(m.Rows))
+			}
+			pause.enable(m.Pause)
+			resume.enable(m.Resume)
 
 			// Starts with the app name: balloons are named after the tooltip.
-			tip := []string{winutil.AppName + "  " + head}
-			i := 0
-			for _, v := range s.Interfaces {
-				if !v.Present || !v.Enabled || i >= ifaceRows {
-					continue
-				}
-				line := fmt.Sprintf("%s: %s", v.Name, Speed(v.Speed))
-				rows[i].SetTitle(line)
-				rows[i].Show()
-				tip = append(tip, line)
-				i++
-			}
-			for ; i < ifaceRows; i++ {
-				rows[i].Hide()
-			}
+			t := strings.Join(append([]string{winutil.AppName + "  " + m.Status}, m.Rows...), "\n")
 			// Windows cuts tray tooltips at 127 characters.
-			t := strings.Join(tip, "\n")
 			if len(t) > 127 {
 				t = t[:127]
 			}
@@ -118,7 +110,105 @@ func onReady(e *engine.Engine, w Window) {
 	}()
 }
 
-// openDownloads is "Open downloads": the Downloads window's downloads view.
+// line is a menu item that is changed only when its title or visibility
+// does: every change redraws an open menu, so updating it each second
+// made the lines flicker.
+type line struct {
+	item    *systray.MenuItem
+	title   string
+	visible bool
+	enabled bool
+}
+
+func newLine(it *systray.MenuItem) *line { return &line{item: it, visible: true, enabled: true} }
+
+func (l *line) enable(on bool) {
+	if on == l.enabled {
+		return
+	}
+	l.enabled = on
+	if on {
+		l.item.Enable()
+	} else {
+		l.item.Disable()
+	}
+}
+
+func (l *line) set(title string) {
+	if title != l.title {
+		l.title = title
+		l.item.SetTitle(title)
+	}
+}
+
+func (l *line) show(on bool) {
+	if on == l.visible {
+		return
+	}
+	l.visible = on
+	if on {
+		l.item.Show()
+	} else {
+		l.item.Hide()
+	}
+}
+
+// linger is how long an interface keeps its line after it stops carrying
+// a download, so a moment without connections doesn't make it blink.
+const linger = 5 * time.Second
+
+// menu is what the tray menu shows.
+type menu struct {
+	Status        string   // "Idle", "Paused", or the speed and time left
+	Rows          []string // the interfaces carrying downloads, with their speeds
+	Pause, Resume bool     // whether "Pause all" and "Resume all" have something to do (else they are grayed out)
+}
+
+// menuFor is the menu for s. used remembers when each interface last
+// carried a download; menuFor updates it.
+func menuFor(s engine.StateEvent, used map[string]time.Time, now time.Time) menu {
+	var m menu
+	for _, d := range s.Downloads {
+		switch d.Status {
+		case download.StatusPaused, download.StatusFailed:
+			m.Resume = true
+		case download.StatusCompleted, download.StatusChoosing:
+		default:
+			m.Pause = true
+		}
+	}
+	switch {
+	case s.Active > 0:
+		m.Status = fmt.Sprintf("%s  ·  %s left", Speed(s.Speed), Duration(s.ETA))
+	case m.Resume && !m.Pause:
+		m.Status = "Paused"
+	default:
+		m.Status = "Idle"
+	}
+	if s.Active == 0 {
+		clear(used)
+		return m
+	}
+	for _, d := range s.Downloads {
+		if d.Status != download.StatusRunning {
+			continue
+		}
+		for id, l := range d.Links {
+			if l.Conns > 0 || l.Speed >= 1 {
+				used[id] = now
+			}
+		}
+	}
+	for _, v := range s.Interfaces {
+		if t, ok := used[v.ID]; !ok || now.Sub(t) > linger || len(m.Rows) >= ifaceRows {
+			continue
+		}
+		m.Rows = append(m.Rows, fmt.Sprintf("%s: %s", v.Name, Speed(v.Speed)))
+	}
+	return m
+}
+
+// openDownloads is a left click and "Show downloads": the Downloads window's downloads view.
 func openDownloads(e *engine.Engine) { e.OpenManager("") }
 
 // openSettings is "Connections & settings": the Downloads window's settings view.
