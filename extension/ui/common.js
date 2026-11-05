@@ -67,9 +67,10 @@ function progressText(d) {
 }
 
 // Whether torrent peers can connect in through an interface.
-const INCOMING_TEXT = { reachable: "reachable", outgoing: "outgoing only" };
+const INCOMING_TEXT = { reachable: "reachable", forwarded: "port forwarded", outgoing: "outgoing only" };
 const INCOMING_TITLE = {
   reachable: "Torrent peers can connect in through this connection",
+  forwarded: "The port you set for this VPN tunnel (not checked)",
   outgoing: "The router didn't open a port (no UPnP or NAT-PMP): torrents only use peers they connect to",
 };
 

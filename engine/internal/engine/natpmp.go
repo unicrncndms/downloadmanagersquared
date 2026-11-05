@@ -56,9 +56,8 @@ func (e *Engine) forwardPMP(now time.Time) *sync.WaitGroup {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for id, te := range e.tunnels {
-		// PIA forwards its own way. (A tunnel with a port the user typed in
-		// would be skipped here too.)
-		if te.pia || e.tunnelUpLocked(id) == nil {
+		// PIA forwards its own way, and a port the user typed in wins.
+		if te.pia || e.manualPortLocked(id, te) != 0 || e.tunnelUpLocked(id) == nil {
 			continue
 		}
 		if te.pmp.gen != te.gen {

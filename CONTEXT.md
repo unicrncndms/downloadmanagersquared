@@ -121,7 +121,7 @@ _Avoid_: Kill switch (it is what VPN only does, not a separate setting)
 Where tunnel configs come from: imported WireGuard `.conf` files, or PIA, which generates one config per interface through its API.
 
 **Forwarded port**:
-A port the VPN server forwards to a tunnel, so torrent peers can connect in ("reachable"). A PIA tunnel gets one through PIA's API. An imported tunnel gets one if its gateway answers NAT-PMP (Proton VPN does); otherwise it is outgoing only.
+A port the VPN server forwards to a tunnel, so torrent peers can connect in ("reachable"). A PIA tunnel gets one through PIA's API. An imported tunnel gets one if its gateway answers NAT-PMP (Proton VPN does), or the user types in a port their provider forwards (AirVPN); otherwise it is outgoing only. A typed-in port shows as "forwarded", not "reachable": the engine can't check it.
 
 ### Browser
 

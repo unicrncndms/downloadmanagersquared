@@ -606,7 +606,7 @@ func (e *Engine) torrentIfacesFor(m paths.Mode) []torrent.Iface {
 			te := e.tunnelUpLocked(base)
 			t := te.t
 			ifs = append(ifs, torrent.Iface{
-				ID: id, Gen: te.gen, Port: te.pfPort, Upload: e.uploadLocked(base),
+				ID: id, Gen: te.gen, Port: e.tunnelPortLocked(base, te), Upload: e.uploadLocked(base),
 				Dial: t.DialContext, ListenPacket: t.ListenPacket, LookupIP: t.LookupIP, Listen: t.Listen,
 			})
 			continue
@@ -1099,15 +1099,16 @@ type IfaceView struct {
 	Upload        bool   `json:"upload"`
 	UploadLimit   int64  `json:"uploadLimit"`   // bytes per second, 0 = none
 	DownloadLimit int64  `json:"downloadLimit"` // bytes per second, 0 = none
-	Incoming      string `json:"incoming"`      // torrent peers can connect in: "reachable", "outgoing" (only), "" (not known yet)
+	Incoming      string `json:"incoming"`      // torrent peers can connect in: "reachable", "forwarded" (a port the user typed in, unchecked), "outgoing" (only), "" (not known yet)
 
 	// Tunnels are paths of their own, listed after the interfaces.
-	Tunnel      bool   `json:"tunnel,omitempty"`
-	Of          string `json:"of,omitempty"`          // a tunnel's interface
-	TunnelState string `json:"tunnelState,omitempty"` // "up", "connecting", "down" (retrying), "off" (its interface isn't used)
-	TunnelError string `json:"tunnelError,omitempty"`
-	HasTunnel   bool   `json:"hasTunnel,omitempty"` // an interface with a tunnel configured
-	Provider    string `json:"provider,omitempty"`  // a tunnel's: "conf" or "pia"
+	Tunnel        bool   `json:"tunnel,omitempty"`
+	Of            string `json:"of,omitempty"`          // a tunnel's interface
+	TunnelState   string `json:"tunnelState,omitempty"` // "up", "connecting", "down" (retrying), "off" (its interface isn't used)
+	TunnelError   string `json:"tunnelError,omitempty"`
+	HasTunnel     bool   `json:"hasTunnel,omitempty"`     // an interface with a tunnel configured
+	Provider      string `json:"provider,omitempty"`      // a tunnel's: "conf" or "pia"
+	ForwardedPort int    `json:"forwardedPort,omitempty"` // an imported tunnel's port typed in by the user
 }
 
 type StateEvent struct {

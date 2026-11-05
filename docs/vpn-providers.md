@@ -23,8 +23,10 @@ Gathered in November 2026 from provider documentation and community reports. Pro
 | **Mullvad** | Yes | Not checked; believed to last until you revoke the device | No (Mullvad removed port forwarding in 2023) |
 | **Proton VPN** | Yes: account.protonvpn.com → Downloads → WireGuard configuration | Reported as one year; make a new one before then. Logging out of a Proton app also revokes that app's keys | Yes, on P2P servers, if **NAT-PMP** is on when you make the config: DMS² picks it up by itself (not yet tested with Proton) |
 | **IVPN** | Yes | Not checked | No (removed in 2023) |
-| **AirVPN** | Yes: Client Area → Config Generator | Not checked | Fixed ports set in AirVPN's panel. Not checked for WireGuard configs |
+| **AirVPN** | Yes: Client Area → Config Generator | Not checked | Yes: a fixed port you reserve in AirVPN's panel (staff confirm it works with WireGuard configs). Type it in DMS², see below |
 | **Surfshark** | Yes (make a key in the dashboard) | Not checked | No |
+| **OVPN** | Yes | Not checked | Likely: ports opened in OVPN's dashboard (49152 and up), reconnect afterwards. Type it in DMS² |
+| **TorGuard** | Yes | Not checked | Likely, for a config made for the exact server IP the port was requested on. Type it in DMS² |
 | **Windscribe** | Yes, on paid plans (config generator) | Not checked | Reportedly not for manual WireGuard configs, only through Windscribe's app or OpenVPN |
 | **Private Internet Access** | No: sign in instead | n/a | Yes, built in |
 | **NordVPN** | No official `.conf` | n/a | No |
@@ -50,6 +52,9 @@ That's why PIA needs your login and every other provider doesn't. DMS² stores t
 
 - **PIA**: automatic, in regions that support it.
 - **NAT-PMP inside the tunnel** (Proton VPN): automatic. When an imported tunnel comes up, DMS² asks its gateway, through the tunnel only, whether it forwards ports. No login is needed. If the gateway answers, the tunnel gets a port, renewed about every 30 seconds, and shows "reachable". If not, it shows "outgoing only" after a few seconds and isn't asked again until it reconnects. Proton only forwards on P2P servers, with NAT-PMP turned on when you made the config, and not together with its "Moderate NAT" option. This is built from Proton's published guide and hasn't been tested against Proton's servers yet. If you use Proton, please [open an issue](https://github.com/unicrncndms/downloadmanagersquared/issues) saying whether your tunnel shows "reachable".
-- **A fixed port from your provider's panel**: under consideration, if a provider is confirmed to forward one to WireGuard configs (AirVPN may). You'd type the port next to the imported `.conf`, and DMS² would show it as "forwarded (not checked)", since it can't verify it.
+- **A fixed port from your provider's panel** (AirVPN, and likely OVPN and TorGuard): you type it in. In settings, under **Network connections**, the **Port** box next to a connection's imported `.conf` takes the port your provider forwards to that tunnel. Torrents on that tunnel then listen on it, and the tunnel shows "port forwarded". DMS² can't check that the provider really forwards it, so it never shows such a port as "reachable". Clear the box to go back to NAT-PMP or outgoing only. Removing the tunnel clears it too; importing a new `.conf` keeps it.
+  - DMS² listens on the same port it tells peers, so the port on your PC must be the one the internet sees. In AirVPN's panel, leave the **Local** field empty.
+  - With several connections, reserve one port per connection and, at AirVPN, link each port to the device (key) of that connection's `.conf`. Each connection's tunnel then gets its own.
+  - A typed-in port wins: DMS² doesn't also ask the tunnel's gateway for one by NAT-PMP.
 
 If a tunnel's config stops working after months, for example a Proton config past its expiry, the tunnel shows "the VPN server doesn't answer", with a hint that the config may have expired or been revoked. Make a new config at your provider and import it again.
