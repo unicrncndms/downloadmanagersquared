@@ -21,7 +21,7 @@ DMS² then runs in the tray. The extension asks to enable containers, which it u
 
 Download a file of 100 MB or more as usual: DMS² takes it over, along with magnet links and `.torrent` files. The toolbar icon shows your downloads; **Connections & settings** is at the bottom of that list.
 
-**Sites with a link per IP:** the first time, a window opens with a blue bar. Click through the site until the download starts. DMS² remembers those clicks and repeats them by itself for each connection from then on. These windows start without cookies, so sites that need you logged in can't be clicked through.
+**Sites with a link per IP:** the first time, a window opens with a blue bar. Click through the site until the download starts. DMS² remembers those clicks and repeats them by itself for each connection from then on. These windows start without cookies, so sites that need you logged in can't be clicked through. Many file hosts limit free downloads per IP address, and their terms may not allow getting around that. Following each host's terms is up to you.
 
 **Checksums:** paste a SHA-256 or MD5 into a download's details in the list. DMS² checks the file when it finishes (or right away if it already has), and a download that doesn't match is kept as `.dms.part` instead of finishing.
 
