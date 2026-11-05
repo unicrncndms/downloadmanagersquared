@@ -23,3 +23,5 @@ DMS² doesn't protect you from programs running as your own user, or from the PC
 ## Updates
 
 The extension updates itself from this repository's [releases](https://github.com/unicrncndms/downloadmanagersquared/releases); every update is signed by Mozilla, and Firefox won't install one that isn't. To decide on updates yourself, open `about:addons`, choose downloadmanagersquared, and set **Allow automatic updates** to **Off**. The engine never updates itself: you run a newer `dms-engine.exe` when you choose to.
+
+To check that a release's zip, `dms-engine.exe` or `dms-host.exe` was built by this repository's release workflow from the tagged source, run `gh attestation verify <file> --repo unicrncndms/downloadmanagersquared`. It shows the workflow run and commit; it doesn't mean the build is reproducible.

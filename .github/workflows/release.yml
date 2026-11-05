@@ -3,7 +3,8 @@ name: Release
 # A tag vX.Y.Z builds a draft release with the engine zip, has AMO sign the
 # extension (unlisted) and publishes the release with the signed .xpi. If AMO
 # takes longer than the wait, the draft stays and release-signed.yml publishes
-# it later. A release is never public without its .xpi.
+# it later. A release is never public without its .xpi, nor before its zip
+# and exes have build provenance attestations (gh attestation verify).
 
 on:
   push:
@@ -20,6 +21,10 @@ jobs:
     needs: ci
     runs-on: windows-latest
     environment: release
+    permissions:
+      contents: write
+      id-token: write # the attestations' Sigstore certificate
+      attestations: write
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ github.ref_name }}
@@ -40,6 +45,14 @@ jobs:
       - name: Build
         run: ./build.ps1 -Version $env:TAG -Repo $env:GITHUB_REPOSITORY
 
+      # The exes as they go into the zip; release-signed.yml doesn't rebuild them.
+      - name: Attest the exes
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/dms-engine.exe
+            dist/dms-host.exe
+
       - name: Draft release with the engine
         run: |
           # Hashes are added by publish.ps1, once the zip carries the signed extension.
@@ -56,12 +69,26 @@ jobs:
           npx --yes web-ext@10.8.0 sign --channel=unlisted --source-dir dist/extension --artifacts-dir dist/signed --api-key $env:AMO_JWT_ISSUER --api-secret $env:AMO_JWT_SECRET --approval-timeout 1800000
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-      - name: Publish with the signed extension
+      - name: Attach the signed extension
+        id: attach
         if: steps.sign.outcome == 'success'
         run: |
           $xpi = Get-ChildItem dist/signed/*.xpi | Select-Object -First 1
-          ./.github/scripts/publish.ps1 -Tag $env:TAG -Xpi $xpi.FullName
+          ./.github/scripts/attach.ps1 -Tag $env:TAG -Xpi $xpi.FullName
+
+      - name: Attest the zip as uploaded
+        if: steps.sign.outcome == 'success'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.attach.outputs.zip }}
+
+      - name: Publish
+        if: steps.sign.outcome == 'success'
+        env:
+          ZIP: ${{ steps.attach.outputs.zip }}
+          XPI: ${{ steps.attach.outputs.xpi }}
+        run: ./.github/scripts/publish.ps1 -Tag $env:TAG -Zip $env:ZIP -Xpi $env:XPI
 
       - name: Signing still in review
         if: steps.sign.outcome != 'success'
-        run: echo "::warning::AMO hasn't signed $env:TAG within 30 minutes. The release stays a draft; run the 'Publish a signed release' workflow with this tag once AMO has signed it."
+        run: echo "::warning::AMO hasn't signed $env:TAG within 30 minutes. The release stays a draft; run the 'Publish a signed release' workflow on this tag (gh workflow run release-signed.yml --ref $env:TAG -f tag=$env:TAG) once AMO has signed it."

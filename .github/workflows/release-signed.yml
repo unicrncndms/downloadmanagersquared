@@ -1,7 +1,10 @@
 name: Publish a signed release
 
 # For a draft whose signing outlasted release.yml's wait: fetches the signed
-# .xpi from AMO, attaches it and updates.json, and publishes the release.
+# .xpi from AMO, attaches it and updates.json, attests the zip as uploaded and
+# publishes the release. The exes were attested by release.yml, which built them.
+# Run it on the tag (only v* tags may use the release environment), so the
+# attestation names the commit the draft was built from.
 
 on:
   workflow_dispatch:
@@ -17,6 +20,10 @@ jobs:
   publish:
     runs-on: windows-latest
     environment: release
+    permissions:
+      contents: write
+      id-token: write # the attestation's Sigstore certificate
+      attestations: write
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ inputs.tag }}
@@ -28,6 +35,7 @@ jobs:
 
       - name: Check the release is a draft
         run: |
+          if ($env:TAG -ne $env:GITHUB_REF_NAME) { throw "run this workflow on the tag $env:TAG, not $env:GITHUB_REF_NAME" }
           $draft = gh release view $env:TAG --json isDraft --jq .isDraft
           if ($draft -ne 'true') { throw "$env:TAG is not a draft release" }
 
@@ -37,5 +45,17 @@ jobs:
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: ./.github/scripts/amo-fetch.ps1 -Version $env:TAG.TrimStart('v') -Out signed.xpi
 
-      - name: Publish with the signed extension
-        run: ./.github/scripts/publish.ps1 -Tag $env:TAG -Xpi (Resolve-Path signed.xpi).Path
+      - name: Attach the signed extension
+        id: attach
+        run: ./.github/scripts/attach.ps1 -Tag $env:TAG -Xpi (Resolve-Path signed.xpi).Path
+
+      - name: Attest the zip as uploaded
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.attach.outputs.zip }}
+
+      - name: Publish
+        env:
+          ZIP: ${{ steps.attach.outputs.zip }}
+          XPI: ${{ steps.attach.outputs.xpi }}
+        run: ./.github/scripts/publish.ps1 -Tag $env:TAG -Zip $env:ZIP -Xpi $env:XPI
