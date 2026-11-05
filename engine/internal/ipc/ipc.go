@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -126,7 +128,11 @@ func serveConn(c *Conn, h Handler) {
 	defer h.Disconnected(c)
 	r := bufio.NewReaderSize(c.c, 64<<10)
 	for {
-		line, err := r.ReadBytes('\n')
+		line, err := ReadLine(r, MaxMessage)
+		if errors.Is(err, ErrTooLong) {
+			log.Printf("ipc: dropped a message over %d bytes", MaxMessage)
+			continue
+		}
 		if err != nil {
 			return
 		}
@@ -135,13 +141,56 @@ func serveConn(c *Conn, h Handler) {
 			continue
 		}
 		go func() {
+			resp := response{ID: req.ID}
+			defer func() { c.send(resp) }()
+			defer func() {
+				if p := recover(); p != nil {
+					log.Printf("ipc: %s panicked: %v\n%s", req.Method, p, debug.Stack())
+					resp = response{ID: req.ID, Error: "internal error"}
+				}
+			}()
 			res, err := h.Call(c, req.Method, req.Params)
-			resp := response{ID: req.ID, Result: res}
+			resp.Result = res
 			if err != nil {
 				resp.Error = err.Error()
 			}
-			c.send(resp)
 		}()
+	}
+}
+
+// MaxMessage is the longest line the engine reads from a client. Real
+// requests are a few kilobytes; this only stops a runaway client from growing
+// the engine's memory without bound.
+const MaxMessage = 4 << 20
+
+// ErrTooLong is ReadLine's answer to a line over its limit. The line has been
+// read past, so the next one can follow.
+var ErrTooLong = errors.New("line too long")
+
+// ReadLine reads one newline-terminated line of at most max bytes, newline
+// included. A longer line is skipped up to its newline and gives ErrTooLong.
+func ReadLine(r *bufio.Reader, max int) ([]byte, error) {
+	var line []byte
+	tooLong := false
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if !tooLong {
+			if len(line)+len(chunk) > max {
+				tooLong, line = true, nil
+			} else {
+				line = append(line, chunk...)
+			}
+		}
+		switch {
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case err != nil:
+			return nil, err
+		case tooLong:
+			return nil, ErrTooLong
+		default:
+			return line, nil
+		}
 	}
 }
 

@@ -156,3 +156,96 @@ func TestTheOwnProcessOwnsItsLoopbackConnection(t *testing.T) {
 		t.Fatalf("owner %s, want %s", user, me)
 	}
 }
+
+func TestAnOwnerWhoseUserCantBeReadIsRefused(t *testing.T) {
+	old := clientOwner
+	t.Cleanup(func() { clientOwner = old })
+	clientOwner = func(_, _ *net.TCPAddr) (uint32, string, error) {
+		return 4242, "", errors.New("access denied")
+	}
+	p := &fakePath{}
+	s := listen(t, p)
+	if code := connect(t, s, "93.184.215.14"); code != -1 {
+		t.Fatalf("reply %d, want the connection closed", code)
+	}
+	if len(p.dialed) != 0 {
+		t.Fatalf("dialed %v", p.dialed)
+	}
+}
+
+func TestNoLocalOrSpecialTargetIsDialled(t *testing.T) {
+	p := &fakePath{names: map[string][]net.IP{
+		"localhost":      {net.IPv4(127, 0, 0, 1), net.IPv6loopback},
+		"mapped.example": {net.ParseIP("::ffff:127.0.0.1"), net.ParseIP("::ffff:192.168.0.1")},
+		"v6only.example": {net.ParseIP("2606:2800:220:1::1")},
+	}}
+	s := listen(t, p)
+	for _, target := range []string{
+		"0.0.0.0", "127.1.2.3", "172.16.0.1", "192.168.0.1", "224.0.0.1", "239.255.255.250",
+		"255.255.255.255", "localhost", "mapped.example", "v6only.example",
+	} {
+		if code := connect(t, s, target); code != repNotAllowed {
+			t.Errorf("%s: reply %d, want %d (not allowed)", target, code, repNotAllowed)
+		}
+	}
+	if len(p.dialed) != 0 {
+		t.Fatalf("dialed %v", p.dialed)
+	}
+}
+
+func TestAnIPv6TargetIsRefusedUndialled(t *testing.T) {
+	p := &fakePath{}
+	s := listen(t, p)
+	c, err := net.Dial("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(s.Port())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	c.Write([]byte{5, 1, 0})
+	var m [2]byte
+	if _, err := io.ReadFull(c, m[:]); err != nil {
+		t.Fatal(err)
+	}
+	req := append([]byte{5, 1, 0, 4}, net.IPv6loopback...)
+	c.Write(binary.BigEndian.AppendUint16(req, 443))
+	var rep [10]byte
+	if _, err := io.ReadFull(c, rep[:]); err != nil {
+		t.Fatal(err)
+	}
+	if rep[1] != repAddrNotSupported {
+		t.Fatalf("reply %d, want %d", rep[1], repAddrNotSupported)
+	}
+	if len(p.dialed) != 0 {
+		t.Fatalf("dialed %v", p.dialed)
+	}
+}
+
+func TestGarbageFromAClientClosesOnlyItsConnection(t *testing.T) {
+	p := &fakePath{}
+	s := listen(t, p)
+	for _, junk := range [][]byte{
+		{4, 1, 0},                        // SOCKS4
+		{5, 255},                         // claims 255 methods, sends none
+		{5, 1, 0, 5, 9, 0},               // unknown command
+		{5, 1, 0, 5, 1, 0, 3, 0, 1, 187}, // empty host name
+	} {
+		c, err := net.Dial("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(s.Port())))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Write(junk)
+		if tc, ok := c.(*net.TCPConn); ok {
+			tc.CloseWrite()
+		}
+		c.SetDeadline(time.Now().Add(5 * time.Second))
+		io.Copy(io.Discard, c)
+		c.Close()
+	}
+	if len(p.dialed) != 0 {
+		t.Fatalf("dialed %v", p.dialed)
+	}
+	if code := connect(t, s, "93.184.215.14"); code != repSucceeded {
+		t.Fatalf("reply %d after garbage, want success", code)
+	}
+}

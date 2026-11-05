@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -41,37 +42,55 @@ func main() {
 	}
 
 	done := make(chan struct{}, 2)
-	go func() { // Firefox -> engine
-		for {
-			msg, err := readFrame(os.Stdin)
-			if err != nil {
-				break
-			}
-			var buf bytes.Buffer
-			if json.Compact(&buf, withBrowser(msg, browser)) != nil {
-				continue
-			}
-			buf.WriteByte('\n')
-			if _, err := conn.Write(buf.Bytes()); err != nil {
-				break
-			}
-		}
-		done <- struct{}{}
-	}()
-	go func() { // engine -> Firefox
-		r := bufio.NewReaderSize(conn, 64<<10)
-		for {
-			line, err := r.ReadBytes('\n')
-			if err != nil {
-				break
-			}
-			if err := writeFrame(os.Stdout, bytes.TrimSpace(line)); err != nil {
-				break
-			}
-		}
-		done <- struct{}{}
-	}()
+	go func() { relayIn(os.Stdin, conn, browser); done <- struct{}{} }()
+	go func() { relayOut(conn, os.Stdout); done <- struct{}{} }()
 	<-done
+}
+
+// maxToFirefox is the largest message Firefox takes from a native app; a
+// longer one makes it drop the connection.
+const maxToFirefox = 1 << 20
+
+// relayIn passes Firefox's messages to the engine as JSON lines, until either
+// side closes. Messages that aren't JSON, or are longer than the engine
+// reads, are skipped.
+func relayIn(from io.Reader, to io.Writer, browser string) {
+	for {
+		msg, err := readFrame(from, ipc.MaxMessage-1) // -1: the newline
+		if errors.Is(err, errTooLong) {
+			continue
+		}
+		if err != nil {
+			return
+		}
+		var buf bytes.Buffer
+		if json.Compact(&buf, withBrowser(msg, browser)) != nil {
+			continue
+		}
+		buf.WriteByte('\n')
+		if _, err := to.Write(buf.Bytes()); err != nil {
+			return
+		}
+	}
+}
+
+// relayOut passes the engine's lines to Firefox as messages, until either side
+// closes. A line too long for Firefox is skipped rather than costing the
+// connection.
+func relayOut(from io.Reader, to io.Writer) {
+	r := bufio.NewReaderSize(from, 64<<10)
+	for {
+		line, err := ipc.ReadLine(r, maxToFirefox)
+		if errors.Is(err, ipc.ErrTooLong) {
+			continue
+		}
+		if err != nil {
+			return
+		}
+		if err := writeFrame(to, bytes.TrimSpace(line)); err != nil {
+			return
+		}
+	}
 }
 
 // withBrowser adds the browser's exe to the extension's hello.
@@ -127,10 +146,20 @@ func startEngine() error {
 	return winutil.StartDetached(filepath.Join(filepath.Dir(self), "dms-engine.exe"))
 }
 
-func readFrame(r io.Reader) ([]byte, error) {
+var errTooLong = errors.New("message too long")
+
+// readFrame reads one length-prefixed message of at most max bytes. A longer
+// one is read past, so the next can follow, and gives errTooLong.
+func readFrame(r io.Reader, max int) ([]byte, error) {
 	var n uint32
 	if err := binary.Read(r, binary.LittleEndian, &n); err != nil {
 		return nil, err
+	}
+	if int64(n) > int64(max) {
+		if _, err := io.CopyN(io.Discard, r, int64(n)); err != nil {
+			return nil, err
+		}
+		return nil, errTooLong
 	}
 	buf := make([]byte, n)
 	_, err := io.ReadFull(r, buf)
