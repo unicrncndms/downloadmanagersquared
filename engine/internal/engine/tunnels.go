@@ -48,6 +48,9 @@ type tunnelEntry struct {
 	pfTried time.Time
 	pfErr   string
 	pfBusy  bool
+
+	// NAT-PMP port forwarding, for an imported tunnel (pfPort holds its port).
+	pmp pmpState
 }
 
 // The .conf files hold private keys, so they live in the engine's folder and
@@ -244,6 +247,7 @@ func (e *Engine) startTunnel(id string, te *tunnelEntry, b *netif.Binding) {
 		te.cfg = cfg
 		// A new server: the old forwarded port is gone with the old tunnel.
 		te.link, te.sig, te.pfPort, te.boundAt, te.pfErr = link, nil, 0, time.Time{}, ""
+		te.pmp = pmpState{} // asked again on this start
 	}
 	te.starting = false
 	if e.tunnels[id] != te { // removed or replaced meanwhile
@@ -306,6 +310,10 @@ func (e *Engine) tunnelViewsLocked(speeds map[string]float64) []IfaceView {
 		}
 		if state == "up" {
 			switch {
+			case !te.pia && pmpReachableLocked(te, time.Now()):
+				v.Incoming = "reachable"
+			case !te.pia && (te.pmp.gen != te.gen || !te.pmp.probed):
+				// Not known until its gateway is asked about NAT-PMP.
 			case !te.pia || !te.link.forwards:
 				v.Incoming = "outgoing"
 			case te.pfPort != 0 && time.Since(te.boundAt) < pfShown:

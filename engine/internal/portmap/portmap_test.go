@@ -19,6 +19,11 @@ type router struct {
 	gw     Gateway
 	mu     sync.Mutex
 	mapped []string // "TCP 6881->6881 for 127.0.0.1", one per mapping made
+
+	// How NAT-PMP answers, like a VPN server rather than a home router.
+	public    int    // grants this public port; 0: the one asked for
+	lifetime  uint32 // grants at most this many seconds; 0: what was asked
+	refuseUDP bool
 }
 
 func (r *router) record(s string) {
@@ -55,17 +60,35 @@ func newRouter(t *testing.T, natpmp, upnp bool) *router {
 				if err != nil {
 					return
 				}
+				if n == 2 && buf[0] == 0 && buf[1] == 0 {
+					pc.WriteTo([]byte{0, 128, 0, 0, 0, 0, 0, 1, 198, 51, 100, 7}, from)
+					continue
+				}
 				if n != 12 || buf[0] != 0 || (buf[1] != 1 && buf[1] != 2) {
 					continue
 				}
 				internal, external := binary.BigEndian.Uint16(buf[4:]), binary.BigEndian.Uint16(buf[6:])
+				life := binary.BigEndian.Uint32(buf[8:])
 				proto := map[byte]string{1: "UDP", 2: "TCP"}[buf[1]]
-				r.record(fmt.Sprintf("%s %d->%d for 127.0.0.1", proto, external, internal))
+				r.mu.Lock()
+				if r.public != 0 {
+					external = uint16(r.public)
+				}
+				if r.lifetime != 0 && r.lifetime < life {
+					life = r.lifetime
+				}
+				refuse := r.refuseUDP && proto == "UDP"
+				r.mu.Unlock()
 				resp := make([]byte, 16)
 				resp[1] = 128 + buf[1]
+				if refuse {
+					binary.BigEndian.PutUint16(resp[2:], 2) // not authorized
+				} else {
+					r.record(fmt.Sprintf("%s %d->%d for 127.0.0.1", proto, external, internal))
+				}
 				binary.BigEndian.PutUint16(resp[8:], internal)
 				binary.BigEndian.PutUint16(resp[10:], external)
-				copy(resp[12:], buf[8:12])
+				binary.BigEndian.PutUint32(resp[12:], life)
 				pc.WriteTo(resp, from)
 			}
 		}()
@@ -167,5 +190,61 @@ func TestNoRouterSupportIsAnError(t *testing.T) {
 	defer cancel()
 	if err := Map(ctx, r.gw, 6881, time.Hour); err == nil {
 		t.Fatal("mapping succeeded with neither NAT-PMP nor UPnP")
+	}
+}
+
+func TestAHomeRouterGrantingAnotherPortIsAnError(t *testing.T) {
+	r := newRouter(t, true, false)
+	r.public = 40000
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := mapNATPMP(ctx, r.gw, 6881, time.Hour); err == nil || !strings.Contains(err.Error(), "40000") {
+		t.Fatalf("got %v, want an error naming the port the router chose", err)
+	}
+}
+
+func TestMapPMPTakesThePortAndLifetimeTheGatewayGrants(t *testing.T) {
+	r := newRouter(t, true, true) // UPnP too: MapPMP must not fall back to it
+	r.public, r.lifetime = 51234, 45
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	m, err := MapPMP(ctx, r.gw, TCP, 0, 1, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Public != 51234 || m.Lifetime != 45*time.Second || m.Internal != 0 {
+		t.Fatalf("mapping %+v, want public 51234 for 45 s", m)
+	}
+	if got := strings.Join(r.mappings(), ", "); got != "TCP 51234->0 for 127.0.0.1" {
+		t.Fatalf("router saw %q, want one NAT-PMP TCP mapping", got)
+	}
+}
+
+func TestMapPMPRefusedIsAnErrorForThatProtocolOnly(t *testing.T) {
+	r := newRouter(t, true, false)
+	r.refuseUDP = true
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := MapPMP(ctx, r.gw, UDP, 0, 1, time.Minute); err == nil || !strings.Contains(err.Error(), "result 2") {
+		t.Fatalf("UDP: got %v, want the refusal", err)
+	}
+	if _, err := MapPMP(ctx, r.gw, TCP, 0, 1, time.Minute); err != nil {
+		t.Fatalf("TCP: %v", err)
+	}
+}
+
+func TestExternalAddressProbesForNATPMP(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ip, err := ExternalAddress(ctx, newRouter(t, true, false).gw)
+	if err != nil || !ip.Equal(net.IPv4(198, 51, 100, 7)) {
+		t.Fatalf("got %v, %v, want 198.51.100.7", ip, err)
+	}
+	start := time.Now()
+	if _, err := ExternalAddress(ctx, newRouter(t, false, false).gw); err == nil {
+		t.Fatal("a gateway without NAT-PMP answered")
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("giving up took %v, want about 2 s", d)
 	}
 }

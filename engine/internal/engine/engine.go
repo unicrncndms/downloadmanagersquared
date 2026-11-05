@@ -319,6 +319,7 @@ func (e *Engine) Run() {
 	}
 	go e.mapPorts()
 	go e.forwardLoop()
+	go e.pmpLoop()
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	last := time.Now()
