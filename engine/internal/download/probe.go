@@ -46,7 +46,7 @@ func newRequest(ctx context.Context, l Link, ua string) (*http.Request, error) {
 		return nil, err
 	}
 	if l.Cookie != "" {
-		req.Header.Set("Cookie", l.Cookie)
+		req.Header.Set("Cookie", string(l.Cookie))
 	}
 	if l.Referer != "" {
 		req.Header.Set("Referer", l.Referer)

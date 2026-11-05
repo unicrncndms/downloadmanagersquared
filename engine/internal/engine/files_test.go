@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -193,7 +194,12 @@ func TestACompletedDownloadKeepsNoCookie(t *testing.T) {
 	}
 	e.queue.Save()
 	state := filepath.Join(e.dir, "downloads", id+".json")
-	if b, _ := os.ReadFile(state); !bytes.Contains(b, []byte("session=secret")) {
+	b, _ := os.ReadFile(state)
+	if bytes.Contains(b, []byte("secret")) {
+		t.Fatalf("a queued download's cookie is readable on disk:\n%s", b)
+	}
+	var saved download.State
+	if json.Unmarshal(b, &saved) != nil || saved.Cookie != "session=secret" {
 		t.Fatal("a queued download doesn't keep its cookie to resume with")
 	}
 	d, _ := e.get(id)

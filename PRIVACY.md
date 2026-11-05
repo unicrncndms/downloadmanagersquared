@@ -8,7 +8,7 @@ The Firefox extension talks only to the DMS² engine on the same PC (through Fir
 
 - the download's URL, file name and size, and the pages that led to it (the page you started it on and the ones before, to find the landing page);
 - the Referer and your browser's User-Agent, so the site sees the same browser;
-- the cookies your browser sent for that download (or, failing that, the cookies it would send for that URL in that container). They go to the local engine only. The engine keeps them in plain text in your Windows profile until the download completes or you remove it, and sends them only to that site and its subdomains.
+- the cookies your browser sent for that download (or, failing that, the cookies it would send for that URL in that container). They go to the local engine only. The engine keeps them in your Windows profile, encrypted with Windows so only your user can read them, until the download completes or you remove it, and sends them only to that site and its subdomains.
 
 The extension also keeps, in Firefox's own storage, the clicks it learned per site (button texts and positions, and how long each took), and which pages led to recent downloads.
 
@@ -18,7 +18,7 @@ Pages DMS² opens to fetch a link run in a temporary container that only reaches
 
 ## What the engine keeps
 
-In `%APPDATA%\downloadmanagersquared\`: your settings, the download list (with the URLs, landing pages and, until each download completes, its cookies), torrents, the log (no URLs), imported WireGuard configs, and a PIA login if you use one, encrypted with Windows so only your user can read it. Uninstalling can delete all of it; your downloaded files are always kept.
+In `%APPDATA%\downloadmanagersquared\`: your settings, the download list (with the URLs, landing pages and, until each download completes, its cookies, encrypted with Windows so only your user can read them), torrents, the log (no URLs), imported WireGuard configs, and a PIA login if you use one, encrypted with Windows so only your user can read it. Uninstalling can delete all of it; your downloaded files are always kept.
 
 ## Other users of the PC
 

@@ -64,7 +64,7 @@ type State struct {
 	ID         string           `json:"id"`
 	URL        string           `json:"url"`
 	PageURL    string           `json:"pageUrl,omitempty"`
-	Cookie     string           `json:"cookie,omitempty"`
+	Cookie     Secret           `json:"cookie,omitempty"`
 	Referer    string           `json:"referer,omitempty"`
 	UserAgent  string           `json:"userAgent,omitempty"`
 	Browser    string           `json:"browser,omitempty"` // exe of the browser that handed it over; its pages open there

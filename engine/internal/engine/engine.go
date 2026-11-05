@@ -958,7 +958,7 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	st := download.State{
 		VPN: paths.ParseMode(r.VPN, e.settings.VPNHTTP),
 		ID:  newID(), URL: r.URL, PageURL: strings.TrimSpace(r.PageURL),
-		Cookie: r.Cookie, Referer: r.Referer, UserAgent: r.UserAgent, Browser: r.Browser,
+		Cookie: download.Secret(r.Cookie), Referer: r.Referer, UserAgent: r.UserAgent, Browser: r.Browser,
 		Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(),
 	}

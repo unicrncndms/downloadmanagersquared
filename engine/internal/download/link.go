@@ -27,7 +27,7 @@ const (
 // its status changes.
 type Link struct {
 	URL      string     `json:"url,omitempty"`
-	Cookie   string     `json:"cookie,omitempty"`
+	Cookie   Secret     `json:"cookie,omitempty"`
 	Referer  string     `json:"referer,omitempty"`
 	Status   LinkStatus `json:"status"`
 	Error    string     `json:"error,omitempty"`
@@ -129,7 +129,7 @@ func (l *Link) needResolve(pageKnown bool, reason string) bool {
 
 // resolved stores the link the browser fetched; it gets probed next.
 func (l *Link) resolved(url, cookie, referer string) {
-	l.URL, l.Cookie, l.Referer = url, cookie, referer
+	l.URL, l.Cookie, l.Referer = url, Secret(cookie), referer
 	l.Status, l.Error, l.retryAt = LinkPending, "", time.Time{}
 }
 
