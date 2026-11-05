@@ -121,7 +121,8 @@ func ProcessUser(pid uint32) (string, error) {
 
 // CurrentUserSID is used to lock the engine's named pipe to this user.
 func CurrentUserSID() (string, error) {
-	tok, err := windows.OpenCurrentProcessToken()
+	var tok windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &tok)
 	if err != nil {
 		return "", err
 	}

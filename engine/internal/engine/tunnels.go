@@ -67,7 +67,7 @@ func (e *Engine) loadTunnels() {
 		if err == nil {
 			_, err = tunnel.ParseConf(string(b))
 		}
-		if err != nil {
+		if err != nil && !errors.Is(err, tunnel.ErrNoDNS) { // that one shows on the tunnel
 			log.Printf("tunnel for %s unreadable, set aside: %v", id, err)
 			setAside(f)
 			name := string(id)
@@ -83,9 +83,15 @@ func (e *Engine) loadTunnels() {
 	}
 }
 
-// setTunnel makes conf the tunnel of an interface, replacing any it had.
+// setTunnel makes conf the tunnel of an interface, replacing any it had. A
+// saved config without DNS (from before that was required) is kept, its tunnel
+// down saying why.
 func (e *Engine) setTunnel(ifaceID, conf string, save bool) error {
 	cfg, err := tunnel.ParseConf(conf)
+	var cantRun string
+	if errors.Is(err, tunnel.ErrNoDNS) && !save {
+		cantRun, err = err.Error(), nil
+	}
 	if err != nil {
 		return err
 	}
@@ -100,7 +106,7 @@ func (e *Engine) setTunnel(ifaceID, conf string, save bool) error {
 		return err
 	}
 	e.mu.Lock()
-	e.tunnels[ifaceID] = &tunnelEntry{cfg: cfg, socks: srv}
+	e.tunnels[ifaceID] = &tunnelEntry{cfg: cfg, socks: srv, err: cantRun}
 	e.mu.Unlock()
 	return nil
 }
@@ -197,7 +203,8 @@ func (e *Engine) syncTunnels(now time.Time) {
 			}
 		}
 		waitsForUser := te.pia && (e.pia == nil || e.pia.refused)
-		if usable && te.t == nil && !te.starting && !now.Before(te.retryAt) && !waitsForUser {
+		cantRun := !te.pia && len(te.cfg.DNS) == 0 // its error says why
+		if usable && te.t == nil && !te.starting && !now.Before(te.retryAt) && !waitsForUser && !cantRun {
 			te.starting = true
 			starts = append(starts, start{id, te, ent.binding})
 		}

@@ -1,6 +1,8 @@
 package download
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"strings"
@@ -12,6 +14,9 @@ import (
 type Version struct {
 	ETag         string `json:"etag,omitempty"`
 	LastModified string `json:"lastModified,omitempty"`
+	// MD5 of the whole file in hex, when the server vouches for one: the
+	// finished file is checked against it unless a checksum was pasted.
+	MD5 string `json:"md5,omitempty"`
 }
 
 // versionMsg is why a link was dropped for serving another version.
@@ -19,6 +24,8 @@ const versionMsg = "a different version of the file: it changed on the server, o
 
 // errChanged fails a download none of whose connections still gets the file
 // it started with.
+//
+//lint:ignore ST1005 shown to the user as is, a sentence like the pause messages
 var errChanged = errors.New("The file changed on the server while it was downloading. Remove it and download it again")
 
 // allMismatchedLocked: every link the download could use serves another file.
@@ -39,14 +46,44 @@ func (d *Download) allMismatchedLocked(usable map[string]Iface, mainID string) b
 }
 
 func versionOf(h http.Header) Version {
-	return Version{ETag: h.Get("ETag"), LastModified: h.Get("Last-Modified")}
+	return Version{ETag: h.Get("ETag"), LastModified: h.Get("Last-Modified"), MD5: wholeFileMD5(h)}
 }
 
-// same reports whether a and b can be the same file. Last-Modified decides
-// when both have one: mirrors in step share it even when each makes up its own
+// wholeFileMD5 is the MD5 of the whole file a server vouches for, in hex, or
+// "". Only Google Cloud Storage's x-goog-hash counts: it describes the stored
+// object even on a range answer. It's left out when the bytes sent aren't the
+// ones stored (GCS unzipping a gzipped object, or any Content-Encoding).
+// Content-MD5 is not used: it's the body's, so a range's on a 206.
+func wholeFileMD5(h http.Header) string {
+	if enc := h.Get("Content-Encoding"); enc != "" && enc != "identity" {
+		return ""
+	}
+	if enc := h.Get("X-Goog-Stored-Content-Encoding"); enc != "" && enc != "identity" {
+		return ""
+	}
+	for _, v := range h.Values("X-Goog-Hash") {
+		for part := range strings.SplitSeq(v, ",") {
+			b64, ok := strings.CutPrefix(strings.TrimSpace(part), "md5=")
+			if !ok {
+				continue
+			}
+			if b, err := base64.StdEncoding.DecodeString(b64); err == nil && len(b) == 16 {
+				return hex.EncodeToString(b)
+			}
+		}
+	}
+	return ""
+}
+
+// same reports whether a and b can be the same file. The servers' MD5s decide
+// when both have one: two that differ vouch for different files. Then
+// Last-Modified decides when both have one: mirrors in step share it even when each makes up its own
 // ETag (Apache's inode-based ones do). Otherwise strong ETags decide. Weak
 // ETags, or nothing to compare, can't tell versions apart, so they count as the same.
 func (a Version) same(b Version) bool {
+	if a.MD5 != "" && b.MD5 != "" {
+		return a.MD5 == b.MD5
+	}
 	if a.LastModified != "" && b.LastModified != "" {
 		ta, ea := http.ParseTime(a.LastModified)
 		tb, eb := http.ParseTime(b.LastModified)

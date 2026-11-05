@@ -71,8 +71,7 @@ func newRouter(t *testing.T, natpmp, upnp bool) *router {
 		}()
 	}
 	if upnp {
-		var srv *httptest.Server
-		srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			switch req.URL.Path {
 			case "/desc.xml":
 				fmt.Fprintf(w, `<?xml version="1.0"?><root><device><deviceList><device><deviceList><device><serviceList>

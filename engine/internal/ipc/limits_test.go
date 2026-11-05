@@ -17,8 +17,7 @@ func (echo) Connected(*Conn)    {}
 func (echo) Disconnected(*Conn) {}
 func (echo) Call(_ *Conn, method string, _ json.RawMessage) (any, error) {
 	if method == "boom" {
-		var m map[string]int
-		m["x"] = 1 // nil map: panics
+		panic("boom")
 	}
 	return method, nil
 }

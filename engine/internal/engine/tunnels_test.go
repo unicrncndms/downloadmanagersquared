@@ -41,7 +41,7 @@ func newVPNServer(t *testing.T, clientPub string) *vpnServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := tunnel.ParseConf(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 203.0.113.1/24\n[Peer]\nPublicKey = %s\nAllowedIPs = 10.9.0.2/32\n", priv, clientPub))
+	cfg, err := tunnel.ParseConf(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 203.0.113.1/24\nDNS = 203.0.113.1\n[Peer]\nPublicKey = %s\nAllowedIPs = 10.9.0.2/32\n", priv, clientPub))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func loopbackIfaces() []netif.Interface {
 
 func importConf(t *testing.T, e *Engine, srv *vpnServer, clientPriv string) {
 	t.Helper()
-	conf := fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = %s\nPersistentKeepalive = 25\n",
+	conf := fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\nDNS = 203.0.113.1\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = %s\nPersistentKeepalive = 25\n",
 		clientPriv, srv.pub, srv.endpoint)
 	p, _ := json.Marshal(map[string]string{"iface": "lo", "conf": conf})
 	if _, err := e.Call(nil, "importTunnel", p); err != nil {
@@ -331,7 +331,7 @@ func TestAConfIsRefusedOnASecondConnection(t *testing.T) {
 	other, _, _ := tunnel.GenerateKey()
 	_, peer, _ := tunnel.GenerateKey()
 	conf := func(key string) string {
-		return fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 127.0.0.1:9\n", key, peer)
+		return fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\nDNS = 203.0.113.1\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 127.0.0.1:9\n", key, peer)
 	}
 	importOn := func(iface, conf string) error {
 		p, _ := json.Marshal(map[string]string{"iface": iface, "conf": conf})
@@ -415,5 +415,64 @@ func TestVPNForTorrentsMovesEveryTorrentToThatSession(t *testing.T) {
 	}
 	if _, err := e.Call(nil, "setVpn", []byte(`{"id":"`+id+`","vpn":"off"}`)); err == nil {
 		t.Fatal("a single download's VPN mode can still be set on its own")
+	}
+}
+
+func TestAConfWithoutDNSIsRefusedSayingWhy(t *testing.T) {
+	e := loopbackEngine(t)
+	priv, _, _ := tunnel.GenerateKey()
+	_, peer, _ := tunnel.GenerateKey()
+	conf := fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 127.0.0.1:9\n", priv, peer)
+	p, _ := json.Marshal(map[string]string{"iface": "lo", "conf": conf})
+	_, err := e.Call(nil, "importTunnel", p)
+	if err == nil || !strings.Contains(err.Error(), "DNS") {
+		t.Fatalf("got %v, want a refusal saying it needs DNS", err)
+	}
+	if _, err := os.Stat(e.tunnelFile("lo")); err == nil {
+		t.Fatal("the refused config was saved")
+	}
+}
+
+func TestASavedConfWithoutDNSKeepsItsTunnelDownSayingWhy(t *testing.T) {
+	shown := balloons(t)
+	dir := t.TempDir()
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := e.tunnelFile("lo")
+	e.Shutdown()
+	priv, _, _ := tunnel.GenerateKey()
+	_, peer, _ := tunnel.GenerateKey()
+	os.MkdirAll(filepath.Dir(conf), 0o755)
+	os.WriteFile(conf, []byte(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.9.0.2/32\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 127.0.0.1:9\n", priv, peer)), 0o600)
+
+	e, err = open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	e.mu.Lock()
+	e.refreshInterfacesLocked(loopbackIfaces())
+	e.mu.Unlock()
+	for i := 0; i < 3; i++ {
+		e.syncTunnels(time.Now().Add(time.Duration(i) * time.Hour))
+		time.Sleep(50 * time.Millisecond)
+	}
+	e.mu.Lock()
+	views := e.tunnelViewsLocked(nil)
+	te := e.tunnels["lo"]
+	e.mu.Unlock()
+	if len(views) != 1 || views[0].TunnelState != "down" || !strings.Contains(views[0].TunnelError, "DNS") {
+		t.Fatalf("views %+v, want one tunnel down saying it needs DNS", views)
+	}
+	if te == nil || te.t != nil || te.starting {
+		t.Fatal("a tunnel without DNS was started")
+	}
+	if _, err := os.Stat(conf); err != nil {
+		t.Fatalf("the saved config was set aside: %v", err)
+	}
+	if len(*shown) != 0 {
+		t.Fatalf("balloons %q, want none: the error shows on the tunnel", *shown)
 	}
 }

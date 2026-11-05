@@ -48,7 +48,14 @@ var amneziaKeys = map[string]bool{
 	"i1": true, "i2": true, "i3": true, "i4": true, "i5": true,
 }
 
-// ParseConf reads a WireGuard .conf file. IPv6 addresses are left out.
+// ErrNoDNS refuses a config without an IPv4 DNS server: its tunnel couldn't
+// resolve a name, and lookups never fall back to the bare connection.
+var ErrNoDNS = errors.New("the config has no DNS server: add a DNS = line with an IPv4 resolver " +
+	"(your VPN provider's, or a public one). IPv6 DNS servers aren't used")
+
+// ParseConf reads a WireGuard .conf file. IPv6 addresses are left out. A config
+// that is complete but for an IPv4 DNS server comes back with ErrNoDNS, so one
+// saved before that was required can still be shown.
 func ParseConf(text string) (Config, error) {
 	cfg := Config{MTU: 1420}
 	var section string
@@ -144,6 +151,8 @@ func ParseConf(text string) (Config, error) {
 		return Config{}, errors.New("no IPv4 Address")
 	case !havePeer || cfg.PublicKey == [32]byte{}:
 		return Config{}, errors.New("no [Peer] with a PublicKey")
+	case len(cfg.DNS) == 0:
+		return cfg, ErrNoDNS
 	}
 	return cfg, nil
 }
@@ -195,6 +204,9 @@ type Tunnel struct {
 // go through; lookup resolves the endpoint's host name, outside the tunnel
 // (nil if the endpoint is an address).
 func Start(cfg Config, listen func() (net.PacketConn, error), lookup func(ctx context.Context, host string) ([]net.IP, error)) (*Tunnel, error) {
+	if len(cfg.DNS) == 0 {
+		return nil, ErrNoDNS
+	}
 	endpoint := ""
 	if cfg.Endpoint != "" {
 		host, port, _ := net.SplitHostPort(cfg.Endpoint)

@@ -22,5 +22,9 @@ func ParseFile(b []byte) (magnet string, info []byte, err error) {
 	if inf.PieceLength <= 0 || len(inf.Pieces) == 0 || inf.TotalLength() <= 0 {
 		return "", nil, errors.New("not a torrent file: it describes no data")
 	}
-	return mi.Magnet(nil, &inf).String(), mi.InfoBytes, nil
+	m, err := mi.MagnetV2()
+	if err != nil {
+		return "", nil, fmt.Errorf("not a torrent file: %w", err)
+	}
+	return m.String(), mi.InfoBytes, nil
 }
