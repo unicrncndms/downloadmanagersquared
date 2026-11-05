@@ -32,6 +32,10 @@ jobs:
         working-directory: engine
         run: go test ./...
 
+      - name: Known vulnerabilities the engine reaches
+        working-directory: engine
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./... # fails only on vulnerable code the engine actually calls
+
       - name: Licences of linked Go modules
         working-directory: engine
         run: |
