@@ -1,0 +1,20 @@
+# One grouped PR a month per ecosystem. govulncheck in CI still fails on a
+# vulnerability the engine reaches in between. Tools pinned in `run:` lines
+# (web-ext, govulncheck, go-licenses, staticcheck) are updated by hand.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /engine
+    schedule:
+      interval: monthly
+    groups:
+      go-modules:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ["*"]
