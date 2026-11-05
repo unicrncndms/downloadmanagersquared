@@ -197,6 +197,9 @@ func (e *Engine) syncTunnels(now time.Time) {
 			if !usable || te.on != ent.binding || lost {
 				if lost {
 					te.err, te.retryAt = "the VPN server doesn't answer", now.Add(tunnelRetry)
+					if !te.pia { // PIA gets a new key each start; a .conf's can expire or be revoked
+						te.err += ". If this keeps happening, the config may have expired or been revoked at your provider: make a new one and import it again"
+					}
 				}
 				stops = append(stops, te.t)
 				te.t, te.on, te.client, te.up = nil, nil, nil, false

@@ -42,6 +42,7 @@ Each connection can get its own WireGuard tunnel, for downloads, torrents or bot
 - **Private Internet Access:** sign in, and every connection without its own `.conf` gets a tunnel.
 - **Other providers:** import a `.conf` per connection. It must be plain WireGuard with an IPv4 address and an IPv4 DNS server (`DNS =`; IPv6 ones aren't used), one config per connection (a separate device or key at your provider). Obfuscated AmneziaWG configs don't work.
 - For sites with a link per IP, use a different server for each connection, or they may share one address.
+- Which providers offer `.conf` files, and why PIA works differently: [docs/vpn-providers.md](docs/vpn-providers.md).
 
 ### Several browsers
 

@@ -476,3 +476,23 @@ func TestASavedConfWithoutDNSKeepsItsTunnelDownSayingWhy(t *testing.T) {
 		t.Fatalf("balloons %q, want none: the error shows on the tunnel", *shown)
 	}
 }
+
+func TestAConfTheServerNoLongerKnowsSaysItMayHaveExpired(t *testing.T) {
+	e := loopbackEngine(t)
+	clientPriv, _, _ := tunnel.GenerateKey()
+	_, otherPub, _ := tunnel.GenerateKey()
+	importConf(t, e, newVPNServer(t, otherPub), clientPriv) // the server knows another key: revoked or expired
+	waitFor(t, "the tunnel to start", 30*time.Second, func() bool {
+		e.syncTunnels(time.Now())
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return e.tunnels["lo"].t != nil
+	})
+	e.syncTunnels(time.Now().Add(tunnelGrace + time.Second))
+	e.mu.Lock()
+	views := e.tunnelViewsLocked(nil)
+	e.mu.Unlock()
+	if len(views) != 1 || views[0].TunnelState != "down" || !strings.Contains(views[0].TunnelError, "expired or been revoked") {
+		t.Fatalf("views %+v, want the tunnel down saying its config may have expired", views)
+	}
+}
