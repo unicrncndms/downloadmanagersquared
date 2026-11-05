@@ -1,4 +1,4 @@
-package engine
+package vpn
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"net/netip"
-	"sync"
 	"time"
 
 	"downloadmanagersquared/engine/internal/portmap"
@@ -16,7 +15,6 @@ import (
 // NAT-PMP port forwarding on imported tunnels: a VPN server that forwards ports
 // this way (Proton VPN) answers on the tunnel's gateway, with no login.
 const (
-	pmpTick     = 2 * time.Second  // how often leases are checked: far under the shortest
 	pmpLifetime = time.Minute      // asked for; Proton's documented loop asks for 60 s
 	pmpQuick    = 5 * time.Second  // retry while the lease still runs
 	pmpTimeout  = 10 * time.Second // one round of requests
@@ -24,7 +22,7 @@ const (
 
 // pmpState is an imported tunnel's NAT-PMP forwarding, for one tunnel start.
 type pmpState struct {
-	gen     int    // the tunnel start (tunnelEntry.gen) it belongs to
+	gen     int    // the tunnel start (entry.gen) it belongs to
 	probed  bool   // the gateway was asked whether it speaks NAT-PMP
 	gw      net.IP // the gateway that answered; nil: none did, outgoing only until a restart
 	until   time.Time
@@ -34,31 +32,14 @@ type pmpState struct {
 	warned  bool // UDP's trouble was logged for this start
 }
 
-// pmpLoop keeps imported tunnels' NAT-PMP leases alive. It runs apart from
-// forwardLoop (PIA's), whose 30 s tick and one-by-one jobs can't hold a 60 s lease.
-func (e *Engine) pmpLoop() {
-	t := time.NewTicker(pmpTick)
-	defer t.Stop()
-	for {
-		select {
-		case <-e.quit:
-			return
-		case now := <-t.C:
-			e.forwardPMP(now)
-		}
-	}
-}
-
 // forwardPMP starts a job for each imported tunnel that is up and due: a first
-// probe, or a renewal. Each runs on its own, so a slow tunnel delays no other;
-// the returned group is for tests to wait on.
-func (e *Engine) forwardPMP(now time.Time) *sync.WaitGroup {
-	var wg sync.WaitGroup
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	for id, te := range e.tunnels {
+// probe, or a renewal. Each runs on its own, so a slow tunnel delays no other.
+func (t *Tunnels) forwardPMP(now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for id, te := range t.tunnels {
 		// PIA forwards its own way, and a port the user typed in wins.
-		if te.pia || e.manualPortLocked(id, te) != 0 || e.tunnelUpLocked(id) == nil {
+		if te.pia || t.manualPortLocked(id, te) != 0 || t.upLocked(id) == nil {
 			continue
 		}
 		if te.pmp.gen != te.gen {
@@ -69,30 +50,26 @@ func (e *Engine) forwardPMP(now time.Time) *sync.WaitGroup {
 			continue
 		}
 		p.busy = true
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			e.pmpJob(now, id, te, te.t, te.gen)
-		}()
+		tn, gen := te.t, te.gen
+		t.goJob(func() { t.pmpJob(now, id, te, tn, gen) })
 	}
-	return &wg
 }
 
-func (e *Engine) pmpJob(now time.Time, id string, te *tunnelEntry, t *tunnel.Tunnel, gen int) {
-	e.mu.Lock()
+func (t *Tunnels) pmpJob(now time.Time, id string, te *entry, tn *tunnel.Tunnel, gen int) {
+	t.mu.Lock()
 	p := te.pmp
 	hint := te.pfPort
 	cfg := te.cfg
-	e.mu.Unlock()
+	t.mu.Unlock()
 	gw := func(ip net.IP) portmap.Gateway {
-		return portmap.Gateway{IP: ip, Local: t.Address(), Listen: func() (net.PacketConn, error) { return t.ListenPacket(0) }}
+		return portmap.Gateway{IP: ip, Local: tn.Address(), Listen: func() (net.PacketConn, error) { return tn.ListenPacket(0) }}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), pmpTimeout)
+	ctx, cancel := context.WithTimeout(t.ctx, pmpTimeout)
 	defer cancel()
 
 	if !p.probed {
 		p.probed = true
-		for _, ip := range pmpGateways(cfg) {
+		for _, ip := range pmpGateways(cfg, t.gatewayOK) {
 			if _, err := portmap.ExternalAddress(ctx, gw(ip)); err == nil {
 				p.gw = ip
 				break
@@ -130,9 +107,9 @@ func (e *Engine) pmpJob(now time.Time, id string, te *tunnelEntry, t *tunnel.Tun
 		}
 	}
 
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if te.t != t || te.gen != gen || e.tunnels[id] != te { // restarted or removed meanwhile
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if te.t != tn || te.gen != gen || t.tunnels[id] != te { // restarted or removed meanwhile
 		return
 	}
 	p.busy = false
@@ -141,15 +118,15 @@ func (e *Engine) pmpJob(now time.Time, id string, te *tunnelEntry, t *tunnel.Tun
 		log.Printf("tunnel for %s: NAT-PMP: %v", id, err)
 	}
 	if port != 0 {
-		te.pfPort = port // a changed one reopens the tunnel's torrent sockets (syncTorrentIfaces)
+		te.pfPort = port // the engine's next tick moves the tunnel's torrent sockets to it
 	}
 }
 
 // pmpGateways are where an imported tunnel's NAT-PMP may answer: its DNS server
 // (Proton's is its gateway, 10.2.0.1), then the .1 of its own address. Only
-// private addresses: a VPN's gateway is inside its network, and a public DNS
+// those ok allows: a VPN's gateway is inside its network, and a public DNS
 // server in a .conf (1.1.1.1) is someone else's, with no business getting these.
-func pmpGateways(cfg tunnel.Config) []net.IP {
+func pmpGateways(cfg tunnel.Config, ok func(netip.Addr) bool) []net.IP {
 	var cands []netip.Addr
 	if len(cfg.DNS) > 0 {
 		cands = append(cands, cfg.DNS[0])
@@ -161,16 +138,12 @@ func pmpGateways(cfg tunnel.Config) []net.IP {
 	}
 	var out []net.IP
 	for i, c := range cands {
-		if c.Is4() && pmpGatewayOK(c) && (i == 0 || c != cands[0]) {
+		if c.Is4() && ok(c) && (i == 0 || c != cands[0]) {
 			out = append(out, net.IP(c.AsSlice()))
 		}
 	}
 	return out
 }
-
-// pmpGatewayOK is whether NAT-PMP may be sent to addr; tests widen it to their
-// fake server's documentation address.
-var pmpGatewayOK = privateGateway
 
 var cgnat = netip.MustParsePrefix("100.64.0.0/10")
 
@@ -181,6 +154,6 @@ func privateGateway(addr netip.Addr) bool {
 }
 
 // pmpReachableLocked is whether an imported tunnel's NAT-PMP lease runs at now.
-func pmpReachableLocked(te *tunnelEntry, now time.Time) bool {
+func pmpReachableLocked(te *entry, now time.Time) bool {
 	return te.pmp.gen == te.gen && te.pmp.gw != nil && te.pfPort != 0 && now.Before(te.pmp.until)
 }

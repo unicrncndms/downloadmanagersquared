@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -170,7 +171,7 @@ func TestUnreadablePIALoginAndTunnelAreSetAside(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conf := e.tunnelFile("wifi")
+	conf := filepath.Join(dir, "tunnels", hex.EncodeToString([]byte("wifi"))+".conf")
 	e.Shutdown()
 	if len(*shown) != 1 || !strings.Contains((*shown)[0], "sign in again") {
 		t.Fatalf("balloons %q, want one about the PIA login", *shown)
@@ -184,7 +185,7 @@ func TestUnreadablePIALoginAndTunnelAreSetAside(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Shutdown()
-	if e.pia != nil || e.tunnels["wifi"] != nil {
+	if _, ok := e.tunnelStatus("wifi"); ok || e.vpn.PIA().Configured {
 		t.Fatal("loaded an unreadable login or tunnel")
 	}
 	for _, f := range []string{filepath.Join(dir, "pia.dat.broken"), conf + ".broken"} {

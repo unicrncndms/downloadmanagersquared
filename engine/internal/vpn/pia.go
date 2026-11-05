@@ -1,17 +1,17 @@
-package engine
+package vpn
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/netif"
-	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/tunnel"
 	"downloadmanagersquared/engine/internal/winutil"
@@ -29,7 +29,7 @@ type piaLogin struct {
 }
 
 // piaState is PIA as the provider of every interface's tunnel that has no
-// .conf of its own. nil in Engine.pia means it isn't set up.
+// .conf of its own. nil in Tunnels.pia means it isn't set up.
 type piaState struct {
 	login     piaLogin
 	refused   bool // the login was refused: wait for the user to save it again
@@ -49,12 +49,13 @@ type PIAView struct {
 	Region     string `json:"region,omitempty"`
 }
 
-func (e *Engine) piaFile() string { return filepath.Join(e.dir, "pia.dat") }
+func (t *Tunnels) piaFile() string { return filepath.Join(t.dir, "pia.dat") }
 
-func (e *Engine) loadPIA() {
-	b, err := os.ReadFile(e.piaFile())
+// loadPIA reads the saved login. One that can't be read is set aside.
+func (t *Tunnels) loadPIA() error {
+	b, err := os.ReadFile(t.piaFile())
 	if errors.Is(err, os.ErrNotExist) {
-		return
+		return nil
 	}
 	var l piaLogin
 	if err == nil {
@@ -68,30 +69,32 @@ func (e *Engine) loadPIA() {
 	}
 	if err != nil {
 		log.Printf("PIA login unreadable, set aside: %v", err)
-		setAside(e.piaFile())
-		notify("PIA login unreadable", "PIA login couldn't be read, sign in again.", nil)
-		return
+		setAside(t.piaFile())
+		return err
 	}
-	e.pia = &piaState{login: l}
+	t.mu.Lock()
+	t.pia = &piaState{login: l}
+	t.mu.Unlock()
+	return nil
 }
 
-// setPIA saves a new login (or with user "" forgets PIA), and gives every
+// SetPIA saves a new login (or with user "" forgets PIA), and gives every
 // interface without a .conf of its own a PIA tunnel.
-func (e *Engine) setPIA(user, pass string) error {
+func (t *Tunnels) SetPIA(user, pass string) error {
 	if user == "" {
-		e.mu.Lock()
-		e.pia = nil
+		t.mu.Lock()
+		t.pia = nil
 		var ids []string
-		for id, te := range e.tunnels {
+		for id, te := range t.tunnels {
 			if te.pia {
 				ids = append(ids, id)
 			}
 		}
-		e.mu.Unlock()
+		t.mu.Unlock()
 		for _, id := range ids {
-			e.removeTunnelEntry(id)
+			t.removeEntry(id)
 		}
-		if err := os.Remove(e.piaFile()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(t.piaFile()); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		return nil
@@ -101,30 +104,51 @@ func (e *Engine) setPIA(user, pass string) error {
 	if err != nil {
 		return err
 	}
-	if err := atomicfile.Write(e.piaFile(), sealed, 0o600); err != nil {
+	if err := atomicfile.Write(t.piaFile(), sealed, 0o600); err != nil {
 		return err
 	}
-	e.mu.Lock()
-	e.pia = &piaState{login: piaLogin{user, pass}}
-	for _, te := range e.tunnels {
+	t.mu.Lock()
+	t.pia = &piaState{login: piaLogin{user, pass}}
+	for _, te := range t.tunnels {
 		if te.pia {
 			te.retryAt = time.Time{} // try the new login at once
 		}
 	}
-	e.mu.Unlock()
-	e.syncTunnels(time.Now())
+	t.mu.Unlock()
+	t.sync(time.Now())
 	return nil
+}
+
+// SetPIARegion picks PIA's region ("" = the lowest latency) and makes the PIA
+// tunnels connect again.
+func (t *Tunnels) SetPIARegion(region string) {
+	var stops []*tunnel.Tunnel
+	t.mu.Lock()
+	t.region = region
+	if t.pia != nil {
+		t.pia.region = pia.Region{}
+	}
+	for _, te := range t.tunnels {
+		if te.pia && te.t != nil {
+			stops = append(stops, te.t)
+			te.t, te.on, te.client, te.up, te.retryAt = nil, nil, nil, false, time.Time{}
+		}
+	}
+	t.mu.Unlock()
+	for _, tn := range stops {
+		tn.Close()
+	}
 }
 
 // piaWantedLocked are the usable interfaces that should get a PIA tunnel:
 // those without a tunnel of their own.
-func (e *Engine) piaWantedLocked() []string {
-	if e.pia == nil || e.pia.refused {
+func (t *Tunnels) piaWantedLocked() []string {
+	if t.pia == nil || t.pia.refused {
 		return nil
 	}
 	var ids []string
-	for id, ent := range e.ifaces {
-		if ent.present && e.enabledLocked(ent) && e.tunnels[id] == nil {
+	for id, i := range t.ifaces {
+		if i.Usable && i.Binding != nil && t.tunnels[id] == nil {
 			ids = append(ids, id)
 		}
 	}
@@ -139,16 +163,16 @@ type piaLink struct {
 
 // piaConfig registers a new key for one interface, through that interface,
 // and returns its tunnel config.
-func (e *Engine) piaConfig(te *tunnelEntry, b *netif.Binding) (tunnel.Config, piaLink, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+func (t *Tunnels) piaConfig(te *entry, b *netif.Binding) (tunnel.Config, piaLink, error) {
+	ctx, cancel := context.WithTimeout(t.ctx, 45*time.Second)
 	defer cancel()
-	e.mu.Lock()
-	p, api, regionID := e.pia, e.piaAPI, e.settings.PIARegion
-	e.mu.Unlock()
+	t.mu.Lock()
+	p, regionID := t.pia, t.region
+	t.mu.Unlock()
 	if p == nil {
 		return tunnel.Config{}, piaLink{}, errors.New("PIA isn't set up")
 	}
-	token, region, err := e.piaSession(ctx, p, api, regionID, b)
+	token, region, err := t.piaSession(ctx, p, regionID, b)
 	if err != nil {
 		return tunnel.Config{}, piaLink{}, err
 	}
@@ -156,15 +180,15 @@ func (e *Engine) piaConfig(te *tunnelEntry, b *netif.Binding) (tunnel.Config, pi
 	if err != nil {
 		return tunnel.Config{}, piaLink{}, err
 	}
-	srv, err := e.reservePIAServer(te, region.WG())
+	srv, err := t.reservePIAServer(te, region.WG())
 	if err != nil {
 		return tunnel.Config{}, piaLink{}, err
 	}
-	k, err := api.AddKey(ctx, b.DialContext, srv, token, pub)
+	k, err := t.api.AddKey(ctx, b.DialContext, srv, token, pub)
 	if err != nil {
-		e.mu.Lock()
+		t.mu.Lock()
 		p.token = "" // maybe it expired early: log in again next time
-		e.mu.Unlock()
+		t.mu.Unlock()
 		return tunnel.Config{}, piaLink{}, err
 	}
 	cfg, err := tunnel.ParseConf(k.Conf(priv, srv))
@@ -182,14 +206,14 @@ func (e *Engine) piaConfig(te *tunnelEntry, b *netif.Binding) (tunnel.Config, pi
 // tunnels hold. PIA gives an account one peer IP per server and routes it to
 // the newest key, so two tunnels sharing a server would leave one of them dead.
 // Apart, each also gets its own exit IP.
-func (e *Engine) reservePIAServer(te *tunnelEntry, servers []pia.Server) (pia.Server, error) {
+func (t *Tunnels) reservePIAServer(te *entry, servers []pia.Server) (pia.Server, error) {
 	if len(servers) == 0 {
 		return pia.Server{}, errors.New("PIA's region has no WireGuard server")
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	held := map[string]int{}
-	for _, o := range e.tunnels {
+	for _, o := range t.tunnels {
 		if o != te && o.pia && o.server != "" {
 			held[o.server]++
 		}
@@ -213,95 +237,76 @@ const (
 	pfShown  = 20 * time.Minute // a bind older than this no longer counts as reachable
 )
 
-// forwardLoop keeps the PIA tunnels' ports forwarded.
-func (e *Engine) forwardLoop() {
-	t := time.NewTicker(30 * time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-e.quit:
-			return
-		case now := <-t.C:
-			e.forwardPorts(now)
-		}
-	}
-}
-
-// forwardPorts gets each PIA tunnel in a forwarding region a port, and binds
-// it again every 15 minutes.
-func (e *Engine) forwardPorts(now time.Time) {
-	type job struct {
-		id string
-		te *tunnelEntry
-		t  *tunnel.Tunnel
-		b  *netif.Binding
-	}
-	var jobs []job
-	e.mu.Lock()
-	for id, te := range e.tunnels {
-		if !te.pia || !te.link.forwards || e.tunnelUpLocked(id) == nil || te.pfBusy {
+// forwardPIA gets each PIA tunnel in a forwarding region a port, and binds it
+// again every 15 minutes. Each tunnel's binding runs on its own.
+func (t *Tunnels) forwardPIA(now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	p, regionID := t.pia, t.region
+	for id, te := range t.tunnels {
+		if !te.pia || !te.link.forwards || t.upLocked(id) == nil || te.pfBusy {
 			continue
 		}
 		due := te.boundAt.IsZero() || now.Sub(te.boundAt) >= pfRebind
 		if te.pfErr != "" {
 			due = now.Sub(te.pfTried) >= pfRetry
 		}
-		if due {
-			te.pfBusy = true
-			jobs = append(jobs, job{id, te, te.t, te.on})
+		if !due {
+			continue
 		}
-	}
-	p, api, regionID := e.pia, e.piaAPI, e.settings.PIARegion
-	e.mu.Unlock()
-	for _, j := range jobs {
-		err := e.forwardPort(now, p, api, regionID, j.te, j.t, j.b)
-		e.mu.Lock()
-		j.te.pfBusy, j.te.pfTried = false, now
-		if j.te.t == j.t { // still the same tunnel
-			if err != nil {
-				log.Printf("PIA port forwarding on %s: %v", j.id, err)
-				j.te.pfErr = err.Error()
-			} else {
-				j.te.pfErr, j.te.boundAt = "", now
+		te.pfBusy = true
+		tn, b := te.t, te.on
+		t.goJob(func() {
+			err := t.forwardPort(now, p, regionID, te, tn, b)
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			te.pfBusy, te.pfTried = false, now
+			if te.t != tn { // no longer the same tunnel
+				return
 			}
-		}
-		e.mu.Unlock()
+			if err != nil {
+				log.Printf("PIA port forwarding on %s: %v", id, err)
+				te.pfErr = err.Error()
+			} else {
+				te.pfErr, te.boundAt = "", now
+			}
+		})
 	}
 }
 
-func (e *Engine) forwardPort(now time.Time, p *piaState, api pia.API, regionID string, te *tunnelEntry, t *tunnel.Tunnel, b *netif.Binding) error {
+func (t *Tunnels) forwardPort(now time.Time, p *piaState, regionID string, te *entry, tn *tunnel.Tunnel, b *netif.Binding) error {
 	if p == nil {
 		return errors.New("PIA isn't set up")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.ctx, 30*time.Second)
 	defer cancel()
-	e.mu.Lock()
+	t.mu.Lock()
 	sig, gws := te.sig, te.link.gateways
-	e.mu.Unlock()
+	t.mu.Unlock()
 	var lastErr error
 	for _, gw := range gws {
 		if sig == nil || now.After(sig.Expires.Add(-24*time.Hour)) {
-			token, _, err := e.piaSession(ctx, p, api, regionID, b)
+			token, _, err := t.piaSession(ctx, p, regionID, b)
 			if err != nil {
 				return err
 			}
-			s, err := api.Signature(ctx, t.DialContext, gw, token)
+			s, err := t.api.Signature(ctx, tn.DialContext, gw, token)
 			if err != nil {
 				lastErr = err
 				continue
 			}
 			sig = &s
 		}
-		if err := api.BindPort(ctx, t.DialContext, gw, *sig); err != nil {
+		if err := t.api.BindPort(ctx, tn.DialContext, gw, *sig); err != nil {
 			lastErr = err
 			continue
 		}
-		e.mu.Lock()
-		if te.t == t {
+		t.mu.Lock()
+		if te.t == tn {
 			te.sig, te.pfPort = sig, sig.Port
 			te.link.gateways = []pia.Server{gw} // the one that answers
 		}
-		e.mu.Unlock()
+		t.mu.Unlock()
 		return nil
 	}
 	return lastErr
@@ -309,27 +314,27 @@ func (e *Engine) forwardPort(now time.Time, p *piaState, api pia.API, regionID s
 
 // piaSession is a valid token and the region to use, logging in and reading
 // the server list when needed.
-func (e *Engine) piaSession(ctx context.Context, p *piaState, api pia.API, regionID string, b *netif.Binding) (string, pia.Region, error) {
-	e.mu.Lock()
+func (t *Tunnels) piaSession(ctx context.Context, p *piaState, regionID string, b *netif.Binding) (string, pia.Region, error) {
+	t.mu.Lock()
 	token, tokenAt := p.token, p.tokenAt
 	regions, regionsAt := p.regions, p.regionsAt
 	login, picked := p.login, p.region.ID
-	e.mu.Unlock()
+	t.mu.Unlock()
 	now := time.Now()
 	if token == "" || now.Sub(tokenAt) > piaTokenLife {
-		t, err := api.Token(ctx, b.HTTPClient(), login.User, login.Pass)
-		e.mu.Lock()
-		if errors.Is(err, pia.ErrLogin) && e.pia == p {
+		tok, err := t.api.Token(ctx, b.HTTPClient(), login.User, login.Pass)
+		t.mu.Lock()
+		if errors.Is(err, pia.ErrLogin) && t.pia == p {
 			p.refused, p.err = true, "PIA refused the username or password. Enter them again in settings."
 		}
-		e.mu.Unlock()
+		t.mu.Unlock()
 		if err != nil {
 			return "", pia.Region{}, err
 		}
-		token, tokenAt = t, now
+		token, tokenAt = tok, now
 	}
 	if regions == nil || now.Sub(regionsAt) > piaRegionsLife {
-		r, err := api.Regions(ctx, b.HTTPClient())
+		r, err := t.api.Regions(ctx, b.HTTPClient())
 		if err != nil {
 			return "", pia.Region{}, err
 		}
@@ -350,30 +355,23 @@ func (e *Engine) piaSession(ctx context.Context, p *piaState, api pia.API, regio
 		}
 	}
 	if region.ID == "" { // "" or gone: the lowest latency
-		r, err := api.Fastest(ctx, regions, b.DialContext)
+		r, err := t.api.Fastest(ctx, regions, b.DialContext)
 		if err != nil {
 			return "", pia.Region{}, err
 		}
 		region = r
 	}
-	e.mu.Lock()
+	t.mu.Lock()
 	p.token, p.tokenAt, p.regions, p.regionsAt, p.region, p.err = token, tokenAt, regions, regionsAt, region, ""
-	e.mu.Unlock()
+	t.mu.Unlock()
 	return token, region, nil
 }
 
-// piaRegions lists the regions for the settings page, through the main interface.
-func (e *Engine) piaRegions() ([]map[string]any, error) {
-	e.mu.Lock()
-	ent := e.ifaces[paths.MainInterface(e.pathSnapshotLocked())]
-	api := e.piaAPI
-	e.mu.Unlock()
-	if ent == nil {
-		return nil, errors.New("no connection")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+// PIARegions lists PIA's regions for the settings page, through client.
+func (t *Tunnels) PIARegions(client *http.Client) ([]map[string]any, error) {
+	ctx, cancel := context.WithTimeout(t.ctx, 20*time.Second)
 	defer cancel()
-	regions, err := api.Regions(ctx, ent.binding.HTTPClient())
+	regions, err := t.api.Regions(ctx, client)
 	if err != nil {
 		return nil, err
 	}
@@ -384,27 +382,11 @@ func (e *Engine) piaRegions() ([]map[string]any, error) {
 	return out, nil
 }
 
-// restartPIATunnels makes the PIA tunnels connect again, as after a region change.
-func (e *Engine) restartPIATunnels() {
-	var stops []*tunnel.Tunnel
-	e.mu.Lock()
-	if e.pia != nil {
-		e.pia.region = pia.Region{}
-	}
-	for _, te := range e.tunnels {
-		if te.pia && te.t != nil {
-			stops = append(stops, te.t)
-			te.t, te.on, te.client, te.up, te.retryAt = nil, nil, nil, false, time.Time{}
-		}
-	}
-	e.mu.Unlock()
-	for _, t := range stops {
-		t.Close()
-	}
-}
-
-func (e *Engine) piaViewLocked() PIAView {
-	p := e.pia
+// PIA is PIA's account as the settings page shows it.
+func (t *Tunnels) PIA() PIAView {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	p := t.pia
 	if p == nil {
 		return PIAView{State: "off"}
 	}
@@ -415,8 +397,8 @@ func (e *Engine) piaViewLocked() PIAView {
 	case p.err != "":
 		v.State = "error"
 	default:
-		for id, te := range e.tunnels {
-			if te.pia && e.tunnelUpLocked(id) != nil {
+		for id, te := range t.tunnels {
+			if te.pia && t.upLocked(id) != nil {
 				v.State = "ok"
 			}
 		}
