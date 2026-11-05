@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -145,20 +146,38 @@ func (e *Engine) pmpJob(now time.Time, id string, te *tunnelEntry, t *tunnel.Tun
 }
 
 // pmpGateways are where an imported tunnel's NAT-PMP may answer: its DNS server
-// (Proton's is its gateway, 10.2.0.1), then the .1 of its own address.
+// (Proton's is its gateway, 10.2.0.1), then the .1 of its own address. Only
+// private addresses: a VPN's gateway is inside its network, and a public DNS
+// server in a .conf (1.1.1.1) is someone else's, with no business getting these.
 func pmpGateways(cfg tunnel.Config) []net.IP {
-	var out []net.IP
+	var cands []netip.Addr
 	if len(cfg.DNS) > 0 {
-		out = append(out, net.IP(cfg.DNS[0].AsSlice()))
+		cands = append(cands, cfg.DNS[0])
 	}
 	if cfg.Address.Is4() {
 		a := cfg.Address.As4()
 		a[3] = 1
-		if ip := net.IP(a[:]); len(out) == 0 || !out[0].Equal(ip) {
-			out = append(out, ip)
+		cands = append(cands, netip.AddrFrom4(a))
+	}
+	var out []net.IP
+	for i, c := range cands {
+		if c.Is4() && pmpGatewayOK(c) && (i == 0 || c != cands[0]) {
+			out = append(out, net.IP(c.AsSlice()))
 		}
 	}
 	return out
+}
+
+// pmpGatewayOK is whether NAT-PMP may be sent to addr; tests widen it to their
+// fake server's documentation address.
+var pmpGatewayOK = privateGateway
+
+var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+
+// privateGateway: 10/8, 172.16/12, 192.168/16, or carrier-grade NAT's 100.64/10
+// (where some VPNs put their tunnel networks).
+func privateGateway(addr netip.Addr) bool {
+	return addr.IsPrivate() || cgnat.Contains(addr)
 }
 
 // pmpReachableLocked is whether an imported tunnel's NAT-PMP lease runs at now.

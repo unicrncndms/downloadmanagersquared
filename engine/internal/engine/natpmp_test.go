@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +30,10 @@ type fakePMP struct {
 func serveFakePMP(t *testing.T, srv *vpnServer) *fakePMP {
 	t.Helper()
 	f := &fakePMP{public: 51234, lifetime: 60}
+	// The test server sits at a documentation address (203.0.113.1), which
+	// real configs' gateways never are.
+	pmpGatewayOK = func(netip.Addr) bool { return true }
+	t.Cleanup(func() { pmpGatewayOK = privateGateway })
 	pc, err := srv.t.ListenPacket(5351)
 	if err != nil {
 		t.Fatal(err)
@@ -288,5 +293,33 @@ func TestASlowTunnelDelaysNoOtherNATPMPRenewal(t *testing.T) {
 	wg.Wait()
 	if d := time.Since(begin); d < 1500*time.Millisecond {
 		t.Fatalf("the silent gateway was given up on after %v: the test proves nothing", d)
+	}
+}
+
+func TestNATPMPIsOnlySentToPrivateGateways(t *testing.T) {
+	gws := func(addr, dns string) []string {
+		cfg := tunnel.Config{Address: netip.MustParseAddr(addr)}
+		if dns != "" {
+			cfg.DNS = []netip.Addr{netip.MustParseAddr(dns)}
+		}
+		var out []string
+		for _, ip := range pmpGateways(cfg) {
+			out = append(out, ip.String())
+		}
+		return out
+	}
+	for _, c := range []struct {
+		addr, dns string
+		want      string
+	}{
+		{"10.2.0.2", "10.2.0.1", "[10.2.0.1]"},                // Proton: DNS is the gateway, and the .1 is the same
+		{"10.64.12.7", "10.64.0.1", "[10.64.0.1 10.64.12.1]"}, // Mullvad-like: both asked
+		{"10.9.0.2", "1.1.1.1", "[10.9.0.1]"},                 // a public resolver is skipped
+		{"100.72.3.4", "", "[100.72.3.1]"},                    // carrier-grade NAT range counts as private
+		{"203.0.113.5", "8.8.8.8", "[]"},                      // nothing private: nothing asked
+	} {
+		if got := fmt.Sprint(gws(c.addr, c.dns)); got != c.want {
+			t.Errorf("address %s, DNS %q: gateways %s, want %s", c.addr, c.dns, got, c.want)
+		}
 	}
 }

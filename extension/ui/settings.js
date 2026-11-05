@@ -46,7 +46,7 @@ function vpnCell(i, tun) {
   // The port the VPN provider forwards to this tunnel, where it can't tell DMS² itself.
   let port = null;
   if (!pia) {
-    port = el("input", { type: "number", class: "port", min: 1, max: 65535, placeholder: "Port", title: "Forwarded port (empty: none)", value: tun.forwardedPort || "" });
+    port = el("input", { type: "number", class: "port", min: 1, max: 65535, placeholder: "Port", title: "A port your VPN provider forwards to this connection, for torrent peers to connect in (empty: none, or found by NAT-PMP). AirVPN: leave the port's Local field empty, and with several connections give each its own port, linked to that connection's device.", value: tun.forwardedPort || "" });
     port.addEventListener("change", () => {
       const n = Number(port.value) || 0;
       act("setForwardedPort", { iface: i.id, port: n }, n ? `Forwarded port ${n} set` : "Forwarded port cleared");
