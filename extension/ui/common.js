@@ -20,11 +20,27 @@ function link(url, text) {
 const RELEASES_URL = "https://github.com/unicrncndms/downloadmanagersquared/releases/latest";
 
 // Engine connection badge in the page header.
-function renderConn(m, connectedText) {
+function renderConn(m) {
   const conn = $("conn");
-  conn.textContent = m.connected ? connectedText : m.notInstalled ? "Engine not installed" : "Engine offline";
+  conn.textContent = m.connected ? "Engine connected" : m.notInstalled ? "Engine not installed" : "Engine offline";
   conn.className = "badge " + (m.connected ? "ok" : "bad");
   conn.title = m.error || "";
+}
+
+// In the Downloads window both pages share one header: the logo, the engine
+// badge, then tabs between the downloads and the settings. Returns whether
+// the page is in the window.
+function windowHeader(current) {
+  if (!Host.openDownloads) return false;
+  document.body.classList.add("windowed", "engine-window");
+  const tab = (name, label, go) => name === current
+    ? el("button", { class: "tab on", "aria-current": "page" }, label)
+    : el("button", { class: "tab", onclick: go }, label);
+  document.querySelector("h1").lastChild.textContent = "DMS²";
+  $("conn").after(el("div", { class: "tabs" },
+    tab("downloads", "Downloads", () => Host.openDownloads()),
+    tab("settings", "Connections & settings", () => Host.openSettings(""))));
+  return true;
 }
 
 function fmtBytes(n) {

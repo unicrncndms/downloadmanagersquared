@@ -10,6 +10,16 @@
     html, body { height: 100%; }
     body { width: 480px; max-height: 600px; display: flex; flex-direction: column; }
     body.windowed { width: auto; max-height: none; }
+    /* In the window: the settings page's header (see --win-* in ui.css). */
+    .engine-window header { padding: var(--win-pad); }
+    .engine-window .head { height: var(--win-row1); gap: 16px; white-space: nowrap; }
+    .engine-window .head h1 { font-size: 18px; gap: 8px; }
+    .engine-window .head h1 img { width: 22px; height: 22px; }
+    .engine-window .tools { height: var(--win-row2); margin-top: var(--win-gap); gap: 6px; white-space: nowrap; }
+    .engine-window .tools .chips { margin-top: 0; flex: 1 1 0; min-width: 0; flex-wrap: nowrap; overflow: hidden;
+      mask-image: linear-gradient(to left, transparent, #000 24px); }
+    .engine-window .tools .spacer { display: none; }
+    .engine-window main { padding: 12px 24px; }
     header { padding: 10px 14px 8px; border-bottom: 1px solid var(--line); background: var(--panel); }
     .head { display: flex; align-items: center; gap: 8px; }
     .head h1 { font-size: 15px; margin: 0; display: flex; align-items: center; gap: 6px; }

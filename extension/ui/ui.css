@@ -73,6 +73,15 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
 .badge.warn { color: var(--warn); }
 .badge.bad { color: var(--bad); }
 .badge.dim { color: var(--muted); background: transparent; border: 1px solid var(--line); }
+/* The Downloads window's header is the same two lines on both pages, at
+   every width: neither line wraps, so it never changes height. */
+:root { --win-row1: 30px; --win-row2: 26px; --win-gap: 8px; --win-pad: 12px 24px 10px; }
+
+/* The Downloads window's tabs between the downloads and the settings. */
+.tabs { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.tabs .tab { border: 0; background: transparent; color: var(--muted); padding: 3px 12px; border-radius: 6px; font-size: 13px; }
+.tabs .tab:hover { color: var(--text); }
+.tabs .tab.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; cursor: default; }
 .empty { padding: 24px; text-align: center; color: var(--muted); }
 .toast {
   position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%);

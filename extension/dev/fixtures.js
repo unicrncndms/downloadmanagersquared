@@ -51,7 +51,7 @@ const FIXTURES = {
   otherVersion: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.4.1" },
   // The Downloads window: no recipes or user agent here, and the versions always match.
   window: { connected: true, state: STATE, settings: { ...SETTINGS, vpnProvider: "pia" }, autostart: true, recipes: null, engineVersion: "0.3.0",
-    host: { version: "0.3.0", userAgent: null, recipesHere: false } },
+    host: { version: "0.3.0", userAgent: null, recipesHere: false, openDownloads: true } },
 };
 
 window.fixture = () => FIXTURES[new URLSearchParams(location.search).get("fixture") || "downloads"] || FIXTURES.downloads;

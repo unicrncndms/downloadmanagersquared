@@ -1,6 +1,7 @@
 package winutil
 
 import (
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -42,3 +43,32 @@ func SetTitleBar(hwnd uintptr, dark bool, caption, text uint32) {
 
 // colorref turns 0xRRGGBB into a Windows COLORREF (0x00BBGGRR).
 func colorref(c uint32) uint32 { return c>>16&0xff | c&0xff00 | (c&0xff)<<16 }
+
+// Popup menus (the tray's) are dark or light by uxtheme's undocumented
+// SetPreferredAppMode (ordinal 135) and FlushMenuThemes (136), which every
+// Windows 10 1903+ and 11 has. Without them a menu stays light in dark mode.
+var menuTheme struct {
+	setMode, flush uintptr
+}
+
+func init() {
+	h, err := windows.LoadLibraryEx("uxtheme.dll", 0, windows.LOAD_LIBRARY_SEARCH_SYSTEM32)
+	if err != nil {
+		return
+	}
+	menuTheme.setMode, _ = windows.GetProcAddressByOrdinal(h, 135)
+	menuTheme.flush, _ = windows.GetProcAddressByOrdinal(h, 136)
+}
+
+// SetMenusDark makes this process's popup menus dark or light.
+func SetMenusDark(dark bool) {
+	if menuTheme.setMode == 0 || menuTheme.flush == 0 {
+		return
+	}
+	mode := uintptr(3) // ForceLight
+	if dark {
+		mode = 2 // ForceDark
+	}
+	syscall.SyscallN(menuTheme.setMode, mode)
+	syscall.SyscallN(menuTheme.flush)
+}
