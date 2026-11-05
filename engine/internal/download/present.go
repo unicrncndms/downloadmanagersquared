@@ -92,6 +92,9 @@ func Present(s Summary) Summary {
 		s.Note = ""
 		if s.hashResult == "match" && !s.checking {
 			s.Note = matched(s.SHA256 != "", s.MD5 != "")
+			if s.serverMD5 {
+				s.Note = "MD5 from the server matches"
+			}
 		}
 	case !known && torrent:
 		s.Note = "Asking peers for the torrent's files…"

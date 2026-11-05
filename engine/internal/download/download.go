@@ -1109,6 +1109,10 @@ func (d *Download) complete(ctx context.Context) error {
 	d.file = nil
 	sparse := d.st.RangeOK
 	sha, md := d.st.SHA256, d.st.MD5
+	fromServer := sha == "" && md == "" && d.st.Version.MD5 != "" // a pasted checksum wins
+	if fromServer {
+		md = d.st.Version.MD5
+	}
 	part := d.partPath()
 	dir, name := d.st.Dir, d.st.Filename
 	d.mu.Unlock()
@@ -1126,7 +1130,10 @@ func (d *Download) complete(ctx context.Context) error {
 		d.mu.Unlock()
 		d.env.Changed(d)
 		if err := verify(ctx, part, sha, md); err != nil {
-			if errors.Is(err, errMismatch) {
+			switch {
+			case errors.Is(err, errMismatch) && fromServer:
+				return fmt.Errorf("MD5 from the server %w: the file arrived damaged, remove the download and add it again", errMismatch)
+			case errors.Is(err, errMismatch):
 				return fmt.Errorf("%w: remove the download and add it again, or check the value", err)
 			}
 			return err
@@ -1296,6 +1303,7 @@ type Summary struct {
 	InSwarm  bool          `json:"inSwarm,omitempty"` // exchanging pieces with peers right now
 
 	hashResult string // State.HashResult, for the label and note
+	serverMD5  bool   // no checksum pasted: the server's MD5 is the one checked
 	checking   bool   // a finished file is being checked against new checksums
 
 	// Filled in by present.
@@ -1408,7 +1416,8 @@ func (d *Download) Summary() Summary {
 		Speed: d.speed, ETA: -1, RangeOK: d.st.RangeOK, Probed: d.st.Probed,
 		SHA256: d.st.SHA256, MD5: d.st.MD5, Links: map[string]LinkSummary{},
 		hashResult: d.st.HashResult, checking: d.checking,
-		Added: d.st.Added, Finished: d.st.Finished, VPN: d.st.VPN,
+		serverMD5: d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.MD5 != "",
+		Added:     d.st.Added, Finished: d.st.Finished, VPN: d.st.VPN,
 	}
 	if d.running {
 		s.ETA = d.eta.Seconds()
