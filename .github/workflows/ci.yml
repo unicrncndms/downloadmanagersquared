@@ -28,6 +28,10 @@ jobs:
         working-directory: engine
         run: go vet ./...
 
+      - name: staticcheck
+        working-directory: engine
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./... # 2026.2.2, default checks
+
       - name: go test
         working-directory: engine
         run: go test ./...

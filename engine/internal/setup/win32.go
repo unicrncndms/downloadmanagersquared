@@ -150,12 +150,14 @@ type paintStruct struct {
 	reserved  [32]byte
 }
 
+// drawItemStruct is Win32's DRAWITEMSTRUCT; the blanks hold its layout.
 type drawItemStruct struct {
-	ctlType, ctlID, itemID, itemAction, itemState uint32
-	hwndItem                                      windows.Handle
-	hdc                                           windows.Handle
-	item                                          rect
-	itemData                                      uintptr
+	_         [4]uint32 // CtlType, CtlID, itemID, itemAction
+	itemState uint32
+	hwndItem  windows.Handle
+	hdc       windows.Handle
+	item      rect
+	_         uintptr // itemData
 }
 
 func str(s string) uintptr {

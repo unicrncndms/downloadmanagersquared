@@ -126,7 +126,7 @@ func newSwarmOf(t *testing.T, seeders int, src, name string, private bool) *swar
 		if err != nil {
 			t.Fatal(err)
 		}
-		tor.VerifyData()
+		tor.VerifyDataContext(context.Background())
 		s.clients = append(s.clients, cl)
 		s.addrs[fmt.Sprintf("192.0.2.%d:6881", i+1)] = fmt.Sprintf("127.0.0.1:%d", cl.LocalPort())
 	}

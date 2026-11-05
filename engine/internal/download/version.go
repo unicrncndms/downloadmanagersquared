@@ -19,6 +19,8 @@ const versionMsg = "a different version of the file: it changed on the server, o
 
 // errChanged fails a download none of whose connections still gets the file
 // it started with.
+//
+//lint:ignore ST1005 shown to the user as is, a sentence like the pause messages
 var errChanged = errors.New("The file changed on the server while it was downloading. Remove it and download it again")
 
 // allMismatchedLocked: every link the download could use serves another file.
