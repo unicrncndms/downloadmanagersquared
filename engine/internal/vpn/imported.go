@@ -3,6 +3,7 @@ package vpn
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -19,14 +20,22 @@ import (
 
 // imported is the provider of tunnels whose WireGuard .conf the user imported.
 // The configs live in the engine's folder, never in the settings the extension
-// gets, since they hold private keys. Ports come by NAT-PMP, or the user types one in.
+// gets, since they hold private keys. Ports come by NAT-PMP, or the user types
+// one in, kept beside the config.
 type imported struct {
 	t         *Tunnels
 	gatewayOK func(netip.Addr) bool // where NAT-PMP may be sent
+	ports     map[string]int        // typed in, by interface ID; under t.mu
 }
 
-func (*imported) name() string         { return "conf" }
-func (*imported) takesTypedPort() bool { return true }
+// options are what is kept beside an imported config: <hex id>.json.
+type options struct {
+	ForwardedPort int `json:"forwardedPort,omitempty"` // typed in by the user, 0 = none
+}
+
+func (*imported) name() string { return "conf" }
+
+func (p *imported) typedPort(te *entry) int { return p.ports[te.id] }
 
 // ready: a config without DNS (saved before that was required) can't run; its error says so.
 func (*imported) ready(te *entry) bool { return len(te.cfg.DNS) > 0 }
@@ -44,6 +53,93 @@ func (p *imported) config(_ context.Context, te *entry, _ *netif.Binding) (tunne
 
 func (p *imported) file(ifaceID string) string {
 	return filepath.Join(p.t.dir, "tunnels", hex.EncodeToString([]byte(ifaceID))+".conf")
+}
+
+func (p *imported) optionsFile(ifaceID string) string {
+	return strings.TrimSuffix(p.file(ifaceID), ".conf") + ".json"
+}
+
+// loadOptions reads what is kept beside an interface's config. Unreadable
+// options are set aside: the tunnel runs without them.
+func (p *imported) loadOptions(ifaceID string) {
+	f := p.optionsFile(ifaceID)
+	b, err := os.ReadFile(f)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	var o options
+	if err == nil {
+		err = json.Unmarshal(b, &o)
+	}
+	if err == nil && (o.ForwardedPort < 0 || o.ForwardedPort > 65535) {
+		err = fmt.Errorf("forwarded port %d", o.ForwardedPort)
+	}
+	if err != nil {
+		log.Printf("tunnel options for %s unreadable, set aside: %v", ifaceID, err)
+		setAside(f)
+		return
+	}
+	p.t.mu.Lock()
+	p.setPortLocked(ifaceID, o.ForwardedPort)
+	p.t.mu.Unlock()
+}
+
+func (p *imported) setPortLocked(ifaceID string, port int) {
+	if port == 0 {
+		delete(p.ports, ifaceID)
+	} else {
+		p.ports[ifaceID] = port
+	}
+}
+
+// SetForwardedPort records the port a VPN provider forwards to an interface's
+// imported tunnel (0 clears it). It is kept with the tunnel's config.
+func (t *Tunnels) SetForwardedPort(ifaceID string, port int) error {
+	if port < 0 || port > 65535 {
+		return errors.New("a port is a number from 1 to 65535")
+	}
+	p := t.imported
+	t.mu.Lock()
+	te := t.tunnels[ifaceID]
+	t.mu.Unlock()
+	switch {
+	case te == nil:
+		return errors.New("this connection has no imported VPN tunnel")
+	case te.prov != provider(p):
+		return errors.New("PIA forwards its own port")
+	}
+	var err error
+	if port == 0 {
+		if err = os.Remove(p.optionsFile(ifaceID)); errors.Is(err, os.ErrNotExist) {
+			err = nil
+		}
+	} else {
+		b, _ := json.Marshal(options{ForwardedPort: port})
+		err = atomicfile.Write(p.optionsFile(ifaceID), b, 0o600)
+	}
+	if err != nil {
+		return err
+	}
+	t.mu.Lock()
+	p.setPortLocked(ifaceID, port)
+	t.mu.Unlock()
+	return nil
+}
+
+// AdoptForwardedPort gives an imported tunnel a port typed in before ports
+// were kept with their tunnels, unless it has one already. A port for an
+// interface without an imported tunnel is dropped.
+func (t *Tunnels) AdoptForwardedPort(ifaceID string, port int) {
+	t.mu.Lock()
+	te := t.tunnels[ifaceID]
+	has := t.imported.ports[ifaceID] != 0
+	t.mu.Unlock()
+	if te == nil || te.prov != provider(t.imported) || has {
+		return
+	}
+	if err := t.SetForwardedPort(ifaceID, port); err != nil {
+		log.Printf("forwarded port %d for %s: %v", port, ifaceID, err)
+	}
 }
 
 // load reads the saved configs. One that can't be read is set aside.
@@ -67,7 +163,9 @@ func (p *imported) load() []Problem {
 		}
 		if err := p.set(string(id), string(b), false); err != nil {
 			log.Printf("tunnel for %s: %v", id, err)
+			continue
 		}
+		p.loadOptions(string(id))
 	}
 	return problems
 }
@@ -129,11 +227,17 @@ func (t *Tunnels) Import(ifaceID, conf string) error {
 	return nil
 }
 
-// Remove takes an interface's imported tunnel down and deletes its config.
+// Remove takes an interface's imported tunnel down and deletes its config,
+// with the port typed in for it.
 func (t *Tunnels) Remove(ifaceID string) error {
 	t.removeEntry(ifaceID)
-	if err := os.Remove(t.imported.file(ifaceID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	t.mu.Lock()
+	t.imported.setPortLocked(ifaceID, 0)
+	t.mu.Unlock()
+	for _, f := range []string{t.imported.file(ifaceID), t.imported.optionsFile(ifaceID)} {
+		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 	return nil
 }

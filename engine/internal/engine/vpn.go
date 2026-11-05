@@ -43,15 +43,11 @@ func (e *Engine) tickVPN(now time.Time) {
 func (e *Engine) vpnIfacesLocked() []vpn.Iface {
 	var out []vpn.Iface
 	for id, ent := range e.ifaces {
-		i := vpn.Iface{ID: id, Name: ent.info.Name, Binding: ent.binding, Usable: ent.present && e.enabledLocked(ent)}
-		if s := e.settings.Interfaces[id]; s != nil {
-			i.ForwardedPort = s.ForwardedPort
-		}
-		out = append(out, i)
+		out = append(out, vpn.Iface{ID: id, Name: ent.info.Name, Binding: ent.binding, Usable: ent.present && e.enabledLocked(ent)})
 	}
 	for id, s := range e.settings.Interfaces {
 		if e.ifaces[id] == nil {
-			out = append(out, vpn.Iface{ID: id, Name: s.Name, ForwardedPort: s.ForwardedPort})
+			out = append(out, vpn.Iface{ID: id, Name: s.Name})
 		}
 	}
 	return out
@@ -114,36 +110,15 @@ func (e *Engine) piaRegions() ([]map[string]any, error) {
 // removeTunnel takes an interface's tunnel down and forgets it, with the port
 // typed in for it.
 func (e *Engine) removeTunnel(ifaceID string) error {
-	err := e.vpn.Remove(ifaceID)
-	e.mu.Lock()
-	had := e.settings.Interfaces[ifaceID] != nil && e.settings.Interfaces[ifaceID].ForwardedPort != 0
-	e.mu.Unlock()
-	if had {
-		e.applySettings(func(s *Settings) { s.Interfaces[ifaceID].ForwardedPort = 0 })
-	}
-	return err
+	return e.vpn.Remove(ifaceID)
 }
 
 // setForwardedPort records the port a VPN provider forwards to an interface's
 // imported tunnel (0 clears it). The tunnel's torrent listener moves to it.
 func (e *Engine) setForwardedPort(ifaceID string, port int) error {
-	if port < 0 || port > 65535 {
-		return errors.New("a port is a number from 1 to 65535")
+	if err := e.vpn.SetForwardedPort(ifaceID, port); err != nil {
+		return err
 	}
-	st, ok := e.tunnelStatus(ifaceID)
-	if !ok {
-		return errors.New("this connection has no imported VPN tunnel")
-	}
-	if st.Provider == "pia" {
-		return errors.New("PIA forwards its own port")
-	}
-	e.applySettings(func(s *Settings) {
-		is := s.Interfaces[ifaceID]
-		if is == nil {
-			is = &IfaceSettings{}
-			s.Interfaces[ifaceID] = is
-		}
-		is.ForwardedPort = port
-	})
+	e.syncTorrentIfaces()
 	return nil
 }

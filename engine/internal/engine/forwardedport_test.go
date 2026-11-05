@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -39,36 +40,62 @@ func TestATypedInPortIsListenedOnInsideTheTunnel(t *testing.T) {
 	c.Close()
 }
 
-func savedForwardedPort(t *testing.T, e *Engine) int {
-	t.Helper()
-	s, _ := loadSettings(filepath.Join(e.dir, "settings.json"))
-	if is := s.Interfaces["lo"]; is != nil {
-		return is.ForwardedPort
-	}
-	return 0
-}
-
-func TestATypedInPortIsSavedKeptOnReimportAndGoneWithTheTunnel(t *testing.T) {
+func TestATypedInPortIsKeptAcrossARestartAndGoneWithTheTunnel(t *testing.T) {
 	e := loopbackEngine(t)
 	clientPriv, clientPub, _ := tunnel.GenerateKey()
-	srv := newVPNServer(t, clientPub)
-	importConf(t, e, srv, clientPriv)
+	importConf(t, e, newVPNServer(t, clientPub), clientPriv)
 	if err := setForwarded(e, 41000); err != nil {
 		t.Fatal(err)
 	}
-	if got := savedForwardedPort(t, e); got != 41000 {
-		t.Fatalf("saved port %d, want 41000", got)
+	dir := e.dir
+	e.Shutdown()
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	importConf(t, e, srv, clientPriv)
-	if got := savedForwardedPort(t, e); got != 41000 {
-		t.Fatalf("after importing the config again the port is %d, want 41000 kept", got)
+	defer e.Shutdown()
+	if st, _ := e.tunnelStatus("lo"); st.ForwardedPort != 41000 {
+		t.Fatalf("after a restart the port is %d, want 41000", st.ForwardedPort)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "settings.json")); strings.Contains(string(b), "forwardedPort") {
+		t.Fatalf("the port is in the settings: %s", b)
 	}
 	p, _ := json.Marshal(map[string]string{"iface": "lo"})
 	if _, err := e.Call(nil, "removeTunnel", p); err != nil {
 		t.Fatal(err)
 	}
-	if got := savedForwardedPort(t, e); got != 0 {
-		t.Fatalf("after removing the tunnel the port is %d, want none", got)
+	if _, ok := e.tunnelStatus("lo"); ok {
+		t.Fatal("the tunnel is still there")
+	}
+}
+
+// Before ports were kept with their tunnels, settings.json held them.
+func TestAPortInOldSettingsMovesToItsTunnel(t *testing.T) {
+	dir := t.TempDir()
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientPriv, clientPub, _ := tunnel.GenerateKey()
+	if err := e.vpn.Import("lo", newVPNServer(t, clientPub).Conf(clientPriv)); err != nil {
+		t.Fatal(err)
+	}
+	e.Shutdown()
+	os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"interfaces":{"lo":{"name":"Loopback","forwardedPort":41000},"wifi":{"forwardedPort":42000}}}`), 0o600)
+
+	e, err = open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	if st, _ := e.tunnelStatus("lo"); st.ForwardedPort != 41000 {
+		t.Fatalf("the old port moved as %d, want 41000", st.ForwardedPort)
+	}
+	if _, ok := e.tunnelStatus("wifi"); ok {
+		t.Fatal("a port without a tunnel made one")
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "settings.json")); strings.Contains(string(b), "forwardedPort") || !strings.Contains(string(b), "Loopback") {
+		t.Fatalf("settings after the move: %s", b)
 	}
 }
 

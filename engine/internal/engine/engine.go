@@ -182,6 +182,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	os.MkdirAll(filepath.Join(dir, "torrents"), 0o755)
 	atomicfile.RemoveStale(dir)
 	settings, broken := loadSettings(filepath.Join(dir, "settings.json"))
+	oldPorts := legacyForwardedPorts(filepath.Join(dir, "settings.json")) // gone from the settings at the next save
 	if broken {
 		notify("Settings reset", "Settings couldn't be read and were reset; the old file is settings.json.broken.", nil)
 	}
@@ -223,6 +224,9 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	}
 	e.loadDownloads()
 	e.loadVPN()
+	for id, port := range oldPorts {
+		e.vpn.AdoptForwardedPort(id, port)
+	}
 	return e, nil
 }
 

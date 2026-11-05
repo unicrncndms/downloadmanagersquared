@@ -61,8 +61,8 @@ type PIAView struct {
 }
 
 func (*piaProvider) name() string         { return "pia" }
-func (*piaProvider) takesTypedPort() bool { return false } // PIA forwards its own
-func (*piaProvider) lostHint() string     { return "" }    // a new key each start: nothing to expire
+func (*piaProvider) typedPort(*entry) int { return 0 }  // PIA forwards its own
+func (*piaProvider) lostHint() string     { return "" } // a new key each start: nothing to expire
 
 // ready: with no login, or one PIA refused, PIA waits for the user.
 func (p *piaProvider) ready(*entry) bool { return p.acct != nil && !p.acct.refused }

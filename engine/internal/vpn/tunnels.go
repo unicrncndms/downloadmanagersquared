@@ -37,8 +37,6 @@ type Iface struct {
 	Name    string         // for messages; "" if not known
 	Binding *netif.Binding // nil if it isn't connected
 	Usable  bool           // present and enabled: its tunnel may run
-	// ForwardedPort is a port the user typed in for its imported tunnel, 0 if none.
-	ForwardedPort int
 }
 
 // Options set up Tunnels.
@@ -82,8 +80,9 @@ type provider interface {
 	// config is the config for a new start of te's tunnel through b, and the
 	// forwarder of that start, given its running tunnel. Called without the lock.
 	config(ctx context.Context, te *entry, b *netif.Binding) (tunnel.Config, func(*tunnel.Tunnel) forwarder, error)
-	lostHint() string     // added to the error when the server stops answering
-	takesTypedPort() bool // whether the user's typed-in port applies
+	lostHint() string // added to the error when the server stops answering
+	// typedPort is the port the user typed in for te's tunnel, 0 if none.
+	typedPort(te *entry) int
 }
 
 // forwarder keeps a port forwarded to one start of a tunnel. It is dropped with
@@ -134,7 +133,7 @@ func New(o Options) *Tunnels {
 		dir: o.Dir, ctx: ctx, cancel: cancel,
 		tunnels: map[string]*entry{}, ifaces: map[string]Iface{},
 	}
-	t.imported = &imported{t: t, gatewayOK: o.GatewayOK}
+	t.imported = &imported{t: t, gatewayOK: o.GatewayOK, ports: map[string]int{}}
 	t.pia = &piaProvider{t: t, api: o.PIA, region: o.PIARegion, servers: map[*entry]string{}}
 	return t
 }
@@ -410,14 +409,8 @@ func (t *Tunnels) Status(now time.Time) []Status {
 	return out
 }
 
-// typedPortLocked is the port the user typed in for te's tunnel, 0 if none or
-// its provider forwards its own.
-func (t *Tunnels) typedPortLocked(te *entry) int {
-	if !te.prov.takesTypedPort() {
-		return 0
-	}
-	return t.ifaces[te.id].ForwardedPort
-}
+// typedPortLocked is the port the user typed in for te's tunnel, 0 if none.
+func (t *Tunnels) typedPortLocked(te *entry) int { return te.prov.typedPort(te) }
 
 // portLocked is the port a running tunnel's torrent listener uses, and whether
 // peers reach it: the one typed in (which the engine can't check), else its

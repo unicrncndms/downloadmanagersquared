@@ -228,7 +228,9 @@ func TestNATPMPIsOnlySentToPrivateGateways(t *testing.T) {
 
 func TestATypedInPortWinsAndNATPMPIsNeverAsked(t *testing.T) {
 	r, _, f := pmpTunnel(t, nil) // its gateway would answer NAT-PMP
-	r.iface("lo").ForwardedPort = 41000
+	if err := r.SetForwardedPort("lo", 41000); err != nil {
+		t.Fatal(err)
+	}
 	r.waitUp(t)
 	r.tick(time.Now())
 	if tcp, udp, probes := f.Counts(); tcp+udp+probes != 0 {
@@ -243,7 +245,9 @@ func TestATypedInPortWinsAndNATPMPIsNeverAsked(t *testing.T) {
 	}
 
 	// Cleared, the tunnel is NAT-PMP's again.
-	r.iface("lo").ForwardedPort = 0
+	if err := r.SetForwardedPort("lo", 0); err != nil {
+		t.Fatal(err)
+	}
 	r.tick(time.Now())
 	s = r.status(t, "lo", time.Now())
 	if up, _ := r.Up("lo"); up.Port != 51234 || s.Incoming != "reachable" || s.ForwardedPort != 0 {
