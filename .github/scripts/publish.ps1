@@ -46,6 +46,10 @@ try {
 
 gh release upload $Tag $asset $json $zip --clobber --repo $repo
 if ($LASTEXITCODE) { throw 'uploading the extension failed' }
-gh release edit $Tag --draft=false --latest --repo $repo
+# The notes hash the files exactly as uploaded.
+$notes = Join-Path $dir 'notes.md'
+$text = & (Join-Path $PSScriptRoot 'release-notes.ps1') -Tag $Tag -Files $zip, $asset
+[IO.File]::WriteAllText($notes, $text, (New-Object Text.UTF8Encoding $false))
+gh release edit $Tag --notes-file $notes --draft=false --latest --repo $repo
 if ($LASTEXITCODE) { throw 'publishing the release failed' }
 Write-Host "Published $Tag"

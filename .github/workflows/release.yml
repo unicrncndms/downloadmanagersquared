@@ -41,7 +41,10 @@ jobs:
         run: ./build.ps1 -Version $env:TAG -Repo $env:GITHUB_REPOSITORY
 
       - name: Draft release with the engine
-        run: gh release create $env:TAG dist/downloadmanagersquared-windows.zip --draft --verify-tag --title $env:TAG --notes "Download downloadmanagersquared-windows.zip, extract it and run dms-engine.exe. Setup then adds the extension to your browser."
+        run: |
+          # Hashes are added by publish.ps1, once the zip carries the signed extension.
+          ./.github/scripts/release-notes.ps1 -Tag $env:TAG | Out-File -Encoding utf8 notes.md
+          gh release create $env:TAG dist/downloadmanagersquared-windows.zip --draft --verify-tag --title $env:TAG --notes-file notes.md
 
       - name: Sign the extension (unlisted)
         id: sign
