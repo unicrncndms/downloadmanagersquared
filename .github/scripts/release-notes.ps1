@@ -12,8 +12,16 @@ $lines = @(
     ''
 )
 
-$previous = git tag --merged "$Tag^" --list 'v*' --sort=-v:refname | Select-Object -First 1
+# The previous release: the newest earlier v* tag that has one. A tag whose
+# release never went out (CI failed; release tags can't be moved) is skipped.
+$tags = @(git tag --merged "$Tag^" --list 'v*' --sort=-v:refname)
 if ($LASTEXITCODE) { throw "reading the tags before $Tag failed" }
+$previous = $null
+foreach ($t in $tags) {
+    gh release view $t --json tagName *> $null
+    if ($LASTEXITCODE -eq 0) { $previous = $t; break }
+}
+$global:LASTEXITCODE = 0
 $range = if ($previous) { "$previous..$Tag" } else { $Tag }
 $subjects = @(git log --no-merges --format=%s $range)
 if ($LASTEXITCODE) { throw "reading the commits for $range failed" }
