@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -50,6 +51,8 @@ type Extractor struct {
 	first     int // Entries before this are all done
 
 	folders map[string]int // folder Entry path -> its index
+
+	s *stream // the large Entry being extracted as its bytes arrive, if any
 }
 
 // Result is what one call to Extract did, for the caller to save.
@@ -57,6 +60,10 @@ type Result struct {
 	Done   []Entry // extracted, checked and renamed into place
 	Freed  []Range // their bytes, now freed in the archive file
 	Failed []*Failure
+
+	// More: a large Entry stopped after freeing a step of its bytes, with
+	// more of them on disk. Save the above, then call again without waiting.
+	More bool
 }
 
 // Failure is an Entry whose bytes are wrong: its CRC32 or size doesn't match
@@ -108,6 +115,12 @@ func NewExtractor(a *Archive, f *os.File, dir string, done []int64) (*Extractor,
 			return nil, unsupported("A file in it is named like the files DMS² hasn't finished extracting (%s)", e.Name+PartSuffix)
 		}
 	}
+	// A large Entry left unfinished starts over: what was written of it goes now.
+	for i, e := range a.Entries {
+		if !e.Dir && !x.done[i] && large(e) {
+			os.Remove(x.path(i) + PartSuffix)
+		}
+	}
 	x.skipDone()
 	return x, nil
 }
@@ -145,7 +158,8 @@ func (x *Extractor) Extract(ctx context.Context, missing []Range) (Result, error
 	defer x.skipDone()
 	for i := x.first; i < len(x.a.Entries); i++ {
 		e := x.a.Entries[i]
-		if x.done[i] || !x.ready(e, missing) {
+		isLarge := !e.Dir && large(e)
+		if x.done[i] || !isLarge && !x.ready(e, missing) {
 			continue
 		}
 		if err := ctx.Err(); err != nil {
@@ -158,12 +172,22 @@ func (x *Extractor) Extract(ctx context.Context, missing []Range) (Result, error
 			}
 			touched[x.rel[i]] = true
 		} else {
-			bad, err := x.extractFile(ctx, e, path)
+			var bad string
+			var err error
+			finished := true
+			if isLarge {
+				bad, finished, err = x.streamStep(ctx, i, missing, &r)
+			} else {
+				bad, err = x.extractFile(ctx, e, path)
+			}
 			if err != nil {
 				return r, err
 			}
 			if bad != "" {
 				r.Failed = append(r.Failed, &Failure{Entry: e, Range: Range{e.Start, e.End}, Reason: bad})
+				continue
+			}
+			if !finished {
 				continue
 			}
 		}
@@ -208,12 +232,19 @@ func merge(rs []Range) []Range {
 }
 
 // ready: every byte of the Entry is on disk.
-//
-// Ticket 05 goes here: an Entry above a size threshold becomes ready once its
-// front is on disk, and is extracted as its bytes arrive in order.
-func (x *Extractor) ready(e Entry, missing []Range) bool {
-	i, _ := slices.BinarySearchFunc(missing, e.Start, func(r Range, at int64) int { return cmp.Compare(r.End, at+1) })
-	return i == len(missing) || missing[i].Start >= e.End
+func (x *Extractor) ready(e Entry, missing []Range) bool { return onDisk(missing, e.Start, e.End) }
+
+// onDisk: none of [start, end) is in missing, which merge has sorted.
+func onDisk(missing []Range, start, end int64) bool { return onDiskTo(missing, start) >= end }
+
+// onDiskTo is where the bytes on disk from at on end: the start of the first
+// missing range at or after at, or at itself if it is missing.
+func onDiskTo(missing []Range, at int64) int64 {
+	i, _ := slices.BinarySearchFunc(missing, at, func(r Range, at int64) int { return cmp.Compare(r.End, at+1) })
+	if i == len(missing) {
+		return math.MaxInt64
+	}
+	return max(missing[i].Start, at)
 }
 
 func (x *Extractor) path(i int) string {
@@ -237,36 +268,56 @@ func (x *Extractor) free(i int) error {
 // extractFile writes the Entry to path. bad is why its bytes are wrong; err is
 // any other failure.
 func (x *Extractor) extractFile(ctx context.Context, e Entry, path string) (bad string, err error) {
-	var h [localLen]byte
-	if _, err := x.f.ReadAt(h[:], e.Start); err != nil {
-		return "", err
+	data, bad, err := x.header(e)
+	if bad != "" || err != nil {
+		return bad, err
 	}
-	le := binary.LittleEndian
-	if le.Uint32(h[:]) != sigLocal {
-		return "its header is wrong", nil
-	}
-	data := e.Start + localLen + int64(le.Uint16(h[26:])) + int64(le.Uint16(h[28:]))
-	if data+e.CompressedSize > e.End {
-		return "its header is wrong", nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", err
-	}
-	tmp := path + PartSuffix
-	out, err := os.Create(tmp)
+	out, err := create(path)
 	if err != nil {
 		return "", err
 	}
-	keep := false
-	defer func() {
-		if !keep {
-			out.Close()
-			os.Remove(tmp)
-		}
-	}()
+	bad, err = copyEntry(ctx, e, io.NewSectionReader(x.f, data, e.CompressedSize), out)
+	if bad != "" || err != nil {
+		discard(out)
+		return bad, err
+	}
+	return "", finish(e, out, path)
+}
 
-	var src io.Reader = io.NewSectionReader(x.f, data, e.CompressedSize)
+// header reads the Entry's local header: where its data starts.
+func (x *Extractor) header(e Entry) (data int64, bad string, err error) {
+	var h [localLen]byte
+	if _, err := x.f.ReadAt(h[:], e.Start); err != nil {
+		return 0, "", err
+	}
+	le := binary.LittleEndian
+	if le.Uint32(h[:]) != sigLocal {
+		return 0, "its header is wrong", nil
+	}
+	data = e.Start + localLen + int64(le.Uint16(h[26:])) + int64(le.Uint16(h[28:]))
+	if data+e.CompressedSize > e.End {
+		return 0, "its header is wrong", nil
+	}
+	return data, "", nil
+}
+
+// create makes the unfinished file for path, and the folders it goes in.
+func create(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	return os.Create(path + PartSuffix)
+}
+
+// discard closes and deletes an unfinished file.
+func discard(out *os.File) {
+	out.Close()
+	os.Remove(out.Name())
+}
+
+// copyEntry decompresses the Entry's data from src into out and checks its
+// size and CRC32. bad is why its bytes are wrong; err is any other failure.
+func copyEntry(ctx context.Context, e Entry, src io.Reader, out *os.File) (bad string, err error) {
 	if e.Method == Deflate {
 		fr := flate.NewReader(src)
 		defer fr.Close()
@@ -309,31 +360,40 @@ func (x *Extractor) extractFile(ctx context.Context, e Entry, path string) (bad 
 	case sum.Sum32() != e.CRC32:
 		return "its checksum doesn't match", nil
 	}
-	if err := out.Close(); err != nil {
-		return "", err
-	}
-	if err := os.Chtimes(tmp, e.Modified, e.Modified); err != nil {
-		return "", err
-	}
-	// A file left from an attempt whose end wasn't saved may be read-only.
-	if fi, err := os.Lstat(path); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o200 == 0 {
-		os.Chmod(path, 0o666)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return "", err
-	}
-	keep = true
-	if e.ReadOnly {
-		if err := os.Chmod(path, 0o444); err != nil {
-			return "", err
-		}
-	}
 	return "", nil
+}
+
+// finish puts a checked Entry's file in place, with its time and read-only
+// flag. The unfinished file is gone either way.
+func finish(e Entry, out *os.File, path string) error {
+	tmp := out.Name()
+	err := out.Close()
+	if err == nil {
+		err = os.Chtimes(tmp, e.Modified, e.Modified)
+	}
+	if err == nil {
+		// A file left from an attempt whose end wasn't saved may be read-only.
+		if fi, err := os.Lstat(path); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o200 == 0 {
+			os.Chmod(path, 0o666)
+		}
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if e.ReadOnly {
+		return os.Chmod(path, 0o444)
+	}
+	return nil
 }
 
 // fileError: err came from reading the archive file, not from its bytes being
 // wrong. flate wraps those in a ReadError, which doesn't unwrap.
 func fileError(err error) bool {
+	if errors.Is(err, errStopped) {
+		return true
+	}
 	var re *flate.ReadError
 	if errors.As(err, &re) {
 		err = re.Err

@@ -99,13 +99,22 @@ func extractor(t *testing.T, a *Archive, f *os.File, dir string, done ...int64) 
 	return x
 }
 
+// extract calls Extract until it has done all it can, as the download does.
 func extract(t *testing.T, x *Extractor, missing []Range) Result {
 	t.Helper()
-	r, err := x.Extract(context.Background(), missing)
-	if err != nil {
-		t.Fatalf("Extract: %v", err)
+	var all Result
+	for {
+		r, err := x.Extract(context.Background(), missing)
+		if err != nil {
+			t.Fatalf("Extract: %v", err)
+		}
+		all.Done = append(all.Done, r.Done...)
+		all.Freed = append(all.Freed, r.Freed...)
+		all.Failed = append(all.Failed, r.Failed...)
+		if !r.More {
+			return all
+		}
 	}
-	return r
 }
 
 // leftovers lists the unfinished files under dir.

@@ -289,6 +289,7 @@ type folderRun struct {
 	arc      *archive.Archive
 	x        *archive.Extractor
 	finished bool // every Entry done (guarded by d.mu)
+	again    bool // a large Entry has more bytes on disk to extract now (folderLoop only)
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -346,6 +347,11 @@ func onDisk(missing []Range, start, end int64) bool {
 
 func (d *Download) folderLoop(ctx context.Context, fr *folderRun) {
 	defer func() {
+		if fr.x != nil {
+			// A large Entry under way is dropped: the next run puts its
+			// freed bytes back in the plan and extracts it from its front.
+			fr.x.Close()
+		}
 		d.mu.Lock()
 		if d.fold == fr {
 			d.fold = nil
@@ -365,6 +371,9 @@ func (d *Download) folderLoop(ctx context.Context, fr *folderRun) {
 		}
 		if err != nil || !more {
 			return
+		}
+		if fr.again {
+			continue // freed bytes are saved: on with the large Entry
 		}
 		select {
 		case <-ctx.Done():
@@ -413,6 +422,7 @@ func (d *Download) folderStep(ctx context.Context, fr *folderRun) (more bool, er
 		if d.folderOnLocked() {
 			d.plan.bounds = entryBounds(a)
 		}
+		d.reclaimLocked(a)
 		f.Renamed = nil
 		for _, r := range a.Renamed {
 			f.Renamed = append(f.Renamed, r.From+" → "+r.To)
@@ -469,6 +479,7 @@ func (d *Download) folderStep(ctx context.Context, fr *folderRun) (more bool, er
 		am[i] = archive.Range{Start: r.Start, End: r.End}
 	}
 	res, xerr := fr.x.Extract(ctx, am)
+	fr.again = res.More
 	perr := d.folderRecord(fr, res)
 	if xerr != nil && !exists(out) {
 		xerr = errFolderRemoved
@@ -549,7 +560,7 @@ func (d *Download) folderRecord(fr *folderRun, res archive.Result) error {
 	f.Files, f.Of = fr.x.Progress()
 	var err error
 	for _, fl := range res.Failed {
-		d.plan.add(Range{fl.Range.Start, fl.Range.End})
+		d.refetchLocked(Range{fl.Range.Start, fl.Range.End})
 		if i := slices.Index(f.Failed, fl.Range.Start); i >= 0 {
 			// Its next try after a resume gets another fetch first.
 			f.Failed = slices.Delete(f.Failed, i, i+1)
@@ -562,10 +573,10 @@ func (d *Download) folderRecord(fr *folderRun, res archive.Result) error {
 	fr.finished = fr.x.Finished()
 	onDisk := d.st.Size - d.plan.remaining()
 	file := d.file
-	changed := len(res.Done) > 0 || len(res.Failed) > 0
+	changed := len(res.Done) > 0 || len(res.Freed) > 0 || len(res.Failed) > 0
 	d.mu.Unlock()
 	if changed {
-		if afterExtract != nil && len(res.Done) > 0 {
+		if afterExtract != nil && len(res.Freed) > 0 {
 			afterExtract(file, onDisk)
 		}
 		d.env.Changed(d)
@@ -594,4 +605,69 @@ func thousands(n int) string {
 		s = s[:i] + "," + s[i:]
 	}
 	return s
+}
+
+// refetchLocked has the bytes r fetched again: those on disk go back in the
+// plan, and those freed are no longer counted as freed.
+func (d *Download) refetchLocked(r Range) {
+	for _, p := range subtractRanges([]Range{r}, d.plan.ranges()) {
+		d.plan.add(p)
+	}
+	f := d.st.Folder
+	f.Freed = subtractRanges(f.Freed, []Range{r})
+}
+
+// reclaimLocked puts back in the plan the bytes freed of Entries not done: a
+// large Entry stopped partway (a pause, a crash, a failed run) is extracted
+// again from its front, so the bytes freed behind its decompressor are
+// fetched again first.
+func (d *Download) reclaimLocked(a *archive.Archive) {
+	f := d.st.Folder
+	if len(f.Freed) == 0 {
+		return
+	}
+	done := map[int64]bool{}
+	for _, s := range f.Done {
+		done[s] = true
+	}
+	var lost []Range
+	for _, e := range a.Entries {
+		if done[e.Start] {
+			continue
+		}
+		n := len(lost)
+		for _, r := range f.Freed {
+			if r.Start < e.End && e.Start < r.End {
+				lost = append(lost, Range{max(r.Start, e.Start), min(r.End, e.End)})
+			}
+		}
+		if len(lost) > n {
+			log.Printf("download %s: %s was stopped partway, fetching its freed bytes again", d.st.ID, e.Name)
+		}
+	}
+	for _, r := range lost {
+		d.refetchLocked(r)
+	}
+}
+
+// subtractRanges is rs without the bytes in cut. rs is left alone.
+func subtractRanges(rs, cut []Range) []Range {
+	out := slices.Clone(rs)
+	for _, c := range cut {
+		var next []Range
+		for _, r := range out {
+			if c.End <= r.Start || r.End <= c.Start {
+				next = append(next, r)
+				continue
+			}
+			if r.Start < c.Start {
+				next = append(next, Range{r.Start, c.Start})
+			}
+			if c.End < r.End {
+				next = append(next, Range{c.End, r.End})
+			}
+		}
+		out = next
+	}
+	return out
 }
