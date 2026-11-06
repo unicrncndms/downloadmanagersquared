@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/windows"
+
 	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
@@ -103,6 +105,10 @@ type Engine struct {
 	// Also under mu.
 	window       Window // the Downloads window; nil until SetWindow
 	windowFailed bool   // its Open has failed (logged once)
+
+	// pickFolder shows Windows' folder picker (winutil.PickFolder); set once,
+	// before the engine runs (tests replace it).
+	pickFolder func(owner uintptr, start, title string) (string, bool)
 
 	cum      float64 // bytes moved since start, integrated from speed (for the global ETA)
 	meter    rate.Meter
@@ -187,7 +193,10 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		notify("Settings reset", "Settings couldn't be read and were reset; the old file is settings.json.broken.", nil)
 	}
 	e := &Engine{
-		dir:      dir,
+		dir: dir,
+		pickFolder: func(owner uintptr, start, title string) (string, bool) {
+			return winutil.PickFolder(windows.Handle(owner), start, title)
+		},
 		ln:       ln,
 		settings: settings,
 		ifaces:   map[string]*ifaceEntry{},
@@ -808,6 +817,10 @@ type Window interface {
 	Open(view string) error
 }
 
+// windowHandle is a Downloads window that can say which window it is, so a
+// dialog opens over it: the real one (Handle is 0 while it is closed).
+type windowHandle interface{ Handle() uintptr }
+
 // SetWindow gives the engine the Downloads window, for OpenManager.
 func (e *Engine) SetWindow(w Window) {
 	e.mu.Lock()
@@ -948,6 +961,7 @@ type AddRequest struct {
 	UserAgent string `json:"userAgent"`
 	Torrent   bool   `json:"torrent"` // the URL serves a .torrent file
 	VPN       string `json:"vpn"`     // "off", "alongside" or "vpn"; "" = the default for its type
+	Folder    *bool  `json:"folder"`  // Download as folder: on (asks for the folder), off, or nil for the default
 	Browser   string `json:"-"`       // the exe of the browser that sent it, known from its connection
 }
 
@@ -983,7 +997,12 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(),
 	}
-	if e.settings.FolderDefault {
+	switch {
+	case r.Folder != nil && *r.Folder:
+		// Switched on by hand: it asks where to extract (settled once the name
+		// is known: only a .zip stays one).
+		st.Folder = &download.Folder{On: true}
+	case r.Folder == nil && e.settings.FolderDefault:
 		// Settled once the name is known: only a .zip becomes one.
 		st.Folder = &download.Folder{Auto: true, Into: e.settings.folderDir()}
 	}
@@ -991,6 +1010,45 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	e.queue.Add(download.New(e, st))
 	log.Printf("added %s", st.ID) // no URL: links are private
 	return st.ID, nil
+}
+
+// PickFolder shows the folder picker for a download's folder to extract into,
+// over the Downloads window when it is open, and sets the folder chosen. It
+// returns at once: the picker can stay open longer than a request may take,
+// and the extension's popup closes as soon as it opens. The choice shows up
+// in the download's state.
+func (e *Engine) PickFolder(id string) error {
+	d, err := e.get(id)
+	if err != nil {
+		return err
+	}
+	st := d.State()
+	if f := st.Folder; f == nil || !f.On || f.Into != "" {
+		// Changing a folder already chosen is a move, not this (ticket 07).
+		return errors.New("this download isn't waiting for a folder to extract into")
+	}
+	e.mu.Lock()
+	start := e.settings.folderDir()
+	var owner uintptr
+	if h, ok := e.window.(windowHandle); ok {
+		owner = h.Handle()
+	}
+	pick := e.pickFolder
+	e.mu.Unlock()
+	name := st.Filename
+	if name == "" {
+		name = "the archive"
+	}
+	go func() {
+		dir, ok := pick(owner, start, "Choose where to extract "+name)
+		if !ok {
+			return
+		}
+		if err := e.SetFolder(id, nil, &dir); err != nil {
+			log.Printf("download %s: the folder chosen: %v", id, err)
+		}
+	}()
+	return nil
 }
 
 // SetFolder sets a download's folder to extract into, which becomes the last

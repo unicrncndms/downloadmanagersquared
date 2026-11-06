@@ -135,12 +135,14 @@ for (const [id, [key, , parse]] of Object.entries(FIELDS)) {
   $(id).addEventListener("change", () => act("setSettings", { [key]: parse($(id).value) }, "Saved"));
 }
 $("sAuto").addEventListener("change", () => act("setAutostart", { on: $("sAuto").checked }, "Saved"));
+$("sFolder").addEventListener("change", () => act("setSettings", { folderDefault: $("sFolder").checked }, "Saved"));
 
 // fillSettings shows what the engine has, except in the field being edited.
 function fillSettings(s) {
   for (const [id, [, show]] of Object.entries(FIELDS)) {
     if (document.activeElement !== $(id)) $(id).value = show(s);
   }
+  $("sFolder").checked = !!s.folderDefault;
 }
 
 // --- VPN provider ---

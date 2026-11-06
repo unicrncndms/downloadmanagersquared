@@ -57,6 +57,7 @@ type FolderSummary struct {
 	Of      int      `json:"of"`
 	Renamed []string `json:"renamed,omitempty"`
 	Note    string   `json:"note,omitempty"`
+	Why     string   `json:"why,omitempty"` // why the switch can't change: locked, not a .zip, a checksum typed, no ranges
 }
 
 func (f *Folder) summary() *FolderSummary {
@@ -67,12 +68,46 @@ func (f *Folder) summary() *FolderSummary {
 		Renamed: slices.Clone(f.Renamed), Note: f.Note}
 }
 
+// folderSummaryLocked is the toggle Details shows: for a download whose name
+// ends in .zip, or once the mode was asked for, with why it can't change.
+func (d *Download) folderSummaryLocked() *FolderSummary {
+	s := d.st.Folder.summary()
+	if s == nil {
+		if !isZip(d.st.Filename) {
+			return nil
+		}
+		s = &FolderSummary{}
+	}
+	s.Why = d.folderWhyNotLocked()
+	return s
+}
+
+// folderWhyNotLocked is why the switch can't change, as SetFolder refuses it:
+// locked, or (to switch it on) not a .zip, a checksum typed, no ranges. ""
+// when it can; a complete download has no switch.
+func (d *Download) folderWhyNotLocked() string {
+	switch {
+	case d.st.Folder.locked():
+		return lockedNote
+	case d.st.Filename != "" && !isZip(d.st.Filename):
+		return notZipNote
+	case d.st.SHA256 != "" || d.st.MD5 != "":
+		return checksumNote
+	case d.st.Probed && !d.st.RangeOK:
+		return noRangesNote
+	}
+	return ""
+}
+
 func isZip(name string) bool { return strings.EqualFold(filepath.Ext(name), ".zip") }
 
 // folderOnLocked: the download is a Download as folder.
 func (d *Download) folderOnLocked() bool { return d.st.Folder != nil && d.st.Folder.On }
 
 const (
+	lockedNote   = "Some files are already extracted and their space freed, so this can't change any more"
+	notZipNote   = "Only a .zip can be downloaded as a folder"
+	checksumNote = "A checksum is entered, and only a whole file can be checked against it: clear it first"
 	noRangesNote = "The server doesn't allow split downloading, so it can't be extracted as it downloads"
 	hashNote     = "Downloaded as a file: a checksum was entered, and only a whole file can be checked against it"
 	serverMD5    = "The server's MD5 wasn't checked: the archive was extracted as it downloaded, so there was no whole file to check"
@@ -105,14 +140,9 @@ func (d *Download) setFolderLocked(on bool) error {
 	case d.st.Status == StatusCompleted:
 		return errors.New("the download is complete")
 	case f.locked():
-		return errors.New("some of the archive is already extracted and freed, so this can't change any more")
-	case !on:
-	case d.st.Filename != "" && !isZip(d.st.Filename):
-		return errors.New("only a .zip can be downloaded as a folder")
-	case d.st.SHA256 != "" || d.st.MD5 != "":
-		return errors.New("a checksum is set, and only a whole file can be checked against it: clear it first")
-	case d.st.Probed && !d.st.RangeOK:
-		return errors.New(noRangesNote)
+		return errors.New(lockedNote)
+	case on && d.folderWhyNotLocked() != "":
+		return errors.New(d.folderWhyNotLocked())
 	}
 	if f == nil {
 		f = &Folder{}

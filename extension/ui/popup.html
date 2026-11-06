@@ -58,6 +58,11 @@
     footer button { flex: 1; }
     .version-warn { margin-top: 6px; padding: 5px 8px; border-radius: 6px; background: var(--accent-soft); font-size: 12px; }
     .version-warn[hidden] { display: none; }
+    #addBox .check, .fold > label { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+    #addBox .check[hidden], .fold[hidden], .fold > [hidden] { display: none; }
+    .fold { margin-top: 6px; display: grid; gap: 3px; }
+    .fold .why { color: var(--muted); }
+    .facts dd.lines { white-space: pre-line; }
     .offline { padding: 12px; border-radius: 6px; background: var(--accent-soft); font-size: 13px; }
   </style>
 </head>
@@ -85,6 +90,7 @@
         <option value="alongside">VPN and direct</option>
         <option value="vpn">VPN only</option>
       </select>
+      <label id="addFolderRow" class="check" hidden><input type="checkbox" id="addFolder"> Download as folder: extract it while it downloads</label>
       <button class="primary">Add</button>
     </form>
   </header>
@@ -92,6 +98,7 @@
   <footer><button id="openSettings">Connections &amp; settings</button></footer>
   <div class="toast" id="toast"></div>
   <script src="../lib/version.js"></script>
+  <script src="../lib/folder.js"></script>
   <script src="host.js"></script>
   <script src="common.js"></script>
   <script src="popup.js"></script>

@@ -37,6 +37,22 @@ const DOWNLOADS = [
     links: { eth: { status: "ready", conns: 3, label: "Seeding", tone: "ok" }, wifi: { status: "ready", conns: 2, label: "Seeding", tone: "ok" } }, added: "2026-11-03T18:00:00Z" },
 ];
 
+// Download as folder: waiting for a folder, extracting (locked), and unavailable.
+const zipDownload = (id, filename, folder, extra) => ({
+  kind: "http", id, url: `https://cdn.example.org/${filename}`, filename, dir: "C:\\Users\\you\\Downloads", size: 4.2e10, done: 1.3e10,
+  status: "running", speed: 9.2e6, eta: 3150, probed: true, rangeOk: true, label: "Downloading",
+  actions: { pause: true, showInFolder: true, remove: true }, partialFile: true,
+  links: { eth: { status: "ready", conns: 4, speed: 9.2e6, label: "Downloading", tone: "ok" } }, added: "2026-11-06T10:00:00Z", folder, ...extra,
+});
+const FOLDER_DOWNLOADS = [
+  zipDownload("f3", "photos.zip", { on: false, files: 0, of: 0, why: "A checksum is entered, and only a whole file can be checked against it: clear it first" },
+    { sha256: "a".repeat(64) }),
+  zipDownload("f2", "dataset.zip", { on: true, into: "E:\\Data", out: "E:\\Data\\dataset", locked: true, why: "Some files are already extracted and their space freed, so this can't change any more", files: 412, of: 1280,
+    renamed: ["CON.txt → _CON.txt", "notes:v2.md → notes_v2.md"], note: "The server's MD5 wasn't checked: the archive was extracted as it downloaded, so there was no whole file to check" },
+    { note: "412 of 1,280 files extracted" }),
+  zipDownload("f1", "big.zip", { on: true, files: 0, of: 0 }, { note: "choose a folder to extract into" }),
+];
+
 const STATE = { downloads: DOWNLOADS, interfaces: IFACES, pia: { state: "off" }, speed: 11.5e6, eta: 322, active: 1 };
 
 const RECIPES = {
@@ -45,6 +61,8 @@ const RECIPES = {
 
 const FIXTURES = {
   downloads: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
+  folder: { connected: true, state: { ...STATE, downloads: FOLDER_DOWNLOADS, active: 3 }, settings: { ...SETTINGS, folderDir: "E:\\Data" },
+    autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   empty: { connected: true, state: { ...STATE, downloads: [], active: 0, speed: 0 }, settings: SETTINGS, autostart: true, recipes: {}, engineVersion: "0.3.0" },
   offline: { connected: false, error: "engine disconnected", state: null, settings: null, recipes: RECIPES },
   notInstalled: { connected: false, notInstalled: true, error: "No such native application downloadmanagersquared", state: null, settings: null, recipes: {} },

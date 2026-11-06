@@ -215,6 +215,12 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, err
 		}
 		return nil, e.SetFolder(p.ID, p.On, p.Into)
+	case "pickFolder":
+		p, err := decode[idParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.PickFolder(p.ID)
 	case "setPageUrl":
 		p, err := decode[pageParams](raw)
 		if err != nil {

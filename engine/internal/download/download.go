@@ -1491,7 +1491,7 @@ func (d *Download) Summary() Summary {
 		hashResult: d.st.HashResult, checking: d.checking,
 		serverMD5: d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.MD5 != "",
 		Added:     d.st.Added, Finished: d.st.Finished, VPN: d.st.VPN,
-		Folder: d.st.Folder.summary(),
+		Folder: d.folderSummaryLocked(),
 	}
 	if d.running {
 		s.ETA = d.eta.Seconds()
