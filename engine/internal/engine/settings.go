@@ -3,8 +3,10 @@ package engine
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	mrand "math/rand/v2"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -42,6 +44,34 @@ type Settings struct {
 	FolderDefault bool     `json:"folderDefault"`        // new .zip downloads are one
 	FolderDir     string   `json:"folderDir,omitempty"`  // the folder last extracted into; "" = SaveDir
 	FolderDirs    []string `json:"folderDirs,omitempty"` // the folders last extracted into, newest first: Change… offers them
+}
+
+// pickTorrentPort draws ports from pick until one can be bound: Windows
+// reserves ranges (Hyper-V, dynamic port exclusions) where a listen is
+// refused, which would leave torrents with outgoing peers only for good. After
+// 50 refusals it keeps the last, as before.
+func pickTorrentPort(pick func() int) int {
+	p := pick()
+	for i := 0; i < 50 && !bindable(p); i++ {
+		p = pick()
+	}
+	return p
+}
+
+// bindable: TCP and UDP can both listen on port p on every address now.
+func bindable(p int) bool {
+	addr := fmt.Sprintf("0.0.0.0:%d", p)
+	l, err := net.Listen("tcp4", addr)
+	if err != nil {
+		return false
+	}
+	l.Close()
+	u, err := net.ListenPacket("udp4", addr)
+	if err != nil {
+		return false
+	}
+	u.Close()
+	return true
 }
 
 // maxRecentFolders is how many folders extracted into are remembered.
@@ -112,7 +142,7 @@ func (s *Settings) normalize() {
 		s.VPNProvider = ""
 	}
 	if s.TorrentPort < 1024 || s.TorrentPort > 65535 {
-		s.TorrentPort = 20000 + mrand.IntN(40000)
+		s.TorrentPort = pickTorrentPort(func() int { return 20000 + mrand.IntN(40000) })
 	}
 	for _, is := range s.Interfaces {
 		if is.Connections != 0 { // 0 = use DefaultConnections

@@ -2,6 +2,8 @@ package engine
 
 import (
 	"fmt"
+	mrand "math/rand/v2"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -136,5 +138,30 @@ func TestRecentFoldersKeepTheLastFive(t *testing.T) {
 	want := []string{`H:\f`, `G:\e`, `F:\d`, `E:\c`, `C:\A`}
 	if fmt.Sprint(s.FolderDirs) != fmt.Sprint(want) || s.FolderDir != `H:\f` {
 		t.Fatalf("recent %v, last %q", s.FolderDirs, s.FolderDir)
+	}
+}
+
+// A new torrent port is one that can be bound: Windows reserves ranges
+// (Hyper-V, dynamic port exclusions) where a listen is refused, and a port
+// there would leave torrents with outgoing peers only for good.
+func TestANewTorrentPortCanBeBound(t *testing.T) {
+	taken, err := net.Listen("tcp4", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taken.Close()
+	busy := taken.Addr().(*net.TCPAddr).Port
+	tries := []int{busy, busy, busy}
+	pick := func() int {
+		if len(tries) > 0 {
+			p := tries[0]
+			tries = tries[1:]
+			return p
+		}
+		return 20000 + mrand.IntN(40000)
+	}
+	p := pickTorrentPort(pick)
+	if p == busy || !bindable(p) {
+		t.Fatalf("picked %d (busy %d)", p, busy)
 	}
 }
