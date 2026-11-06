@@ -327,14 +327,16 @@ function makeCard(id) {
       ["Save folder", d.folder && d.folder.on ? "" : d.dir], // a folder's place is under Folder
       ["Original link", d.url],
     ];
+    // A link stays on one line, cut short; all of it shows on hover, and the
+    // ⋯ menu copies it.
     fileFacts.replaceChildren(...facts.filter(([, v]) => v).flatMap(([k, v]) =>
-      [el("dt", {}, k), el("dd", { class: k === "Info hash" || k.endsWith("link") ? "mono" : "" }, v)]));
+      [el("dt", {}, k), el("dd", k.endsWith("link") ? { class: "mono one-line", title: v } : { class: k === "Info hash" ? "mono" : "" }, v)]));
     fileSection.hidden = !fileFacts.children.length;
 
     checkSection.hidden = torrent;
     if (!torrent && checkForm.hidden) {
       checkFacts.replaceChildren(...[["Landing page", d.pageUrl], ["SHA-256", d.sha256], ["MD5", d.md5]].flatMap(([k, v]) =>
-        [el("dt", {}, k), el("dd", { class: v ? "mono" : "muted" }, v || "none")]));
+        [el("dt", {}, k), el("dd", !v ? { class: "muted" } : k === "Landing page" ? { class: "mono one-line", title: v } : { class: "mono" }, v || "none")]));
     }
   }
 
