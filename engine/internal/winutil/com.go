@@ -149,7 +149,10 @@ func PickFolder(owner windows.Handle, start, title string) (string, bool) {
 		}
 		runtime.KeepAlive(t)
 		runtime.KeepAlive(s)
-		if err := d.call(mDialogShow, uintptr(owner)); err != nil {
+		// In front even when the engine is in the background (frontOwner).
+		front, done := frontOwner(owner)
+		defer done()
+		if err := d.call(mDialogShow, uintptr(front)); err != nil {
 			return err // cancelled, mostly
 		}
 		var item *comObject
