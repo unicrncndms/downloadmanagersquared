@@ -110,6 +110,7 @@ function makeCard(id) {
   });
   const meta = el("div", { class: "meta" }, left, el("span", { class: "end" }, right, pause, resume, el("span", { class: "more" }, more, menu)));
   const sub = el("div", { class: "sub muted num" });
+  const via = el("div", { class: "sub muted num" }); // which interfaces, how many connections each
 
   // Popups can't show confirm dialogs, so removing an unfinished download asks
   // inline; a Download as folder deletes or keeps its folder too.
@@ -185,7 +186,7 @@ function makeCard(id) {
 
   const root = el("div", { class: "card" },
     el("div", { class: "top" }, name, vpn, status, size, showDone, dropDone),
-    bar, meta, sub,
+    bar, meta, sub, via,
     cardConns, pick, foldAsk, ask,
     details);
 
@@ -224,7 +225,7 @@ function makeCard(id) {
     size.textContent = d.size > 0 ? fmtBytes(d.size) : "";
     showDone.hidden = !line || !(d.actions || {}).showInFolder;
     if (line) {
-      for (const n of [bar, meta, sub, cardConns, pick, foldAsk, ask, details]) n.hidden = true;
+      for (const n of [bar, meta, sub, via, cardConns, pick, foldAsk, ask, details]) n.hidden = true;
       return;
     }
 
@@ -245,6 +246,8 @@ function makeCard(id) {
     right.textContent = seeding ? "" : s.right;
     sub.textContent = s.error ? "" : [!seeding && torrent ? up : "", s.sub].filter(Boolean).join(" · ");
     sub.hidden = !sub.textContent;
+    via.textContent = s.error ? "" : viaLine(d, (ifc) => ifaceName(ifc, latest.state, latest.settings));
+    via.hidden = !via.textContent;
 
     const can = d.actions || {};
     pause.hidden = !can.pause;

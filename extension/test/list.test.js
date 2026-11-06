@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { sortDownloads, statusLine, problemLinks, seedLine, bulkActions, finished } = require("../lib/list.js");
+const { sortDownloads, statusLine, problemLinks, viaLine, seedLine, bulkActions, finished } = require("../lib/list.js");
 
 const dl = (id, status, extra) => ({ kind: "http", id, status, size: 0, done: 0, links: {}, actions: {}, ...extra });
 
@@ -49,6 +49,20 @@ test("only interfaces with a problem show on the card", () => {
   } });
   assert.deepEqual(problemLinks(d).sort(), ["retry", "vpn", "wifi"]);
   assert.deepEqual(problemLinks(dl("b", "completed", { links: { x: { tone: "bad" } } })), []);
+});
+
+test("a running card says which interfaces it uses and how many connections each", () => {
+  const names = { eth: "Ethernet", wifi: "Wi-Fi", vpn: "VPN" };
+  const nameOf = (id) => names[id];
+  const d = dl("a", "running", { links: {
+    wifi: { conns: 2, speed: 4.4e6 }, eth: { conns: 4, speed: 7.1e6 }, vpn: { conns: 0, label: "Failed" },
+  } });
+  // Busiest first; one not connected isn't listed.
+  assert.equal(viaLine(d, nameOf), "via Ethernet 4× · Wi-Fi 2×");
+  const t = dl("t", "seeding", { kind: "torrent", links: { eth: { conns: 3 }, wifi: { conns: 1 } } });
+  assert.equal(viaLine(t, nameOf), "via Ethernet 3 peers · Wi-Fi 1 peer");
+  assert.equal(viaLine(dl("p", "paused", { links: { eth: { conns: 4 } } }), nameOf), "");
+  assert.equal(viaLine(dl("q", "running", { links: {} }), nameOf), "");
 });
 
 test("seeding says how far it is to the ratio target", () => {

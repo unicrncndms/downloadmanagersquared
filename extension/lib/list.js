@@ -86,6 +86,22 @@ function problemLinks(d) {
   });
 }
 
+// viaLine is a short line of the interfaces a running download uses, busiest
+// first, with each one's connections (peers for a torrent): "via Ethernet 4×
+// · Wi-Fi 2×". "" when it isn't running or nothing is connected. nameOf gives
+// an interface's name.
+function viaLine(d, nameOf) {
+  if (d.status !== "running" && d.status !== "seeding" && d.status !== "metadata") return "";
+  const torrent = d.kind === "torrent";
+  const used = Object.keys(d.links || {}).filter((id) => d.links[id].conns > 0)
+    .sort((a, b) => d.links[b].conns - d.links[a].conns || (d.links[b].speed || 0) - (d.links[a].speed || 0));
+  if (!used.length) return "";
+  return "via " + used.map((id) => {
+    const n = d.links[id].conns;
+    return `${nameOf(id)} ${torrent ? `${n} peer${n === 1 ? "" : "s"}` : `${n}×`}`;
+  }).join(" · ");
+}
+
 // seedLine is a torrent's upload and ratio, against the seed ratio target
 // while seeding; "" before it has uploaded anything.
 function seedLine(d, settings) {
@@ -104,5 +120,5 @@ function bulkActions(downloads) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, statusLine, problemLinks, seedLine, bulkActions };
+  module.exports = { fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, statusLine, problemLinks, viaLine, seedLine, bulkActions };
 }
