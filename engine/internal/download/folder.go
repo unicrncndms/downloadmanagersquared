@@ -138,7 +138,7 @@ func (d *Download) folderOffLocked() {
 	}
 	f.Files, f.Of, f.Renamed = 0, 0, nil
 	if d.plan != nil {
-		d.plan.prefer = -1
+		d.plan.prefer, d.plan.bounds = -1, nil
 	}
 }
 
@@ -380,6 +380,9 @@ func (d *Download) folderStep(ctx context.Context, fr *folderRun) (more bool, er
 		}
 		fr.arc = a
 		d.mu.Lock()
+		if d.folderOnLocked() {
+			d.plan.bounds = entryBounds(a)
+		}
 		f.Renamed = nil
 		for _, r := range a.Renamed {
 			f.Renamed = append(f.Renamed, r.From+" → "+r.To)

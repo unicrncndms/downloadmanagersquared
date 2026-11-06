@@ -1,6 +1,9 @@
 package download
 
-import "math"
+import (
+	"math"
+	"slices"
+)
 
 // unknownEnd is the end of a file whose size the server didn't say; the chunk
 // ends wherever the response does.
@@ -25,6 +28,12 @@ type plan struct {
 	// prefer is a byte whose free chunk is claimed before any other (a
 	// Download as folder's tail), -1 for none.
 	prefer int64
+
+	// bounds are a Download as folder's Entry boundaries in byte order (each
+	// Entry's start, and the central directory's), nil for any other download.
+	// With them, claim sends a new connection to an Entry's front and cuts on
+	// boundaries.
+	bounds []int64
 }
 
 func newPlan(size int64, rangeOK bool, remaining []Range) *plan {
@@ -64,28 +73,95 @@ func (p *plan) claim(newSpeed float64) *segment {
 	var victim *segment
 	var worst float64
 	for _, s := range p.segs {
-		if s.owner == nil || s.end-s.pos < 2*minSplit {
+		if !canSplit(s) {
 			continue
 		}
-		if t := float64(s.end-s.pos) / math.Max(s.owner.speed, 1); t > worst {
+		if t := timeLeft(s); t > worst {
 			worst, victim = t, s
 		}
 	}
 	if victim == nil || worst < 3 {
 		return nil
 	}
-	vs := math.Max(victim.owner.speed, 1)
+	if s, at := p.entryFront(newSpeed); s != nil {
+		return p.split(s, at)
+	}
+	return p.split(victim, p.nearBound(victim, balancedCut(victim, newSpeed)))
+}
+
+// canSplit: a chunk is being fetched and big enough to split in two.
+func canSplit(s *segment) bool { return s.owner != nil && s.end-s.pos >= 2*minSplit }
+
+// timeLeft is how long a chunk's connection needs for the rest of it, in seconds.
+func timeLeft(s *segment) float64 { return float64(s.end-s.pos) / math.Max(s.owner.speed, 1) }
+
+// balancedCut is where to split a chunk so both halves should finish at about
+// the same time, keeping each at least minSplit.
+func balancedCut(s *segment, newSpeed float64) int64 {
+	vs := math.Max(s.owner.speed, 1)
 	vn := vs
 	if newSpeed > 0 {
 		vn = newSpeed
 	}
-	// Split so both halves should finish at about the same time.
-	cut := victim.pos + int64(float64(victim.end-victim.pos)*vs/(vs+vn))
-	cut = min(max(cut, victim.pos+minSplit), victim.end-minSplit)
-	ns := &segment{pos: cut, written: cut, end: victim.end}
-	victim.end = cut
+	cut := s.pos + int64(float64(s.end-s.pos)*vs/(vs+vn))
+	return min(max(cut, s.pos+minSplit), s.end-minSplit)
+}
+
+// split hands out the bytes of a chunk from at on, as a new chunk.
+func (p *plan) split(s *segment, at int64) *segment {
+	ns := &segment{pos: at, written: at, end: s.end}
+	s.end = at
 	p.segs = append(p.segs, ns)
 	return ns
+}
+
+// entryFront finds the earliest Entry front that can be split off a chunk
+// being fetched, for a Download as folder: at least minSplit on each side,
+// a chunk with 3 s or more left, and no further in than the balanced cut, so
+// the new connection gets at least its share. None without Entry boundaries.
+func (p *plan) entryFront(newSpeed float64) (*segment, int64) {
+	var into *segment
+	var at int64
+	for _, s := range p.segs {
+		if !canSplit(s) || timeLeft(s) < 3 {
+			continue
+		}
+		i, _ := slices.BinarySearch(p.bounds, s.pos+minSplit)
+		if i == len(p.bounds) {
+			continue
+		}
+		if b := p.bounds[i]; b <= balancedCut(s, newSpeed) && (into == nil || b < at) {
+			into, at = s, b
+		}
+	}
+	return into, at
+}
+
+// nearBound moves a cut in chunk s onto the closest Entry boundary within
+// minSplit of it, if one keeps both halves at least minSplit.
+func (p *plan) nearBound(s *segment, cut int64) int64 {
+	best := cut
+	i, _ := slices.BinarySearch(p.bounds, cut)
+	for _, j := range []int{i - 1, i} {
+		if j < 0 || j >= len(p.bounds) {
+			continue
+		}
+		b := p.bounds[j]
+		if b < s.pos+minSplit || b > s.end-minSplit || abs(b-cut) >= minSplit {
+			continue
+		}
+		if best == cut || abs(b-cut) < abs(best-cut) {
+			best = b
+		}
+	}
+	return best
+}
+
+func abs(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 // before: free chunk a is claimed before b, the preferred one first, then the lowest.
@@ -105,8 +181,7 @@ func (p *plan) before(a, b *segment) bool {
 func (p *plan) cut(at int64) {
 	for _, s := range p.segs {
 		if s.pos < at && at < s.end {
-			p.segs = append(p.segs, &segment{pos: at, written: at, end: s.end})
-			s.end = at
+			p.split(s, at)
 			return
 		}
 	}
