@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/torrent"
@@ -183,6 +184,20 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			}
 		}
 		return nil, t.Choose(p.Files, strings.TrimSpace(p.Dir))
+	case "torrentFiles":
+		p, err := decode[idParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		j, err := e.queue.Get(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		files := j.Summary().Files
+		if files == nil {
+			files = []download.FileSummary{}
+		}
+		return files, nil
 	case "chooseVpn":
 		p, err := decode[struct {
 			ID  string `json:"id"`

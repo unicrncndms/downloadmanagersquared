@@ -47,6 +47,11 @@ type Entry interface {
 type Queue struct {
 	dir string
 
+	// saveMu orders the state files' writes: two Saves (the tick's and Close's)
+	// never write one file at once, and a Remove never runs during a Save that
+	// would write its file back.
+	saveMu sync.Mutex
+
 	mu    sync.Mutex
 	byID  map[string]Entry
 	order []string
@@ -113,6 +118,8 @@ func (q *Queue) Remove(id string, deleteFiles bool) error {
 		return err
 	}
 	e.Discard(deleteFiles)
+	q.saveMu.Lock()
+	defer q.saveMu.Unlock()
 	q.mu.Lock()
 	delete(q.byID, id)
 	delete(q.dirty, id)
@@ -228,6 +235,8 @@ func (q *Queue) MarkDirty(id string) {
 
 // Save writes the state of every entry changed since the last Save.
 func (q *Queue) Save() {
+	q.saveMu.Lock()
+	defer q.saveMu.Unlock()
 	q.mu.Lock()
 	var changed []Entry
 	for id := range q.dirty {

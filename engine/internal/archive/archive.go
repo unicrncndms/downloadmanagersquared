@@ -598,7 +598,7 @@ func cleanName(stored string) (name string, changed bool, err error) {
 		case "..":
 			return "", false, outside
 		}
-		c := cleanPart(p)
+		c := CleanPart(p)
 		if c != p {
 			changed = true
 		}
@@ -609,8 +609,8 @@ func cleanName(stored string) (name string, changed bool, err error) {
 
 func isLetter(b byte) bool { return 'a' <= b|0x20 && b|0x20 <= 'z' }
 
-// cleanPart makes one path element safe for Windows.
-func cleanPart(p string) string {
+// CleanPart makes one path element safe for Windows.
+func CleanPart(p string) string {
 	var b strings.Builder
 	for _, r := range p {
 		if r < 32 || strings.ContainsRune(`<>:"|?*`, r) {

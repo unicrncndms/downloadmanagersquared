@@ -18,7 +18,9 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
   window.feed = (m) => { for (const f of listeners) f(m); };
 
   window.Host = {
-    call: (method, params) => record({ call: method, params }),
+    // A fixture's `files` answers torrentFiles, by download id.
+    call: (method, params) => record({ call: method, params })
+      .then(() => method === "torrentFiles" ? (window.fixture().files || {})[params.id] || [] : undefined),
     subscribe(fn) {
       listeners.push(fn);
       setTimeout(() => fn(window.fixture()), 0);

@@ -19,17 +19,17 @@ const Engine = {
     const port = browser.runtime.connectNative("downloadmanagersquared");
     this.port = port;
     port.onMessage.addListener((msg) => this.onMessage(msg));
-    port.onDisconnect.addListener((p) => {
+    const lost = (msg) => {
       if (this.port !== port) return;
       this.port = null;
       for (const { reject } of this.pending.values()) reject(new Error("engine disconnected"));
       this.pending.clear();
-      const msg = (p.error && p.error.message) || "";
       this.notInstalled = /no such native application/i.test(msg);
       this.setConnected(false, msg || this.lastError || "engine disconnected");
       setTimeout(() => this.connect(), this.retryDelay);
       this.retryDelay = Math.min(this.retryDelay * 2, 30000);
-    });
+    };
+    port.onDisconnect.addListener((p) => lost((p.error && p.error.message) || ""));
     this.call("hello", { userAgent: navigator.userAgent })
       .then((h) => {
         this.settings = h.settings;
@@ -40,7 +40,9 @@ const Engine = {
         this.retryDelay = 2000;
         this.setConnected(true, "");
       })
-      .catch(() => {});
+      // No answer to hello leaves the port open but useless: start over.
+      // (Our own disconnect() fires no onDisconnect.)
+      .catch((e) => { if (this.port === port) { port.disconnect(); lost(e.message); } });
   },
 
   onMessage(msg) {

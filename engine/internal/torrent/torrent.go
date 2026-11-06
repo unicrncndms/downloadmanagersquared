@@ -122,6 +122,10 @@ func (t *Torrent) Summary() download.Summary {
 	}
 	if t.st.Status == StatusChoosing {
 		s.Files = t.filesLocked()
+		s.FileCount = len(s.Files)
+		for _, f := range s.Files {
+			s.FilesSize += f.Size
+		}
 	}
 	if t.st.Size > 0 {
 		s.Ratio = float64(t.st.Uploaded) / float64(t.st.Size)
@@ -582,13 +586,48 @@ func (t *Torrent) Resume() {
 
 // Discard stops the torrent for good. With deleteFiles, unfinished files go;
 // once its download completed (seeding, or checking to seed again) they are the user's.
+// Only the torrent's own files go, never a folder by name: its name may be
+// that of a folder the user already had.
 func (t *Torrent) Discard(deleteFiles bool) {
 	finished := t.Status() == download.StatusCompleted || !t.State().Finished.IsZero()
 	t.Stop(download.StatusPaused)
-	if p := t.Path(); deleteFiles && p != "" && !finished {
-		os.RemoveAll(p)        // a multi-file torrent is a folder
-		os.Remove(p + ".part") // a single file waits under .part until complete
+	if !deleteFiles || finished {
+		return
 	}
+	p := t.Path()
+	t.mu.Lock()
+	info, err := t.infoLocked()
+	dir, skip := filepath.Clean(t.st.Dir), t.st.Skip
+	t.mu.Unlock()
+	if err != nil {
+		if p != "" {
+			os.Remove(p + ".part") // files unknown: at most a single file's .part, never a folder
+		}
+		return
+	}
+	for i, p := range diskPaths(dir, info) {
+		os.Remove(p + ".part") // a file waits under .part until complete
+		if !slices.Contains(skip, i) {
+			os.Remove(p) // a skipped file of that name was never the torrent's
+		}
+		// Folders the torrent's files leave empty go too, up to the save folder.
+		for d := filepath.Dir(p); len(d) > len(dir) && os.Remove(d) == nil; d = filepath.Dir(d) {
+		}
+	}
+}
+
+// diskPaths are where the file storage keeps the torrent's files under dir,
+// in the torrent's order: dir/name for one file, dir/name/path for several.
+func diskPaths(dir string, info *metainfo.Info) []string {
+	var out []string
+	for _, f := range info.UpvertedFiles() {
+		parts := []string{dir}
+		if n := info.BestName(); n != metainfo.NoName {
+			parts = append(parts, n)
+		}
+		out = append(out, filepath.Join(append(parts, f.BestPath()...)...))
+	}
+	return out
 }
 
 // Yields is true: torrents queue behind HTTP downloads and give their slot to one.

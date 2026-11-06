@@ -249,7 +249,7 @@ function makeCard(id) {
 
     const choosing = d.status === "choosing";
     const seeding = d.status === "seeding";
-    const files = d.files || [];
+    const nFiles = d.fileCount || 0; // the list itself comes with the picker
     bar.hidden = seeding;
     fill.style.width = percent(d) + "%";
     const s = statusLine(d);
@@ -257,10 +257,10 @@ function makeCard(id) {
     left.classList.toggle("bad", !!s.error);
     left.classList.toggle("muted", !s.error);
     if (s.error) left.textContent = s.error;
-    else if (choosing && files.length) left.textContent = `${plural(files.length, "file")} · ${fmtBytes(files.reduce((n, f) => n + f.size, 0))}`;
+    else if (choosing && nFiles) left.textContent = `${plural(nFiles, "file")} · ${fmtBytes(d.filesSize || 0)}`;
     const up = seedLine(d, latest.settings);
     if (!s.error && seeding) left.textContent = up; // the badge already says Seeding
-    else if (!s.error && !(choosing && files.length)) left.textContent = s.left;
+    else if (!s.error && !(choosing && nFiles)) left.textContent = s.left;
     right.textContent = seeding ? "" : s.right;
     sub.textContent = s.error ? "" : [!seeding && torrent ? up : "", s.sub].filter(Boolean).join(" · ");
     sub.hidden = !sub.textContent;
@@ -276,9 +276,10 @@ function makeCard(id) {
     more.parentElement.hidden = choosing;
 
     pick.hidden = !choosing;
-    const step = choosing ? `${d.askVpn}|${files.length}|${hasVpn()}` : "";
-    if (step && step !== picking) renderPick(d);
+    const step = choosing ? `${d.askVpn}|${nFiles}|${hasVpn()}` : "";
+    const newStep = step && step !== picking;
     picking = step;
+    if (newStep) renderPick(d);
 
     // Download as folder: the step while it waits for a folder, and its
     // section in Details.
@@ -395,15 +396,22 @@ function makeCard(id) {
     for (const ifc of rows.keys()) if (!ids.includes(ifc)) rows.delete(ifc);
   }
 
-  function renderPick(d) {
-    const files = d.files || [];
+  // The state carries only how many files a torrent has, so a big one stays
+  // within what Firefox passes on: the list is asked for here.
+  async function renderPick(d) {
+    let files = [];
+    if (d.fileCount) {
+      const step = picking;
+      try { files = await call("torrentFiles", { id }); } catch (e) { return toast(e.message); }
+      if (picking !== step) return; // a newer render took over meanwhile
+    }
     // Before the torrent first meets peers: suggest a VPN, or stay on this connection.
     const vpnChoice = d.askVpn ? el("div", { class: "vpnask" },
       el("div", {}, el("b", {}, "Join the swarm through a VPN?"), " Every peer sees the address you join from."),
       el("label", {}, el("input", { type: "radio", name: "vpn-" + id, value: "vpn", checked: hasVpn(), disabled: !hasVpn() }),
         hasVpn() ? " Use the VPN (recommended)" : " Use a VPN: none is set up yet ",
         hasVpn() ? null : el("a", { href: "#", onclick: (e) => { e.preventDefault(); Host.openSettings("#pia"); } }, "Set one up")),
-      el("label", {}, el("input", { type: "radio", name: "vpn-" + id, value: "off", checked: !hasVpn() }), " Stay on the current connection")) : null;
+      el("label", {}, el("input", { type: "radio", name: "vpn-" + id, value: "off", checked: !hasVpn() }), " Stay on the current connection")) : ""; // not null: replaceChildren would print "null"
     const vpnValue = () => (pick.querySelector(`input[name="vpn-${id}"]:checked`) || {}).value;
     if (!files.length) { // a magnet link: the question comes before fetching the files
       pick.replaceChildren(vpnChoice, el("div", { class: "actions" },

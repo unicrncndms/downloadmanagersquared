@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"downloadmanagersquared/engine/internal/archive"
 )
 
 type probeResult struct {
@@ -136,25 +138,25 @@ func remoteName(resp *http.Response) string {
 	return ""
 }
 
-// SanitizeFilename makes a name safe to create on Windows.
+// SanitizeFilename makes a name safe to create on Windows, by the same rules
+// as a Download as folder's entries. "" stays "": the name is still unknown.
 func SanitizeFilename(name string) string {
 	name = strings.Map(func(r rune) rune {
-		if strings.ContainsRune(`<>:"/\|?*`, r) || unicode.IsControl(r) {
+		if r == '/' || r == '\\' || unicode.IsControl(r) {
 			return '_'
 		}
 		return r
 	}, name)
-	name = strings.Trim(name, " .")
+	if name = strings.Trim(name, " ."); name == "" {
+		return ""
+	}
+	name = archive.CleanPart(name)
 	if len(name) > 200 {
 		ext := path.Ext(name)
 		if len(ext) > 20 {
 			ext = ""
 		}
-		name = name[:200-len(ext)] + ext
-	}
-	switch strings.ToUpper(strings.TrimSuffix(name, path.Ext(name))) {
-	case "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "LPT1", "LPT2", "LPT3":
-		name = "_" + name
+		name = strings.ToValidUTF8(name[:200-len(ext)], "") + ext // never half a character
 	}
 	return name
 }

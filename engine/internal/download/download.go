@@ -1354,7 +1354,11 @@ type Summary struct {
 	Folder *FolderSummary `json:"folder,omitempty"` // Download as folder, once asked for
 
 	// Torrents only: the files to choose from (while choosing), then the upload once complete.
-	Files    []FileSummary `json:"files,omitempty"`
+	// Files stays out of the state sent every second: a torrent of many files
+	// would make it bigger than Firefox takes. The picker asks for it ("torrentFiles").
+	Files     []FileSummary `json:"-"`
+	FileCount int           `json:"fileCount,omitempty"`
+	FilesSize int64         `json:"filesSize,omitempty"`
 	AskVPN   bool          `json:"askVpn,omitempty"` // waiting for: VPN, or the current connection?
 	Peers    int           `json:"peers,omitempty"`  // connected
 	Seeds    int           `json:"seeds,omitempty"`  // connected peers with the whole torrent

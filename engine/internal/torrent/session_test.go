@@ -777,3 +777,55 @@ func TestFinishedTorrentResumesToSeedWithoutASlot(t *testing.T) {
 		t.Fatalf("an unfinished torrent resumed as %q, rejoining %v", half.Status(), half.Rejoins())
 	}
 }
+
+func TestDiscardDeletesOnlyTheTorrentsOwnFiles(t *testing.T) {
+	sw := newMultiSwarm(t, 0, 256<<10, 256<<10)
+	s, err := NewSession(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	write := func(p string) {
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exists := func(p string) bool { _, err := os.Stat(p); return err == nil }
+
+	// The user already had a folder of the torrent's name.
+	dir := t.TempDir()
+	pack := filepath.Join(dir, "pack")
+	write(filepath.Join(pack, "mine.txt"))
+	write(filepath.Join(pack, "f0.bin.part"))
+	write(filepath.Join(pack, "f1.bin"))
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Info: sw.infoBytes(t), Dir: dir, Name: "pack"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Discard(true)
+	if !exists(filepath.Join(pack, "mine.txt")) {
+		t.Fatal("deleting the torrent deleted the user's own file")
+	}
+	if exists(filepath.Join(pack, "f0.bin.part")) || exists(filepath.Join(pack, "f1.bin")) {
+		t.Fatal("the torrent's files were kept")
+	}
+
+	// A folder only the torrent filled goes with its files.
+	dir = t.TempDir()
+	write(filepath.Join(dir, "pack", "f0.bin.part"))
+	tor, _ = s.Add(State{ID: "t2", Magnet: sw.magnet(), Info: sw.infoBytes(t), Dir: dir, Name: "pack"})
+	tor.Discard(true)
+	if exists(filepath.Join(dir, "pack")) || !exists(dir) {
+		t.Fatal("want the torrent's emptied folder gone and the save folder kept")
+	}
+
+	// Its files still unknown, nothing of the torrent is on disk: a folder of its name stays.
+	dir = t.TempDir()
+	write(filepath.Join(dir, "pack", "f1.bin"))
+	tor, _ = s.Add(State{ID: "t3", Magnet: sw.magnet(), Dir: dir, Name: "pack"})
+	tor.Discard(true)
+	if !exists(filepath.Join(dir, "pack", "f1.bin")) {
+		t.Fatal("a torrent with no files known deleted a folder by its name")
+	}
+}

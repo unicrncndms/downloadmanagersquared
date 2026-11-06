@@ -60,7 +60,14 @@ const RECIPES = {
   "example.com": { steps: [{ tag: "button", text: "Free download" }, { tag: "a", text: "Start download" }], learned: Date.parse("2026-10-20") },
 };
 
+// A torrent waiting for its files to be chosen: the state has only their count.
+const CHOOSING = { kind: "torrent", id: "t", url: "magnet:?xt=urn:btih:9f1c", filename: "datasets", dir: "C:\\Users\\you\\Downloads",
+  size: 3e9, done: 0, status: "choosing", speed: 0, eta: -1, fileCount: 2, filesSize: 3e9, label: "Choose files",
+  actions: { remove: true }, partialFile: false, links: {}, added: "2026-11-06T11:00:00Z" };
+
 const FIXTURES = {
+  choosing: { connected: true, state: { ...STATE, downloads: [CHOOSING], active: 0 }, settings: SETTINGS, autostart: true, recipes: RECIPES,
+    engineVersion: "0.3.0", files: { t: [{ path: "datasets/a.csv", size: 1e9, selected: true }, { path: "datasets/b.csv", size: 2e9, selected: false }] } },
   downloads: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   folder: { connected: true, state: { ...STATE, downloads: FOLDER_DOWNLOADS, active: 3 }, settings: { ...SETTINGS, folderDir: "E:\\Data", folderDirs: ["E:\\Data", "D:\\Games\\Mods", "F:\\Archive"] },
     autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
