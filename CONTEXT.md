@@ -100,6 +100,16 @@ A torrent uploading to peers after its own download is complete. It holds no que
 **Ratio**:
 How much a torrent has uploaded divided by its size. Seeding stops when the ratio target is reached (1.0 by default) and the torrent is finished.
 
+### Archives
+
+**Download as folder**:
+A ZIP download that is extracted while it downloads, so the user ends up with the extracted folder and never the `.zip`. The archive's bytes are thrown away once the files in them are extracted.
+_Avoid_: Unpack in place, streaming unzip, auto-extract
+
+**Entry**:
+One file or folder stored inside a ZIP archive.
+_Avoid_: File (that is the download), member, item
+
 ### VPN
 
 **Tunnel**:
