@@ -382,3 +382,46 @@ func TestACrossDriveMoveWithAFileHeldOpenChangesNothing(t *testing.T) {
 		t.Fatalf("something arrived at the target: %v", names(t, to))
 	}
 }
+
+// Removed with its files after a crash midway through a move between drives:
+// the half-made copies go too, not only the folder and the .part.
+func TestRemovingAfterACrashMidMoveDeletesTheCopies(t *testing.T) {
+	root := t.TempDir()
+	from, to := filepath.Join(root, "a"), filepath.Join(root, "b")
+	oldOut, newOut := filepath.Join(from, "big"), filepath.Join(to, "big")
+	oldPart, newPart := filepath.Join(from, "big.zip"+partSuffix), filepath.Join(to, "big.zip"+partSuffix)
+	for _, dir := range []string{oldOut, newOut} {
+		os.MkdirAll(dir, 0o755)
+		os.WriteFile(filepath.Join(dir, "x.txt"), []byte("x"), 0o644)
+	}
+	for _, p := range []string{oldPart, newPart} {
+		os.WriteFile(p, []byte("zip"), 0o644)
+	}
+	d := New(&testEnv{}, State{ID: "m9", Dir: from, Filename: "big.zip", Size: 3, Allocated: true, RangeOK: true, Status: StatusPaused,
+		Folder: &Folder{On: true, Into: from, Out: oldOut, Moving: to, MoveOut: newOut, MovePart: newPart}})
+	d.Discard(true)
+	for _, p := range []string{oldOut, newOut, oldPart, newPart} {
+		if exists(p) {
+			t.Errorf("%s is still there", p)
+		}
+	}
+}
+
+// A move asked for while stopped is called off when the mode goes off, so
+// switching it on again doesn't move to a folder chosen before.
+func TestSwitchingOffCallsOffAPendingMove(t *testing.T) {
+	root := t.TempDir()
+	from := filepath.Join(root, "a")
+	os.MkdirAll(filepath.Join(from, "big"), 0o755)
+	d := New(&testEnv{}, State{ID: "m10", Dir: from, Filename: "big.zip", Size: 3, RangeOK: true, Probed: true, Status: StatusPaused,
+		Folder: &Folder{On: true, Into: from, Out: filepath.Join(from, "big"), Moving: filepath.Join(root, "b"), MoveError: "earlier"}})
+	if err := d.SetFolder(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetFolder(true); err != nil {
+		t.Fatal(err)
+	}
+	if f := d.State().Folder; f.Moving != "" || f.MoveError != "" {
+		t.Fatalf("still pending: moving %q, error %q", f.Moving, f.MoveError)
+	}
+}

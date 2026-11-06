@@ -174,14 +174,15 @@ func (d *Download) setFolderLocked(on bool) error {
 }
 
 // folderOffLocked tidies up after the mode goes off before anything was
-// freed: the output folder goes if nothing is in it, and the tail is no
-// longer fetched first.
+// freed: the output folder goes if nothing is in it, a move not yet done is
+// called off, and the tail is no longer fetched first.
 func (d *Download) folderOffLocked() {
 	f := d.st.Folder
 	if f.Out != "" && os.Remove(f.Out) == nil {
 		f.Out = ""
 	}
 	f.Files, f.Of, f.Renamed = 0, 0, nil
+	f.Moving, f.MoveError = "", ""
 	if d.plan != nil {
 		d.plan.prefer, d.plan.bounds = -1, nil
 	}

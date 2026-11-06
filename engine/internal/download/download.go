@@ -1396,14 +1396,20 @@ func (d *Download) Discard(deleteFile bool) {
 		return
 	}
 	d.mu.Lock()
-	part, out := d.partPath(), ""
+	part, out, moveOut, movePart := d.partPath(), "", "", ""
 	if f := d.st.Folder; f != nil {
-		out = f.Out
+		// With the copies a move between drives left halfway, as after a crash.
+		out, moveOut, movePart = f.Out, f.MoveOut, f.MovePart
 	}
 	d.mu.Unlock()
 	os.Remove(part)
-	if out != "" {
-		os.RemoveAll(out)
+	for _, dir := range []string{out, moveOut} {
+		if dir != "" {
+			os.RemoveAll(dir)
+		}
+	}
+	if movePart != "" {
+		os.Remove(movePart)
 	}
 }
 
