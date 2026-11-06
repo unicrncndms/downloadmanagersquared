@@ -1,6 +1,9 @@
 package download
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+)
 
 // KindTorrent is a torrent's Summary.Kind; an HTTP download's is empty.
 const KindTorrent = "torrent"
@@ -104,12 +107,41 @@ func Present(s Summary) Summary {
 		s.Note = "main connection only"
 	}
 
+	if f := s.Folder; f != nil && f.On {
+		switch {
+		case s.Status == StatusCompleted && f.Out != "":
+			s.Note = "Extracted to " + filepath.Base(f.Out)
+		case s.Status == StatusCompleted:
+		case f.Into == "":
+			s.Note = joinNote(s.Note, "choose a folder to extract into")
+		case f.Of > 0:
+			s.Note = joinNote(s.Note, fmt.Sprintf("%s of %s files extracted", thousands(f.Files), thousands(f.Of)))
+		}
+		switch {
+		case s.Status == StatusCompleted:
+		case f.MovingNow:
+			s.Label, s.Tone = "Moving…", toneNone
+		case f.Moving != "" && s.Status != StatusRunning:
+			s.Note = joinNote(s.Note, "moves to "+f.Moving+" when it resumes")
+		}
+		if f.Refetch > 0 && s.Status != StatusCompleted {
+			s.Folder.MoveWarning = "Moving now re-downloads about " + human(f.Refetch)
+		}
+	}
+
 	links := make(map[string]LinkSummary, len(s.Links))
 	for id, l := range s.Links {
 		links[id] = presentLink(l, s)
 	}
 	s.Links = links
 	return s
+}
+
+func joinNote(a, b string) string {
+	if a == "" {
+		return b
+	}
+	return a + " · " + b
 }
 
 // matched is the note for checksums that match the finished file.

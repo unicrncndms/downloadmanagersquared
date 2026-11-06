@@ -24,13 +24,23 @@ $("toggleAdd").onclick = () => {
   $("addBox").hidden = !$("addBox").hidden;
   if (!$("addBox").hidden) $("addUrl").focus();
 };
+// A .zip link offers Download as folder, ticked as the settings default.
+$("addUrl").addEventListener("input", () => {
+  const c = addFolderChoice($("addUrl").value, latest.settings);
+  if (c.show === !$("addFolderRow").hidden) return; // leave a box the user ticked alone
+  $("addFolderRow").hidden = !c.show;
+  $("addFolder").checked = c.checked;
+});
 $("addBox").addEventListener("submit", (e) => {
   e.preventDefault();
   const add = { url: $("addUrl").value, pageUrl: $("addPage").value, vpn: $("addVpn").value };
   if (Host.userAgent !== null) add.userAgent = Host.userAgent; // else the engine uses the browser's
+  const folder = addFolderParam(!$("addFolderRow").hidden, $("addFolder").checked, latest.settings);
+  if (folder !== undefined) add.folder = folder;
   act("add", add, "Added").then(() => {
     $("addUrl").value = "";
     $("addPage").value = "";
+    $("addFolderRow").hidden = true;
     $("addBox").hidden = true;
   });
 });
@@ -52,16 +62,47 @@ function makeCard(id) {
   const resume = el("button", { class: "small", onclick: () => act("resume", { id }) }, "Resume");
   const folder = el("button", { class: "small", onclick: () => act("showInFolder", { id }) }, "Show in folder");
   const remove = el("button", { class: "small", onclick: () => removeDownload(id, actions, ask) }, "Remove");
-  // Popups can't show confirm dialogs, so removing an unfinished download asks inline.
+  // Popups can't show confirm dialogs, so removing an unfinished download asks
+  // inline; a Download as folder deletes or keeps its folder too.
+  let wording = removeWording(null);
+  const delButton = el("button", { class: "small primary", onclick: () => act("remove", { id, deleteFile: true }, wording.deleted) });
+  const keepButton = el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, wording.kept) });
   const ask = el("div", { class: "actions ask", hidden: true },
     el("span", { class: "muted" }, "Remove this download?"),
-    el("button", { class: "small primary", onclick: () => act("remove", { id, deleteFile: true }, "Removed, partial file deleted") }, "Delete partial file"),
-    el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, "Removed from list (partial file kept)") }, "Keep partial file"),
+    delButton, keepButton,
     el("button", { class: "small", onclick: () => { ask.hidden = true; actions.hidden = false; } }, "Cancel"));
   const actions = el("div", { class: "actions" }, pause, resume, folder, remove);
   // The add step: a torrent waits here until its files and folder are chosen.
   const pick = el("div", { class: "pick", hidden: true });
   let picking = ""; // what the add step shows: the VPN question and/or the files
+
+  // Download as folder switched on by hand: it keeps downloading while this
+  // asks where to extract. Browse… sets the folder itself (the engine shows
+  // the picker), so it works even after the toolbar popup closes.
+  const foldInto = el("input", { type: "text" });
+  const foldAsk = el("div", { class: "pick", hidden: true },
+    el("div", { class: "form" },
+      el("label", {}, "Extract into (in a folder named after the archive)"), foldInto,
+      el("button", { class: "small", onclick: () => act("pickFolder", { id }) }, "Browse…")),
+    el("div", { class: "actions" },
+      el("button", { class: "small primary", onclick: () => act("setFolder", { id, into: foldInto.value }, "Extracting into " + foldInto.value) }, "Download"),
+      el("button", { class: "small", onclick: () => act("setFolder", { id, on: false }, "Downloading it as a file") }, "Download as a file")));
+  let foldAsking = false;
+  // In Details: the switch, why it can't change, and where it extracts.
+  const foldOn = el("input", { type: "checkbox", onchange: () => act("setFolder", { id, on: foldOn.checked }) });
+  const foldSwitch = el("label", {}, foldOn, "Download as folder: extract it while it downloads");
+  const foldWhy = el("div", { class: "why" });
+  // Extract into, while unfinished: Browse… moves what is extracted (the
+  // engine shows the picker and does the move; the state shows how it went).
+  const foldMoveInto = el("span", { class: "mono" });
+  const foldMoveWarn = el("div", { class: "why" });
+  const foldMoveErr = el("div", { class: "why bad" });
+  const foldMove = el("div", { class: "form", hidden: true },
+    el("label", {}, "Extract into"), foldMoveInto,
+    el("button", { class: "small", onclick: () => act("pickFolder", { id }) }, "Browse…"),
+    foldMoveWarn, foldMoveErr);
+  const foldFacts = el("dl", { class: "facts" });
+  const foldBox = el("div", { class: "fold", hidden: true }, foldSwitch, foldWhy, foldMove, foldFacts);
 
   const page = el("input", { type: "url" });
   const sha = el("input", { type: "text", class: "mono", placeholder: "64 hex characters (optional)", spellcheck: "false" });
@@ -75,14 +116,14 @@ function makeCard(id) {
     el("button", { class: "small", onclick: () => act("setHashes", { id, sha256: sha.value, md5: md5.value }, "Checksums saved") }, "Save"),
     el("label", {}, "Original link"), urlText);
   const facts = el("dl", { class: "facts" });
-  const details = el("details", {}, el("summary", {}, "Details"), httpDetails, facts);
+  const details = el("details", {}, el("summary", {}, "Details"), foldBox, httpDetails, facts);
 
   const root = el("div", { class: "card" },
     el("div", { class: "top" }, name, vpn, status),
     el("div", { class: "bar" }, fill),
     el("div", { class: "meta" }, sizeText, speedText),
     swarm,
-    err, pick, conns,
+    err, pick, foldAsk, conns,
     actions, ask,
     details);
 
@@ -122,6 +163,38 @@ function makeCard(id) {
     const step = choosing ? `${d.askVpn}|${files.length}|${hasVpn()}` : "";
     if (step && step !== picking) renderPick(d);
     picking = step;
+
+    // Download as folder: the add step while it waits for a folder, the switch
+    // and its facts in Details, and what Remove says.
+    const fv = folderView(d, latest.settings);
+    const asking = !!(fv && fv.ask);
+    foldAsk.hidden = !asking;
+    if (asking && !foldAsking) foldInto.value = fv.ask.prefill; // once: then it's the user's to edit
+    foldAsking = asking;
+    foldBox.hidden = !fv;
+    if (fv) {
+      foldSwitch.hidden = !fv.toggle;
+      if (fv.toggle) {
+        foldOn.checked = fv.toggle.on;
+        foldOn.disabled = fv.toggle.disabled;
+      }
+      foldWhy.textContent = fv.toggle ? fv.toggle.reason : "";
+      foldWhy.hidden = !foldWhy.textContent;
+      foldMove.hidden = !fv.move;
+      if (fv.move) {
+        foldMoveInto.textContent = fv.move.moving ? `${fv.move.into} → ${fv.move.moving}` : fv.move.into;
+        foldMoveWarn.textContent = fv.move.warning;
+        foldMoveWarn.hidden = !fv.move.warning;
+        foldMoveErr.textContent = fv.move.error;
+        foldMoveErr.hidden = !fv.move.error;
+      }
+      foldFacts.hidden = !fv.facts.length;
+      foldFacts.replaceChildren(...fv.facts.flatMap(([k, v]) =>
+        [el("dt", {}, k), el("dd", { class: k === "Renamed" ? "lines" : "" }, v)]));
+    }
+    wording = removeWording(d);
+    delButton.textContent = wording.del;
+    keepButton.textContent = wording.keep;
     // Landing page and checksums are for HTTP downloads; a torrent shows what it is.
     httpDetails.hidden = torrent;
     facts.hidden = !torrent;

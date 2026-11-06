@@ -19,6 +19,7 @@ func TestPresentWithThePages(t *testing.T) {
 		"ui/settings.html": {Data: []byte("<!doctype html>")},
 		"ui/host.js":       {Data: []byte("")},
 		"lib/version.js":   {Data: []byte("")},
+		"lib/folder.js":    {Data: []byte("")},
 	}
 	if !present(pages) {
 		t.Fatal("not present with the pages")

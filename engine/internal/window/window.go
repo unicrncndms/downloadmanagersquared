@@ -103,6 +103,16 @@ func (w *Window) Close() {
 	}
 }
 
+// Handle is the open window's, for a dialog to open over it; 0 while closed.
+func (w *Window) Handle() uintptr {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.open == nil {
+		return 0
+	}
+	return w.open.hwnd
+}
+
 func pageURL(view string) string {
 	switch {
 	case view == "":

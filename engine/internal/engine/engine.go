@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/windows"
+
 	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
@@ -103,6 +105,10 @@ type Engine struct {
 	// Also under mu.
 	window       Window // the Downloads window; nil until SetWindow
 	windowFailed bool   // its Open has failed (logged once)
+
+	// pickFolder shows Windows' folder picker (winutil.PickFolder); set once,
+	// before the engine runs (tests replace it).
+	pickFolder func(owner uintptr, start, title string) (string, bool)
 
 	cum      float64 // bytes moved since start, integrated from speed (for the global ETA)
 	meter    rate.Meter
@@ -187,7 +193,10 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		notify("Settings reset", "Settings couldn't be read and were reset; the old file is settings.json.broken.", nil)
 	}
 	e := &Engine{
-		dir:      dir,
+		dir: dir,
+		pickFolder: func(owner uintptr, start, title string) (string, bool) {
+			return winutil.PickFolder(windows.Handle(owner), start, title)
+		},
 		ln:       ln,
 		settings: settings,
 		ifaces:   map[string]*ifaceEntry{},
@@ -755,7 +764,11 @@ var notify = winutil.NotifyClick
 // notifyFinished says a download ended; a click on a finished one shows it in its folder.
 func (e *Engine) notifyFinished(s download.Summary, path string) {
 	if s.Status == download.StatusCompleted || s.Status == torrent.StatusSeeding {
-		notify("Download complete", s.Filename, func() { winutil.ShowInFolder(path) })
+		msg := s.Filename
+		if f := s.Folder; f != nil && f.On && f.Out != "" {
+			msg = "Extracted to " + filepath.Base(f.Out)
+		}
+		notify("Download complete", msg, func() { winutil.ShowInFolder(path) })
 	} else {
 		notify("Download failed", s.Filename+": "+s.Error, nil)
 	}
@@ -803,6 +816,10 @@ type Window interface {
 	// settings page. It fails only if the window can't be created.
 	Open(view string) error
 }
+
+// windowHandle is a Downloads window that can say which window it is, so a
+// dialog opens over it: the real one (Handle is 0 while it is closed).
+type windowHandle interface{ Handle() uintptr }
 
 // SetWindow gives the engine the Downloads window, for OpenManager.
 func (e *Engine) SetWindow(w Window) {
@@ -944,6 +961,7 @@ type AddRequest struct {
 	UserAgent string `json:"userAgent"`
 	Torrent   bool   `json:"torrent"` // the URL serves a .torrent file
 	VPN       string `json:"vpn"`     // "off", "alongside" or "vpn"; "" = the default for its type
+	Folder    *bool  `json:"folder"`  // Download as folder: on (asks for the folder), off, or nil for the default
 	Browser   string `json:"-"`       // the exe of the browser that sent it, known from its connection
 }
 
@@ -979,10 +997,89 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(),
 	}
+	switch {
+	case r.Folder != nil && *r.Folder:
+		// Switched on by hand: it asks where to extract (settled once the name
+		// is known: only a .zip stays one).
+		st.Folder = &download.Folder{On: true}
+	case r.Folder == nil && e.settings.FolderDefault:
+		// Settled once the name is known: only a .zip becomes one.
+		st.Folder = &download.Folder{Auto: true, Into: e.settings.folderDir()}
+	}
 	e.mu.Unlock()
 	e.queue.Add(download.New(e, st))
 	log.Printf("added %s", st.ID) // no URL: links are private
 	return st.ID, nil
+}
+
+// PickFolder shows the folder picker for a download's folder to extract into,
+// over the Downloads window when it is open, and sets the folder chosen; once
+// one is set, choosing another moves what is extracted there. It
+// returns at once: the picker can stay open longer than a request may take,
+// and the extension's popup closes as soon as it opens. The choice shows up
+// in the download's state.
+func (e *Engine) PickFolder(id string) error {
+	d, err := e.get(id)
+	if err != nil {
+		return err
+	}
+	st := d.State()
+	f := st.Folder
+	if f == nil || !f.On || st.Status == download.StatusCompleted {
+		return errors.New("this download isn't being extracted as a folder")
+	}
+	e.mu.Lock()
+	start := e.settings.folderDir()
+	if f.Into != "" {
+		start = f.Into // a move: from where it is
+	}
+	var owner uintptr
+	if h, ok := e.window.(windowHandle); ok {
+		owner = h.Handle()
+	}
+	pick := e.pickFolder
+	e.mu.Unlock()
+	name := st.Filename
+	if name == "" {
+		name = "the archive"
+	}
+	go func() {
+		title := "Choose where to extract " + name
+		if f.Into != "" {
+			title = "Choose where to move the files extracted from " + name
+		}
+		dir, ok := pick(owner, start, title)
+		if !ok {
+			return
+		}
+		if err := e.SetFolder(id, nil, &dir); err != nil {
+			log.Printf("download %s: the folder chosen: %v", id, err)
+		}
+	}()
+	return nil
+}
+
+// SetFolder sets a download's folder to extract into, which becomes the last
+// one used, and switches Download as folder on or off; either may be nil.
+func (e *Engine) SetFolder(id string, on *bool, into *string) error {
+	d, err := e.get(id)
+	if err != nil {
+		return err
+	}
+	// The switch first: refused, it leaves the folder and the setting as they were.
+	if on != nil {
+		if err := d.SetFolder(*on); err != nil {
+			return err
+		}
+	}
+	if into != nil {
+		dir := strings.TrimSpace(*into)
+		if err := d.SetFolderInto(dir); err != nil {
+			return err
+		}
+		e.applySettings(func(s *Settings) { s.FolderDir = filepath.Clean(dir) })
+	}
+	return nil
 }
 
 func isTorrentURL(u string) bool {

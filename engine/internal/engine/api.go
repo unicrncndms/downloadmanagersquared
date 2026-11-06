@@ -74,6 +74,13 @@ type settingsPatch struct {
 	VPNHTTP            *string  `json:"vpnHttp"`
 	VPNTorrent         *string  `json:"vpnTorrent"`
 	VPNProvider        *string  `json:"vpnProvider"`
+	FolderDefault      *bool    `json:"folderDefault"`
+}
+
+type folderParams struct {
+	ID   string  `json:"id"`
+	On   *bool   `json:"on"`
+	Into *string `json:"into"` // the folder to extract into, confirmed by the user
 }
 
 type ifacePatch struct {
@@ -202,6 +209,18 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, err
 		}
 		return nil, d.SetHashes(p.SHA256, p.MD5)
+	case "setFolder":
+		p, err := decode[folderParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.SetFolder(p.ID, p.On, p.Into)
+	case "pickFolder":
+		p, err := decode[idParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.PickFolder(p.ID)
 	case "setPageUrl":
 		p, err := decode[pageParams](raw)
 		if err != nil {
@@ -272,6 +291,9 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			}
 			if p.VPNProvider != nil {
 				s.VPNProvider = *p.VPNProvider
+			}
+			if p.FolderDefault != nil {
+				s.FolderDefault = *p.FolderDefault
 			}
 		})
 		// The VPN modes apply to every download of that type, not only new ones.
