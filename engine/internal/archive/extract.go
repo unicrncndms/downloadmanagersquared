@@ -16,6 +16,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/klauspost/compress/zstd"
+
+	"downloadmanagersquared/engine/internal/archive/deflate64"
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
@@ -315,13 +318,92 @@ func discard(out *os.File) {
 	os.Remove(out.Name())
 }
 
+// zstdMaxWindow is the biggest Zstandard window DMS² decodes with: the
+// highest levels (--ultra -22) and long mode (--long) use 128 MiB.
+const zstdMaxWindow = 256 << 20
+
+// zstdFits turns down an Entry whose first Zstandard frame needs a window
+// over zstdMaxWindow or a dictionary. Anything else wrong with the header is
+// left to the decoder, as bytes that came out wrong.
+func zstdFits(e Entry, br *bufio.Reader) error {
+	b, _ := br.Peek(18) // the longest frame header
+	if len(b) < 6 || binary.LittleEndian.Uint32(b) != 0xfd2fb528 {
+		return nil // a skippable frame first, or not Zstandard at all
+	}
+	fhd := b[4]
+	single := fhd&0x20 != 0
+	dictLen := [4]int{0, 1, 2, 4}[fhd&3]
+	fcsLen := [4]int{0, 2, 4, 8}[fhd>>6]
+	if fcsLen == 0 && single {
+		fcsLen = 1
+	}
+	at := 5
+	var window uint64
+	if !single {
+		exp, mantissa := uint64(b[5]>>3), uint64(b[5]&7)
+		base := uint64(1) << (10 + exp)
+		window = base + base/8*mantissa
+		at++
+	}
+	if dictLen > 0 {
+		if len(b) < at+dictLen {
+			return nil
+		}
+		var id uint32
+		for i := dictLen - 1; i >= 0; i-- {
+			id = id<<8 | uint32(b[at+i])
+		}
+		if id != 0 {
+			return unsupported("%s needs a Zstandard dictionary, which isn't in the archive", e.Name)
+		}
+		at += dictLen
+	}
+	if single {
+		if len(b) < at+fcsLen {
+			return nil
+		}
+		for i := fcsLen - 1; i >= 0; i-- {
+			window = window<<8 | uint64(b[at+i])
+		}
+		if fcsLen == 2 {
+			window += 256
+		}
+	}
+	if window > zstdMaxWindow {
+		return unsupported("%s was compressed with a %d MiB Zstandard window, more than the %d MiB DMS² extracts with", e.Name, window>>20, zstdMaxWindow>>20)
+	}
+	return nil
+}
+
 // copyEntry decompresses the Entry's data from src into out and checks its
 // size and CRC32. bad is why its bytes are wrong; err is any other failure.
 func copyEntry(ctx context.Context, e Entry, src io.Reader, out *os.File) (bad string, err error) {
-	if e.Method == Deflate {
+	switch e.Method {
+	case Deflate:
 		fr := flate.NewReader(src)
 		defer fr.Close()
 		src = fr
+	case Deflate64:
+		fr := deflate64.NewReader(src)
+		defer fr.Close()
+		src = fr
+	case Zstd, zstdOld:
+		// What the decoder would only report as an error like any other:
+		// bytes that are right but can't be decoded here. Fetching them
+		// again wouldn't help, so the download stops and says why.
+		br := bufio.NewReader(src)
+		if err := zstdFits(e, br); err != nil {
+			return "", err
+		}
+		// One goroutine-free decoder, and no bigger window than
+		// zstdMaxWindow: a frame can ask for gigabytes.
+		zr, err := zstd.NewReader(br, zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true),
+			zstd.WithDecoderMaxWindow(zstdMaxWindow))
+		if err != nil {
+			return "", err
+		}
+		defer zr.Close()
+		src = zr
 	}
 	// One byte more than it should have shows a size that's too big, without
 	// writing more than that.

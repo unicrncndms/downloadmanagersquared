@@ -28,9 +28,21 @@ const TailGuess = 64 << 10
 
 // Compression methods DMS² can extract.
 const (
-	Store   uint16 = 0
-	Deflate uint16 = 8
+	Store     uint16 = 0
+	Deflate   uint16 = 8
+	Deflate64 uint16 = 9  // Windows Explorer's, for large files
+	Zstd      uint16 = 93 // Zstandard
+	zstdOld   uint16 = 20 // Zstandard's number in APPNOTE 6.3.7, since deprecated
 )
+
+// extractable: DMS² can decompress the method.
+func extractable(m uint16) bool {
+	switch m {
+	case Store, Deflate, Deflate64, Zstd, zstdOld:
+		return true
+	}
+	return false
+}
 
 const (
 	sigLocal    = 0x04034b50
@@ -384,7 +396,7 @@ func readCentral(br *bufio.Reader, base int64) (Entry, error) {
 		return Entry{}, unsupported("It contains encrypted files (%s)", stored)
 	case isLink(madeBy, external):
 		return Entry{}, unsupported("It contains a symbolic link, which DMS² can't extract (%s)", stored)
-	case method != Store && method != Deflate:
+	case !extractable(method):
 		return Entry{}, unsupported("It uses a compression method DMS² can't extract: %s (%s)", methodName(method), stored)
 	case method == Store && csize != usize:
 		return Entry{}, errNotZip // stored data is the file itself
@@ -435,7 +447,7 @@ func methodName(m uint16) string {
 		return "BZIP2"
 	case 14:
 		return "LZMA"
-	case 93:
+	case 20, 93:
 		return "Zstandard"
 	case 95:
 		return "XZ"

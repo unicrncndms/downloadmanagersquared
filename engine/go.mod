@@ -10,6 +10,7 @@ require (
 	github.com/anacrolix/torrent v1.61.0
 	github.com/anacrolix/utp v0.1.0
 	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
+	github.com/klauspost/compress v1.20.3
 	golang.org/x/crypto v0.57.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.42.0
