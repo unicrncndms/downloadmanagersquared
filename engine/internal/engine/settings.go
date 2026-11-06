@@ -31,6 +31,8 @@ type Settings struct {
 	ThresholdBytes     int64                     `json:"thresholdBytes"`
 	SaveDir            string                    `json:"saveDir"`
 	MaxParallel        int                       `json:"maxParallel"`
+	UploadLimit        int64                     `json:"uploadLimit,omitempty"`   // across every interface, bytes per second, 0 = none
+	DownloadLimit      int64                     `json:"downloadLimit,omitempty"` // the same
 	ETAWindowSec       int                       `json:"etaWindowSec"`
 	DefaultConnections int                       `json:"defaultConnections"`
 	SeedRatio          float64                   `json:"seedRatio"`   // seed a torrent until uploaded/size reaches this; 0 = don't seed
@@ -125,6 +127,7 @@ func (s *Settings) normalize() {
 		s.SaveDir = d.SaveDir
 	}
 	s.MaxParallel = min(max(s.MaxParallel, 1), 16)
+	s.UploadLimit, s.DownloadLimit = max(s.UploadLimit, 0), max(s.DownloadLimit, 0)
 	if s.ETAWindowSec < 5 {
 		s.ETAWindowSec = d.ETAWindowSec
 	}

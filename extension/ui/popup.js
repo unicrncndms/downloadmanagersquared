@@ -101,7 +101,10 @@ function makeCard(id) {
   const menuFolder = el("button", { onclick: () => { closeMenu(); act("showInFolder", { id }); } }, "Show in folder");
   const menuCopy = el("button", { onclick: () => { closeMenu(); copyLink(d && d.url); } }, "Copy link");
   const menuRemove = el("button", { onclick: () => { closeMenu(); removeDownload(id, ask); } }, "Remove…");
-  const menu = el("div", { class: "menu", hidden: true }, menuFolder, menuCopy, menuRemove);
+  // A queued download moves with these, or by dragging it onto another queued one.
+  const menuNext = el("button", { onclick: () => { closeMenu(); moveDownload(id, "first"); } }, "Start next");
+  const menuLast = el("button", { onclick: () => { closeMenu(); moveDownload(id, "last"); } }, "Start last");
+  const menu = el("div", { class: "menu", hidden: true }, menuNext, menuLast, menuFolder, menuCopy, menuRemove);
   const more = iconButton("more", "More", (e) => {
     e.stopPropagation();
     const was = !menu.hidden;
@@ -163,7 +166,11 @@ function makeCard(id) {
 
   // Details, in sections: Connections, Folder, File, Checks.
   const section = (title, ...body) => el("section", {}, el("h3", {}, title), ...body);
-  const connSection = section("Connections", allConns);
+  // An HTTP download's own speed limit, on top of the connections' and the global one.
+  const limitIn = el("input", { type: "number", min: 0, step: "any", placeholder: "none", id: "limit-" + id,
+    onchange: () => act("setLimit", { id, limit: Math.round((Number(limitIn.value) || 0) * 1e6) }, "Saved") });
+  const limitRow = el("div", { class: "row" }, el("label", { for: "limit-" + id, class: "muted" }, "Speed limit (MB/s)"), limitIn);
+  const connSection = section("Connections", allConns, limitRow);
 
   const foldOn = el("input", { type: "checkbox", onchange: () => act("setFolder", { id, on: foldOn.checked }) });
   const foldTag = el("span", { class: "badge dim" }, "unavailable");
@@ -207,6 +214,24 @@ function makeCard(id) {
     bar, meta, sub, via,
     cardConns, pick, foldAsk, ask,
     details);
+  const queued = () => d && d.status === "queued";
+  root.addEventListener("dragstart", (e) => {
+    e.dataTransfer.setData(DRAG_TYPE, id);
+    e.dataTransfer.effectAllowed = "move";
+  });
+  root.addEventListener("dragover", (e) => {
+    if (!queued() || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+    e.preventDefault();
+    root.classList.add("drop");
+  });
+  root.addEventListener("dragleave", () => root.classList.remove("drop"));
+  root.addEventListener("drop", (e) => {
+    root.classList.remove("drop");
+    const from = e.dataTransfer.getData(DRAG_TYPE);
+    if (!from || !queued()) return;
+    e.preventDefault();
+    moveDownload(from, id);
+  });
 
   let shownPageHint = false;
 
@@ -273,6 +298,10 @@ function makeCard(id) {
     menuFolder.hidden = !can.showInFolder;
     menuRemove.hidden = !can.remove; // a torrent being added has its own Cancel
     menuCopy.hidden = !d.url;
+    menuNext.hidden = menuLast.hidden = !queued();
+    limitRow.hidden = torrent;
+    if (document.activeElement !== limitIn) limitIn.value = d.limit ? +(d.limit / 1e6).toFixed(3) : "";
+    root.draggable = queued();
     more.parentElement.hidden = choosing;
 
     pick.hidden = !choosing;
@@ -437,6 +466,15 @@ function makeCard(id) {
 // Whether any VPN tunnel is set up, so a torrent can be sent through one.
 function hasVpn() {
   return ((latest.state && latest.state.interfaces) || []).some((i) => i.tunnel);
+}
+
+const DRAG_TYPE = "application/x-dms-download";
+
+// moveDownload moves queued download id onto target: another queued download's
+// id, or "first" or "last".
+function moveDownload(id, target) {
+  const before = moveBefore(latest.state.downloads || [], id, target);
+  if (before !== null) act("move", { id, before });
 }
 
 function removeDownload(id, ask) {

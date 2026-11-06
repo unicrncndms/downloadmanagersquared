@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { sortDownloads, statusLine, problemLinks, viaLine, seedLine, bulkActions, finished } = require("../lib/list.js");
+const { sortDownloads, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, finished } = require("../lib/list.js");
 
 const dl = (id, status, extra) => ({ kind: "http", id, status, size: 0, done: 0, links: {}, actions: {}, ...extra });
 
@@ -86,4 +86,18 @@ test("finished is complete and not seeding", () => {
   assert.equal(finished(dl("a", "completed")), true);
   assert.equal(finished(dl("b", "seeding")), false);
   assert.equal(finished(dl("c", "running")), false);
+});
+
+test("queued downloads list in the order they will start, and move by drop or to an end", () => {
+  const list = [dl("run", "running"), dl("q1", "queued"), dl("q2", "queued"), dl("q3", "queued")];
+  assert.deepEqual(sortDownloads(list).map((d) => d.id), ["run", "q1", "q2", "q3"]);
+  assert.equal(moveBefore(list, "q3", "q1"), "q1"); // dragged up: takes q1's place
+  assert.equal(moveBefore(list, "q1", "q2"), "q3"); // dragged down: goes after q2
+  assert.equal(moveBefore(list, "q1", "q3"), ""); // after the last one
+  assert.equal(moveBefore(list, "q3", "first"), "q1");
+  assert.equal(moveBefore(list, "q1", "last"), "");
+  assert.equal(moveBefore(list, "q1", "first"), null); // already there
+  assert.equal(moveBefore(list, "q3", "last"), null);
+  assert.equal(moveBefore(list, "run", "q1"), null); // only queued ones move
+  assert.equal(moveBefore(list, "q1", "run"), null);
 });

@@ -124,6 +124,8 @@ const FIELDS = {
   sDir: ["saveDir", (s) => s.saveDir, (v) => v.trim()],
   sThreshold: ["thresholdBytes", (s) => +(s.thresholdBytes / GB).toFixed(3), (v) => Math.round(Number(v) * GB)],
   sParallel: ["maxParallel", (s) => s.maxParallel, Number],
+  sDownLimit: ["downloadLimit", (s) => (s.downloadLimit ? +(s.downloadLimit / MB).toFixed(3) : ""), (v) => Math.round((Number(v) || 0) * MB)],
+  sUpLimit: ["uploadLimit", (s) => (s.uploadLimit ? +(s.uploadLimit / MB).toFixed(3) : ""), (v) => Math.round((Number(v) || 0) * MB)],
   sConns: ["defaultConnections", (s) => s.defaultConnections, Number],
   sEta: ["etaWindowSec", (s) => s.etaWindowSec, Number],
   sRatio: ["seedRatio", (s) => s.seedRatio, Number],

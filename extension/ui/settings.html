@@ -113,6 +113,13 @@
         <label for="sParallel">Downloads at once</label>
         <input type="number" id="sParallel" min="1" max="16" data-setting>
 
+        <label for="sDownLimit">Download limit, all connections (MB/s)
+          <span class="info" tabindex="0" data-tip="Caps everything DMS² receives, on top of each connection's own limit. Empty: none."></span></label>
+        <input type="number" id="sDownLimit" min="0" step="any" placeholder="none" data-setting>
+
+        <label for="sUpLimit">Upload limit, all connections (MB/s)</label>
+        <input type="number" id="sUpLimit" min="0" step="any" placeholder="none" data-setting>
+
         <label for="sConns">Default requests per connection</label>
         <input type="number" id="sConns" min="1" max="32" data-setting>
 

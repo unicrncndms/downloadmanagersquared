@@ -37,6 +37,8 @@
     .card .meta .end > .num { margin-right: 4px; }
     .card .sub { font-size: 11px; margin-top: 1px; }
     .card [hidden] { display: none !important; }
+    .card[draggable="true"] { cursor: grab; }
+    .card.drop { border-color: var(--accent); }
     button.icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; padding: 0;
       border-color: transparent; background: transparent; color: var(--muted); }
     button.icon:hover { color: var(--accent); border-color: var(--line); }

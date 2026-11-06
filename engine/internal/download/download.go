@@ -66,6 +66,7 @@ type State struct {
 	PageURL    string           `json:"pageUrl,omitempty"`
 	Cookie     Secret           `json:"cookie,omitempty"`
 	Referer    string           `json:"referer,omitempty"`
+	Limit      int64            `json:"limit,omitempty"` // download speed cap, bytes per second; 0 = none
 	UserAgent  string           `json:"userAgent,omitempty"`
 	Browser    string           `json:"browser,omitempty"` // exe of the browser that handed it over; its pages open there
 	Dir        string           `json:"dir"`
@@ -167,6 +168,8 @@ type Download struct {
 	lastTick time.Time
 	lastSave time.Time
 	lastDisk time.Time
+
+	limit *rate.Shaper // st.Limit, over all its connections
 }
 
 func New(env Env, st State) *Download {
@@ -176,7 +179,20 @@ func New(env Env, st State) *Download {
 	for _, l := range st.Links {
 		l.restored()
 	}
-	return &Download{env: env, st: st}
+	st.Limit = max(st.Limit, 0)
+	d := &Download{env: env, st: st, limit: rate.NewShaper()}
+	d.limit.SetLimits(0, st.Limit)
+	return d
+}
+
+// SetLimit caps the download's speed, in bytes per second; 0 is none.
+func (d *Download) SetLimit(bps int64) {
+	bps = max(bps, 0)
+	d.mu.Lock()
+	d.st.Limit = bps
+	d.mu.Unlock()
+	d.limit.SetLimits(0, bps)
+	d.env.Changed(d)
 }
 
 func (d *Download) ID() string { return d.st.ID }
@@ -1092,6 +1108,12 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 				w.bytes.Add(allowed)
 				ir.bytes.Add(allowed)
 			}
+			// Held to the download's own limit; waiting for it isn't a stall.
+			stall.Stop()
+			if err := d.limit.Took(ctx, n); err != nil {
+				return err
+			}
+			stall.Reset(stallTimeout)
 			if allowed < int64(n) {
 				return nil
 			}
@@ -1203,6 +1225,7 @@ func (d *Download) complete(ctx context.Context) error {
 		d.st.HashResult = "match"
 		d.mu.Unlock()
 	}
+	d.markFunc()(part)
 	final := filepath.Join(dir, uniqueName(dir, name, ""))
 	if err := os.Rename(part, final); err != nil {
 		return fmt.Errorf("could not rename finished file: %w", err)
@@ -1211,6 +1234,20 @@ func (d *Download) complete(ctx context.Context) error {
 	d.st.Filename = filepath.Base(final)
 	d.mu.Unlock()
 	return nil
+}
+
+// markFunc writes the Mark of the Web, as a browser would, on a file this
+// download produced. A failure (a volume without alternate data streams) is
+// only logged: the file is fine without it.
+func (d *Download) markFunc() func(path string) {
+	d.mu.Lock()
+	id, host, ref := d.st.ID, d.st.URL, cmp.Or(d.st.Referer, d.st.PageURL)
+	d.mu.Unlock()
+	return func(path string) {
+		if err := winutil.MarkFromInternet(path, host, ref); err != nil {
+			log.Printf("download %s: marking %s as from the internet: %v", id, filepath.Base(path), err)
+		}
+	}
 }
 
 func verify(ctx context.Context, path, wantSHA, wantMD5 string) error {
@@ -1340,7 +1377,8 @@ type Summary struct {
 	Status   Status                 `json:"status"`
 	Error    string                 `json:"error,omitempty"`
 	Speed    float64                `json:"speed"`
-	ETA      float64                `json:"eta"` // seconds, -1 when unknown
+	ETA      float64                `json:"eta"`             // seconds, -1 when unknown
+	Limit    int64                  `json:"limit,omitempty"` // HTTP only: the download's speed cap, bytes per second
 	RangeOK  bool                   `json:"rangeOk"`
 	Probed   bool                   `json:"probed"`
 	SHA256   string                 `json:"sha256,omitempty"`
@@ -1359,15 +1397,15 @@ type Summary struct {
 	Files     []FileSummary `json:"-"`
 	FileCount int           `json:"fileCount,omitempty"`
 	FilesSize int64         `json:"filesSize,omitempty"`
-	AskVPN   bool          `json:"askVpn,omitempty"` // waiting for: VPN, or the current connection?
-	Peers    int           `json:"peers,omitempty"`  // connected
-	Seeds    int           `json:"seeds,omitempty"`  // connected peers with the whole torrent
-	Swarm    int           `json:"swarm,omitempty"`  // peers known, connected or not
-	InfoHash string        `json:"infoHash,omitempty"`
-	Uploaded int64         `json:"uploaded,omitempty"`
-	Ratio    float64       `json:"ratio,omitempty"`
-	UpSpeed  float64       `json:"upSpeed,omitempty"`
-	InSwarm  bool          `json:"inSwarm,omitempty"` // exchanging pieces with peers right now
+	AskVPN    bool          `json:"askVpn,omitempty"` // waiting for: VPN, or the current connection?
+	Peers     int           `json:"peers,omitempty"`  // connected
+	Seeds     int           `json:"seeds,omitempty"`  // connected peers with the whole torrent
+	Swarm     int           `json:"swarm,omitempty"`  // peers known, connected or not
+	InfoHash  string        `json:"infoHash,omitempty"`
+	Uploaded  int64         `json:"uploaded,omitempty"`
+	Ratio     float64       `json:"ratio,omitempty"`
+	UpSpeed   float64       `json:"upSpeed,omitempty"`
+	InSwarm   bool          `json:"inSwarm,omitempty"` // exchanging pieces with peers right now
 
 	hashResult string // State.HashResult, for the label and note
 	serverMD5  bool   // no checksum pasted: the server's MD5 is the one checked
@@ -1501,7 +1539,7 @@ func (d *Download) Summary() Summary {
 		hashResult: d.st.HashResult, checking: d.checking,
 		serverMD5: d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.MD5 != "",
 		Added:     d.st.Added, Finished: d.st.Finished, VPN: d.st.VPN,
-		Folder: d.folderSummaryLocked(),
+		Folder: d.folderSummaryLocked(), Limit: d.st.Limit,
 	}
 	if d.running {
 		s.ETA = d.eta.Seconds()

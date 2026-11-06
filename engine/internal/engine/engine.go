@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -95,6 +96,7 @@ type Engine struct {
 	mu        sync.Mutex
 	settings  Settings
 	ifaces    map[string]*ifaceEntry
+	global    *rate.Shaper // the limits across every interface: each one's shaper is under it
 	clients   map[*ipc.Conn]*client
 	clientSeq int64
 	resolves  map[string]resolveReq // waiting for an extension to pick them up
@@ -200,6 +202,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		ln:       ln,
 		settings: settings,
 		ifaces:   map[string]*ifaceEntry{},
+		global:   rate.NewShaper(),
 		clients:  map[*ipc.Conn]*client{},
 		resolves: map[string]resolveReq{},
 		started:  map[string]time.Time{},
@@ -214,8 +217,11 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	ports := map[paths.Mode]int{paths.Off: e.settings.TorrentPort, paths.VPNOnly: e.settings.TorrentPort}
 	for _, m := range []paths.Mode{paths.Off, paths.Alongside, paths.VPNOnly} {
 		s, err := torrent.NewSession(torrent.Config{
-			Changed:  func(t *torrent.Torrent) { e.queue.MarkDirty(t.ID()) },
-			Finished: func(t *torrent.Torrent) { e.notifyFinished(t.Summary(), t.Path()) },
+			Changed: func(t *torrent.Torrent) { e.queue.MarkDirty(t.ID()) },
+			Finished: func(t *torrent.Torrent) {
+				markTorrent(t.ID(), t.Path())
+				e.notifyFinished(t.Summary(), t.Path())
+			},
 			Ratio: func() float64 {
 				e.mu.Lock()
 				defer e.mu.Unlock()
@@ -427,7 +433,7 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 				log.Printf("socks for %s: %v", i.Name, err)
 				continue
 			}
-			ent = &ifaceEntry{socks: srv, shaper: rate.NewShaper()}
+			ent = &ifaceEntry{socks: srv, shaper: rate.NewShaper().Under(e.global)}
 			e.ifaces[i.ID] = ent
 			log.Printf("interface %s (%s) %s, socks port %d", i.Name, i.Description, i.IPv4, srv.Port())
 		}
@@ -461,6 +467,7 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 }
 
 func (e *Engine) applyLimitsLocked() {
+	e.global.SetLimits(e.settings.UploadLimit, e.settings.DownloadLimit)
 	for id, ent := range e.ifaces {
 		var up, down int64
 		if s := e.settings.Interfaces[id]; s != nil {
@@ -762,6 +769,23 @@ func (e *Engine) Finished(d *download.Download) { e.notifyFinished(d.Summary(), 
 var notify = winutil.NotifyClick
 
 // notifyFinished says a download ended; a click on a finished one shows it in its folder.
+// markTorrent writes the Mark of the Web on every file under path, the
+// torrent's file or folder. No URL: a torrent's files come from peers.
+func markTorrent(id, path string) {
+	if path == "" {
+		return
+	}
+	filepath.WalkDir(path, func(p string, de fs.DirEntry, err error) error {
+		if err == nil && de.Type().IsRegular() {
+			if err := winutil.MarkFromInternet(p, "", ""); err != nil {
+				log.Printf("torrent %s: marking %s as from the internet: %v", id, filepath.Base(p), err)
+				return filepath.SkipAll // the volume takes no streams: the rest won't either
+			}
+		}
+		return nil
+	})
+}
+
 func (e *Engine) notifyFinished(s download.Summary, path string) {
 	if s.Status == download.StatusCompleted || s.Status == torrent.StatusSeeding {
 		msg := s.Filename

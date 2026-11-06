@@ -56,6 +56,9 @@ type Extractor struct {
 	folders map[string]int // folder Entry path -> its index
 
 	s *stream // the large Entry being extracted as its bytes arrive, if any
+
+	// Mark, if set, is called on each file before it takes its final name.
+	Mark func(path string)
 }
 
 // Result is what one call to Extract did, for the caller to save.
@@ -284,7 +287,7 @@ func (x *Extractor) extractFile(ctx context.Context, e Entry, path string) (bad 
 		discard(out)
 		return bad, err
 	}
-	return "", finish(e, out, path)
+	return "", finish(e, out, path, x.Mark)
 }
 
 // header reads the Entry's local header: where its data starts.
@@ -446,12 +449,15 @@ func copyEntry(ctx context.Context, e Entry, src io.Reader, out *os.File) (bad s
 }
 
 // finish puts a checked Entry's file in place, with its time and read-only
-// flag. The unfinished file is gone either way.
-func finish(e Entry, out *os.File, path string) error {
+// flag, after mark (if set) has seen it. The unfinished file is gone either way.
+func finish(e Entry, out *os.File, path string, mark func(string)) error {
 	tmp := out.Name()
 	err := out.Close()
 	if err == nil {
 		err = os.Chtimes(tmp, e.Modified, e.Modified)
+	}
+	if err == nil && mark != nil {
+		mark(tmp)
 	}
 	if err == nil {
 		// A file left from an attempt whose end wasn't saved may be read-only.

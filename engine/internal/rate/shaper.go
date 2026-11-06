@@ -12,9 +12,28 @@ import (
 const shaperBurst = 32 << 10
 
 // Shaper holds every connection on one interface to its upload and download
-// limits together.
+// limits together, and to its parent's (Under) as well: the lower one wins.
 type Shaper struct {
 	up, down *xrate.Limiter
+	parent   *Shaper
+}
+
+// Under makes p s's parent: everything s shapes counts against p's limits too.
+func (s *Shaper) Under(p *Shaper) *Shaper {
+	s.parent = p
+	return s
+}
+
+// Took waits until n bytes received fit the download limits, or ctx ends.
+func (s *Shaper) Took(ctx context.Context, n int) error {
+	for ; n > 0; n -= shaperBurst {
+		for t := s; t != nil; t = t.parent {
+			if err := t.down.WaitN(ctx, min(n, shaperBurst)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func NewShaper() *Shaper {
@@ -56,9 +75,15 @@ func (s *Shaper) PacketConn(pc net.PacketConn) net.PacketConn {
 	return &shapedPacketConn{PacketConn: pc, s: s}
 }
 
-func wait(l *xrate.Limiter, n int) {
-	if n > 0 {
-		l.WaitN(context.Background(), min(n, shaperBurst))
+func (s *Shaper) waitUp(n int) {
+	for t := s; t != nil && n > 0; t = t.parent {
+		t.up.WaitN(context.Background(), min(n, shaperBurst))
+	}
+}
+
+func (s *Shaper) waitDown(n int) {
+	for t := s; t != nil && n > 0; t = t.parent {
+		t.down.WaitN(context.Background(), min(n, shaperBurst))
 	}
 }
 
@@ -72,7 +97,7 @@ func (c *shapedConn) Read(p []byte) (int, error) {
 		p = p[:shaperBurst]
 	}
 	n, err := c.Conn.Read(p)
-	wait(c.s.down, n)
+	c.s.waitDown(n)
 	return n, err
 }
 
@@ -80,7 +105,7 @@ func (c *shapedConn) Write(p []byte) (int, error) {
 	written := 0
 	for len(p) > 0 {
 		chunk := p[:min(len(p), shaperBurst)]
-		wait(c.s.up, len(chunk))
+		c.s.waitUp(len(chunk))
 		n, err := c.Conn.Write(chunk)
 		written += n
 		if err != nil {
@@ -98,11 +123,11 @@ type shapedPacketConn struct {
 
 func (c *shapedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	n, addr, err := c.PacketConn.ReadFrom(p)
-	wait(c.s.down, n)
+	c.s.waitDown(n)
 	return n, addr, err
 }
 
 func (c *shapedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
-	wait(c.s.up, len(p))
+	c.s.waitUp(len(p))
 	return c.PacketConn.WriteTo(p, addr)
 }

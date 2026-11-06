@@ -1,6 +1,7 @@
 package rate
 
 import (
+	"context"
 	"io"
 	"net"
 	"sync"
@@ -115,5 +116,37 @@ func TestPacketsCountAgainstTheSameLimit(t *testing.T) {
 	}
 	if took := time.Since(start); took < 1500*time.Millisecond {
 		t.Fatalf("200 KB of packets at 100 KB/s took %v", took)
+	}
+}
+
+func TestTheLowerOfAShaperAndItsParentWins(t *testing.T) {
+	const size = 200 << 10
+	addr := serve(t, size)
+	read := func(c net.Conn) { io.Copy(io.Discard, c) }
+	for _, c := range []struct{ child, parent int64 }{{0, 200 << 10}, {200 << 10, 0}, {200 << 10, 50 << 20}} {
+		global := NewShaper()
+		global.SetLimits(0, c.parent)
+		s := NewShaper().Under(global)
+		s.SetLimits(0, c.child)
+		if took := both(t, s, addr, read); took < 1500*time.Millisecond {
+			t.Errorf("limits %d (own) and %d (parent): 400 KB took %v, want about 2 s", c.child, c.parent, took)
+		}
+	}
+}
+
+func TestTookWaitsForTheDownloadLimit(t *testing.T) {
+	s := NewShaper()
+	s.SetLimits(0, 200<<10)
+	start := time.Now()
+	if err := s.Took(t.Context(), 400<<10); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took < 1500*time.Millisecond {
+		t.Fatalf("400 KB at 200 KB/s took %v", took)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := s.Took(ctx, 1<<20); err == nil {
+		t.Fatal("Took ignored a cancelled context")
 	}
 }

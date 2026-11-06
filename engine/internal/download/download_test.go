@@ -272,6 +272,19 @@ func TestNoRangeUsesMainOnly(t *testing.T) {
 		t.Errorf("main interface did not download the file")
 	}
 	checkFile(t, filepath.Join(dir, "thing.iso"), data)
+	checkMarked(t, filepath.Join(dir, "thing.iso"), srv.URL+"/thing.iso")
+}
+
+// checkMarked: path carries the Mark of the Web, with host as its HostUrl.
+func checkMarked(t *testing.T, path, host string) {
+	t.Helper()
+	b, err := os.ReadFile(path + ":Zone.Identifier")
+	if err != nil {
+		t.Fatalf("no Mark of the Web on %s: %v", filepath.Base(path), err)
+	}
+	if s := string(b); !strings.Contains(s, "ZoneId=3\r\n") || !strings.Contains(s, "HostUrl="+host+"\r\n") {
+		t.Fatalf("Mark of the Web on %s is %q, want ZoneId=3 and HostUrl=%s", filepath.Base(path), s, host)
+	}
 }
 
 func TestUnknownSizeEndsWithTheResponse(t *testing.T) {
@@ -714,5 +727,29 @@ func TestResumeQueuesAStoppedDownload(t *testing.T) {
 	d.Resume()
 	if d.Status() != StatusQueued || d.Yields() || d.Rejoins() {
 		t.Fatalf("resumed as %q, yields %v, rejoins %v", d.Status(), d.Yields(), d.Rejoins())
+	}
+}
+
+func TestDownloadLimitHoldsAcrossInterfaces(t *testing.T) {
+	data := randomData(3 << 20)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "f.bin", time.Time{}, bytes.NewReader(data))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	env := &testEnv{ifaces: []Iface{iface("eth", 4, 0), iface("wifi", 4, 0)}, main: "eth"}
+	start := time.Now()
+	d := runToEnd(t, env, State{ID: "lim", URL: srv.URL + "/f.bin", Dir: dir, Size: -1, Limit: 1 << 20})
+	if s := d.Summary(); s.Status != StatusCompleted || s.Limit != 1<<20 {
+		t.Fatalf("status %s limit %d: %s", s.Status, s.Limit, s.Error)
+	}
+	// 3 MB at 1 MB/s, less the first burst and the probes' bytes.
+	if took := time.Since(start); took < 1500*time.Millisecond {
+		t.Fatalf("3 MB at 1 MB/s took %v", took)
+	}
+	checkFile(t, filepath.Join(dir, "f.bin"), data)
+	d.SetLimit(-5)
+	if got := d.State().Limit; got != 0 {
+		t.Fatalf("limit after a negative one: %d, want 0 (none)", got)
 	}
 }

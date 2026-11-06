@@ -52,12 +52,27 @@ function group(d) {
   return 1;
 }
 
-// sortDownloads orders the engine's list (oldest first) by group, newest first
-// within each.
+// sortDownloads orders the engine's list (in queue order) by group, newest
+// first within each, except the queued: those in the order they will start.
 function sortDownloads(downloads) {
   return downloads.map((d, i) => ({ d, i }))
-    .sort((a, b) => group(a.d) - group(b.d) || b.i - a.i)
+    .sort((a, b) => group(a.d) - group(b.d) || (group(a.d) === 3 ? a.i - b.i : b.i - a.i))
     .map((x) => x.d);
+}
+
+// moveBefore is the engine "move" a queued download id takes, as its
+// "before": dropped on target, it takes target's place (after it when
+// dragged down); target "first" or "last" is an end of the queue. null:
+// nothing to move.
+function moveBefore(downloads, id, target) {
+  const qs = downloads.filter((d) => d.status === "queued").map((d) => d.id);
+  const from = qs.indexOf(id);
+  if (from < 0) return null;
+  if (target === "first") return from === 0 ? null : qs[0];
+  if (target === "last") return from === qs.length - 1 ? null : "";
+  const to = qs.indexOf(target);
+  if (to < 0 || to === from) return null;
+  return to < from ? target : qs[to + 1] || "";
 }
 
 // statusLine is the line under the progress bar: left "31% · 13.0 GB / 42.0
@@ -120,5 +135,5 @@ function bulkActions(downloads) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, statusLine, problemLinks, viaLine, seedLine, bulkActions };
+  module.exports = { fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions };
 }

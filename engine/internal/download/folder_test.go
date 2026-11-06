@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -163,6 +164,12 @@ func TestZipDownloadsAsAFolder(t *testing.T) {
 		t.Fatalf("path %s, out %s, want %s", d.Path(), s.Folder.Out, out)
 	}
 	checkTree(t, out, files, "")
+	filepath.WalkDir(out, func(p string, de fs.DirEntry, err error) error {
+		if err == nil && !de.IsDir() {
+			checkMarked(t, p, srv.URL+"/dl")
+		}
+		return nil
+	})
 	if got := names(t, into); len(got) != 1 || got[0] != "big" {
 		t.Fatalf("left in the folder: %v (want only big)", got)
 	}

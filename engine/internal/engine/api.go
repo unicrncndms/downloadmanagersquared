@@ -69,6 +69,8 @@ type settingsPatch struct {
 	ThresholdBytes     *int64   `json:"thresholdBytes"`
 	SaveDir            *string  `json:"saveDir"`
 	MaxParallel        *int     `json:"maxParallel"`
+	UploadLimit        *int64   `json:"uploadLimit"`
+	DownloadLimit      *int64   `json:"downloadLimit"`
 	ETAWindowSec       *int     `json:"etaWindowSec"`
 	DefaultConnections *int     `json:"defaultConnections"`
 	SeedRatio          *float64 `json:"seedRatio"`
@@ -165,6 +167,29 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, winutil.ShowInFolder(j.Path())
 		}
 		return nil, nil
+	case "setLimit":
+		p, err := decode[struct {
+			ID    string `json:"id"`
+			Limit int64  `json:"limit"` // bytes per second, 0 = none
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		d, err := e.get(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		d.SetLimit(p.Limit)
+		return nil, nil
+	case "move":
+		p, err := decode[struct {
+			ID     string `json:"id"`
+			Before string `json:"before"` // "" = last
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.queue.Move(p.ID, p.Before) // the next tick starts by the new order
 	case "chooseFiles":
 		p, err := decode[chooseParams](raw)
 		if err != nil {
@@ -288,6 +313,12 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			}
 			if p.MaxParallel != nil {
 				s.MaxParallel = *p.MaxParallel
+			}
+			if p.UploadLimit != nil {
+				s.UploadLimit = *p.UploadLimit
+			}
+			if p.DownloadLimit != nil {
+				s.DownloadLimit = *p.DownloadLimit
 			}
 			if p.ETAWindowSec != nil {
 				s.ETAWindowSec = *p.ETAWindowSec

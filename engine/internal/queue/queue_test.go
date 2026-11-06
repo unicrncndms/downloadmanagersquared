@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -211,5 +212,36 @@ func TestLoweringTheLimitQueuesATorrentBeforeAnHTTPDownload(t *testing.T) {
 	q.Schedule(1, lo)
 	if !h.running || tor.running || tor.status != download.StatusQueued {
 		t.Fatalf("the torrent gives up its slot first; got http %v torrent %v/%s", h.running, tor.running, tor.status)
+	}
+}
+
+func TestAMovedEntryStartsFirstAndKeepsItsPlace(t *testing.T) {
+	dir := t.TempDir()
+	a, b, c := queued(false), queued(false), queued(false)
+	q := New(dir, nil)
+	for _, e := range []*fake{a, b, c} {
+		q.Add(e)
+	}
+	if err := q.Move(c.id, a.id); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Move(a.id, ""); err != nil {
+		t.Fatal(err)
+	}
+	q.Schedule(1, lo)
+	if !c.running || a.running || b.running {
+		t.Fatalf("running a %v b %v c %v; want c, moved to the front", a.running, b.running, c.running)
+	}
+	// After a restart, with one added since the move: the moved order, then the new one.
+	d := queued(false)
+	var got []string
+	for _, e := range New(dir, []Entry{d, a, b, c}).List() {
+		got = append(got, e.ID())
+	}
+	if want := []string{c.id, b.id, a.id, d.id}; !slices.Equal(got, want) {
+		t.Fatalf("order after restart %v, want %v", got, want)
+	}
+	if err := q.Move("nope", ""); err == nil {
+		t.Fatal("moving an unknown download succeeded")
 	}
 }

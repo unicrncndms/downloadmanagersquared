@@ -1,8 +1,10 @@
 // Package queue is the downloads list: HTTP downloads and torrents in the
-// order added, which of them hold the Max parallel slots, and their saved state.
+// order added or moved, which of them hold the Max parallel slots, and their saved state.
 package queue
 
 import (
+	"cmp"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -58,11 +60,24 @@ type Queue struct {
 	dirty map[string]bool
 }
 
-// New is a queue saving under dir, holding loaded in the order they were added.
+// New is a queue saving under dir, holding loaded in the order they were
+// added, or as the user last moved them.
 func New(dir string, loaded []Entry) *Queue {
 	q := &Queue{dir: dir, byID: map[string]Entry{}, dirty: map[string]bool{}}
 	loaded = slices.Clone(loaded)
 	sort.SliceStable(loaded, func(i, j int) bool { return loaded[i].Added().Before(loaded[j].Added()) })
+	// Entries the saved order doesn't know were added after the last move: they go last.
+	var saved []string
+	if b, err := os.ReadFile(q.orderPath()); err == nil {
+		json.Unmarshal(b, &saved)
+	}
+	rank := func(e Entry) int {
+		if i := slices.Index(saved, e.ID()); i >= 0 {
+			return i
+		}
+		return len(saved)
+	}
+	sort.SliceStable(loaded, func(i, j int) bool { return rank(loaded[i]) < rank(loaded[j]) })
 	for _, e := range loaded {
 		q.byID[e.ID()] = e
 		q.order = append(q.order, e.ID())
@@ -89,7 +104,7 @@ func (q *Queue) Get(id string) (Entry, error) {
 	return e, nil
 }
 
-// List is every entry in the order added.
+// List is every entry in the queue's order: as added, unless moved.
 func (q *Queue) List() []Entry {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -110,6 +125,31 @@ func (q *Queue) Replace(old, e Entry) error {
 	q.byID[e.ID()], q.dirty[e.ID()] = e, true
 	return nil
 }
+
+// Move puts the entry id just before the entry before, or last when before is
+// "". The order is what Schedule starts by, and is kept across restarts.
+func (q *Queue) Move(id, before string) error {
+	q.saveMu.Lock()
+	defer q.saveMu.Unlock()
+	q.mu.Lock()
+	if q.byID[id] == nil || (before != "" && q.byID[before] == nil) {
+		q.mu.Unlock()
+		return fmt.Errorf("no download %q", cmp.Or(before, id))
+	}
+	if id != before {
+		q.order = slices.DeleteFunc(q.order, func(x string) bool { return x == id })
+		at := len(q.order)
+		if before != "" {
+			at = slices.Index(q.order, before)
+		}
+		q.order = slices.Insert(q.order, at, id)
+	}
+	order := slices.Clone(q.order)
+	q.mu.Unlock()
+	return atomicfile.WriteJSON(q.orderPath(), order)
+}
+
+func (q *Queue) orderPath() string { return filepath.Join(q.dir, "order.json") }
 
 // Remove discards an entry and its saved state.
 func (q *Queue) Remove(id string, deleteFiles bool) error {
@@ -164,7 +204,7 @@ func (q *Queue) ResumeAll() {
 }
 
 // Schedule starts queued entries while fewer than limit hold a slot, HTTP
-// downloads before torrents, each in the order added. A queued HTTP download
+// downloads before torrents, each in the queue's order. A queued HTTP download
 // that finds no free slot takes one from the latest added torrent that is
 // downloading, which goes back to the queue. Under VPN only, an entry waits
 // while snap has no tunnel up.

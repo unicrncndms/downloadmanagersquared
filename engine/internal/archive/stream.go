@@ -109,7 +109,7 @@ func (x *Extractor) streamStep(ctx context.Context, i int, missing []Range, r *R
 		discard(out)
 		return end.bad, false, end.err
 	}
-	if err := finish(e, out, s.path); err != nil {
+	if err := finish(e, out, s.path, x.Mark); err != nil {
 		return "", false, err
 	}
 	return "", true, nil

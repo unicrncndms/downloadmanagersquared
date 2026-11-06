@@ -448,6 +448,7 @@ func (d *Download) folderStep(ctx context.Context, fr *folderRun) (more bool, er
 		if err != nil {
 			return d.folderFallback(err)
 		}
+		x.Mark = d.markFunc()
 		fr.x = x
 		d.mu.Lock()
 		f.Files, f.Of = x.Progress()
