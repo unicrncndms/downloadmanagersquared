@@ -18,8 +18,9 @@ $tags = @(git tag --merged "$Tag^" --list 'v*' --sort=-v:refname)
 if ($LASTEXITCODE) { throw "reading the tags before $Tag failed" }
 $previous = $null
 foreach ($t in $tags) {
-    gh release view $t --json tagName *> $null
-    if ($LASTEXITCODE -eq 0) { $previous = $t; break }
+    # "release not found" on stderr is an answer here, not an error.
+    $released = & { $ErrorActionPreference = 'Continue'; gh release view $t --json tagName 2>$null | Out-Null; $LASTEXITCODE -eq 0 }
+    if ($released) { $previous = $t; break }
 }
 $global:LASTEXITCODE = 0
 $range = if ($previous) { "$previous..$Tag" } else { $Tag }
