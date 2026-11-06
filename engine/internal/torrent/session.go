@@ -16,7 +16,6 @@ import (
 	"sync"
 
 	"github.com/anacrolix/dht/v2"
-	alog "github.com/anacrolix/log"
 	atorrent "github.com/anacrolix/torrent"
 	pp "github.com/anacrolix/torrent/peer_protocol"
 	"github.com/anacrolix/torrent/storage"
@@ -134,7 +133,6 @@ func (s *Session) newClient() (*atorrent.Client, storage.ClientImplCloser, error
 		Logger: slog.New(slog.DiscardHandler),
 	})
 	c.DefaultStorage = stor
-	c.Logger = alog.Default.WithFilterLevel(alog.Critical)
 	c.Slogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	cl, err := atorrent.NewClient(c)
 	if err != nil {
