@@ -31,7 +31,7 @@ if ($Repo) { $ldflags += " -X downloadmanagersquared/engine/internal/install.Rep
 # installs on its own, e.g. double-clicked inside the zip, where Explorer
 # extracts only that exe. It also carries the extension's pages for its
 # Downloads window (internal\ui), in their own layout: ui\..., lib\version.js,
-# lib\folder.js and icons\icon.svg, which the pages load as ../lib/... and
+# lib\folder.js, lib\list.js and icons\icon.svg, which the pages load as ../lib/... and
 # ../icons/icon.svg. Both folders are emptied again afterwards.
 $bundle = Join-Path $root 'engine\internal\bundle\files'
 $pages = Join-Path $root 'engine\internal\ui\files'
@@ -44,7 +44,7 @@ try {
     Copy-Item "$dist\dms-host.exe", (Join-Path $root 'LICENSE'), "$dist\THIRD-PARTY-NOTICES" $bundle
     Copy-Item (Join-Path $root 'extension\ui') $pages -Recurse
     New-Item -ItemType Directory -Force (Join-Path $pages 'lib') | Out-Null
-    Copy-Item (Join-Path $root 'extension\lib\version.js'), (Join-Path $root 'extension\lib\folder.js') (Join-Path $pages 'lib')
+    Copy-Item (Join-Path $root 'extension\lib\version.js'), (Join-Path $root 'extension\lib\folder.js'), (Join-Path $root 'extension\lib\list.js') (Join-Path $pages 'lib')
     New-Item -ItemType Directory -Force (Join-Path $pages 'icons') | Out-Null
     Copy-Item (Join-Path $root 'extension\icons\icon.svg') (Join-Path $pages 'icons')
     & $go build -trimpath -ldflags "-H windowsgui -s -w $ldflags" -o "$dist\dms-engine.exe" ./cmd/dms-engine

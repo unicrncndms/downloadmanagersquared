@@ -10,8 +10,9 @@
 // folderView is the toggle, the add step and the facts for Details, or null
 // when the download has nothing to do with it (a torrent, a name that isn't
 // .zip and never asked for it).
-//   toggle: { on, disabled, reason } while unfinished, else null
-//   ask:    { prefill } while it waits for a folder to extract into, else null
+//   toggle: { on, disabled, reason } while unfinished and not locked, else null
+//   extracting: locked (Entries freed), so Details just says it extracts
+//   ask:   { prefill } while it waits for a folder to extract into, else null
 //   move:   { into, moving, warning, error } once it has one, while unfinished:
 //           "Extract into" with Browse… to move it, else null
 //   facts:  [label, value] pairs
@@ -20,9 +21,9 @@ function folderView(d, settings) {
   if (!f) return null;
   const done = d.status === "completed";
   let toggle = null;
-  if (!done) {
+  if (!done && !f.locked) {
     const reason = f.why || "";
-    toggle = { on: !!f.on, disabled: !!reason || !!f.locked, reason };
+    toggle = { on: !!f.on, disabled: !!reason, reason };
   }
   const ask = f.on && !f.into && !done ? { prefill: lastFolder(settings) } : null;
   const move = f.on && f.into && !done
@@ -33,7 +34,7 @@ function folderView(d, settings) {
   if (f.on && f.out) facts.push([done ? "Extracted to" : "Folder", f.out]);
   if (f.note) facts.push(["Note", f.note]);
   if (f.renamed && f.renamed.length) facts.push(["Renamed", f.renamed.join("\n")]);
-  return { toggle, ask, move, facts };
+  return { toggle, extracting: !done && !!f.locked, ask, move, facts };
 }
 
 // lastFolder is where a Download as folder extracts unless told otherwise:

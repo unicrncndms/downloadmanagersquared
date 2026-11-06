@@ -16,16 +16,12 @@
     .engine-window .head h1 { font-size: 18px; gap: 8px; }
     .engine-window .head h1 img { width: 22px; height: 22px; }
     .engine-window .tools { height: var(--win-row2); margin-top: var(--win-gap); gap: 6px; white-space: nowrap; }
-    .engine-window .tools .chips { margin-top: 0; flex: 1 1 0; min-width: 0; flex-wrap: nowrap; overflow: hidden;
-      mask-image: linear-gradient(to left, transparent, #000 24px); }
-    .engine-window .tools .spacer { display: none; }
     .engine-window main { padding: 12px 24px; }
     header { padding: 10px 14px 8px; border-bottom: 1px solid var(--line); background: var(--panel); }
     .head { display: flex; align-items: center; gap: 8px; }
     .head h1 { font-size: 15px; margin: 0; display: flex; align-items: center; gap: 6px; }
     .head h1 img { width: 18px; height: 18px; }
     .head .total { margin-left: auto; font-weight: 600; }
-    .chips { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: 12px; }
     .tools { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
     .tools .spacer { flex: 1; }
     #addBox { margin-top: 8px; display: grid; gap: 6px; }
@@ -34,8 +30,35 @@
     .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
     .card .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
     .card .name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .card .meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 5px; font-size: 12px; }
-    .card .err { color: var(--bad); font-size: 12px; margin-top: 4px; }
+    .card .meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 5px; font-size: 12px; min-height: 22px; }
+    .card .meta .left { min-width: 0; }
+    .card .meta .left.bad { color: var(--bad); }
+    .card .meta .end { display: flex; align-items: center; gap: 2px; margin-left: auto; white-space: nowrap; }
+    .card .meta .end > .num { margin-right: 4px; }
+    .card .sub { font-size: 11px; margin-top: 1px; }
+    .card [hidden] { display: none !important; }
+    button.icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; padding: 0;
+      border-color: transparent; background: transparent; color: var(--muted); }
+    button.icon:hover { color: var(--accent); border-color: var(--line); }
+    button.icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    button.icon[title="Resume"] svg { fill: currentColor; }
+    button.icon[title="More"] svg { stroke-width: 3; }
+    .more { position: relative; display: inline-flex; }
+    .menu { position: absolute; right: 0; top: 24px; z-index: 5; display: grid; min-width: 140px; padding: 4px; border: 1px solid var(--line);
+      border-radius: 8px; background: var(--panel); box-shadow: 0 6px 20px rgba(0, 0, 0, .25); }
+    .menu button { border: 0; background: transparent; text-align: left; padding: 5px 8px; border-radius: 5px; font-size: 12px; }
+    .menu button:hover { background: var(--accent-soft); }
+    .card .top .size { font-size: 12px; }
+    .card.line { padding: 6px 8px 6px 12px; }
+    .card.line .top { margin-bottom: 0; }
+    .card.line .name, .card.expandable .name { cursor: pointer; }
+    .card.line .name { font-weight: 500; }
+    .group-head { display: flex; justify-content: space-between; align-items: baseline; margin: 12px 2px 6px; font-size: 12px; }
+    .extract { margin-top: 8px; font-size: 12px; display: grid; gap: 4px; }
+    .row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .row .grow, .row .path { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .path { font-weight: 600; }
+    .bad { color: var(--bad); }
     .card .actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
     .card .ask { align-items: center; }
     .card .ask > span { margin-right: 4px; font-size: 12px; }
@@ -47,24 +70,25 @@
     .conns { margin-top: 6px; display: grid; grid-template-columns: minmax(70px, auto) 1fr auto auto; gap: 3px 8px; align-items: center; font-size: 12px; }
     .conns .why { grid-column: 1 / -1; margin-top: -2px; color: var(--muted); font-size: 11px; }
     details { margin-top: 6px; font-size: 12px; }
+    details section { margin-top: 8px; }
+    details h3 { margin: 0 0 3px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+    details .switch { display: flex; gap: 6px; align-items: center; }
+    details .switch .badge { cursor: help; }
+    details .row .path { font-weight: 400; }
     .facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 6px 0 0; }
     .facts dt { color: var(--muted); }
     .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
     summary { cursor: pointer; color: var(--muted); }
     .form { display: grid; grid-template-columns: 1fr auto; gap: 4px 6px; margin-top: 6px; }
     .form label { grid-column: 1 / -1; color: var(--muted); margin-top: 4px; }
-    .form input { min-width: 0; }
+    .form input { min-width: 0; grid-column: 1 / -1; }
+    .form .actions { grid-column: 1 / -1; margin-top: 4px; }
     footer { padding: 8px 14px 10px; border-top: 1px solid var(--line); background: var(--panel); display: flex; }
     footer button { flex: 1; }
     .version-warn { margin-top: 6px; padding: 5px 8px; border-radius: 6px; background: var(--accent-soft); font-size: 12px; }
     .version-warn[hidden] { display: none; }
-    #addBox .check, .fold > label { display: flex; gap: 6px; align-items: center; font-size: 12px; }
-    #addBox .check[hidden], .fold[hidden], .fold > [hidden] { display: none; }
-    .fold { margin-top: 6px; display: grid; gap: 3px; }
-    .fold .why { color: var(--muted); }
-    .fold .form .why { grid-column: 1 / -1; }
-    .fold .why.bad { color: var(--bad); }
-    .fold .form .mono { min-width: 0; overflow-wrap: anywhere; align-self: center; }
+    #addBox .check { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+    #addBox .check[hidden] { display: none; }
     .facts dd.lines { white-space: pre-line; }
     .offline { padding: 12px; border-radius: 6px; background: var(--accent-soft); font-size: 13px; }
   </style>
@@ -76,10 +100,9 @@
       <span id="conn" class="badge dim">…</span>
       <span class="total num" id="total"></span>
     </div>
-    <div class="chips num muted" id="chips"></div>
     <div class="version-warn" id="versionWarn" hidden></div>
     <div class="tools">
-      <button class="small" id="toggleAdd">+ Add download</button>
+      <button class="small" id="toggleAdd">+ Add</button>
       <span class="spacer"></span>
       <button class="small" id="pauseAll">Pause all</button>
       <button class="small" id="resumeAll">Resume all</button>
@@ -102,6 +125,7 @@
   <div class="toast" id="toast"></div>
   <script src="../lib/version.js"></script>
   <script src="../lib/folder.js"></script>
+  <script src="../lib/list.js"></script>
   <script src="host.js"></script>
   <script src="common.js"></script>
   <script src="popup.js"></script>

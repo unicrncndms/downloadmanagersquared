@@ -1,5 +1,5 @@
 // Package ui is the extension's pages that dms-engine.exe carries for its
-// Downloads window: ui/..., lib/version.js and lib/folder.js, the layout the
+// Downloads window: ui/..., lib/version.js, lib/folder.js and lib/list.js, the layout the
 // pages expect.
 // build.ps1 copies them into files\ before it builds the engine and empties it
 // again after; a plain `go build` or `go test` carries none, and Present says so.
@@ -17,7 +17,7 @@ var embedded embed.FS
 var Pages, _ = fs.Sub(embedded, "files")
 
 // The files without which the window has nothing to show.
-var required = []string{"ui/popup.html", "ui/settings.html", "ui/host.js", "lib/version.js", "lib/folder.js"}
+var required = []string{"ui/popup.html", "ui/settings.html", "ui/host.js", "lib/version.js", "lib/folder.js", "lib/list.js"}
 
 // Present says whether the exe carries the pages, i.e. was built by build.ps1.
 func Present() bool { return present(Pages) }

@@ -28,11 +28,11 @@ test("switched on by hand without a folder: the add step, prefilled with the las
   assert.equal(folderView(zip({ on: true, into: "E:\\Extracted" }), last).ask, null);
 });
 
-test("locked once something is freed, and says why", () => {
-  const t = folderView(zip({ on: true, into: "D:\\x", locked: true, why: "Some files are already extracted and their space freed" }), SETTINGS).toggle;
-  assert.equal(t.on, true);
-  assert.equal(t.disabled, true);
-  assert.match(t.reason, /freed/);
+test("once locked, the switch goes and it just says it extracts", () => {
+  const v = folderView(zip({ on: true, into: "D:\\x", locked: true, why: "Some files are already extracted and their space freed" }), SETTINGS);
+  assert.equal(v.toggle, null);
+  assert.equal(v.extracting, true);
+  assert.equal(folderView(zip({ on: true, into: "D:\\x" }), SETTINGS).extracting, false);
 });
 
 test("unavailable, with the engine's reason: a checksum, no ranges, not a .zip", () => {

@@ -1,18 +1,16 @@
 "use strict";
 
 // The downloads view: the toolbar popup, or a small window when opened from the tray.
+// A card shows at a glance what a download is doing; the rest is one click
+// away, in its "⋯" menu or its Details. Finished downloads shrink to a line.
 
 let latest = {};
 const cards = new Map(); // download id -> card controller
 
 if (new URLSearchParams(location.search).has("window")) document.body.classList.add("windowed");
 
-// In the Downloads window the header matches the settings page's, and is two
-// lines: the interfaces' speeds share one with the buttons.
-if (windowHeader("downloads")) {
-  document.querySelector("footer").hidden = true;
-  $("toggleAdd").before($("chips"));
-}
+// In the Downloads window the header matches the settings page's.
+if (windowHeader("downloads")) document.querySelector("footer").hidden = true;
 
 $("openSettings").onclick = () => {
   Host.openSettings("");
@@ -45,23 +43,74 @@ $("addBox").addEventListener("submit", (e) => {
   });
 });
 
+// An open "⋯" menu closes on a click anywhere else.
+let openMenu = null;
+document.addEventListener("click", (e) => {
+  if (openMenu && !openMenu.parentElement.contains(e.target)) closeMenu();
+});
+function closeMenu() {
+  if (openMenu) openMenu.hidden = true;
+  openMenu = null;
+}
+
+// Small line icons, drawn in the text colour.
+const ICONS = {
+  pause: "M5 3v10M11 3v10",
+  play: "M5 3l8 5-8 5z",
+  more: "M3 8h.01M8 8h.01M13 8h.01",
+  folder: "M2 4.5h4l1.5 1.5H14v6.5H2z",
+  close: "M4 4l8 8M12 4l-8 8",
+};
+function icon(name) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS(ns, "path");
+  p.setAttribute("d", ICONS[name]);
+  svg.append(p);
+  return svg;
+}
+function iconButton(name, title, onclick) {
+  return el("button", { class: "icon", title, "aria-label": title, onclick }, icon(name));
+}
+
 function makeCard(id) {
-  const name = el("span", { class: "name" });
+  let d = null; // the download as last shown
+  let expanded = false; // a finished download opened back into its card
+
+  const name = el("span", { class: "name", title: "" });
   const status = el("span", { class: "badge" });
   const vpn = el("span", { class: "badge dim" });
+  const size = el("span", { class: "muted num size" }); // a finished line's size
+  const showDone = iconButton("folder", "Show in folder", () => act("showInFolder", { id }));
+  const dropDone = iconButton("close", "Remove from list (files stay)", () => act("remove", { id, deleteFile: false }, "Removed from list"));
+  name.addEventListener("click", () => {
+    if (!d || !finished(d)) return;
+    expanded = !expanded;
+    update(d);
+  });
+
   const fill = el("div");
-  const sizeText = el("span", { class: "muted num" });
-  const speedText = el("span", { class: "num" });
-  // Torrents only: the swarm and the upload, below the progress.
-  const peersText = el("span", { class: "muted num" });
-  const upText = el("span", { class: "num" });
-  const swarm = el("div", { class: "meta" }, peersText, upText);
-  const err = el("div", { class: "err" });
-  const conns = el("div", { class: "conns num" });
-  const pause = el("button", { class: "small", onclick: () => act("pause", { id }) }, "Pause");
-  const resume = el("button", { class: "small", onclick: () => act("resume", { id }) }, "Resume");
-  const folder = el("button", { class: "small", onclick: () => act("showInFolder", { id }) }, "Show in folder");
-  const remove = el("button", { class: "small", onclick: () => removeDownload(id, actions, ask) }, "Remove");
+  const bar = el("div", { class: "bar" }, fill);
+  const left = el("span", { class: "muted num left" });
+  const right = el("span", { class: "num" });
+  const pause = iconButton("pause", "Pause", () => act("pause", { id }));
+  const resume = iconButton("play", "Resume", () => act("resume", { id }));
+  // The "⋯" menu: Show in folder, Copy link, Remove….
+  const menuFolder = el("button", { onclick: () => { closeMenu(); act("showInFolder", { id }); } }, "Show in folder");
+  const menuCopy = el("button", { onclick: () => { closeMenu(); copyLink(d && d.url); } }, "Copy link");
+  const menuRemove = el("button", { onclick: () => { closeMenu(); removeDownload(id, ask); } }, "Remove…");
+  const menu = el("div", { class: "menu", hidden: true }, menuFolder, menuCopy, menuRemove);
+  const more = iconButton("more", "More", (e) => {
+    e.stopPropagation();
+    const was = !menu.hidden;
+    closeMenu();
+    if (!was) { menu.hidden = false; openMenu = menu; }
+  });
+  const meta = el("div", { class: "meta" }, left, el("span", { class: "end" }, right, pause, resume, el("span", { class: "more" }, more, menu)));
+  const sub = el("div", { class: "sub muted num" });
+
   // Popups can't show confirm dialogs, so removing an unfinished download asks
   // inline; a Download as folder deletes or keeps its folder too.
   let wording = removeWording(null);
@@ -70,123 +119,169 @@ function makeCard(id) {
   const ask = el("div", { class: "actions ask", hidden: true },
     el("span", { class: "muted" }, "Remove this download?"),
     delButton, keepButton,
-    el("button", { class: "small", onclick: () => { ask.hidden = true; actions.hidden = false; } }, "Cancel"));
-  const actions = el("div", { class: "actions" }, pause, resume, folder, remove);
+    el("button", { class: "small", onclick: () => { ask.hidden = true; } }, "Cancel"));
+
+  // Interfaces with a problem, on the card; all of them in Details.
+  const cardConns = el("div", { class: "conns num" });
+  const allConns = el("div", { class: "conns num" });
+  const cardRows = new Map();
+  const allRows = new Map();
+
   // The add step: a torrent waits here until its files and folder are chosen.
   const pick = el("div", { class: "pick", hidden: true });
   let picking = ""; // what the add step shows: the VPN question and/or the files
 
   // Download as folder switched on by hand: it keeps downloading while this
-  // asks where to extract. Browse… sets the folder itself (the engine shows
+  // asks where to extract. Change… sets the folder itself (the engine shows
   // the picker), so it works even after the toolbar popup closes.
-  const foldInto = el("input", { type: "text" });
-  const foldAsk = el("div", { class: "pick", hidden: true },
-    el("div", { class: "form" },
-      el("label", {}, "Extract into (in a folder named after the archive)"), foldInto,
-      el("button", { class: "small", onclick: () => act("pickFolder", { id }) }, "Browse…")),
-    el("div", { class: "actions" },
-      el("button", { class: "small primary", onclick: () => act("setFolder", { id, into: foldInto.value }, "Extracting into " + foldInto.value) }, "Download"),
-      el("button", { class: "small", onclick: () => act("setFolder", { id, on: false }, "Downloading it as a file") }, "Download as a file")));
-  let foldAsking = false;
-  // In Details: the switch, why it can't change, and where it extracts.
-  const foldOn = el("input", { type: "checkbox", onchange: () => act("setFolder", { id, on: foldOn.checked }) });
-  const foldSwitch = el("label", {}, foldOn, "Download as folder: extract it while it downloads");
-  const foldWhy = el("div", { class: "why" });
-  // Extract into, while unfinished: Browse… moves what is extracted (the
-  // engine shows the picker and does the move; the state shows how it went).
-  const foldMoveInto = el("span", { class: "mono" });
-  const foldMoveWarn = el("div", { class: "why" });
-  const foldMoveErr = el("div", { class: "why bad" });
-  const foldMove = el("div", { class: "form", hidden: true },
-    el("label", {}, "Extract into"), foldMoveInto,
-    el("button", { class: "small", onclick: () => act("pickFolder", { id }) }, "Browse…"),
-    foldMoveWarn, foldMoveErr);
-  const foldFacts = el("dl", { class: "facts" });
-  const foldBox = el("div", { class: "fold", hidden: true }, foldSwitch, foldWhy, foldMove, foldFacts);
+  const askInto = el("b", { class: "path" });
+  const foldAsk = el("div", { class: "extract", hidden: true },
+    el("div", { class: "row" },
+      el("span", { class: "grow" }, "Extract into ", askInto),
+      el("button", { class: "small", onclick: () => act("pickFolder", { id }) }, "Change…"),
+      el("button", { class: "small primary", onclick: () => act("setFolder", { id, into: askInto.textContent }, "Extracting into " + askInto.textContent) }, "Start")),
+    el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); act("setFolder", { id, on: false }, "Downloading it as a file"); } }, "Download as a file instead"));
 
+  // Details, in sections: Connections, Folder, File, Checks.
+  const section = (title, ...body) => el("section", {}, el("h3", {}, title), ...body);
+  const connSection = section("Connections", allConns);
+
+  const foldOn = el("input", { type: "checkbox", onchange: () => act("setFolder", { id, on: foldOn.checked }) });
+  const foldTag = el("span", { class: "badge dim" }, "unavailable");
+  const foldSwitch = el("label", { class: "switch" }, foldOn, "Download as folder: extract it while it downloads", foldTag);
+  const foldExtracting = el("div", {}, "Extracting as a folder");
+  // Extract into, while unfinished: Change… moves what is extracted (the
+  // engine shows the picker and does the move; the state shows how it went).
+  const moveInto = el("span", { class: "path grow" });
+  const moveWarn = el("div", { class: "muted" });
+  const moveErr = el("div", { class: "bad" });
+  const foldMove = el("div", {},
+    el("div", { class: "row" }, el("span", { class: "muted" }, "Extract into"), moveInto,
+      el("button", { class: "small", onclick: () => act("pickFolder", { id }) }, "Change…")),
+    moveWarn, moveErr);
+  const foldFacts = el("dl", { class: "facts" });
+  const foldSection = section("Folder", foldSwitch, foldExtracting, foldMove, foldFacts);
+
+  const fileFacts = el("dl", { class: "facts" });
+  const fileSection = section("File", fileFacts);
+
+  // Checks: the landing page and checksums as values, Edit for boxes.
+  const checkFacts = el("dl", { class: "facts" });
   const page = el("input", { type: "url" });
   const sha = el("input", { type: "text", class: "mono", placeholder: "64 hex characters (optional)", spellcheck: "false" });
   const md5 = el("input", { type: "text", class: "mono", placeholder: "32 hex characters (optional)", spellcheck: "false" });
-  const urlText = el("div", { class: "mono muted", style: "grid-column:1/-1" });
-  const httpDetails = el("div", { class: "form" },
+  const checkForm = el("div", { class: "form", hidden: true },
     el("label", {}, "Landing page"), page,
-    el("button", { class: "small", onclick: () => act("setPageUrl", { id, pageUrl: page.value }, "Saved") }, "Save"),
-    el("label", {}, "SHA-256"), sha, el("span"),
+    el("label", {}, "SHA-256"), sha,
     el("label", {}, "MD5"), md5,
-    el("button", { class: "small", onclick: () => act("setHashes", { id, sha256: sha.value, md5: md5.value }, "Checksums saved") }, "Save"),
-    el("label", {}, "Original link"), urlText);
-  const facts = el("dl", { class: "facts" });
-  const details = el("details", {}, el("summary", {}, "Details"), foldBox, httpDetails, facts);
+    el("div", { class: "actions" },
+      el("button", { class: "small primary", onclick: saveChecks }, "Save"),
+      el("button", { class: "small", onclick: () => editChecks(false) }, "Cancel")));
+  const checkEdit = el("button", { class: "small", onclick: () => editChecks(true) }, "Edit");
+  const checkSection = section("Checks", checkFacts, checkEdit, checkForm);
+
+  const details = el("details", { ontoggle: () => { if (d) update(d); } },
+    el("summary", {}, "Details"), connSection, foldSection, fileSection, checkSection);
 
   const root = el("div", { class: "card" },
-    el("div", { class: "top" }, name, vpn, status),
-    el("div", { class: "bar" }, fill),
-    el("div", { class: "meta" }, sizeText, speedText),
-    swarm,
-    err, pick, foldAsk, conns,
-    actions, ask,
+    el("div", { class: "top" }, name, vpn, status, size, showDone, dropDone),
+    bar, meta, sub,
+    cardConns, pick, foldAsk, ask,
     details);
 
-  const rows = new Map();
-  let filled = false;
   let shownPageHint = false;
 
-  function update(d) {
+  function editChecks(on) {
+    if (on) {
+      page.value = d.pageUrl || "";
+      sha.value = d.sha256 || "";
+      md5.value = d.md5 || "";
+    }
+    checkForm.hidden = !on;
+    checkFacts.hidden = on;
+    checkEdit.hidden = on;
+  }
+  async function saveChecks() {
+    await act("setPageUrl", { id, pageUrl: page.value });
+    await act("setHashes", { id, sha256: sha.value, md5: md5.value }, "Saved");
+    editChecks(false);
+  }
+
+  function update(next) {
+    d = next;
     const torrent = d.kind === "torrent";
+    const done = finished(d);
+    const line = done && !expanded;
+    root.classList.toggle("line", line);
     name.textContent = d.filename || d.url;
+    name.title = done ? (expanded ? "Fold back into a line" : "Open this download") : d.filename || d.url;
     vpn.textContent = VPN_TEXT[d.vpn] || "";
-    vpn.hidden = !VPN_TEXT[d.vpn];
-    name.title = d.filename || d.url;
+    vpn.hidden = line || !VPN_TEXT[d.vpn];
     status.textContent = d.label;
     status.className = "badge " + (d.tone || "");
-    fill.style.width = percent(d) + "%";
-    const choosing = d.status === "choosing";
-    const files = d.files || [];
-    sizeText.textContent = choosing && files.length
-      ? `${files.length} file${files.length === 1 ? "" : "s"} · ${fmtBytes(files.reduce((n, f) => n + f.size, 0))}`
-      : progressText(d);
-    speedText.textContent = d.status === "running" ? `↓ ${fmtSpeed(d.speed)} · ${fmtETA(d.eta)} left` : "";
+    status.hidden = line;
+    size.hidden = showDone.hidden = dropDone.hidden = !line;
+    size.textContent = d.size > 0 ? fmtBytes(d.size) : "";
+    showDone.hidden = !line || !(d.actions || {}).showInFolder;
+    if (line) {
+      for (const n of [bar, meta, sub, cardConns, pick, foldAsk, ask, details]) n.hidden = true;
+      return;
+    }
 
-    // The swarm: who we're connected to, and what we've given back.
-    const inSwarm = !!d.inSwarm;
-    swarm.hidden = !torrent || choosing || !(inSwarm || d.uploaded > 0);
-    peersText.textContent = !inSwarm ? ""
-      : `${plural(d.peers || 0, "peer")} · ${plural(d.seeds || 0, "seed")}${d.swarm > (d.peers || 0) ? ` · ${d.swarm} known` : ""}`;
-    upText.textContent = `↑ ${inSwarm ? fmtSpeed(d.upSpeed || 0) + " · " : ""}${fmtBytes(d.uploaded || 0)} sent · ratio ${(d.ratio || 0).toFixed(2)}`;
-    err.textContent = d.error || "";
+    const choosing = d.status === "choosing";
+    const seeding = d.status === "seeding";
+    const files = d.files || [];
+    bar.hidden = seeding;
+    fill.style.width = percent(d) + "%";
+    const s = statusLine(d);
+    meta.hidden = false;
+    left.classList.toggle("bad", !!s.error);
+    left.classList.toggle("muted", !s.error);
+    if (s.error) left.textContent = s.error;
+    else if (choosing && files.length) left.textContent = `${plural(files.length, "file")} · ${fmtBytes(files.reduce((n, f) => n + f.size, 0))}`;
+    const up = seedLine(d, latest.settings);
+    if (!s.error && seeding) left.textContent = up; // the badge already says Seeding
+    else if (!s.error && !(choosing && files.length)) left.textContent = s.left;
+    right.textContent = seeding ? "" : s.right;
+    sub.textContent = s.error ? "" : [!seeding && torrent ? up : "", s.sub].filter(Boolean).join(" · ");
+    sub.hidden = !sub.textContent;
+
     const can = d.actions || {};
     pause.hidden = !can.pause;
     resume.hidden = !can.resume;
-    folder.hidden = !can.showInFolder;
-    remove.hidden = !can.remove; // a torrent being added has its own Cancel
+    menuFolder.hidden = !can.showInFolder;
+    menuRemove.hidden = !can.remove; // a torrent being added has its own Cancel
+    menuCopy.hidden = !d.url;
+    more.parentElement.hidden = choosing;
+
     pick.hidden = !choosing;
     const step = choosing ? `${d.askVpn}|${files.length}|${hasVpn()}` : "";
     if (step && step !== picking) renderPick(d);
     picking = step;
 
-    // Download as folder: the add step while it waits for a folder, the switch
-    // and its facts in Details, and what Remove says.
+    // Download as folder: the step while it waits for a folder, and its
+    // section in Details.
     const fv = folderView(d, latest.settings);
-    const asking = !!(fv && fv.ask);
-    foldAsk.hidden = !asking;
-    if (asking && !foldAsking) foldInto.value = fv.ask.prefill; // once: then it's the user's to edit
-    foldAsking = asking;
-    foldBox.hidden = !fv;
+    foldAsk.hidden = !(fv && fv.ask);
+    if (fv && fv.ask) sub.hidden = true; // the engine's "choose a folder" says what the step shows
+    if (fv && fv.ask) askInto.textContent = fv.ask.prefill;
+    foldSection.hidden = !fv;
     if (fv) {
       foldSwitch.hidden = !fv.toggle;
       if (fv.toggle) {
         foldOn.checked = fv.toggle.on;
         foldOn.disabled = fv.toggle.disabled;
+        foldTag.hidden = !fv.toggle.disabled;
+        foldTag.title = fv.toggle.reason;
       }
-      foldWhy.textContent = fv.toggle ? fv.toggle.reason : "";
-      foldWhy.hidden = !foldWhy.textContent;
+      foldExtracting.hidden = !fv.extracting;
       foldMove.hidden = !fv.move;
       if (fv.move) {
-        foldMoveInto.textContent = fv.move.moving ? `${fv.move.into} → ${fv.move.moving}` : fv.move.into;
-        foldMoveWarn.textContent = fv.move.warning;
-        foldMoveWarn.hidden = !fv.move.warning;
-        foldMoveErr.textContent = fv.move.error;
-        foldMoveErr.hidden = !fv.move.error;
+        moveInto.textContent = fv.move.moving ? `${fv.move.into} → ${fv.move.moving}` : fv.move.into;
+        moveWarn.textContent = fv.move.warning;
+        moveWarn.hidden = !fv.move.warning;
+        moveErr.textContent = fv.move.error;
+        moveErr.hidden = !fv.move.error;
       }
       foldFacts.hidden = !fv.facts.length;
       foldFacts.replaceChildren(...fv.facts.flatMap(([k, v]) =>
@@ -195,23 +290,57 @@ function makeCard(id) {
     wording = removeWording(d);
     delButton.textContent = wording.del;
     keepButton.textContent = wording.keep;
-    // Landing page and checksums are for HTTP downloads; a torrent shows what it is.
-    httpDetails.hidden = torrent;
-    facts.hidden = !torrent;
-    details.hidden = choosing;
-    if (torrent) {
-      facts.replaceChildren(...[
-        ["Save folder", d.dir],
-        ["Info hash", d.infoHash],
-        ["VPN", VPN_TEXT[d.vpn] || "Off"],
-        ["Magnet link", d.url],
-      ].filter(([, v]) => v).flatMap(([k, v]) => [el("dt", {}, k), el("dd", { class: k === "Save folder" || k === "VPN" ? "" : "mono" }, v)]));
-    }
 
-    // One line per connection: name, state, connections, speed (and why, if it failed).
-    const ids = Object.keys(d.links).sort((a, b) =>
+    // The interfaces: those with a problem on the card, all in Details.
+    const ids = Object.keys(d.links || {}).sort((a, b) =>
       ifaceName(a, latest.state, latest.settings).localeCompare(ifaceName(b, latest.state, latest.settings)));
-    conns.hidden = d.status === "completed" || ids.length === 0;
+    const problems = new Set(problemLinks(d));
+    const shown = ids.filter((ifc) => problems.has(ifc));
+    cardConns.hidden = !shown.length;
+    renderLinks(cardConns, cardRows, shown);
+    connSection.hidden = done || !ids.length;
+
+    details.hidden = choosing;
+    if (!details.open) {
+      // Point straight at the field that fixes it.
+      const needsPage = ids.some((ifc) => d.links[ifc].status === "needs-page");
+      if (needsPage && !shownPageHint && !torrent) {
+        details.open = true;
+        editChecks(true);
+        page.placeholder = "Paste the page you started the download from";
+        page.focus();
+        shownPageHint = true;
+      }
+      if (!needsPage) shownPageHint = false;
+      return; // the rest is only drawn while Details is open
+    }
+    renderLinks(allConns, allRows, ids);
+
+    const facts = torrent ? [
+      ["Save folder", d.dir],
+      ["Peers", d.inSwarm ? `${plural(d.peers || 0, "peer")} · ${plural(d.seeds || 0, "seed")}${d.swarm > (d.peers || 0) ? ` · ${d.swarm} known` : ""}` : ""],
+      ["Sent", d.uploaded > 0 ? fmtBytes(d.uploaded) : ""],
+      ["Info hash", d.infoHash],
+      ["VPN", VPN_TEXT[d.vpn] || "Off"],
+      ["Magnet link", d.url],
+    ] : [
+      ["Save folder", d.folder && d.folder.on ? "" : d.dir], // a folder's place is under Folder
+      ["Original link", d.url],
+    ];
+    fileFacts.replaceChildren(...facts.filter(([, v]) => v).flatMap(([k, v]) =>
+      [el("dt", {}, k), el("dd", { class: k === "Info hash" || k.endsWith("link") ? "mono" : "" }, v)]));
+    fileSection.hidden = !fileFacts.children.length;
+
+    checkSection.hidden = torrent;
+    if (!torrent && checkForm.hidden) {
+      checkFacts.replaceChildren(...[["Landing page", d.pageUrl], ["SHA-256", d.sha256], ["MD5", d.md5]].flatMap(([k, v]) =>
+        [el("dt", {}, k), el("dd", { class: v ? "mono" : "muted" }, v || "none")]));
+    }
+  }
+
+  // One line per interface: name, state, connections, speed (and why, if it failed).
+  function renderLinks(grid, rows, ids) {
+    const torrent = d.kind === "torrent";
     let k = 0;
     for (const ifc of ids) {
       const l = d.links[ifc];
@@ -225,7 +354,7 @@ function makeCard(id) {
         r.why = el("div", { class: "why" }, r.whyText, " ", r.retry);
         rows.set(ifc, r);
       }
-      for (const n of [r.name, r.state, r.info, r.speed, r.why]) place(conns, n, k++);
+      for (const n of [r.name, r.state, r.info, r.speed, r.why]) place(grid, n, k++);
       r.name.textContent = ifaceName(ifc, latest.state, latest.settings);
       r.state.replaceChildren(...[
         el("span", { class: "badge " + (l.tone || "dim") }, l.label),
@@ -239,23 +368,10 @@ function makeCard(id) {
       r.whyText.textContent = l.error || "";
       r.retry.hidden = !l.canRetry;
     }
-    // Point straight at the field that fixes it.
-    const needsPage = ids.some((ifc) => d.links[ifc].status === "needs-page");
-    if (needsPage && !shownPageHint) {
-      details.open = true;
-      page.placeholder = "Paste the page you started the download from";
-      shownPageHint = true;
-    }
-    if (!needsPage) shownPageHint = false;
-
-    if (!filled || document.activeElement !== page) page.value = d.pageUrl || "";
-    if (!filled) {
-      sha.value = d.sha256 || "";
-      md5.value = d.md5 || "";
-      urlText.textContent = d.url;
-      filled = true;
-    }
+    while (grid.children.length > k) grid.lastChild.remove();
+    for (const ifc of rows.keys()) if (!ids.includes(ifc)) rows.delete(ifc);
   }
+
   function renderPick(d) {
     const files = d.files || [];
     // Before the torrent first meets peers: suggest a VPN, or stay on this connection.
@@ -278,13 +394,13 @@ function makeCard(id) {
       el("div", { class: "files" }, files.map((f, i) => el("label", {},
         boxes[i], el("span", { class: "path" }, f.path), el("span", { class: "muted num" }, fmtBytes(f.size))))),
       el("div", { class: "form" },
-        el("label", {}, files.length > 1 ? "Save to (in a folder named after the torrent)" : "Save to"), dir, el("span")),
+        el("label", {}, files.length > 1 ? "Save to (in a folder named after the torrent)" : "Save to"), dir),
       el("div", { class: "actions" },
         el("button", { class: "small primary", onclick: () => act("chooseFiles", { id, files: boxes.map((b) => b.checked), dir: dir.value, ...(d.askVpn ? { vpn: vpnValue() } : {}) }, "Download queued") }, "Download"),
         el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, "Cancelled") }, "Cancel")));
   }
 
-  return { root, update };
+  return { root, update, isLine: () => root.classList.contains("line") };
 }
 
 // Whether any VPN tunnel is set up, so a torrent can be sent through one.
@@ -292,19 +408,40 @@ function hasVpn() {
   return ((latest.state && latest.state.interfaces) || []).some((i) => i.tunnel);
 }
 
-function removeDownload(id, actions, ask) {
+function removeDownload(id, ask) {
   const d = (latest.state.downloads || []).find((x) => x.id === id);
   if (!d) return;
   if (!d.partialFile) return act("remove", { id, deleteFile: false }, "Removed from list (files kept)");
-  actions.hidden = true;
   ask.hidden = false;
+}
+
+async function copyLink(url) {
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    toast("Link copied");
+  } catch {
+    toast("Couldn't copy the link");
+  }
+}
+
+// The heading over the finished lines, with Clear finished.
+const finishedHead = el("div", { class: "group-head" },
+  el("span", { class: "muted" }, "Finished"),
+  el("a", { href: "#", onclick: (e) => { e.preventDefault(); clearFinished(); } }, "Clear finished"));
+
+async function clearFinished() {
+  const done = (latest.state.downloads || []).filter(finished);
+  for (const d of done) await call("remove", { id: d.id, deleteFile: false }).catch(() => {});
+  toast(done.length === 1 ? "1 finished download cleared (files kept)" : `${done.length} finished downloads cleared (files kept)`);
 }
 
 function renderDownloads(state) {
   const list = $("list");
-  const downloads = (state.downloads || []).slice().reverse();
+  const downloads = sortDownloads(state.downloads || []);
   const seen = new Set();
   let i = 0;
+  let headed = false;
   for (const d of downloads) {
     seen.add(d.id);
     let c = cards.get(d.id);
@@ -312,9 +449,14 @@ function renderDownloads(state) {
       c = makeCard(d.id);
       cards.set(d.id, c);
     }
+    if (finished(d) && !headed) {
+      place(list, finishedHead, i++);
+      headed = true;
+    }
     c.update(d);
-    place(list, c.root, i++); // newest first
+    place(list, c.root, i++);
   }
+  if (!headed) finishedHead.remove();
   for (const [id, c] of cards) {
     if (!seen.has(id)) {
       c.root.remove();
@@ -365,10 +507,8 @@ connectUI((m) => {
   if ($("list").querySelector(".offline")) $("list").replaceChildren();
   const s = m.state;
   $("total").textContent = s.active ? `${fmtSpeed(s.speed)} · ${fmtETA(s.eta)} left` : "idle";
-  // With torrents in the list, say where peers can connect in.
-  const torrents = (s.downloads || []).some((d) => d.kind === "torrent");
-  $("chips").replaceChildren(...s.interfaces.filter((i) => i.present && i.enabled)
-    .map((i) => el("span", { title: torrents ? INCOMING_TITLE[i.incoming] || "" : "" },
-      `${i.name}${i.isMain ? " (main)" : ""}: ${fmtSpeed(i.speed)}${torrents && INCOMING_TEXT[i.incoming] ? " · " + INCOMING_TEXT[i.incoming] : ""}`)));
+  const bulk = bulkActions(s.downloads || []);
+  $("pauseAll").hidden = !bulk.pauseAll;
+  $("resumeAll").hidden = !bulk.resumeAll;
   renderDownloads(s);
 });

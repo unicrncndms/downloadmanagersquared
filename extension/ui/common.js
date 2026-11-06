@@ -43,25 +43,7 @@ function windowHeader(current) {
   return true;
 }
 
-function fmtBytes(n) {
-  if (!(n >= 0)) return "?";
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  let i = 0;
-  while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
-  return `${n.toFixed(i && n < 100 ? 1 : 0)} ${u[i]}`;
-}
-
-function fmtSpeed(bps) {
-  return bps >= 1 ? fmtBytes(bps) + "/s" : "0 B/s";
-}
-
-function fmtETA(sec) {
-  if (!(sec >= 0) || !isFinite(sec)) return "—";
-  const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = Math.floor(sec % 60);
-  if (h) return `${h}h ${String(m).padStart(2, "0")}m`;
-  if (m) return `${m}m ${String(s).padStart(2, "0")}s`;
-  return `${s}s`;
-}
+// fmtBytes, fmtSpeed, fmtETA and percent are in lib/list.js.
 
 function el(tag, attrs, ...children) {
   const e = document.createElement(tag);
@@ -97,10 +79,6 @@ const TUNNEL_CLASS = { up: "ok", connecting: "warn", down: "bad", off: "dim" };
 
 function plural(n, word) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
-
-function percent(d) {
-  return d.size > 0 ? Math.min(100, (d.done / d.size) * 100) : 0;
 }
 
 function ifaceName(id, state, settings) {
