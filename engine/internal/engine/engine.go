@@ -1013,7 +1013,8 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 }
 
 // PickFolder shows the folder picker for a download's folder to extract into,
-// over the Downloads window when it is open, and sets the folder chosen. It
+// over the Downloads window when it is open, and sets the folder chosen; once
+// one is set, choosing another moves what is extracted there. It
 // returns at once: the picker can stay open longer than a request may take,
 // and the extension's popup closes as soon as it opens. The choice shows up
 // in the download's state.
@@ -1023,12 +1024,15 @@ func (e *Engine) PickFolder(id string) error {
 		return err
 	}
 	st := d.State()
-	if f := st.Folder; f == nil || !f.On || f.Into != "" {
-		// Changing a folder already chosen is a move, not this (ticket 07).
-		return errors.New("this download isn't waiting for a folder to extract into")
+	f := st.Folder
+	if f == nil || !f.On || st.Status == download.StatusCompleted {
+		return errors.New("this download isn't being extracted as a folder")
 	}
 	e.mu.Lock()
 	start := e.settings.folderDir()
+	if f.Into != "" {
+		start = f.Into // a move: from where it is
+	}
 	var owner uintptr
 	if h, ok := e.window.(windowHandle); ok {
 		owner = h.Handle()
@@ -1040,7 +1044,11 @@ func (e *Engine) PickFolder(id string) error {
 		name = "the archive"
 	}
 	go func() {
-		dir, ok := pick(owner, start, "Choose where to extract "+name)
+		title := "Choose where to extract " + name
+		if f.Into != "" {
+			title = "Choose where to move the files extracted from " + name
+		}
+		dir, ok := pick(owner, start, title)
 		if !ok {
 			return
 		}

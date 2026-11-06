@@ -45,7 +45,6 @@ test("unavailable, with the engine's reason: a checksum, no ranges, not a .zip",
 test("Details lists the folder, the fallback reason, renamed Entries and a skipped digest", () => {
   const v = folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big", note: "The server's MD5 wasn't checked", renamed: ["CON.txt → _CON.txt", "a?.txt → a_.txt"] }), SETTINGS);
   assert.deepEqual(v.facts, [
-    ["Extract into", "D:\\x"],
     ["Folder", "D:\\x\\big"],
     ["Note", "The server's MD5 wasn't checked"],
     ["Renamed", "CON.txt → _CON.txt\na?.txt → a_.txt"],
@@ -79,4 +78,15 @@ test("the add form sends the switch only when it differs from the default", () =
   assert.equal(addFolderParam(true, true, SETTINGS), true); // on by hand: asks for the folder
   assert.equal(addFolderParam(true, false, { ...SETTINGS, folderDefault: true }), false);
   assert.equal(addFolderParam(true, true, { ...SETTINGS, folderDefault: true }), undefined);
+});
+
+test("while unfinished, Extract into can be changed, with the move's warning and why one failed", () => {
+  const v = folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big", moveWarning: "Moving now re-downloads about 3.2 GiB" }), SETTINGS);
+  assert.deepEqual(v.move, { into: "D:\\x", moving: "", warning: "Moving now re-downloads about 3.2 GiB", error: "" });
+  const failed = folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big", moveError: "Couldn't move: a file in it is in use" }), SETTINGS);
+  assert.equal(failed.move.error, "Couldn't move: a file in it is in use");
+  const pending = folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big", moving: "E:\\y" }, { status: "paused" }), SETTINGS);
+  assert.equal(pending.move.moving, "E:\\y");
+  assert.equal(folderView(zip({ on: true }), SETTINGS).move, null); // still asking
+  assert.equal(folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big" }, { status: "completed" }), SETTINGS).move, null);
 });

@@ -117,6 +117,16 @@ func Present(s Summary) Summary {
 		case f.Of > 0:
 			s.Note = joinNote(s.Note, fmt.Sprintf("%s of %s files extracted", thousands(f.Files), thousands(f.Of)))
 		}
+		switch {
+		case s.Status == StatusCompleted:
+		case f.MovingNow:
+			s.Label, s.Tone = "Moving…", toneNone
+		case f.Moving != "" && s.Status != StatusRunning:
+			s.Note = joinNote(s.Note, "moves to "+f.Moving+" when it resumes")
+		}
+		if f.Refetch > 0 && s.Status != StatusCompleted {
+			s.Folder.MoveWarning = "Moving now re-downloads about " + human(f.Refetch)
+		}
 	}
 
 	links := make(map[string]LinkSummary, len(s.Links))

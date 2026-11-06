@@ -153,6 +153,8 @@ type Download struct {
 	file    *os.File
 	plan    *plan      // nil unless running with the file open
 	fold    *folderRun // extracting, in Download as folder
+	moving  bool       // copying the folder and the .part to another drive
+	mvmu    sync.Mutex // held while the folder and the .part move; taken before mu
 	xmu     sync.Mutex // held while Entries are extracted and freed; taken before mu
 	workers map[*worker]struct{}
 	ifs     map[string]*ifaceRun
@@ -400,6 +402,7 @@ func (d *Download) Path() string {
 }
 
 func (d *Download) run(ctx context.Context) {
+	d.relocate(ctx) // a move asked for: before anything is open
 	err := d.loop(ctx)
 	d.mu.Lock()
 	for w := range d.workers {
@@ -786,9 +789,6 @@ func (d *Download) needResolveLocked(ifaceID string, l *Link, reason string) {
 }
 
 func (d *Download) openFileLocked() error {
-	if d.moveNeededLocked() {
-		d.movePartLocked()
-	}
 	if err := os.MkdirAll(d.st.Dir, 0o755); err != nil {
 		return err
 	}

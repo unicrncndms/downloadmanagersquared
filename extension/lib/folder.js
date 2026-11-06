@@ -3,14 +3,17 @@
 // What the downloads page shows of Download as folder. Pure, no browser.* or
 // DOM: the popup loads it as a script and the Node tests require it. d is a
 // download from the engine's state, d.folder its FolderSummary (on, into, out,
-// locked, files, of, renamed, note, why); settings the engine's settings. The
-// reasons are the engine's (ADR 0003): why says why the switch can't change.
+// locked, files, of, renamed, note, why, moving, moveError, moveWarning);
+// settings the engine's settings. The reasons are the engine's (ADR 0003):
+// why says why the switch can't change.
 
 // folderView is the toggle, the add step and the facts for Details, or null
 // when the download has nothing to do with it (a torrent, a name that isn't
 // .zip and never asked for it).
 //   toggle: { on, disabled, reason } while unfinished, else null
 //   ask:    { prefill } while it waits for a folder to extract into, else null
+//   move:   { into, moving, warning, error } once it has one, while unfinished:
+//           "Extract into" with Browse… to move it, else null
 //   facts:  [label, value] pairs
 function folderView(d, settings) {
   const f = d && d.kind !== "torrent" ? d.folder : null;
@@ -22,12 +25,15 @@ function folderView(d, settings) {
     toggle = { on: !!f.on, disabled: !!reason || !!f.locked, reason };
   }
   const ask = f.on && !f.into && !done ? { prefill: lastFolder(settings) } : null;
+  const move = f.on && f.into && !done
+    ? { into: f.into, moving: f.moving || "", warning: f.moveWarning || "", error: f.moveError || "" }
+    : null;
   const facts = [];
-  if (f.on && f.into && !(done && f.out)) facts.push(["Extract into", f.into]);
+  if (f.on && f.into && done && !f.out) facts.push(["Extract into", f.into]);
   if (f.on && f.out) facts.push([done ? "Extracted to" : "Folder", f.out]);
   if (f.note) facts.push(["Note", f.note]);
   if (f.renamed && f.renamed.length) facts.push(["Renamed", f.renamed.join("\n")]);
-  return { toggle, ask, facts };
+  return { toggle, ask, move, facts };
 }
 
 // lastFolder is where a Download as folder extracts unless told otherwise:

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,9 +99,23 @@ func TestPickFolderSetsTheFolderToExtractInto(t *testing.T) {
 	if _, err := e.Call(nil, "pickFolder", []byte(`{"id":"nope"}`)); err == nil {
 		t.Fatal("pickFolder took an unknown download")
 	}
-	// Only while it waits for a folder: changing one is a move (ticket 07).
-	if _, err := e.Call(nil, "pickFolder", []byte(fmt.Sprintf(`{"id":%q}`, id))); err == nil {
-		t.Fatal("pickFolder took a download that has its folder")
+	// Again once it has a folder: a move, starting at that folder.
+	moved := t.TempDir()
+	pick = moved
+	if _, err := e.Call(nil, "pickFolder", []byte(fmt.Sprintf(`{"id":%q}`, id))); err != nil {
+		t.Fatal(err)
+	}
+	if s := <-got; s.start != chosen || !strings.Contains(s.title, "move") {
+		t.Fatalf("picker for a move shown as %+v, want at %q", s, chosen)
+	}
+	waitFor(t, "the folder moved to", 5*time.Second, func() bool {
+		d, _ := e.get(id)
+		return d.State().Folder.Into == moved
+	})
+	// Not for a download that isn't a Download as folder.
+	plain, _ := e.Add(AddRequest{URL: "https://example.com/plain.iso"})
+	if _, err := e.Call(nil, "pickFolder", []byte(fmt.Sprintf(`{"id":%q}`, plain))); err == nil {
+		t.Fatal("pickFolder took a download that isn't a folder")
 	}
 }
 

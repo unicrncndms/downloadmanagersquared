@@ -33,6 +33,11 @@ type Folder struct {
 	Of      int      `json:"of,omitempty"`    // files in the archive
 	Renamed []string `json:"renamed,omitempty"`
 	Note    string   `json:"note,omitempty"` // why it fell back to a normal download, or what wasn't checked
+
+	Moving    string `json:"moving,omitempty"`    // the folder it is moving to, until it has
+	MoveError string `json:"moveError,omitempty"` // why the last move didn't happen
+	MoveOut   string `json:"moveOut,omitempty"`   // where a move between drives copies the folder to, for a retry after a crash
+	MovePart  string `json:"movePart,omitempty"`  // and the .part
 }
 
 func (f *Folder) locked() bool { return f != nil && len(f.Freed) > 0 }
@@ -58,6 +63,12 @@ type FolderSummary struct {
 	Renamed []string `json:"renamed,omitempty"`
 	Note    string   `json:"note,omitempty"`
 	Why     string   `json:"why,omitempty"` // why the switch can't change: locked, not a .zip, a checksum typed, no ranges
+
+	Moving      string `json:"moving,omitempty"`      // the folder it is moving to, until it has
+	MovingNow   bool   `json:"movingNow,omitempty"`   // copying to another drive right now
+	MoveError   string `json:"moveError,omitempty"`   // why the last move didn't happen
+	Refetch     int64  `json:"refetch,omitempty"`     // bytes a move now would download again
+	MoveWarning string `json:"moveWarning,omitempty"` // what Details says of that before a move
 }
 
 func (f *Folder) summary() *FolderSummary {
@@ -65,7 +76,7 @@ func (f *Folder) summary() *FolderSummary {
 		return nil
 	}
 	return &FolderSummary{On: f.On, Into: f.Into, Out: f.Out, Locked: f.locked(), Files: f.Files, Of: f.Of,
-		Renamed: slices.Clone(f.Renamed), Note: f.Note}
+		Renamed: slices.Clone(f.Renamed), Note: f.Note, Moving: f.Moving, MoveError: f.MoveError}
 }
 
 // folderSummaryLocked is the toggle Details shows: for a download whose name
@@ -79,6 +90,10 @@ func (d *Download) folderSummaryLocked() *FolderSummary {
 		s = &FolderSummary{}
 	}
 	s.Why = d.folderWhyNotLocked()
+	s.MovingNow = d.moving
+	if s.On && s.Out != "" {
+		s.Refetch = d.moveRefetchLocked()
+	}
 	return s
 }
 
@@ -173,29 +188,25 @@ func (d *Download) folderOffLocked() {
 }
 
 // SetFolderInto sets the folder to extract into (the output folder goes
-// inside it). The .part moves next to the output folder when it is on the
-// same drive.
+// inside it). The .part goes next to the output folder. Once extraction has
+// started, it moves what is extracted and the .part there (see move.go).
 func (d *Download) SetFolderInto(dir string) error {
 	if !filepath.IsAbs(dir) {
 		return errors.New("not a folder: " + dir)
 	}
 	dir = filepath.Clean(dir)
 	d.mu.Lock()
-	f := d.st.Folder
-	var err error
-	switch {
-	case d.st.Status == StatusCompleted:
-		err = errors.New("the download is complete")
-	case f != nil && f.Out != "" && !strings.EqualFold(filepath.Dir(f.Out), dir):
-		err = errors.New("extraction has started: the folder can't change yet")
-	}
-	if err != nil {
+	if d.st.Status == StatusCompleted {
 		d.mu.Unlock()
-		return err
+		return errors.New("the download is complete")
 	}
+	f := d.st.Folder
 	if f == nil {
 		f = &Folder{}
 		d.st.Folder = f
+	}
+	if f.On && (f.Out != "" || f.Moving != "") {
+		return d.moveToLocked(dir) // unlocks
 	}
 	f.Into = dir
 	if f.On && !d.st.Allocated {
@@ -211,27 +222,10 @@ func (d *Download) SetFolderInto(dir string) error {
 }
 
 // moveNeededLocked: the .part exists somewhere other than the folder it
-// extracts into, on the same drive, so a rename puts it there. Another drive
-// is left alone (moving between drives is a copy).
+// extracts into, so the next run moves it there first (relocate).
 func (d *Download) moveNeededLocked() bool {
 	f := d.st.Folder
-	return d.folderOnLocked() && f.Into != "" && d.st.Allocated && !strings.EqualFold(d.st.Dir, f.Into) &&
-		strings.EqualFold(filepath.VolumeName(d.st.Dir), filepath.VolumeName(f.Into))
-}
-
-// movePartLocked moves the .part into the folder it extracts into, before it is opened.
-func (d *Download) movePartLocked() {
-	into := d.st.Folder.Into
-	if err := os.MkdirAll(into, 0o755); err != nil {
-		log.Printf("download %s: keeping the partial file where it is: %v", d.st.ID, err)
-		return
-	}
-	name := uniqueName(into, d.st.Filename, "", partSuffix)
-	if err := os.Rename(d.partPath(), filepath.Join(into, name+partSuffix)); err != nil {
-		log.Printf("download %s: keeping the partial file where it is: %v", d.st.ID, err)
-		return
-	}
-	d.st.Dir, d.st.Filename = into, name
+	return d.folderOnLocked() && f.Into != "" && d.st.Allocated && !strings.EqualFold(d.st.Dir, f.Into)
 }
 
 // stopRestart is Download.stopAs for a run that stops only to start again.
@@ -417,8 +411,8 @@ func (d *Download) folderStep(ctx context.Context, fr *folderRun) (more bool, er
 		if err != nil {
 			return d.folderFallback(err)
 		}
-		fr.arc = a
 		d.mu.Lock()
+		fr.arc = a // under the lock: Details reads it for the move warning
 		if d.folderOnLocked() {
 			d.plan.bounds = entryBounds(a)
 		}

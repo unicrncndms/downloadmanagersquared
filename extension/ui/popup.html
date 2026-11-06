@@ -62,6 +62,9 @@
     #addBox .check[hidden], .fold[hidden], .fold > [hidden] { display: none; }
     .fold { margin-top: 6px; display: grid; gap: 3px; }
     .fold .why { color: var(--muted); }
+    .fold .form .why { grid-column: 1 / -1; }
+    .fold .why.bad { color: var(--bad); }
+    .fold .form .mono { min-width: 0; overflow-wrap: anywhere; align-self: center; }
     .facts dd.lines { white-space: pre-line; }
     .offline { padding: 12px; border-radius: 6px; background: var(--accent-soft); font-size: 13px; }
   </style>

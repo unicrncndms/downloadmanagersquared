@@ -92,8 +92,17 @@ function makeCard(id) {
   const foldOn = el("input", { type: "checkbox", onchange: () => act("setFolder", { id, on: foldOn.checked }) });
   const foldSwitch = el("label", {}, foldOn, "Download as folder: extract it while it downloads");
   const foldWhy = el("div", { class: "why" });
+  // Extract into, while unfinished: Browse… moves what is extracted (the
+  // engine shows the picker and does the move; the state shows how it went).
+  const foldMoveInto = el("span", { class: "mono" });
+  const foldMoveWarn = el("div", { class: "why" });
+  const foldMoveErr = el("div", { class: "why bad" });
+  const foldMove = el("div", { class: "form", hidden: true },
+    el("label", {}, "Extract into"), foldMoveInto,
+    el("button", { class: "small", onclick: () => act("pickFolder", { id }) }, "Browse…"),
+    foldMoveWarn, foldMoveErr);
   const foldFacts = el("dl", { class: "facts" });
-  const foldBox = el("div", { class: "fold", hidden: true }, foldSwitch, foldWhy, foldFacts);
+  const foldBox = el("div", { class: "fold", hidden: true }, foldSwitch, foldWhy, foldMove, foldFacts);
 
   const page = el("input", { type: "url" });
   const sha = el("input", { type: "text", class: "mono", placeholder: "64 hex characters (optional)", spellcheck: "false" });
@@ -171,6 +180,14 @@ function makeCard(id) {
       }
       foldWhy.textContent = fv.toggle ? fv.toggle.reason : "";
       foldWhy.hidden = !foldWhy.textContent;
+      foldMove.hidden = !fv.move;
+      if (fv.move) {
+        foldMoveInto.textContent = fv.move.moving ? `${fv.move.into} → ${fv.move.moving}` : fv.move.into;
+        foldMoveWarn.textContent = fv.move.warning;
+        foldMoveWarn.hidden = !fv.move.warning;
+        foldMoveErr.textContent = fv.move.error;
+        foldMoveErr.hidden = !fv.move.error;
+      }
       foldFacts.hidden = !fv.facts.length;
       foldFacts.replaceChildren(...fv.facts.flatMap(([k, v]) =>
         [el("dt", {}, k), el("dd", { class: k === "Renamed" ? "lines" : "" }, v)]));
