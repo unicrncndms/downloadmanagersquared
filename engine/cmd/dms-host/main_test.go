@@ -71,3 +71,21 @@ func TestALineTooLongForFirefoxIsSkipped(t *testing.T) {
 		t.Fatalf("relayed %q", out.Bytes())
 	}
 }
+
+// Before the engine shows the folder picker, the host passes on Firefox's
+// right to bring a window to the front, so the picker isn't behind Firefox.
+func TestPickFolderLetsTheEngineComeToTheFront(t *testing.T) {
+	was := allowForeground
+	t.Cleanup(func() { allowForeground = was })
+	var allowed []string
+	var out bytes.Buffer
+	allowForeground = func() { allowed = append(allowed, out.String()) }
+	var in bytes.Buffer
+	in.Write(frame([]byte(`{"id":1,"method":"list"}`)))
+	in.Write(frame([]byte(`{"id":2,"method":"pickFolder","params":{"id":"x"}}`)))
+	relayIn(&in, &out, "")
+	// Once, and before the request reached the engine.
+	if len(allowed) != 1 || allowed[0] != "{\"id\":1,\"method\":\"list\"}\n" {
+		t.Fatalf("allowed %q", allowed)
+	}
+}

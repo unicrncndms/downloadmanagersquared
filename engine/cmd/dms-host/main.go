@@ -67,6 +67,12 @@ func relayIn(from io.Reader, to io.Writer, browser string) {
 		if json.Compact(&buf, withBrowser(msg, browser)) != nil {
 			continue
 		}
+		if method(msg) == "pickFolder" {
+			// The engine runs in the background, so Windows would put its
+			// folder picker behind Firefox. Firefox started this host and is
+			// in front, so the host may let the engine come forward.
+			allowForeground()
+		}
 		buf.WriteByte('\n')
 		if _, err := to.Write(buf.Bytes()); err != nil {
 			return
@@ -91,6 +97,19 @@ func relayOut(from io.Reader, to io.Writer) {
 			return
 		}
 	}
+}
+
+// allowForeground lets the engine bring its next window to the front; tests
+// replace it.
+var allowForeground = winutil.AllowForeground
+
+// method is the request's method, "" if it has none.
+func method(msg []byte) string {
+	var req struct {
+		Method string `json:"method"`
+	}
+	json.Unmarshal(msg, &req)
+	return req.Method
 }
 
 // withBrowser adds the browser's exe to the extension's hello.
