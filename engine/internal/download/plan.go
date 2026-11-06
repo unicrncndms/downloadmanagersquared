@@ -21,10 +21,14 @@ type plan struct {
 	size       int64 // -1 while unknown
 	splittable bool
 	segs       []*segment
+
+	// prefer is a byte whose free chunk is claimed before any other (a
+	// Download as folder's tail), -1 for none.
+	prefer int64
 }
 
 func newPlan(size int64, rangeOK bool, remaining []Range) *plan {
-	p := &plan{size: size, splittable: rangeOK}
+	p := &plan{size: size, splittable: rangeOK, prefer: -1}
 	if !rangeOK {
 		end := size
 		if end < 0 {
@@ -45,7 +49,7 @@ func newPlan(size int64, rangeOK bool, remaining []Range) *plan {
 func (p *plan) claim(newSpeed float64) *segment {
 	var free *segment
 	for _, s := range p.segs {
-		if s.owner == nil && s.written < s.end && (free == nil || s.written < free.written) {
+		if s.owner == nil && s.written < s.end && (free == nil || p.before(s, free)) {
 			free = s
 		}
 	}
@@ -82,6 +86,38 @@ func (p *plan) claim(newSpeed float64) *segment {
 	victim.end = cut
 	p.segs = append(p.segs, ns)
 	return ns
+}
+
+// before: free chunk a is claimed before b, the preferred one first, then the lowest.
+func (p *plan) before(a, b *segment) bool {
+	if p.prefer >= 0 {
+		pa, pb := a.written >= p.prefer, b.written >= p.prefer
+		if pa != pb {
+			return pa
+		}
+	}
+	return a.written < b.written
+}
+
+// cut makes a chunk boundary at byte at, so the missing bytes from there can
+// be claimed on their own. A chunk being fetched past at ends there instead,
+// as when claim splits it. Bytes already claimed or on disk need no cut.
+func (p *plan) cut(at int64) {
+	for _, s := range p.segs {
+		if s.pos < at && at < s.end {
+			p.segs = append(p.segs, &segment{pos: at, written: at, end: s.end})
+			s.end = at
+			return
+		}
+	}
+}
+
+// add makes bytes that were on disk missing again, to be fetched once more.
+// None of them may be missing already.
+func (p *plan) add(r Range) {
+	if r.Start < r.End {
+		p.segs = append(p.segs, &segment{pos: r.Start, written: r.Start, end: r.End})
+	}
 }
 
 // release frees a chunk its worker has stopped on, so it can be claimed again.

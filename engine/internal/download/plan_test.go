@@ -96,3 +96,62 @@ func TestPlanUnknownSizeEndsWithTheResponse(t *testing.T) {
 		t.Fatalf("after the end: done %d remaining %d", p.done(), p.remaining())
 	}
 }
+
+// A cut puts a chunk boundary at a byte, so the bytes from there can be
+// claimed on their own; an owned chunk ends there and keeps the rest free.
+func TestPlanCutMakesABoundaryAtAByte(t *testing.T) {
+	p := newPlan(100, true, []Range{{0, 100}})
+	p.cut(90)
+	if got := p.ranges(); !reflect.DeepEqual(got, []Range{{0, 90}, {90, 100}}) {
+		t.Fatalf("free chunk: %v", got)
+	}
+
+	p = newPlan(100, true, []Range{{0, 100}})
+	s := p.claim(0)
+	owned(s, 1)
+	p.take(s, 10)
+	p.cut(90)
+	if s.end != 90 {
+		t.Fatalf("owned chunk ends at %d, want 90", s.end)
+	}
+	if n := p.claim(0); n == nil || n.pos != 90 || n.end != 100 {
+		t.Fatalf("the bytes after the cut aren't free: %+v", n)
+	}
+
+	// A byte already claimed or on disk needs no cut.
+	before := len(p.segs)
+	p.cut(5)
+	if len(p.segs) != before {
+		t.Fatal("cut a chunk below where its connection already is")
+	}
+}
+
+// With a byte preferred, the free chunk from there is claimed first.
+func TestPlanClaimsThePreferredBytesFirst(t *testing.T) {
+	p := newPlan(100, true, []Range{{0, 100}})
+	p.cut(90)
+	p.prefer = 90
+	s := p.claim(0)
+	if s.pos != 90 || s.end != 100 {
+		t.Fatalf("claimed %d-%d, want 90-100", s.pos, s.end)
+	}
+	owned(s, 1)
+	if s := p.claim(0); s.pos != 0 {
+		t.Fatalf("then claimed %d, want 0", s.pos)
+	}
+}
+
+// Bytes given back are missing again and claimed like any others.
+func TestPlanAddGivesBytesBack(t *testing.T) {
+	p := newPlan(100, true, nil)
+	if p.remaining() != 0 {
+		t.Fatal("not empty")
+	}
+	p.add(Range{20, 30})
+	if p.remaining() != 10 || p.done() != 90 {
+		t.Fatalf("remaining %d, done %d", p.remaining(), p.done())
+	}
+	if s := p.claim(0); s.pos != 20 || s.end != 30 {
+		t.Fatalf("claimed %d-%d", s.pos, s.end)
+	}
+}

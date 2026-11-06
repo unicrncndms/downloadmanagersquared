@@ -755,7 +755,11 @@ var notify = winutil.NotifyClick
 // notifyFinished says a download ended; a click on a finished one shows it in its folder.
 func (e *Engine) notifyFinished(s download.Summary, path string) {
 	if s.Status == download.StatusCompleted || s.Status == torrent.StatusSeeding {
-		notify("Download complete", s.Filename, func() { winutil.ShowInFolder(path) })
+		msg := s.Filename
+		if f := s.Folder; f != nil && f.On && f.Out != "" {
+			msg = "Extracted to " + filepath.Base(f.Out)
+		}
+		notify("Download complete", msg, func() { winutil.ShowInFolder(path) })
 	} else {
 		notify("Download failed", s.Filename+": "+s.Error, nil)
 	}
@@ -979,10 +983,37 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(),
 	}
+	if e.settings.FolderDefault {
+		// Settled once the name is known: only a .zip becomes one.
+		st.Folder = &download.Folder{Auto: true, Into: e.settings.folderDir()}
+	}
 	e.mu.Unlock()
 	e.queue.Add(download.New(e, st))
 	log.Printf("added %s", st.ID) // no URL: links are private
 	return st.ID, nil
+}
+
+// SetFolder sets a download's folder to extract into, which becomes the last
+// one used, and switches Download as folder on or off; either may be nil.
+func (e *Engine) SetFolder(id string, on *bool, into *string) error {
+	d, err := e.get(id)
+	if err != nil {
+		return err
+	}
+	// The switch first: refused, it leaves the folder and the setting as they were.
+	if on != nil {
+		if err := d.SetFolder(*on); err != nil {
+			return err
+		}
+	}
+	if into != nil {
+		dir := strings.TrimSpace(*into)
+		if err := d.SetFolderInto(dir); err != nil {
+			return err
+		}
+		e.applySettings(func(s *Settings) { s.FolderDir = filepath.Clean(dir) })
+	}
+	return nil
 }
 
 func isTorrentURL(u string) bool {

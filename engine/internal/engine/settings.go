@@ -36,6 +36,19 @@ type Settings struct {
 	VPNTorrent         paths.Mode                `json:"vpnTorrent"`  // the same for a torrent
 	PIARegion          string                    `json:"piaRegion"`   // "" = the lowest latency
 	VPNProvider        string                    `json:"vpnProvider"` // the settings page's provider choice: "", "conf" or "pia"
+
+	// Download as folder
+	FolderDefault bool   `json:"folderDefault"`       // new .zip downloads are one
+	FolderDir     string `json:"folderDir,omitempty"` // the folder last extracted into; "" = SaveDir
+}
+
+// folderDir is where a Download as folder extracts unless told otherwise:
+// the last folder used for one, else the Save folder.
+func (s *Settings) folderDir() string {
+	if s.FolderDir != "" {
+		return s.FolderDir
+	}
+	return s.SaveDir
 }
 
 func defaultSettings() Settings {

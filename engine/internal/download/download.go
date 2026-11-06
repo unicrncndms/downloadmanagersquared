@@ -88,6 +88,7 @@ type State struct {
 	Remaining  []Range          `json:"remaining,omitempty"`
 	Added      time.Time        `json:"added"`
 	Finished   time.Time        `json:"finished,omitzero"`
+	Folder     *Folder          `json:"folder,omitempty"` // Download as folder; nil when never asked for
 
 	plainCookies bool // read with a cookie saved readable, before encryption
 }
@@ -150,7 +151,9 @@ type Download struct {
 	wg       sync.WaitGroup
 
 	file    *os.File
-	plan    *plan // nil unless running with the file open
+	plan    *plan      // nil unless running with the file open
+	fold    *folderRun // extracting, in Download as folder
+	xmu     sync.Mutex // held while Entries are extracted and freed; taken before mu
 	workers map[*worker]struct{}
 	ifs     map[string]*ifaceRun
 	probing map[string]bool
@@ -200,6 +203,7 @@ func (d *Download) State() State {
 		st.Links[k] = &c
 	}
 	st.Remaining = append([]Range(nil), d.st.Remaining...)
+	st.Folder = d.st.Folder.clone()
 	return st
 }
 
@@ -216,6 +220,10 @@ func (d *Download) Start() {
 	if d.running || d.st.Status == StatusCompleted {
 		return
 	}
+	d.startLocked()
+}
+
+func (d *Download) startLocked() {
 	ctx, cancel := context.WithCancel(context.Background())
 	d.running, d.cancel, d.done, d.stopAs = true, cancel, make(chan struct{}), ""
 	d.fatal = make(chan error, 1)
@@ -284,6 +292,9 @@ func (d *Download) RetryLink(ifaceID string) {
 // unfinished download checks them when it finishes; a finished one checks its
 // file now.
 func (d *Download) SetHashes(sha, md string) error {
+	// Not while Entries are being freed: what is freed decides whether a hash can apply.
+	d.xmu.Lock()
+	defer d.xmu.Unlock()
 	sha, md = strings.ToLower(strings.TrimSpace(sha)), strings.ToLower(strings.TrimSpace(md))
 	if err := checkHex(sha, sha256.Size, "SHA-256"); err != nil {
 		return err
@@ -292,6 +303,16 @@ func (d *Download) SetHashes(sha, md string) error {
 		return err
 	}
 	d.mu.Lock()
+	if f := d.st.Folder; (sha != "" || md != "") && f != nil {
+		if f.locked() {
+			d.mu.Unlock()
+			return errors.New("the archive is being extracted as it downloads, so there won't be a whole file to check")
+		}
+		if f.On {
+			f.On, f.Note = false, hashNote
+			d.folderOffLocked()
+		}
+	}
 	d.st.SHA256, d.st.MD5, d.st.HashResult = sha, md, ""
 	check := d.st.Status == StatusCompleted && (sha != "" || md != "") && !d.checking
 	path := filepath.Join(d.st.Dir, d.st.Filename)
@@ -364,10 +385,14 @@ func (d *Download) SetPageURL(u string) {
 
 func (d *Download) partPath() string { return filepath.Join(d.st.Dir, d.st.Filename+partSuffix) }
 
-// PartPath is where the unfinished data lives (or the final file once completed).
+// Path is where the unfinished data lives, or the final file once completed.
+// For a Download as folder it is the output folder once it is named.
 func (d *Download) Path() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if f := d.st.Folder; f != nil && f.On && f.Out != "" {
+		return f.Out
+	}
 	if d.st.Status == StatusCompleted {
 		return filepath.Join(d.st.Dir, d.st.Filename)
 	}
@@ -382,6 +407,7 @@ func (d *Download) run(ctx context.Context) {
 	}
 	d.mu.Unlock()
 	d.wg.Wait()
+	d.stopFolder()
 
 	if err == nil {
 		err = d.complete(ctx)
@@ -397,7 +423,18 @@ func (d *Download) run(ctx context.Context) {
 	d.plan = nil
 	var pe *pauseError
 	finished := false
+	if d.stopAs == stopRestart && err == nil {
+		d.stopAs = "" // it finished meanwhile
+	}
 	switch {
+	case d.stopAs == stopRestart:
+		// Stopped only to start again, keeping its Slot: the queue sees it running throughout.
+		old := d.done
+		d.startLocked()
+		close(old)
+		d.mu.Unlock()
+		d.env.Changed(d)
+		return
 	case d.stopAs != "":
 		d.st.Status = d.stopAs
 	case errors.As(err, &pe):
@@ -501,6 +538,7 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 		}
 		changed = true
 	}
+	d.startFolderLocked(ctx) // before any claim, so the archive's tail comes first
 
 	for w := range d.workers {
 		l := d.st.Links[w.iface]
@@ -544,7 +582,8 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 		}
 	}
 
-	return d.plan.remaining() == 0 && len(d.workers) == 0, nil
+	// A Download as folder holds its Slot until the last Entry is checked.
+	return d.plan.remaining() == 0 && len(d.workers) == 0 && d.folderSettledLocked(), nil
 }
 
 // nothingLeftLocked: every link the download could use has been given up on,
@@ -657,6 +696,7 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 		if d.st.Filename == "" {
 			d.st.Filename = "download"
 		}
+		d.folderProbedLocked()
 	} else {
 		if r.size != d.st.Size {
 			l.mismatch(fmt.Sprintf("different file size (%d vs %d bytes)", r.size, d.st.Size))
@@ -746,6 +786,9 @@ func (d *Download) needResolveLocked(ifaceID string, l *Link, reason string) {
 }
 
 func (d *Download) openFileLocked() error {
+	if d.moveNeededLocked() {
+		d.movePartLocked()
+	}
 	if err := os.MkdirAll(d.st.Dir, 0o755); err != nil {
 		return err
 	}
@@ -1117,8 +1160,24 @@ func (d *Download) complete(ctx context.Context) error {
 	}
 	part := d.partPath()
 	dir, name := d.st.Dir, d.st.Filename
+	folder := d.folderOnLocked()
 	d.mu.Unlock()
 
+	if folder {
+		// Every Entry is extracted and checked: the archive itself isn't kept.
+		if f != nil {
+			f.Close()
+		}
+		if err := os.Remove(part); err != nil {
+			log.Printf("download %s: removing the partial file: %v", d.st.ID, err)
+		}
+		if fromServer {
+			d.mu.Lock()
+			d.st.Folder.Note = serverMD5
+			d.mu.Unlock()
+		}
+		return nil
+	}
 	if f != nil {
 		if sparse {
 			winutil.SetSparse(f, false)
@@ -1292,6 +1351,8 @@ type Summary struct {
 
 	VPN paths.Mode `json:"vpn,omitempty"`
 
+	Folder *FolderSummary `json:"folder,omitempty"` // Download as folder, once asked for
+
 	// Torrents only: the files to choose from (while choosing), then the upload once complete.
 	Files    []FileSummary `json:"files,omitempty"`
 	AskVPN   bool          `json:"askVpn,omitempty"` // waiting for: VPN, or the current connection?
@@ -1327,12 +1388,22 @@ type FileSummary struct {
 func (d *Download) Resume() { d.Stop(StatusQueued) }
 
 // Discard stops the download for good. With deleteFile, an unfinished file
-// goes; a completed one is the user's.
+// goes, and a Download as folder's folder with it; a completed one is the user's.
 func (d *Download) Discard(deleteFile bool) {
 	finished := d.Status() == StatusCompleted
 	d.Stop(StatusPaused)
-	if p := d.Path(); deleteFile && !finished {
-		os.Remove(p)
+	if !deleteFile || finished {
+		return
+	}
+	d.mu.Lock()
+	part, out := d.partPath(), ""
+	if f := d.st.Folder; f != nil {
+		out = f.Out
+	}
+	d.mu.Unlock()
+	os.Remove(part)
+	if out != "" {
+		os.RemoveAll(out)
 	}
 }
 
@@ -1420,6 +1491,7 @@ func (d *Download) Summary() Summary {
 		hashResult: d.st.HashResult, checking: d.checking,
 		serverMD5: d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.MD5 != "",
 		Added:     d.st.Added, Finished: d.st.Finished, VPN: d.st.VPN,
+		Folder: d.st.Folder.summary(),
 	}
 	if d.running {
 		s.ETA = d.eta.Seconds()
