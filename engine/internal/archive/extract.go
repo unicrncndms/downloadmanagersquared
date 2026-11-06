@@ -471,14 +471,10 @@ func finish(e Entry, out *os.File, path string) error {
 }
 
 // fileError: err came from reading the archive file, not from its bytes being
-// wrong. flate wraps those in a ReadError, which doesn't unwrap.
+// wrong. The decompressors pass those on as they are.
 func fileError(err error) bool {
 	if errors.Is(err, errStopped) {
 		return true
-	}
-	var re *flate.ReadError
-	if errors.As(err, &re) {
-		err = re.Err
 	}
 	var pe *os.PathError
 	return errors.As(err, &pe)

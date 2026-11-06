@@ -168,7 +168,10 @@ func TestDOSTimesAreUsedWithoutAnExtendedTimestamp(t *testing.T) {
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
 	h := &zip.FileHeader{Name: "old.txt", Method: zip.Store}
+	// The DOS fields on their own, as an old writer leaves them.
+	//lint:ignore SA1019 the deprecated fields are what this test is about
 	h.ModifiedDate = uint16((2001-1980)<<9 | 2<<5 | 3)
+	//lint:ignore SA1019 as above
 	h.ModifiedTime = uint16(4<<11 | 5<<5 | 6/2)
 	if _, err := w.CreateHeader(h); err != nil {
 		t.Fatal(err)

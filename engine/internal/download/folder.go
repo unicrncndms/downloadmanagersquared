@@ -155,6 +155,7 @@ func (d *Download) setFolderLocked(on bool) error {
 	case d.st.Status == StatusCompleted:
 		return errors.New("the download is complete")
 	case f.locked():
+		//lint:ignore ST1005 shown to the user as is, like the pause messages
 		return errors.New(lockedNote)
 	case on && d.folderWhyNotLocked() != "":
 		return errors.New(d.folderWhyNotLocked())

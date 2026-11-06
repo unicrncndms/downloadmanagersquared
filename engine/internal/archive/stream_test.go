@@ -139,9 +139,7 @@ func TestAStoppedLargeEntryStartsOverFromItsFront(t *testing.T) {
 	if l := leftovers(t, out); len(l) > 0 {
 		t.Fatalf("left %v after a new Extractor", l)
 	}
-	for _, fr := range r.Freed {
-		d.missing = append(d.missing, fr) // back in the plan
-	}
+	d.missing = append(d.missing, r.Freed...) // back in the plan
 	d.arrive(0, a.DirStart)
 	r = extract(t, x, d.missing)
 	if len(r.Done) != 1 || len(r.Failed) != 0 {

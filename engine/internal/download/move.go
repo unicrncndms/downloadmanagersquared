@@ -161,10 +161,11 @@ type move struct {
 }
 
 func moveError(err error) error {
+	// Shown to the user as they are, like the pause messages.
 	if inUse(err) {
-		return errors.New(inUseNote)
+		return errors.New(inUseNote) //lint:ignore ST1005 a sentence for the user
 	}
-	return fmt.Errorf("Couldn't move: %w", err)
+	return fmt.Errorf("Couldn't move: %w", err) //lint:ignore ST1005 a sentence for the user
 }
 
 func (d *Download) doMove(ctx context.Context, m *move) error {
