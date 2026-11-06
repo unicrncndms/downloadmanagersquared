@@ -90,3 +90,13 @@ test("while unfinished, Extract into can be changed, with the move's warning and
   assert.equal(folderView(zip({ on: true }), SETTINGS).move, null); // still asking
   assert.equal(folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big" }, { status: "completed" }), SETTINGS).move, null);
 });
+
+test("Change… offers the recent folders, then the Save folder, without the one it's in", () => {
+  const { folderChoices } = require("../lib/folder.js");
+  const s = { saveDir: "C:\Downloads", folderDirs: ["E:\Data", "D:\Games", "c:\downloads"] };
+  assert.deepEqual(folderChoices(s, ""), ["E:\Data", "D:\Games", "c:\downloads"]);
+  assert.deepEqual(folderChoices(s, "e:\data"), ["D:\Games", "c:\downloads"]);
+  assert.deepEqual(folderChoices({ saveDir: "C:\Downloads" }, ""), ["C:\Downloads"]);
+  assert.deepEqual(folderChoices({ saveDir: "C:\Downloads", folderDirs: ["E:\Data"] }, ""), ["E:\Data", "C:\Downloads"]);
+  assert.deepEqual(folderChoices(null, ""), []);
+});

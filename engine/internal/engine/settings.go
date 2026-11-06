@@ -7,6 +7,7 @@ import (
 	mrand "math/rand/v2"
 	"os"
 	"regexp"
+	"strings"
 
 	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/paths"
@@ -38,8 +39,25 @@ type Settings struct {
 	VPNProvider        string                    `json:"vpnProvider"` // the settings page's provider choice: "", "conf" or "pia"
 
 	// Download as folder
-	FolderDefault bool   `json:"folderDefault"`       // new .zip downloads are one
-	FolderDir     string `json:"folderDir,omitempty"` // the folder last extracted into; "" = SaveDir
+	FolderDefault bool     `json:"folderDefault"`        // new .zip downloads are one
+	FolderDir     string   `json:"folderDir,omitempty"`  // the folder last extracted into; "" = SaveDir
+	FolderDirs    []string `json:"folderDirs,omitempty"` // the folders last extracted into, newest first: Change… offers them
+}
+
+// maxRecentFolders is how many folders extracted into are remembered.
+const maxRecentFolders = 5
+
+// useFolder makes dir the last folder extracted into, at the front of the
+// recent ones.
+func (s *Settings) useFolder(dir string) {
+	s.FolderDir = dir
+	recent := []string{dir}
+	for _, d := range s.FolderDirs {
+		if !strings.EqualFold(d, dir) && len(recent) < maxRecentFolders {
+			recent = append(recent, d)
+		}
+	}
+	s.FolderDirs = recent
 }
 
 // folderDir is where a Download as folder extracts unless told otherwise:

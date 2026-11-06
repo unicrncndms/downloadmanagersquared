@@ -132,15 +132,33 @@ function makeCard(id) {
   const pick = el("div", { class: "pick", hidden: true });
   let picking = ""; // what the add step shows: the VPN question and/or the files
 
+  // Change…: the recent folders, chosen here, and Other folder… for Windows'
+  // picker, which the engine shows and applies itself (the toolbar popup
+  // closes as soon as it opens). current is the folder not to offer; chosen
+  // gets the folder picked from the list.
+  function chooser(current, chosen) {
+    const box = el("div", { class: "choices", hidden: true });
+    const toggle = () => {
+      if (!box.hidden) { box.hidden = true; return; }
+      box.replaceChildren(
+        ...folderChoices(latest.settings, current()).map((dir) =>
+          el("button", { class: "choice", title: dir, onclick: () => { box.hidden = true; chosen(dir); } }, dir)),
+        el("button", { class: "choice other", onclick: () => { box.hidden = true; act("pickFolder", { id }); } }, "Other folder…"));
+      box.hidden = false;
+    };
+    return { box, button: el("button", { class: "small", onclick: toggle }, "Change…") };
+  }
+
   // Download as folder switched on by hand: it keeps downloading while this
-  // asks where to extract. Change… sets the folder itself (the engine shows
-  // the picker), so it works even after the toolbar popup closes.
+  // asks where to extract.
   const askInto = el("b", { class: "path" });
+  const askChange = chooser(() => askInto.textContent, (dir) => act("setFolder", { id, into: dir }, "Extracting into " + dir));
   const foldAsk = el("div", { class: "extract", hidden: true },
     el("div", { class: "row" },
       el("span", { class: "grow" }, "Extract into ", askInto),
-      el("button", { class: "small", onclick: () => act("pickFolder", { id }) }, "Change…"),
+      askChange.button,
       el("button", { class: "small primary", onclick: () => act("setFolder", { id, into: askInto.textContent }, "Extracting into " + askInto.textContent) }, "Start")),
+    askChange.box,
     el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); act("setFolder", { id, on: false }, "Downloading it as a file"); } }, "Download as a file instead"));
 
   // Details, in sections: Connections, Folder, File, Checks.
@@ -152,14 +170,14 @@ function makeCard(id) {
   const foldSwitch = el("label", { class: "switch" }, foldOn, "Download as folder: extract it while it downloads", foldTag);
   const foldExtracting = el("div", {}, "Extracting as a folder");
   // Extract into, while unfinished: Change… moves what is extracted (the
-  // engine shows the picker and does the move; the state shows how it went).
+  // engine does the move; the state shows how it went).
   const moveInto = el("span", { class: "path grow" });
   const moveWarn = el("div", { class: "muted" });
   const moveErr = el("div", { class: "bad" });
+  const moveChange = chooser(() => (d && d.folder && d.folder.into) || "", (dir) => act("setFolder", { id, into: dir }, "Moving to " + dir));
   const foldMove = el("div", {},
-    el("div", { class: "row" }, el("span", { class: "muted" }, "Extract into"), moveInto,
-      el("button", { class: "small", onclick: () => act("pickFolder", { id }) }, "Change…")),
-    moveWarn, moveErr);
+    el("div", { class: "row" }, el("span", { class: "muted" }, "Extract into"), moveInto, moveChange.button),
+    moveChange.box, moveWarn, moveErr);
   const foldFacts = el("dl", { class: "facts" });
   const foldSection = section("Folder", foldSwitch, foldExtracting, foldMove, foldFacts);
 

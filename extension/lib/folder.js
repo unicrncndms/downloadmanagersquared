@@ -43,6 +43,23 @@ function lastFolder(settings) {
   return (settings && (settings.folderDir || settings.saveDir)) || "";
 }
 
+// folderChoices is what Change… offers inside the page, so the folder picker
+// (which closes the toolbar popup) is needed only for another folder: the
+// folders last extracted into, newest first, then the Save folder; each once,
+// whatever its case, and not current, the folder it already extracts into.
+function folderChoices(settings, current) {
+  if (!settings) return [];
+  const seen = new Set([(current || "").toLowerCase()]);
+  const out = [];
+  for (const d of [...(settings.folderDirs || []), settings.saveDir || ""]) {
+    if (d && !seen.has(d.toLowerCase())) {
+      seen.add(d.toLowerCase());
+      out.push(d);
+    }
+  }
+  return out;
+}
+
 // removeWording is what Remove asks for an unfinished download: a Download as
 // folder deletes (or keeps) its folder along with the partial file.
 function removeWording(d) {
@@ -77,4 +94,4 @@ function addFolderParam(shown, checked, settings) {
   return checked;
 }
 
-if (typeof module !== "undefined") module.exports = { folderView, removeWording, addFolderChoice, addFolderParam, lastFolder };
+if (typeof module !== "undefined") module.exports = { folderView, folderChoices, removeWording, addFolderChoice, addFolderParam, lastFolder };

@@ -1077,7 +1077,7 @@ func (e *Engine) SetFolder(id string, on *bool, into *string) error {
 		if err := d.SetFolderInto(dir); err != nil {
 			return err
 		}
-		e.applySettings(func(s *Settings) { s.FolderDir = filepath.Clean(dir) })
+		e.applySettings(func(s *Settings) { s.useFolder(filepath.Clean(dir)) })
 	}
 	return nil
 }

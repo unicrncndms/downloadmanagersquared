@@ -58,6 +58,11 @@
     .row { display: flex; align-items: center; gap: 6px; min-width: 0; }
     .row .grow, .row .path { flex: 1; min-width: 0; overflow-wrap: anywhere; }
     .path { font-weight: 600; }
+    .choices { display: grid; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+    .choices .choice { border: 0; background: transparent; text-align: left; padding: 4px 8px; border-radius: 5px; font-size: 12px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .choices .choice:hover { background: var(--accent-soft); }
+    .choices .other { color: var(--muted); }
     .bad { color: var(--bad); }
     .card .actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
     .card .ask { align-items: center; }

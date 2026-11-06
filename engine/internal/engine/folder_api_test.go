@@ -124,3 +124,17 @@ type handleWindow uintptr
 
 func (handleWindow) Open(string) error { return nil }
 func (w handleWindow) Handle() uintptr { return uintptr(w) }
+
+// Each folder extracted into goes to the front of the recent folders, which
+// the extension offers under Change… without opening the picker: five at
+// most, each once whatever its case.
+func TestRecentFoldersKeepTheLastFive(t *testing.T) {
+	var s Settings
+	for _, d := range []string{`C:\a`, `D:\b`, `C:\A`, `E:\c`, `F:\d`, `G:\e`, `H:\f`} {
+		s.useFolder(d)
+	}
+	want := []string{`H:\f`, `G:\e`, `F:\d`, `E:\c`, `C:\A`}
+	if fmt.Sprint(s.FolderDirs) != fmt.Sprint(want) || s.FolderDir != `H:\f` {
+		t.Fatalf("recent %v, last %q", s.FolderDirs, s.FolderDir)
+	}
+}
