@@ -14,7 +14,7 @@ The extension also keeps, in Firefox's own storage, the clicks it learned per si
 
 ## Pages DMS² opens
 
-Pages DMS² opens to fetch a link run in a temporary container that only reaches the internet through the chosen connection, and is removed with its cookies when the link is fetched. If the engine isn't running, those requests are blocked.
+Pages DMS² opens to fetch a link run in a temporary container that only reaches the internet through the chosen connection, and is removed with its cookies when the link is fetched. It starts with a copy of the cookies your browser would send to that page, so you are logged in there too (never from a private window). That site then sees your session from that connection's IP address as well; a site that ties a login to one address may log you out. If the engine isn't running, those requests are blocked.
 
 ## What the engine keeps
 

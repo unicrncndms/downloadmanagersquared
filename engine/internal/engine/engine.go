@@ -90,7 +90,10 @@ type resolveReq struct {
 	PageURL   string `json:"pageUrl"`
 	SocksPort int    `json:"socksPort"`
 	Learn     bool   `json:"learn,omitempty"` // only to record the recipe: no link is reported
-	Browser   string `json:"-"`               // only the extension in this browser gets it ("" = any)
+	// CookieStore is the browser's cookie store the download came from: its
+	// cookies for the landing page are copied into the resolve's container.
+	CookieStore string `json:"cookieStore,omitempty"`
+	Browser     string `json:"-"` // only the extension in this browser gets it ("" = any)
 }
 
 type Engine struct {
@@ -746,8 +749,13 @@ func (e *Engine) RequestResolve(id, ifaceID, pageURL, browser string) {
 			browser = "" // uninstalled since: any browser will do
 		}
 	}
+	store := ""
+	if d, err := e.get(id); err == nil {
+		store = d.CookieStore()
+	}
 	e.mu.Lock()
 	req := e.resolveReqLocked(id, ifaceID, pageURL, browser)
+	req.CookieStore = store
 	e.resolves[id+"|"+ifaceID] = req
 	c := e.extensionForLocked(browser)
 	start := c == nil && browser != "" && time.Since(e.started[strings.ToLower(browser)]) > time.Minute
@@ -797,6 +805,7 @@ func (e *Engine) RecordRecipe(id string) error {
 		return errors.New("the browser this download came from isn't running")
 	}
 	req := e.resolveReqLocked(id, paths.MainInterface(e.pathSnapshotLocked()), st.PageURL, st.Browser)
+	req.CookieStore = st.CookieStore
 	req.Learn = true
 	e.learning[id] = c
 	e.mu.Unlock()
@@ -1114,6 +1123,8 @@ type AddRequest struct {
 	VPN       string `json:"vpn"`      // "off", "alongside" or "vpn"; "" = the default for its type
 	Folder    *bool  `json:"folder"`   // Download as folder: on (asks for the folder), off, or nil for the default
 	Browser   string `json:"-"`        // the exe of the browser that sent it, known from its connection
+	// CookieStore is the browser's cookie store (container) the download came from.
+	CookieStore string `json:"cookieStore"`
 }
 
 func (e *Engine) Add(r AddRequest) (string, error) {
@@ -1148,7 +1159,7 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		VPN: paths.ParseMode(r.VPN, e.settings.VPNHTTP),
 		ID:  newID(), URL: r.URL, PageURL: strings.TrimSpace(r.PageURL),
 		Cookie: download.Secret(r.Cookie), Referer: r.Referer, UserAgent: r.UserAgent, Browser: r.Browser,
-		Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
+		CookieStore: r.CookieStore, Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(),
 	}
 	switch {

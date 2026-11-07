@@ -61,40 +61,41 @@ type Range struct {
 
 // State is everything needed to resume a download after a restart.
 type State struct {
-	ID         string           `json:"id"`
-	URL        string           `json:"url"`
-	PageURL    string           `json:"pageUrl,omitempty"`
-	Cookie     Secret           `json:"cookie,omitempty"`
-	Referer    string           `json:"referer,omitempty"`
-	Limit      int64            `json:"limit,omitempty"` // download speed cap, bytes per second; 0 = none
-	UserAgent  string           `json:"userAgent,omitempty"`
-	Browser    string           `json:"browser,omitempty"` // exe of the browser that handed it over; its pages open there
-	Dir        string           `json:"dir"`
-	Filename   string           `json:"filename"`
-	RemoteName string           `json:"remoteName,omitempty"` // name the server reports; must match across links
-	Size       int64            `json:"size"`
-	RangeOK    bool             `json:"rangeOk"`
-	Version    Version          `json:"version,omitzero"` // the file's version on the server; every chunk must come from it
-	Probed     bool             `json:"probed"`
-	Stuck      bool             `json:"stuck,omitempty"` // paused because no connection could reach the file
-	VPN        paths.Mode       `json:"vpn,omitempty"`
-	WaitVPN    bool             `json:"waitVpn,omitempty"` // paused because no tunnel is up under VPN only
-	Allocated  bool             `json:"allocated"`
-	SHA256     string           `json:"sha256,omitempty"`
-	MD5        string           `json:"md5,omitempty"`
-	HashResult string           `json:"hashResult,omitempty"` // "match", or why the checksums don't match the finished file
-	Status     Status           `json:"status"`
-	Error      string           `json:"error,omitempty"`
-	Links      map[string]*Link `json:"links"`
-	Remaining  []Range          `json:"remaining,omitempty"`
-	Added      time.Time        `json:"added"`
-	Finished   time.Time        `json:"finished,omitzero"`
-	Folder     *Folder          `json:"folder,omitempty"`    // Download as folder; nil when never asked for
-	Mirrors    []Mirror         `json:"mirrors,omitempty"`   // the file's sources, URL among them; nil for one source
-	MetaSize   int64            `json:"metaSize,omitempty"`  // the size a Metalink gives; every mirror must match it
-	Group      string           `json:"group,omitempty"`     // the files of one Metalink share it
-	GroupName  string           `json:"groupName,omitempty"` // the Metalink's name
-	Log        []Event          `json:"log,omitempty"`       // the activity log, oldest first, at most maxEvents
+	ID          string           `json:"id"`
+	URL         string           `json:"url"`
+	PageURL     string           `json:"pageUrl,omitempty"`
+	Cookie      Secret           `json:"cookie,omitempty"`
+	Referer     string           `json:"referer,omitempty"`
+	Limit       int64            `json:"limit,omitempty"` // download speed cap, bytes per second; 0 = none
+	UserAgent   string           `json:"userAgent,omitempty"`
+	Browser     string           `json:"browser,omitempty"`     // exe of the browser that handed it over; its pages open there
+	CookieStore string           `json:"cookieStore,omitempty"` // that browser's cookie store (container) it came from; resolving starts with its cookies
+	Dir         string           `json:"dir"`
+	Filename    string           `json:"filename"`
+	RemoteName  string           `json:"remoteName,omitempty"` // name the server reports; must match across links
+	Size        int64            `json:"size"`
+	RangeOK     bool             `json:"rangeOk"`
+	Version     Version          `json:"version,omitzero"` // the file's version on the server; every chunk must come from it
+	Probed      bool             `json:"probed"`
+	Stuck       bool             `json:"stuck,omitempty"` // paused because no connection could reach the file
+	VPN         paths.Mode       `json:"vpn,omitempty"`
+	WaitVPN     bool             `json:"waitVpn,omitempty"` // paused because no tunnel is up under VPN only
+	Allocated   bool             `json:"allocated"`
+	SHA256      string           `json:"sha256,omitempty"`
+	MD5         string           `json:"md5,omitempty"`
+	HashResult  string           `json:"hashResult,omitempty"` // "match", or why the checksums don't match the finished file
+	Status      Status           `json:"status"`
+	Error       string           `json:"error,omitempty"`
+	Links       map[string]*Link `json:"links"`
+	Remaining   []Range          `json:"remaining,omitempty"`
+	Added       time.Time        `json:"added"`
+	Finished    time.Time        `json:"finished,omitzero"`
+	Folder      *Folder          `json:"folder,omitempty"`    // Download as folder; nil when never asked for
+	Mirrors     []Mirror         `json:"mirrors,omitempty"`   // the file's sources, URL among them; nil for one source
+	MetaSize    int64            `json:"metaSize,omitempty"`  // the size a Metalink gives; every mirror must match it
+	Group       string           `json:"group,omitempty"`     // the files of one Metalink share it
+	GroupName   string           `json:"groupName,omitempty"` // the Metalink's name
+	Log         []Event          `json:"log,omitempty"`       // the activity log, oldest first, at most maxEvents
 
 	plainCookies bool // read with a cookie saved readable, before encryption
 }
@@ -218,6 +219,13 @@ func (d *Download) Running() bool {
 
 // State returns a copy suitable for saving.
 // Browser is the exe of the browser that handed the download over ("" if none).
+// CookieStore is the browser's cookie store the download came from ("" = unknown).
+func (d *Download) CookieStore() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.st.CookieStore
+}
+
 func (d *Download) Browser() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()

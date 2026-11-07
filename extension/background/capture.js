@@ -148,7 +148,7 @@ const Capture = {
     const referer = pages[pages.length - 1] || pageUrl;
     if (cookie === undefined) cookie = await cookieHeader(url, cookieStoreId);
     try {
-      const { id } = await Engine.call("add", { url, pageUrl, filename, cookie, referer, userAgent: navigator.userAgent, torrent: !!torrent, metalink: !!metalink });
+      const { id } = await Engine.call("add", { url, pageUrl, filename, cookie, referer, userAgent: navigator.userAgent, torrent: !!torrent, metalink: !!metalink, cookieStore: cookieStoreId || "" });
       if (torrent) {
         this.torrentAdded();
       } else {

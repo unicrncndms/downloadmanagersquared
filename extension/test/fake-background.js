@@ -29,7 +29,9 @@ function storageArea(data) {
 }
 
 // shared: what outlives a restart of the background (storage, open windows).
-function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: { v: 100 } }, scripts, session = true, now = 1000000 } = {}) {
+// cookieJar: the cookies each store holds, by store id; cookies.getAll hands
+// out the asked store's (the real browser also filters them by URL).
+function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: { v: 100 } }, scripts, session = true, now = 1000000, cookieJar = {} } = {}) {
   const listeners = {};
   const calls = [];
   const engine = [];
@@ -63,7 +65,7 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
     },
     webNavigation: { onCommitted: ev("webNavigation.onCommitted"), onHistoryStateUpdated: ev("webNavigation.onHistoryStateUpdated") },
     downloads: { onCreated: ev("downloads.onCreated"), cancel: rec("downloads.cancel"), erase: rec("downloads.erase"), download: rec("downloads.download") },
-    cookies: { getAll: rec("cookies.getAll", []) },
+    cookies: { getAll: rec("cookies.getAll", (q) => (cookieJar[q.storeId || "firefox-default"] || []).slice()), set: rec("cookies.set") },
     notifications: { create: rec("notifications.create") },
     contextMenus: { create: rec("contextMenus.create"), onClicked: ev("contextMenus.onClicked") },
     contextualIdentities: {

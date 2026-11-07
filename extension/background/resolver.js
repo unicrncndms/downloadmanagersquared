@@ -184,6 +184,7 @@ const Resolver = {
     }
     const job = {
       key, id: r.id, iface: r.iface, ifaceName: r.ifaceName || r.iface, pageUrl: r.pageUrl,
+      cookieStore: r.cookieStore || "", // where the download came from: its login is copied into the container
       host: hostOf(r.pageUrl), mode: "new", step: 0, recordFrom: 0, recorded: [], learn: !!r.learn,
       tabs: [], tabId: null, windowId: null, loading: false, skipped: false,
       deadlines: {},    // name -> { at, action, args }: what to do when, see setTimer
@@ -248,6 +249,8 @@ const Resolver = {
     job.measured = { steps: [] };
     job.budgetFor = -1;
     const visible = mode === "record";
+    // The page opens with the user's login for its site, not as a stranger.
+    await copyCookies(job.pageUrl, job.cookieStore || "firefox-default", store);
     let win;
     try {
       win = await browser.windows.create({ url: job.pageUrl, cookieStoreId: store, ...(visible ? this.shownBounds() : { state: "minimized" }) });

@@ -23,7 +23,7 @@ Both halves are MIT-licensed and live in one repository: `extension/` (this add-
 Messages go over `runtime.connectNative("downloadmanagersquared")` to `dms-host.exe`, which relays them over a named pipe only the same Windows user can open. Nothing goes anywhere else.
 
 - `hello`: the browser's User-Agent. The engine answers with its version, settings and state. The state can carry `update` (a newer release's version and GitHub release page), which the engine learns by asking `api.github.com` once a day; the popup shows it as a notice with a link, and nothing is downloaded.
-- `add`: a download's URL, file name, the page it was started on, its Referer, the User-Agent, and the `Cookie` header Firefox sent for it. With no request to read (context menu, `downloads.onCreated`), the cookies Firefox would send for that URL in that container, filtered to the download's own site.
+- `add`: a download's URL, file name, the page it was started on, its Referer, the User-Agent, the `cookieStoreId` it came from (sent back with each resolve, to copy that container's cookies for the landing page), and the `Cookie` header Firefox sent for it. With no request to read (context menu, `downloads.onCreated`), the cookies Firefox would send for that URL in that container, filtered to the download's own site.
 - `resolved` / `resolveFailed` / `setPageUrl` / `learnEnded`: a link fetched for one connection (URL, the temporary container's cookies, Referer), or why it failed, the landing page the add-on found, and the end of a recording.
 - `recipeHosts`: the host names the add-on has recorded clicks for, so the engine knows when to offer **Record recipe**. The clicks themselves stay in the add-on.
 - Calls from the popup and settings page: pause, resume, remove, reorder, settings changes and the like, including a VPN login or WireGuard config the user enters there. The add-on doesn't store those.
@@ -40,7 +40,7 @@ The engine keeps a download's cookies only until it completes, and sends them on
 | `webNavigation` | Track which pages a tab showed, including cache and in-page navigation, to find a download's landing page. |
 | `proxy` | Route the add-on's own containers through the engine's per-connection SOCKS proxies. Nothing else is proxied. |
 | `contextualIdentities` | Create, find and remove the temporary DMS² containers, one per connection. |
-| `cookies` | Read a URL's cookies in its container when no request header is available, and the containers' cookies. |
+| `cookies` | Read a URL's cookies in its container when no request header is available, and the containers' cookies. Before a temporary container opens a landing page, copy into it the cookies the user's own container would send to that page (`cookies.getAll({url})`, then `cookies.set` with the temporary container's `storeId`), so the page opens logged in. Never from a private window; nothing is copied back. |
 | `tabs` | Open and close resolve windows, inject the replay script with `tabs.executeScript`, and read the tabs open at startup for their pages. |
 | `storage` | The recorded clicks per site, the pages that led to recent downloads, the container ids, and running resolve jobs (`storage.session`). All local. |
 | `contextMenus` | "Download with DMS²" on links and pages. |

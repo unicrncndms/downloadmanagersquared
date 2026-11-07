@@ -35,6 +35,39 @@ const SentCookies = {
   },
 };
 
+// copyCookies puts the cookies store `from` would send to url (the landing
+// page: its host and parent domains, no other site) into store `to`, so a
+// resolve's container starts logged in where the user is. First-party
+// isolation keys and partitions are kept. Nothing is copied back. Returns
+// how many were copied.
+async function copyCookies(url, from, to) {
+  if (from === "firefox-private") return 0; // a private window's login stays in it
+  let cookies = [];
+  try {
+    cookies = await browser.cookies.getAll({ url, storeId: from, firstPartyDomain: null, partitionKey: {} });
+  } catch (e) {
+    try { cookies = await browser.cookies.getAll({ url, storeId: from }); } catch (e2) { return 0; }
+  }
+  let n = 0;
+  for (const c of cookies) {
+    const host = c.domain.replace(/^\./, "");
+    const set = {
+      url: `${c.secure ? "https" : "http"}://${host}${c.path || "/"}`,
+      name: c.name, value: c.value, path: c.path, secure: c.secure, httpOnly: c.httpOnly, storeId: to,
+    };
+    if (!c.hostOnly) set.domain = c.domain;
+    if (!c.session && c.expirationDate) set.expirationDate = c.expirationDate;
+    if (c.sameSite) set.sameSite = c.sameSite;
+    if (c.firstPartyDomain) set.firstPartyDomain = c.firstPartyDomain;
+    if (c.partitionKey) set.partitionKey = c.partitionKey;
+    try {
+      await browser.cookies.set(set);
+      n++;
+    } catch (e) { /* one the container refuses: the page may ask to log in */ }
+  }
+  return n;
+}
+
 // Fallback where no request passed by (context menu, browser downloads): the
 // cookies this container holds for the URL, first-party filtered.
 async function cookieHeader(url, storeId) {

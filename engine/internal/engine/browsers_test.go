@@ -159,3 +159,31 @@ func TestAResolveForAnUninstalledBrowserGoesToAnyBrowser(t *testing.T) {
 		t.Fatal("with the download's browser gone, the running one didn't get the resolve")
 	}
 }
+
+// A resolve carries the cookie store the download came from, so the
+// extension can start the container with the user's login for the site.
+func TestAResolveCarriesTheDownloadsCookieStore(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	firefox := fakeBrowserExe(t, "firefox.exe")
+	ff := connectExtension(t, e, firefox, "Firefox UA")
+	raw, _ := json.Marshal(AddRequest{URL: "https://example.com/a.iso", PageURL: "https://example.com/a", CookieStore: "firefox-container-3"})
+	res, err := e.Call(ff.conn, "add", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res.(map[string]string)["id"]
+	e.RequestResolve(id, "eth", "https://example.com/a", firefox)
+	select {
+	case data := <-ff.resolves:
+		var req resolveReq
+		if err := json.Unmarshal(data, &req); err != nil || req.CookieStore != "firefox-container-3" {
+			t.Fatalf("resolve %s: cookie store %q, want firefox-container-3 (%v)", data, req.CookieStore, err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no resolve")
+	}
+}

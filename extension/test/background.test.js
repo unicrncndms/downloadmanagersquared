@@ -231,3 +231,39 @@ test("without storage.session the resolver still works, in memory", async () => 
   const job = await recording(b);
   assert.equal(job.mode, "record");
 });
+
+test("a resolve's container starts with the user's cookies for the landing page, from the store the download came from", async () => {
+  const login = { name: "sid", value: "abc", domain: ".site.test", hostOnly: false, path: "/", secure: true, httpOnly: true, session: false, expirationDate: 2e9, sameSite: "lax", firstPartyDomain: "", storeId: "firefox-container-7" };
+  const b = load({ cookieJar: { "firefox-container-7": [login], "firefox-default": [{ ...login, value: "other" }] } });
+  await b.settle();
+  b.connect();
+  const job = await recording(b, { cookieStore: "firefox-container-7" });
+  const store = b.Resolver.containers.eth;
+  const asked = b.calls.find((c) => c[0] === "cookies.getAll" && c[1].url === PAGE);
+  assert.equal(asked[1].storeId, "firefox-container-7");
+  const sets = b.calls.filter((c) => c[0] === "cookies.set").map((c) => c[1]);
+  assert.deepEqual(sets, [{ url: "https://site.test/", name: "sid", value: "abc", path: "/", secure: true, httpOnly: true, storeId: store,
+    domain: ".site.test", expirationDate: 2e9, sameSite: "lax" }]);
+  // Copied before the page opens.
+  const order = b.calls.map((c) => c[0]);
+  assert.ok(order.lastIndexOf("cookies.set") < order.indexOf("windows.create"));
+  assert.ok(job.windowId);
+});
+
+test("a download with no known store uses the normal window's cookies, and a private window's never leave it", async () => {
+  const login = { name: "sid", value: "x", domain: "site.test", hostOnly: true, path: "/", secure: false, httpOnly: false, session: true };
+  let b = load({ cookieJar: { "firefox-default": [login] } });
+  await b.settle();
+  b.connect();
+  await recording(b);
+  const set = b.calls.find((c) => c[0] === "cookies.set")[1];
+  assert.equal(set.url, "http://site.test/");
+  assert.equal(set.domain, undefined); // host-only stays host-only
+  assert.equal(set.expirationDate, undefined); // a session cookie stays one
+
+  b = load({ cookieJar: { "firefox-private": [login] } });
+  await b.settle();
+  b.connect();
+  await recording(b, { cookieStore: "firefox-private" });
+  assert.equal(b.calls.filter((c) => c[0] === "cookies.set").length, 0);
+});

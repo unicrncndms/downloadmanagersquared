@@ -97,7 +97,7 @@ The extension asks for these permissions:
 | `webNavigation` | Following which page a download came from (its landing page) |
 | `proxy` | Sending each temporary container's traffic through its connection's proxy |
 | `contextualIdentities` | Creating the temporary containers that open a site through one connection |
-| `cookies` | Reading the cookies a download needs when the browser didn't send any with it |
+| `cookies` | Reading the cookies a download needs when the browser didn't send any with it, and copying your cookies for a landing page into the temporary container, so the page opens logged in |
 | `tabs` | Opening and closing the windows that click through landing pages, recording and replaying the clicks in them, and opening the settings page |
 | `storage` | Keeping the learned sites and containers in this browser |
 | `contextMenus` | The *Download with DMS²* entries on links and pages |
