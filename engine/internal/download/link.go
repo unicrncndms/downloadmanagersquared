@@ -118,7 +118,7 @@ func (l *Link) needResolve(pageKnown bool, reason string) bool {
 	switch {
 	case !pageKnown:
 		l.Status = LinkNeedsPage
-		l.Error = reason + ". It needs its own link, but the page the download came from is unknown: enter it under Details as the landing page"
+		l.Error = reason + ". It needs its own link, but the page the download came from is unknown: enter it under Details as the landing page, or paste a fresh link to the file there"
 		return false
 	case l.Resolves >= maxResolves:
 		l.fail(fmt.Sprintf("%s; gave up after %d new links", reason, maxResolves))

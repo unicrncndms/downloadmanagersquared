@@ -405,15 +405,23 @@ func (d *Download) checkFinished(path string) {
 }
 
 // SetPageURL sets the landing page and retries interfaces that were waiting for one.
+// A fresh link to the file works as a landing page too: the browser fetches
+// it like one. A download paused because nothing could reach the file goes
+// back in the queue, so the new page gets used without another click.
 func (d *Download) SetPageURL(u string) {
 	d.mu.Lock()
 	d.st.PageURL = strings.TrimSpace(u)
+	wake := false
 	if d.st.PageURL != "" {
 		for _, l := range d.st.Links {
 			l.pageKnown()
 		}
+		wake = d.st.Stuck && d.st.Status == StatusPaused
 	}
 	d.mu.Unlock()
+	if wake {
+		d.Resume()
+	}
 	d.env.Changed(d)
 }
 

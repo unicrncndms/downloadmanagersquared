@@ -444,7 +444,8 @@ function makeCard(id) {
       if (needsPage && !shownPageHint && !torrent) {
         details.open = true;
         editChecks(true);
-        page.placeholder = "Paste the page you started the download from";
+        // A fresh link to the file works here too: the browser fetches it like a page.
+        page.placeholder = "The page you started from, or a fresh link to the file";
         page.focus();
         shownPageHint = true;
       }
