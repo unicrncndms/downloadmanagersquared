@@ -218,14 +218,19 @@ function ipv6Hints(state) {
     `${name} has only IPv6: turn on Enable IPv6 (experimental) to use it.`);
 }
 
-// Check lines' answer: each line's public IP, and a warning per IP shared.
+// Check lines' answer: each line's public IP, and a warning per line shared:
+// the same public IPv4 address, or for IPv6-only lines the same /64 (the
+// engine's line; an older engine sends only ip).
 function lineResults(checks) {
-  const byIP = new Map();
-  for (const c of checks || []) if (c.ip) byIP.set(c.ip, [...(byIP.get(c.ip) || []), c.name]);
+  const byLine = new Map();
+  for (const c of checks || []) {
+    const line = c.line || c.ip;
+    if (line) byLine.set(line, [...(byLine.get(line) || []), c.name]);
+  }
   return {
     lines: (checks || []).map((c) => `${c.name}: ${c.ip || "no answer (" + (c.error || "unknown") + ")"}`),
-    warnings: [...byIP].filter(([, names]) => names.length > 1).map(([ip, names]) =>
-      `${andList(names)} reach the internet from the same public IP (${ip}): they share one uplink, so together they are no faster than one.`),
+    warnings: [...byLine].filter(([, names]) => names.length > 1).map(([line, names]) =>
+      `${andList(names)} reach the internet from the same ${line.endsWith("/64") ? "IPv6 network" : "public IP"} (${line}): they share one uplink, so together they are no faster than one.`),
   };
 }
 

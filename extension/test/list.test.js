@@ -216,3 +216,14 @@ test("each connection's badge names its families; IPv6-only adapters left out ge
   assert.deepEqual(ipv6Hints({ ipv6Only: ["Phone"] }), ["Phone has only IPv6: turn on Enable IPv6 (experimental) to use it."]);
   assert.deepEqual(ipv6Hints({}), []);
 });
+
+test("Check lines compares IPv6-only lines by their /64", () => {
+  const { lineResults } = require("../lib/list.js");
+  const r = lineResults([
+    { id: "usb", name: "Phone", ip: "2001:470:1:2::6", line: "2001:470:1:2::/64" },
+    { id: "wifi", name: "Hotspot", ip: "2001:470:1:2::7", line: "2001:470:1:2::/64" },
+    { id: "lte", name: "Stick", ip: "2001:470:9:9::8", line: "2001:470:9:9::/64" },
+    { id: "eth", name: "Ethernet", ip: "203.0.113.7", line: "203.0.113.7" },
+  ]);
+  assert.deepEqual(r.warnings, ["Phone and Hotspot reach the internet from the same IPv6 network (2001:470:1:2::/64): they share one uplink, so together they are no faster than one."]);
+});

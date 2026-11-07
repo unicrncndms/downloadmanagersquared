@@ -111,8 +111,11 @@ func fromAdapters(head *windows.IpAdapterAddresses, ipv6 bool) (list []Interface
 			DNS:         dnsServers(a.FirstDnsServerAddress, ip != nil, ip6 != nil),
 			VPN:         a.IfType == ifTypePropVirtual || a.IfType == ifTypeTunnel || vpnPattern.MatchString(desc) || vpnPattern.MatchString(name),
 		}
+		// Dual-stack interfaces keep ARP on IPv4.
 		if ip != nil {
-			iface.GatewayMAC = gatewayMAC(ip, gw)
+			iface.GatewayMAC = gatewayMAC(ip, gw, a.IfIndex)
+		} else {
+			iface.GatewayMAC = gatewayMAC(ip6, gw6, a.IfIndex)
 		}
 		list = append(list, iface)
 	}

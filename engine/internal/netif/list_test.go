@@ -143,7 +143,7 @@ func TestWithIPv6OnAdaptersGetTheirGlobalAddressGatewayAndDNS(t *testing.T) {
 		t.Errorf("dual-stack families %v, shown address %v", d.Families(), d.IP())
 	}
 	v6 := got["v6"]
-	if v6.IPv4 != nil || v6.Gateway != nil || !v6.IPv6.Equal(net.ParseIP("2001:470:1::6")) || len(v6.DNS) != 0 || v6.GatewayMAC != "" {
+	if v6.IPv4 != nil || v6.Gateway != nil || !v6.IPv6.Equal(net.ParseIP("2001:470:1::6")) || len(v6.DNS) != 0 {
 		t.Errorf("IPv6-only: %+v", v6)
 	}
 	if !reflect.DeepEqual(v6.Families(), []string{"IPv6"}) || !v6.IP().Equal(v6.IPv6) {

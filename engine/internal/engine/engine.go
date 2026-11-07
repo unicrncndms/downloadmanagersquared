@@ -873,6 +873,7 @@ type LineCheck struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	IP    string `json:"ip,omitempty"`
+	Line  string `json:"line,omitempty"` // what is compared: the IPv4 address, or an IPv6 one's /64
 	Error string `json:"error,omitempty"`
 }
 
@@ -904,7 +905,7 @@ func (e *Engine) CheckLines(server string) []LineCheck {
 			if err != nil {
 				lines[i].check.Error = err.Error()
 			} else {
-				lines[i].check.IP = ip.String()
+				lines[i].check.IP, lines[i].check.Line = ip.String(), netif.LineOf(ip)
 			}
 		}()
 	}

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestSameRouterGoesByGatewayMACNotGatewayIP(t *testing.T) {
@@ -94,5 +96,86 @@ func TestStunAnswerToAnotherRequestIsIgnored(t *testing.T) {
 	binary.BigEndian.PutUint32(resp[4:], stunMagic)
 	if _, err := parseStunResponse(resp, txid); err == nil {
 		t.Fatal("an answer with another transaction id was taken")
+	}
+}
+
+// stunServer6 answers binding requests on ::1 with an IPv6 XOR-MAPPED-ADDRESS:
+// public, XORed with the magic cookie and the request's transaction ID.
+func stunServer6(t *testing.T, public net.IP) net.Addr {
+	t.Helper()
+	pc, err := net.ListenPacket("udp6", "[::1]:0")
+	if err != nil {
+		t.Skip("no IPv6 loopback: ", err)
+	}
+	t.Cleanup(func() { pc.Close() })
+	go func() {
+		buf := make([]byte, 1500)
+		for {
+			n, from, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			if n < 20 {
+				continue
+			}
+			resp := make([]byte, 20, 20+24)
+			binary.BigEndian.PutUint16(resp[0:], stunBindSuccess)
+			binary.BigEndian.PutUint16(resp[2:], 24)
+			copy(resp[4:20], buf[4:20])
+			x := []byte{0, 0x20, 0, 20, 0, 0x02, 0, 0}
+			for i, b := range public.To16() {
+				x = append(x, b^buf[4+i]) // cookie, then transaction id
+			}
+			pc.WriteTo(append(resp, x...), from)
+		}
+	}()
+	return pc.LocalAddr()
+}
+
+// Check lines over IPv6: the STUN answer's IPv6 family is read, and the line is
+// its /64.
+func TestStunOverIPv6ReadsTheIPv6AddressAndLinesCompareBy64(t *testing.T) {
+	public := net.ParseIP("2001:470:1:2:a:b:c:d")
+	server := stunServer6(t, public)
+	pc, err := net.ListenPacket("udp6", "[::1]:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ip, err := stunQuery(ctx, pc, server)
+	if err != nil || !ip.Equal(public) {
+		t.Fatalf("public IP %v, %v; want %v", ip, err, public)
+	}
+	for in, want := range map[string]string{
+		"2001:470:1:2:a:b:c:d": "2001:470:1:2::/64",
+		"2001:470:1:2::99":     "2001:470:1:2::/64",
+		"2001:470:1:3::1":      "2001:470:1:3::/64",
+		"203.0.113.7":          "203.0.113.7",
+	} {
+		if got := LineOf(net.ParseIP(in)); got != want {
+			t.Errorf("LineOf(%s) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+// Two IPv6-only interfaces behind one router: their gateways' MACs (found by
+// neighbor discovery) match, so they get the same-router warning. A third
+// behind another router doesn't.
+func TestIPv6OnlyInterfacesGroupByTheirIPv6GatewaysMAC(t *testing.T) {
+	now := time.Now()
+	macs.Lock()
+	macs.known["2001:470:1::6|fe80::1"] = macEntry{"aa:aa:aa:aa:aa:aa", now}
+	macs.known["2001:470:1::7|fe80::1"] = macEntry{"aa:aa:aa:aa:aa:aa", now}
+	macs.known["2001:470:9::8|fe80::1"] = macEntry{"bb:bb:bb:bb:bb:bb", now}
+	macs.Unlock()
+	v6 := func(id, ip string) adapter {
+		return adapter{id: id, name: id, unicast: []unicast{{ip: ip, prefix: windows.IpPrefixOriginDhcp, suffix: windows.IpSuffixOriginDhcp}}, gateways: []string{"fe80::1"}}
+	}
+	list, _ := fromAdapters(adapters(v6("usb", "2001:470:1::6"), v6("wifi", "2001:470:1::7"), v6("lte", "2001:470:9::8")), true)
+	got := SameRouter(list)
+	if !reflect.DeepEqual(got, map[string][]string{"usb": {"wifi"}, "wifi": {"usb"}}) {
+		t.Fatalf("SameRouter = %v", got)
 	}
 }
