@@ -21,7 +21,8 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
     // A fixture's `files` answers torrentFiles, by download id; its `lines` checkLines.
     call: (method, params) => record({ call: method, params })
       .then(() => method === "torrentFiles" ? (window.fixture().files || {})[params.id] || []
-        : method === "checkLines" ? window.fixture().lines || [] : undefined),
+        : method === "checkLines" ? window.fixture().lines || []
+        : method === "downloadLog" ? (window.fixture().logs || {})[params.id] || [] : undefined),
     subscribe(fn) {
       listeners.push(fn);
       setTimeout(() => fn(window.fixture()), 0);

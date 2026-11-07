@@ -94,6 +94,7 @@ type State struct {
 	MetaSize   int64            `json:"metaSize,omitempty"`  // the size a Metalink gives; every mirror must match it
 	Group      string           `json:"group,omitempty"`     // the files of one Metalink share it
 	GroupName  string           `json:"groupName,omitempty"` // the Metalink's name
+	Log        []Event          `json:"log,omitempty"`       // the activity log, oldest first, at most maxEvents
 
 	plainCookies bool // read with a cookie saved readable, before encryption
 }
@@ -174,6 +175,8 @@ type Download struct {
 	lastDisk time.Time
 
 	limit *rate.Shaper // st.Limit, over all its connections
+
+	seen map[string]string // what the last summary showed, for the activity log; nil until the first
 }
 
 func New(env Env, st State) *Download {
@@ -234,6 +237,7 @@ func (d *Download) State() State {
 	st.Remaining = append([]Range(nil), d.st.Remaining...)
 	st.Folder = d.st.Folder.clone()
 	st.Mirrors = slices.Clone(d.st.Mirrors)
+	st.Log = slices.Clone(d.st.Log)
 	return st
 }
 
@@ -1596,5 +1600,7 @@ func (d *Download) Summary() Summary {
 		}
 		s.Links[id] = ls
 	}
-	return Present(s)
+	s = Present(s)
+	d.observeLocked(s, now)
+	return s
 }

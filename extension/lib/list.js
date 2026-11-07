@@ -217,6 +217,17 @@ function lineResults(checks) {
   };
 }
 
+// logLines is a download's activity log as lines, newest first: local date
+// and time, the interface it concerns (if any), and what happened.
+function logLines(events, nameOf) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return (events || []).slice().reverse().map((e) => {
+    const t = new Date(e.time);
+    const when = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
+    return [when, e.iface ? nameOf(e.iface) : "", e.text].filter(Boolean).join(" · ");
+  });
+}
+
 // matchesSearch is the downloads list's filter box: the words typed, in any
 // case, found in the file name, the source link's host, the status badge or
 // the Metalink's name. An empty box matches everything.
@@ -246,5 +257,5 @@ function addLines(text) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { addLines, matchesSearch, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
+  module.exports = { addLines, matchesSearch, logLines, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
 }

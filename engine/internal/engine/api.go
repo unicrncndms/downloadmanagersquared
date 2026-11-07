@@ -228,6 +228,19 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			files = []download.FileSummary{}
 		}
 		return files, nil
+	case "downloadLog":
+		p, err := decode[idParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		j, err := e.queue.Get(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		if d, ok := j.(*download.Download); ok {
+			return d.Log(), nil
+		}
+		return []download.Event{}, nil // torrents keep no log
 	case "chooseVpn":
 		p, err := decode[struct {
 			ID  string `json:"id"`

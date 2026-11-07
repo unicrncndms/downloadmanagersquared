@@ -176,3 +176,14 @@ test("the search box matches file name, host and status, in any case", () => {
   for (const q of ["fedora", "token", "secret"]) assert.ok(!matchesSearch(d, q), q); // the query string isn't searched
   assert.ok(matchesSearch(dl("m", "queued", { url: "magnet:?xt=urn:btih:abc", groupName: "Debian DVDs" }), "debian"));
 });
+
+test("the activity log reads newest first, with local time and the connection's name", () => {
+  const { logLines } = require("../lib/list.js");
+  const at = (h) => new Date(2026, 10, 7, h, 5, 9).toISOString();
+  const lines = logLines([
+    { time: at(9), text: "Queued" },
+    { time: at(10), iface: "wifi", text: "Link expired: HTTP 403" },
+  ], (id) => ({ wifi: "Wi-Fi" })[id]);
+  assert.deepEqual(lines, ["2026-11-07 10:05:09 · Wi-Fi · Link expired: HTTP 403", "2026-11-07 09:05:09 · Queued"]);
+  assert.deepEqual(logLines(null, () => ""), []);
+});

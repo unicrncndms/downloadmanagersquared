@@ -91,7 +91,14 @@ const CHOOSING = { kind: "torrent", id: "t", url: "magnet:?xt=urn:btih:9f1c", fi
 const FIXTURES = {
   choosing: { connected: true, state: { ...STATE, downloads: [CHOOSING], active: 0 }, settings: SETTINGS, autostart: true, recipes: RECIPES,
     engineVersion: "0.3.0", files: { t: [{ path: "datasets/a.csv", size: 1e9, selected: true }, { path: "datasets/b.csv", size: 2e9, selected: false }] } },
-  downloads: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
+  downloads: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
+    logs: { a: [
+      { time: "2026-11-03T20:00:01Z", text: "Queued" },
+      { time: "2026-11-03T20:00:02Z", text: "Downloading" },
+      { time: "2026-11-03T20:00:03Z", iface: "eth", text: "Downloading" },
+      { time: "2026-11-03T20:00:04Z", iface: "wifi", text: "Getting its own link" },
+      { time: "2026-11-03T20:00:20Z", iface: "wifi", text: "Server busy · 2 of 4 connections" },
+    ] } },
   folder: { connected: true, state: { ...STATE, downloads: FOLDER_DOWNLOADS, active: 3 }, settings: { ...SETTINGS, folderDir: "E:\\Data", folderDirs: ["E:\\Data", "D:\\Games\\Mods", "F:\\Archive"] },
     autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   // Ethernet and Wi-Fi behind one router; Check lines finds them on one public IP.

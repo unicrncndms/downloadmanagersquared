@@ -238,8 +238,33 @@ function makeCard(id) {
   const checkEdit = el("button", { class: "small", onclick: () => editChecks(true) }, "Edit");
   const checkSection = section("Checks", checkFacts, checkEdit, checkForm);
 
-  const details = el("details", { ontoggle: () => { if (d) update(d); } },
-    el("summary", {}, "Details"), connSection, mirrorSection, foldSection, fileSection, checkSection);
+  // Activity: the engine's log of this download, newest first, asked for
+  // while Details is open (it stays out of the state sent every second).
+  const activityList = el("ol", { class: "activity num" });
+  let activity = [];
+  let activityAt = 0;
+  const activityCopy = el("button", { class: "small", onclick: async () => {
+    try {
+      await navigator.clipboard.writeText(activity.join("\n"));
+      toast("Activity copied");
+    } catch {
+      toast("Couldn't copy the activity");
+    }
+  } }, "Copy");
+  const activitySection = section("Activity", activityList, activityCopy);
+  activitySection.hidden = true; // until the log comes
+  async function loadActivity() {
+    if (Date.now() - activityAt < 2000) return;
+    activityAt = Date.now();
+    let events = [];
+    try { events = await call("downloadLog", { id }); } catch { return; }
+    activity = logLines(events, (ifc) => ifaceName(ifc, latest.state, latest.settings));
+    activityList.replaceChildren(...activity.map((line) => el("li", {}, line)));
+    activitySection.hidden = !activity.length;
+  }
+
+  const details = el("details", { ontoggle: () => { activityAt = 0; if (d) update(d); } },
+    el("summary", {}, "Details"), connSection, mirrorSection, foldSection, fileSection, checkSection, activitySection);
 
   const root = el("div", { class: "card" },
     el("div", { class: "top" }, name, vpn, status, size, showDone, dropDone),
@@ -424,6 +449,9 @@ function makeCard(id) {
       m.dropped ? el("span", { class: "badge bad" }, "Dropped") : el("span", { class: "muted" }, m.users.join(", ") || "unused"),
       m.dropped ? el("div", { class: "why" }, m.dropped) : null,
     ].filter(Boolean)));
+
+    if (torrent) activitySection.hidden = true;
+    else loadActivity();
 
     checkSection.hidden = torrent;
     if (!torrent && checkForm.hidden) {
