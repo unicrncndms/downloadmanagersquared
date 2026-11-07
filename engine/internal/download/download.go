@@ -103,8 +103,19 @@ type State struct {
 // Iface is an interface the engine currently allows downloads to use.
 type Iface struct {
 	ID     string
-	Client *http.Client
-	Conns  int
+	Client *http.Client // probes with it: on a dual-stack interface it races IPv6 against IPv4
+	// Clients that connect over one family each ("IPv4", "IPv6"), so a link's
+	// chunks keep to the family its probe got; nil without IPv6.
+	ByFamily map[string]*http.Client
+	Conns    int
+}
+
+// clientFor is the client for link l's requests: its family's, else Client.
+func (ifc Iface) clientFor(l Link) *http.Client {
+	if c := ifc.ByFamily[l.Family]; c != nil {
+		return c
+	}
+	return ifc.Client
 }
 
 // Env is the engine as a download sees it. Paths answers for a VPN mode:
@@ -698,6 +709,9 @@ func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
 		d.mu.Unlock()
 		return
 	}
+	if err == nil && ifc.ByFamily != nil {
+		cur.Family = res.family // a new probe chooses again
+	}
 	if err == nil && !res.rejected() && res.status < 400 && ifc.ID != mainID && d.mainMayAnswerLocked(usable, mainID) {
 		cur.hold(time.Now(), res) // the main interface decides what the file is
 	} else {
@@ -959,7 +973,7 @@ func (d *Download) doneLocked() int64 {
 
 func (d *Download) spawnLocked(ctx context.Context, ifc Iface, l Link, seg *segment) {
 	wctx, cancel := context.WithCancel(ctx)
-	w := &worker{d: d, iface: ifc.ID, client: ifc.Client, link: l, ir: d.ifRun(ifc.ID), cancel: cancel}
+	w := &worker{d: d, iface: ifc.ID, client: ifc.clientFor(l), link: l, ir: d.ifRun(ifc.ID), cancel: cancel}
 	seg.owner = w
 	d.workers[w] = struct{}{}
 	w.ir.active++
@@ -1404,6 +1418,7 @@ type LinkSummary struct {
 	Conns    int        `json:"conns"`
 	Resolved bool       `json:"resolved"`         // fetched by the browser for this interface
 	Mirror   string     `json:"mirror,omitempty"` // the host of the mirror it uses, when the file has several
+	Family   string     `json:"family,omitempty"` // "IPv4" or "IPv6", on an interface with IPv6
 	Up       float64    `json:"up,omitempty"`     // torrents: upload speed to the peers on this path
 
 	// Filled in by present.
@@ -1606,7 +1621,7 @@ func (d *Download) Summary() Summary {
 	}
 	now := time.Now()
 	for id, l := range d.st.Links {
-		ls := LinkSummary{Status: l.Status, Error: l.Error, Resolved: l.URL != d.st.URL && d.mirrorLocked(l.URL) == nil}
+		ls := LinkSummary{Status: l.Status, Error: l.Error, Resolved: l.URL != d.st.URL && d.mirrorLocked(l.URL) == nil, Family: l.Family}
 		if len(d.st.Mirrors) > 0 {
 			ls.Mirror = hostOf(l.URL)
 		}

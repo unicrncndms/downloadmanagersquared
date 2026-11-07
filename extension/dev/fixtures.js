@@ -107,7 +107,9 @@ const FIXTURES = {
     lines: [{ id: "eth", name: "Ethernet", ip: "203.0.113.7" }, { id: "wifi", name: "Wi-Fi", ip: "203.0.113.7" }] },
   // IPv6 on: Wi-Fi is dual-stack, a phone tether has only IPv6.
   ipv6: { connected: true, settings: { ...SETTINGS, ipv6: true }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
-    state: { ...STATE, interfaces: [
+    state: { ...STATE, downloads: [{ ...DOWNLOADS[0], links: { ...DOWNLOADS[0].links,
+      wifi: { ...DOWNLOADS[0].links.wifi, family: "IPv6" },
+      phone: { status: "ready", conns: 4, speed: 1.3e6, family: "IPv6", label: "Downloading", tone: "ok" } } }, ...DOWNLOADS.slice(1)], interfaces: [
       ...IFACES.map((i) => (i.id === "wifi" ? { ...i, ip6: "2a02:2c60:f110:a80:1e29:3239:c102:ce4a", families: ["IPv4", "IPv6"] } : i.tunnel ? i : { ...i, families: ["IPv4"] })),
       { id: "phone", name: "Phone", description: "Remote NDIS", ip: "2a00:20:6000::42", ip6: "2a00:20:6000::42", families: ["IPv6"], present: true, enabled: true,
         connections: 4, socksPort: 50005, speed: 1.3e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" }] } },

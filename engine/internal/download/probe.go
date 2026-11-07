@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"mime"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"path"
 	"strconv"
@@ -24,6 +26,7 @@ type probeResult struct {
 	version Version
 	wait    time.Duration // how long a busy server asked us to stay away
 	dups    []string      // mirrors the server named (Link: rel=duplicate)
+	family  string        // "IPv4" or "IPv6": what the answer came over
 }
 
 // busy: the server pushed back. That says nothing about the link itself.
@@ -71,13 +74,20 @@ func probeLink(ctx context.Context, client *http.Client, l Link, ua string) (pro
 		return probeResult{}, err
 	}
 	req.Header.Set("Range", "bytes=0-0")
+	var family string // of the last connection, the one the answer came over
+	req = req.WithContext(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(i httptrace.GotConnInfo) {
+		family = "IPv6"
+		if a, ok := i.Conn.RemoteAddr().(*net.TCPAddr); !ok || a.IP.To4() != nil {
+			family = "IPv4"
+		}
+	}}))
 	resp, err := client.Do(req)
 	if err != nil {
 		return probeResult{}, err
 	}
 	defer resp.Body.Close()
 
-	r := probeResult{status: resp.StatusCode, size: -1}
+	r := probeResult{status: resp.StatusCode, size: -1, family: family}
 	ct, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	r.isPage = ct == "text/html" || ct == "application/xhtml+xml"
 	switch resp.StatusCode {

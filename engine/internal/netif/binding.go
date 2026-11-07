@@ -34,12 +34,17 @@ type Binding struct {
 	shaper   *rate.Shaper
 	resolver *net.Resolver
 	client   *http.Client
+	families map[string]*http.Client // one client per family, on an interface with IPv6
 	nextDNS  atomic.Uint32
 	dns      []net.IP // the servers asked: the interface's, else public ones
 }
 
-// dnsPort is where DNS servers are asked; tests point it elsewhere.
-var dnsPort = "53"
+// DNSPort is where DNS servers are asked; tests point it elsewhere.
+var DNSPort = "53"
+
+// happyDelay is how long a dual-stack dial gives IPv6 before trying IPv4 too
+// (Happy Eyeballs, RFC 8305).
+var happyDelay = 250 * time.Millisecond
 
 // Public resolvers for an interface that names none. An IPv6-only interface
 // loses its carrier's DNS64 with them: IPv4-only servers can't be reached.
@@ -64,10 +69,18 @@ func NewBinding(iface Interface, shaper *rate.Shaper) *Binding {
 			if srv.To4() == nil && srv.IsLinkLocalUnicast() {
 				host += "%" + strconv.Itoa(int(b.iface.Index)) // a router's fe80:: address, on this link
 			}
-			return b.dialRaw(ctx, network, net.JoinHostPort(host, dnsPort))
+			return b.dialRaw(ctx, network, net.JoinHostPort(host, DNSPort))
 		},
 	}
 	b.client = NewHTTPClient(b.DialContext)
+	if iface.IPv6 != nil {
+		b.families = map[string]*http.Client{}
+		for _, f := range iface.Families() {
+			b.families[f] = NewHTTPClient(func(ctx context.Context, network, address string) (net.Conn, error) {
+				return b.dial(ctx, network, address, f)
+			})
+		}
+	}
 	return b
 }
 
@@ -88,17 +101,34 @@ func NewHTTPClient(dial func(ctx context.Context, network, addr string) (net.Con
 }
 
 // HTTPClient returns a client whose connections all leave through this interface.
+// On a dual-stack interface it races IPv6 against IPv4 (Happy Eyeballs).
 func (b *Binding) HTTPClient() *http.Client { return b.client }
 
-func (b *Binding) Close() { b.client.CloseIdleConnections() }
+// FamilyClients are clients that connect over one family each ("IPv4",
+// "IPv6"), for a link to keep the family its probe found; nil on an
+// interface without IPv6, where HTTPClient has only IPv4 anyway.
+func (b *Binding) FamilyClients() map[string]*http.Client { return b.families }
+
+func (b *Binding) Close() {
+	b.client.CloseIdleConnections()
+	for _, c := range b.families {
+		c.CloseIdleConnections()
+	}
+}
 
 // Has4 and Has6 are the families the interface is used with.
 func (b *Binding) Has4() bool { return b.iface.IPv4 != nil }
 func (b *Binding) Has6() bool { return b.iface.IPv6 != nil }
 
 // DialContext resolves the host through this interface's DNS and connects over
-// the families the interface has, trying IPv4 addresses first.
+// the families the interface has. With both, TCP tries IPv6 first and IPv4
+// from 250 ms on (Happy Eyeballs); otherwise addresses are tried in order.
 func (b *Binding) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return b.dial(ctx, network, address, "")
+}
+
+// dial is DialContext over one family ("IPv4", "IPv6"), or "" for any.
+func (b *Binding) dial(ctx context.Context, network, address, family string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
@@ -110,22 +140,93 @@ func (b *Binding) DialContext(ctx context.Context, network, address string) (net
 		}
 		return b.shaper.Conn(c), nil
 	}
-	ips, err := b.LookupIP(ctx, host)
+	ips, err := b.lookup(ctx, host, family)
 	if err != nil {
 		return nil, err
 	}
-	var lastErr error
+	var v4, v6 []net.IP
 	for _, ip := range ips {
-		c, err := b.dialRaw(ctx, network, net.JoinHostPort(ip.String(), port))
-		if err == nil {
-			return b.shaper.Conn(c), nil
+		if ip.To4() != nil {
+			v4 = append(v4, ip)
+		} else {
+			v6 = append(v6, ip)
 		}
-		lastErr = err
 	}
-	if lastErr == nil {
-		lastErr = errors.New("no address for " + host)
+	var c net.Conn
+	if strings.HasPrefix(network, "tcp") && len(v4) > 0 && len(v6) > 0 {
+		c, err = b.happyEyeballs(ctx, network, v6, v4, port)
+	} else {
+		c, err = b.dialEach(ctx, network, ips, port)
 	}
-	return nil, lastErr
+	if err != nil {
+		return nil, err
+	}
+	return b.shaper.Conn(c), nil
+}
+
+// dialEach tries ips in order, the first connection made winning.
+func (b *Binding) dialEach(ctx context.Context, network string, ips []net.IP, port string) (net.Conn, error) {
+	err := errors.New("no address to connect to")
+	for _, ip := range ips {
+		var c net.Conn
+		if c, err = b.dialRaw(ctx, network, net.JoinHostPort(ip.String(), port)); err == nil {
+			return c, nil
+		}
+	}
+	return nil, err
+}
+
+// happyEyeballs dials the IPv6 addresses, and the IPv4 ones too once IPv6 has
+// had happyDelay or failed. The first connection made wins; a later one is
+// closed.
+func (b *Binding) happyEyeballs(ctx context.Context, network string, v6, v4 []net.IP, port string) (net.Conn, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		c   net.Conn
+		err error
+	}
+	results := make(chan result, 2)
+	try := func(ips []net.IP) {
+		c, err := b.dialEach(ctx, network, ips, port)
+		results <- result{c, err}
+	}
+	go try(v6)
+	timer := time.NewTimer(happyDelay)
+	defer timer.Stop()
+	pending, v4Started := 1, false
+	startV4 := func() {
+		if !v4Started {
+			v4Started, pending = true, pending+1
+			go try(v4)
+		}
+	}
+	var firstErr error
+	for {
+		select {
+		case <-timer.C:
+			startV4()
+		case r := <-results:
+			pending--
+			if r.err == nil {
+				go func(n int) { // the loser, if it still connects
+					for ; n > 0; n-- {
+						if late := <-results; late.c != nil {
+							late.c.Close()
+						}
+					}
+				}(pending)
+				return r.c, nil
+			}
+			if firstErr == nil {
+				firstErr = r.err
+			}
+			startV4()
+			if pending == 0 {
+				return nil, firstErr
+			}
+		}
+	}
 }
 
 // ListenPacket opens an IPv4 UDP socket on port (0: any free one) that sends
@@ -133,7 +234,9 @@ func (b *Binding) DialContext(ctx context.Context, network, address string) (net
 func (b *Binding) ListenPacket(port int) (net.PacketConn, error) { return b.listenPacket("udp4", port) }
 
 // ListenPacket6 is ListenPacket over IPv6.
-func (b *Binding) ListenPacket6(port int) (net.PacketConn, error) { return b.listenPacket("udp6", port) }
+func (b *Binding) ListenPacket6(port int) (net.PacketConn, error) {
+	return b.listenPacket("udp6", port)
+}
 
 func (b *Binding) listenPacket(network string, port int) (net.PacketConn, error) {
 	ip, err := b.local(network)
@@ -206,11 +309,16 @@ func (b *Binding) local(network string) (net.IP, error) {
 // LookupIP resolves host through this interface's DNS, asking only for the
 // families it has (A, AAAA or both), IPv4 addresses first.
 func (b *Binding) LookupIP(ctx context.Context, host string) ([]net.IP, error) {
+	return b.lookup(ctx, host, "")
+}
+
+// lookup is LookupIP for one family ("IPv4", "IPv6"), or "" for all it has.
+func (b *Binding) lookup(ctx context.Context, host, family string) ([]net.IP, error) {
 	network := "ip4"
 	switch {
-	case b.iface.IPv4 == nil && b.iface.IPv6 != nil:
+	case family == "IPv6", family == "" && b.iface.IPv4 == nil && b.iface.IPv6 != nil:
 		network = "ip6"
-	case b.iface.IPv6 != nil:
+	case family == "" && b.iface.IPv6 != nil:
 		network = "ip"
 	}
 	ips, err := b.resolver.LookupIP(ctx, network, host)

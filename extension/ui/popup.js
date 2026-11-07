@@ -510,6 +510,7 @@ function makeCard(id) {
       r.state.replaceChildren(...[
         el("span", { class: "badge " + (l.tone || "dim") }, l.label),
         l.resolved ? el("span", { class: "muted" }, " own link") : null,
+        l.family ? el("span", { class: "muted", title: "The address family this connection fetches the file over" }, " " + l.family) : null,
       ].filter(Boolean));
       r.info.textContent = !l.conns ? "" : torrent ? plural(l.conns, "peer") : `${l.conns}×`;
       r.speed.textContent = torrent

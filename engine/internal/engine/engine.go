@@ -723,6 +723,7 @@ func (e *Engine) Paths(m paths.Mode) []download.Iface {
 	for _, id := range paths.For(m, e.pathSnapshotLocked()).Paths {
 		base, tun := paths.IfaceOf(id)
 		var client *http.Client
+		var byFamily map[string]*http.Client
 		if tun {
 			tn, ok := e.vpn.Up(base)
 			if !ok { // went down since the snapshot
@@ -730,9 +731,10 @@ func (e *Engine) Paths(m paths.Mode) []download.Iface {
 			}
 			client = tn.Client
 		} else {
-			client = e.ifaces[id].binding.HTTPClient()
+			b := e.ifaces[id].binding
+			client, byFamily = b.HTTPClient(), b.FamilyClients()
 		}
-		out = append(out, download.Iface{ID: id, Client: client, Conns: e.connsLocked(base)})
+		out = append(out, download.Iface{ID: id, Client: client, ByFamily: byFamily, Conns: e.connsLocked(base)})
 	}
 	return out
 }

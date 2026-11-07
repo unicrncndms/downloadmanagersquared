@@ -36,6 +36,9 @@ type Link struct {
 	HTTPErrors int `json:"httpErrors,omitempty"`
 	// Version is what the link's server said of the file; a mirror's chunks are checked against it.
 	Version Version `json:"version,omitzero"`
+	// Family is what its probe connected over on an interface with IPv6,
+	// "IPv4" or "IPv6": its chunks keep to it.
+	Family string `json:"family,omitempty"`
 
 	retryAt time.Time
 	pageHit bool         // got a web page for the source URL; what that means is decided once every interface has answered
