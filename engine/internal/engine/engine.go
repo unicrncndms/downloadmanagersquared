@@ -663,7 +663,7 @@ func (e *Engine) torrentIfacesFor(m paths.Mode) []torrent.Iface {
 			})
 			continue
 		}
-		ifs = append(ifs, torrent.Iface{
+		ifc := torrent.Iface{
 			ID:     id,
 			Gen:    e.ifaces[id].gen, // a new address: the old sockets are bound to the old one
 			Upload: e.uploadLocked(id),
@@ -689,7 +689,24 @@ func (e *Engine) torrentIfacesFor(m paths.Mode) []torrent.Iface {
 				}
 				return b.LookupIP(ctx, host)
 			},
-		})
+		}
+		if e.ifaces[id].binding.Has6() { // only with Enable IPv6 on
+			ifc.ListenPacket6 = func(port int) (net.PacketConn, error) {
+				b, err := e.bindingOf(id)
+				if err != nil {
+					return nil, err
+				}
+				return b.ListenPacket6(port)
+			}
+			ifc.Listen6 = func(port int) (net.Listener, error) {
+				b, err := e.bindingOf(id)
+				if err != nil {
+					return nil, err
+				}
+				return b.Listen6(port)
+			}
+		}
+		ifs = append(ifs, ifc)
 	}
 	return ifs
 }

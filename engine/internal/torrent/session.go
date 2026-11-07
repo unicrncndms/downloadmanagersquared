@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/anacrolix/dht/v2"
@@ -35,6 +36,9 @@ type Iface struct {
 	ListenPacket func(port int) (net.PacketConn, error) // an IPv4 UDP socket on port, 0 for any free one
 	LookupIP     func(ctx context.Context, host string) ([]net.IP, error)
 	Listen       func(port int) (net.Listener, error) // optional: TCP for peers connecting in
+	// The same over IPv6, only on an interface with IPv6 (Enable IPv6 on); nil otherwise.
+	ListenPacket6 func(port int) (net.PacketConn, error)
+	Listen6       func(port int) (net.Listener, error)
 }
 
 type Config struct {
@@ -48,13 +52,26 @@ type Config struct {
 // ifaceSockets is one interface as the session uses it.
 type ifaceSockets struct {
 	Iface
-	utp   *utp.Socket // uTP peers and DHT share this UDP socket
-	dht   *dht.Server
-	tcp   net.Listener          // nil unless peers can connect in over TCP
-	port  int                   // where peers connect in, 0 if they can't
-	peers int                   // peers open or being dialed
-	open  map[*trackedPeer]bool // peers open
-	gone  chan struct{}         // closed when the interface is no longer used
+	v4, v6 *familySockets        // nil: none of that family (an IPv6-only interface has no v4)
+	peers  int                   // peers open or being dialed
+	open   map[*trackedPeer]bool // peers open
+	gone   chan struct{}         // closed when the interface is no longer used
+}
+
+// familySockets are an interface's sockets of one address family.
+type familySockets struct {
+	utp  *utp.Socket // uTP peers and DHT share this UDP socket
+	dht  *dht.Server
+	tcp  net.Listener // nil unless peers can connect in over TCP
+	port int          // where peers connect in, 0 if they can't
+}
+
+// family is is's sockets of one family, nil if it has none.
+func (is *ifaceSockets) family(v6 bool) *familySockets {
+	if v6 {
+		return is.v6
+	}
+	return is.v4
 }
 
 // dialing is the interface every dial to one peer address goes out on, while any is in flight.
@@ -82,6 +99,14 @@ type Session struct {
 	dialing map[string]*dialing
 	peerAt  map[string][]*ifaceSockets // peer address -> interfaces of its open peers
 	setup   *ifaceSockets              // interface whose DHT server is being created
+	setup6  bool                       // and whether that server is its IPv6 one
+
+	// ipv6 is whether the running client has IPv6: some interface had IPv6
+	// sockets to give when it started. Under setMu.
+	// shortcut: an interface gaining IPv6 while the client runs (the setting
+	// switched on) waits until the client restarts, when no torrent is in the
+	// swarm or at the next engine start; restart the client if that matters.
+	ipv6 bool
 }
 
 func NewSession(cfg Config) (*Session, error) {
@@ -95,23 +120,27 @@ func (s *Session) newClient() (*atorrent.Client, storage.ClientImplCloser, error
 	c.DisableTCP = true
 	c.DisableUTP = true
 	c.NoDHT = true
-	c.DisableIPv6 = true
+	ipv6 := s.ipv6
+	c.DisableIPv6 = !ipv6 // with IPv6 off no IPv6 peer is even tried
 	c.NoDefaultPortForwarding = true
 	c.DisableWebtorrent = true // WebRTC opens its own UDP sockets
 	c.ListenPort = 0
 	c.Seed = true // without it, peers are dropped on completion; Torrent decides how long to seed
 	c.TrackerDialContext = s.dialFirst
 	c.HTTPDialContext = s.dialFirst
-	c.TrackerListenPacket = func(string, string) (net.PacketConn, error) {
+	c.TrackerListenPacket = func(network, _ string) (net.PacketConn, error) {
 		is := s.first()
 		if is == nil {
 			return nil, errNoIface
 		}
+		if ipv6 && is.v6 != nil && (network == "udp6" || is.v4 == nil) {
+			return is.ListenPacket6(0)
+		}
 		return is.ListenPacket(0)
 	}
 	c.ConfigureAnacrolixDhtServer = func(dc *dht.ServerConfig) {
-		is, hosts := s.setup, s.bootstrap()
-		dc.StartingNodes = func() ([]dht.Addr, error) { return is.bootstrapNodes(hosts) }
+		is, v6, hosts := s.setup, s.setup6, s.bootstrap()
+		dc.StartingNodes = func() ([]dht.Addr, error) { return is.bootstrapNodes(hosts, v6) }
 	}
 	// Torrents announce themselves (Torrent.announceDHT), so private ones can stay off the DHT.
 	c.PeriodicallyAnnounceTorrentsToDht = false
@@ -141,6 +170,10 @@ func (s *Session) newClient() (*atorrent.Client, storage.ClientImplCloser, error
 	}
 	cl.AddDialer(peerDialer{s, "tcp4"})
 	cl.AddDialer(peerDialer{s, "udp4"})
+	if ipv6 {
+		cl.AddDialer(peerDialer{s, "tcp6"})
+		cl.AddDialer(peerDialer{s, "udp6"})
+	}
 	return cl, stor, nil
 }
 
@@ -156,6 +189,7 @@ func (s *Session) acquire() (*atorrent.Client, error) {
 		return nil, errClosed
 	}
 	if s.cl == nil {
+		s.ipv6 = slices.ContainsFunc(s.want, func(i Iface) bool { return i.ListenPacket6 != nil })
 		cl, stor, err := s.newClient()
 		if err != nil {
 			return nil, err
@@ -201,7 +235,10 @@ func (s *Session) Live() bool {
 	return s.cl != nil
 }
 
-var errNoIface = errors.New("no usable interface")
+var (
+	errNoIface     = errors.New("no usable interface")
+	errOtherFamily = errors.New("an address of the other family")
+)
 
 // SetIfaces makes ifaces the interfaces torrents use, in that order (the first
 // carries trackers and web seeds). While the client runs they are matched by
@@ -275,56 +312,89 @@ func (s *Session) addIface(ifc Iface) error {
 	if ifc.Port != 0 {
 		want = ifc.Port
 	}
-	incoming := ifc.Listen != nil && want != 0
+	is := &ifaceSockets{Iface: ifc, open: map[*trackedPeer]bool{}, gone: make(chan struct{})}
+	cl := s.cl // set while setMu is held
+	var errs []error
+	for _, v6 := range []bool{false, true} {
+		listenPacket, listen := ifc.ListenPacket, ifc.Listen
+		if v6 {
+			if !s.ipv6 || ifc.ListenPacket6 == nil {
+				continue
+			}
+			listenPacket, listen = ifc.ListenPacket6, ifc.Listen6
+		}
+		f, err := s.openFamily(cl, is, v6, listenPacket, listen, want)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if v6 {
+			is.v6 = f
+		} else {
+			is.v4 = f
+		}
+	}
+	if is.v4 == nil && is.v6 == nil {
+		return errors.Join(errs...)
+	}
+	s.mu.Lock()
+	s.ifs = append(s.ifs, is)
+	s.mu.Unlock()
+	for _, f := range []*familySockets{is.v4, is.v6} {
+		if f == nil {
+			continue
+		}
+		cl.AddDhtServer(atorrent.AnacrolixDhtServerWrapper{Server: f.dht})
+		if f.port != 0 {
+			cl.AddListener(&peerListener{s: s, is: is, l: f.tcp, done: s.clDone})
+			cl.AddListener(&peerListener{s: s, is: is, l: f.utp, done: s.clDone})
+		}
+	}
+	return nil
+}
+
+// openFamily opens is's uTP socket and DHT server of one family, and its TCP
+// listener on port want when peers may connect in (listen set, want not 0).
+func (s *Session) openFamily(cl *atorrent.Client, is *ifaceSockets, v6 bool, listenPacket func(int) (net.PacketConn, error), listen func(int) (net.Listener, error), want int) (*familySockets, error) {
+	incoming := listen != nil && want != 0
 	port := 0
 	if incoming {
 		port = want
 	}
-	pc, err := ifc.ListenPacket(port)
+	pc, err := listenPacket(port)
 	if err != nil && port != 0 {
-		log.Printf("torrent port %d on %s: %v; outgoing peers only", port, ifc.ID, err)
+		log.Printf("torrent port %d on %s: %v; outgoing peers only", port, is.ID, err)
 		incoming = false
-		pc, err = ifc.ListenPacket(0)
+		pc, err = listenPacket(0)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	us, err := utp.NewSocketFromPacketConn(pc)
 	if err != nil {
 		pc.Close()
-		return err
+		return nil, err
 	}
-	is := &ifaceSockets{Iface: ifc, utp: us, open: map[*trackedPeer]bool{}, gone: make(chan struct{})}
+	f := &familySockets{utp: us}
 	if incoming {
-		if is.tcp, err = ifc.Listen(port); err != nil {
-			log.Printf("torrent port %d on %s: %v; outgoing peers only", port, ifc.ID, err)
+		if f.tcp, err = listen(port); err != nil {
+			log.Printf("torrent port %d on %s: %v; outgoing peers only", port, is.ID, err)
 			incoming = false
 		}
 	}
-	cl := s.cl // set while setMu is held
 	s.mu.Lock()
-	s.setup = is
-	ds, err := cl.NewAnacrolixDhtServer(us)
+	s.setup, s.setup6 = is, v6
+	f.dht, err = cl.NewAnacrolixDhtServer(us)
 	s.setup = nil
-	if err == nil {
-		is.dht = ds
-		s.ifs = append(s.ifs, is)
-	}
 	s.mu.Unlock()
 	if err != nil {
-		us.Close()
-		if is.tcp != nil {
-			is.tcp.Close()
-		}
-		return err
+		f.close()
+		return nil, err
 	}
-	cl.AddDhtServer(atorrent.AnacrolixDhtServerWrapper{Server: ds})
 	if incoming {
-		is.port = port
-		cl.AddListener(&peerListener{s: s, is: is, l: is.tcp, done: s.clDone})
-		cl.AddListener(&peerListener{s: s, is: is, l: us, done: s.clDone})
+		f.port = port
 	}
-	return nil
+	return f, nil
 }
 
 // portedDHT announces on one interface's DHT with that interface's port. The
@@ -344,10 +414,20 @@ func (d portedDHT) Announce(hash [20]byte, port int, impliedPort bool) (atorrent
 
 func (is *ifaceSockets) close() {
 	close(is.gone)
-	is.dht.Close()
-	is.utp.Close()
-	if is.tcp != nil {
-		is.tcp.Close()
+	for _, f := range []*familySockets{is.v4, is.v6} {
+		if f != nil {
+			f.close()
+		}
+	}
+}
+
+func (f *familySockets) close() {
+	if f.dht != nil {
+		f.dht.Close()
+	}
+	f.utp.Close()
+	if f.tcp != nil {
+		f.tcp.Close()
 	}
 }
 
@@ -420,13 +500,22 @@ func (s *Session) dhtServers() []atorrent.DhtServer {
 	defer s.mu.Unlock()
 	var out []atorrent.DhtServer
 	for _, is := range s.ifs {
-		out = append(out, portedDHT{atorrent.AnacrolixDhtServerWrapper{Server: is.dht}, is.port})
+		for _, f := range []*familySockets{is.v4, is.v6} {
+			if f != nil {
+				out = append(out, portedDHT{atorrent.AnacrolixDhtServerWrapper{Server: f.dht}, f.port})
+			}
+		}
 	}
 	return out
 }
 
-// bootstrapNodes resolves the DHT's bootstrap hosts through this interface's DNS.
-func (is *ifaceSockets) bootstrapNodes(hosts []string) ([]dht.Addr, error) {
+// bootstrapNodes resolves the DHT's bootstrap hosts through this interface's
+// DNS, keeping the addresses of one family.
+func (is *ifaceSockets) bootstrapNodes(hosts []string, v6 bool) ([]dht.Addr, error) {
+	network := "udp4"
+	if v6 {
+		network = "udp6"
+	}
 	var addrs []dht.Addr
 	for _, hp := range hosts {
 		host, port, err := net.SplitHostPort(hp)
@@ -438,7 +527,10 @@ func (is *ifaceSockets) bootstrapNodes(hosts []string) ([]dht.Addr, error) {
 			continue
 		}
 		for _, ip := range ips {
-			if ua, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(ip.String(), port)); err == nil {
+			if (ip.To4() == nil) != v6 {
+				continue
+			}
+			if ua, err := net.ResolveUDPAddr(network, net.JoinHostPort(ip.String(), port)); err == nil {
 				addrs = append(addrs, dht.NewAddr(ua))
 			}
 		}
@@ -477,15 +569,19 @@ func (s *Session) lookupFirst(ctx context.Context, host string) ([]net.IP, error
 	return is.LookupIP(ctx, host)
 }
 
-// pick chooses the interface for a new peer: the one carrying the fewest peers.
-// Dials to the same address (TCP and uTP race each other) share an interface.
-func (s *Session) pick(addr string) *ifaceSockets {
+// pick chooses the interface for a new peer: the one carrying the fewest peers
+// among those with sockets of the peer's family. Dials to the same address
+// (TCP and uTP race each other) share an interface.
+func (s *Session) pick(addr string, v6 bool) *ifaceSockets {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	d := s.dialing[addr]
 	if d == nil {
 		var best *ifaceSockets
 		for _, is := range s.ifs {
+			if is.family(v6) == nil {
+				continue
+			}
 			if best == nil || is.peers < best.peers {
 				best = is
 			}
@@ -553,14 +649,18 @@ type peerDialer struct {
 func (d peerDialer) DialerNetwork() string { return d.network }
 
 func (d peerDialer) Dial(ctx context.Context, addr string) (net.Conn, error) {
-	is := d.s.pick(addr)
+	v6 := strings.HasSuffix(d.network, "6")
+	host, _, err := net.SplitHostPort(addr)
+	if ip := net.ParseIP(host); err != nil || ip == nil || (ip.To4() == nil) != v6 {
+		return nil, errOtherFamily // the dialer of the other family takes it
+	}
+	is := d.s.pick(addr, v6)
 	if is == nil {
 		return nil, errNoIface
 	}
 	var c net.Conn
-	var err error
-	if d.network == "udp4" {
-		c, err = is.utp.DialContext(ctx, "udp4", addr)
+	if strings.HasPrefix(d.network, "udp") {
+		c, err = is.family(v6).utp.DialContext(ctx, d.network, addr)
 	} else {
 		c, err = is.Dial(ctx, d.network, addr)
 	}

@@ -85,6 +85,13 @@ func newMultiSwarm(t *testing.T, seeders int, sizes ...int) *swarm {
 // newSwarmOf seeds src/name, a file or a folder.
 func newSwarmOf(t *testing.T, seeders int, src, name string, private bool) *swarm {
 	t.Helper()
+	return newSwarmOn(t, seeders, src, name, private, false)
+}
+
+// newSwarmOn is newSwarmOf with the seeders on ::1 when v6, at public
+// addresses in 2001:db8::/32.
+func newSwarmOn(t *testing.T, seeders int, src, name string, private, v6 bool) *swarm {
+	t.Helper()
 	info := metainfo.Info{PieceLength: 256 << 10}
 	if err := info.BuildFromFilePath(filepath.Join(src, name)); err != nil {
 		t.Fatal(err)
@@ -101,10 +108,13 @@ func newSwarmOf(t *testing.T, seeders int, src, name string, private bool) *swar
 	for i := range seeders {
 		cfg := atorrent.NewDefaultClientConfig()
 		cfg.SetListenAddr("127.0.0.1:0")
+		if v6 {
+			cfg.SetListenAddr("[::1]:0")
+		}
 		cfg.Seed = true
 		cfg.NoDHT = true
 		cfg.DisableUTP = true
-		cfg.DisableIPv6 = true
+		cfg.DisableIPv6, cfg.DisableIPv4 = !v6, v6
 		cfg.NoDefaultPortForwarding = true
 		cfg.DisableWebtorrent = true
 		cfg.DataDir = src
@@ -128,7 +138,11 @@ func newSwarmOf(t *testing.T, seeders int, src, name string, private bool) *swar
 		}
 		tor.VerifyDataContext(context.Background())
 		s.clients = append(s.clients, cl)
-		s.addrs[fmt.Sprintf("192.0.2.%d:6881", i+1)] = fmt.Sprintf("127.0.0.1:%d", cl.LocalPort())
+		if v6 {
+			s.addrs[fmt.Sprintf("[2001:db8::%d]:6881", i+1)] = fmt.Sprintf("[::1]:%d", cl.LocalPort())
+		} else {
+			s.addrs[fmt.Sprintf("192.0.2.%d:6881", i+1)] = fmt.Sprintf("127.0.0.1:%d", cl.LocalPort())
+		}
 	}
 	return s
 }
@@ -149,10 +163,10 @@ func (s *swarm) iface(id string, peers *atomic.Int32) Iface {
 		Upload: true,
 		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			real, ok := s.addrs[addr]
-			if !ok || network != "tcp" && network != "tcp4" {
+			if !ok || network != "tcp" && network != "tcp4" && network != "tcp6" {
 				return nil, errors.New("unreachable")
 			}
-			c, err := (&net.Dialer{}).DialContext(ctx, "tcp4", real)
+			c, err := (&net.Dialer{}).DialContext(ctx, "tcp", real)
 			if err == nil {
 				peers.Add(1)
 			}
