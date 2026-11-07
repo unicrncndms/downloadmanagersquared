@@ -15,6 +15,9 @@ type Actions struct {
 	ShowInFolder bool `json:"showInFolder"`
 	Remove       bool `json:"remove"`
 	Cancel       bool `json:"cancel"` // a torrent waiting for its files to be chosen: Remove under another name
+	// Record the landing page's recipe now, while someone is there. Set by the
+	// engine, which knows the browsers' recipes, not by Present.
+	RecordRecipe bool `json:"recordRecipe"`
 }
 
 // Tones a label is shown in. They match the UI's badge classes.

@@ -134,6 +134,36 @@ function bulkActions(downloads) {
   return { pauseAll: n("pause") >= 2, resumeAll: n("resume") >= 2 };
 }
 
+// "Ethernet and Wi-Fi": names joined for a sentence.
+function andList(names) {
+  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+// Interfaces that look like two lines but add no bandwidth: one warning per
+// group behind the same router (the engine's sameRouter, by gateway MAC).
+// Never a reason to turn one off: the user decides.
+function routerWarnings(interfaces) {
+  const groups = new Map();
+  for (const i of interfaces || []) {
+    if (i.tunnel || !(i.sameRouter || []).length) continue;
+    const names = [i.name, ...i.sameRouter].sort();
+    groups.set(names.join("\n"), names);
+  }
+  return [...groups.values()].map((names) =>
+    `${andList(names)} go through the same router: together they are no faster than one of them.`);
+}
+
+// Check lines' answer: each line's public IP, and a warning per IP shared.
+function lineResults(checks) {
+  const byIP = new Map();
+  for (const c of checks || []) if (c.ip) byIP.set(c.ip, [...(byIP.get(c.ip) || []), c.name]);
+  return {
+    lines: (checks || []).map((c) => `${c.name}: ${c.ip || "no answer (" + (c.error || "unknown") + ")"}`),
+    warnings: [...byIP].filter(([, names]) => names.length > 1).map(([ip, names]) =>
+      `${andList(names)} reach the internet from the same public IP (${ip}): they share one uplink, so together they are no faster than one.`),
+  };
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions };
+  module.exports = { fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
 }

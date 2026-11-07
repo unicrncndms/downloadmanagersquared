@@ -131,6 +131,14 @@ function makeCard(id) {
   const cardRows = new Map();
   const allRows = new Map();
 
+  // Record recipe: the site has no recipe yet, so a link that expires later
+  // would need someone at the browser. Recording now, while someone is here,
+  // lets DMS² renew it alone. Only an offer: nothing records without the click.
+  const recordRow = el("div", { class: "extract", hidden: true },
+    el("div", { class: "row" },
+      el("span", { class: "grow muted" }, "If this link expires, DMS² will need you to click through the site again."),
+      el("button", { class: "small primary", onclick: () => act("recordRecipe", { id }, "Click through the page in the window that opens") }, "Record recipe")));
+
   // The add step: a torrent waits here until its files and folder are chosen.
   const pick = el("div", { class: "pick", hidden: true });
   let picking = ""; // what the add step shows: the VPN question and/or the files
@@ -212,7 +220,7 @@ function makeCard(id) {
   const root = el("div", { class: "card" },
     el("div", { class: "top" }, name, vpn, status, size, showDone, dropDone),
     bar, meta, sub, via,
-    cardConns, pick, foldAsk, ask,
+    cardConns, recordRow, pick, foldAsk, ask,
     details);
   const queued = () => d && d.status === "queued";
   root.addEventListener("dragstart", (e) => {
@@ -268,7 +276,7 @@ function makeCard(id) {
     size.textContent = d.size > 0 ? fmtBytes(d.size) : "";
     showDone.hidden = !line || !(d.actions || {}).showInFolder;
     if (line) {
-      for (const n of [bar, meta, sub, via, cardConns, pick, foldAsk, ask, details]) n.hidden = true;
+      for (const n of [bar, meta, sub, via, cardConns, recordRow, pick, foldAsk, ask, details]) n.hidden = true;
       return;
     }
 
@@ -298,6 +306,7 @@ function makeCard(id) {
     menuFolder.hidden = !can.showInFolder;
     menuRemove.hidden = !can.remove; // a torrent being added has its own Cancel
     menuCopy.hidden = !d.url;
+    recordRow.hidden = !can.recordRecipe;
     menuNext.hidden = menuLast.hidden = !queued();
     limitRow.hidden = torrent;
     if (document.activeElement !== limitIn) limitIn.value = d.limit ? +(d.limit / 1e6).toFixed(3) : "";

@@ -210,6 +210,13 @@ func (d *Download) Running() bool {
 }
 
 // State returns a copy suitable for saving.
+// Browser is the exe of the browser that handed the download over ("" if none).
+func (d *Download) Browser() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.st.Browser
+}
+
 func (d *Download) State() State {
 	d.mu.Lock()
 	defer d.mu.Unlock()

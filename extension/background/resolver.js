@@ -4,37 +4,39 @@
 // a container whose traffic goes through the engine's SOCKS proxy for that
 // interface, the remembered clicks are replayed, and the download the site
 // starts is caught and handed to the engine instead.
+//
+// Job state is plain data, kept in storage.session where there is one, and
+// every timeout is a deadline in it: a background that restarts mid-job (an
+// MV3 service worker) picks its jobs up again. A "learn" job only records the
+// recipe (the engine's Record recipe button) and reports no link.
 const Resolver = {
   containers: {},   // ifaceId -> cookieStoreId
   ifaceByStore: {}, // cookieStoreId -> ifaceId
   recipes: {},      // landing-page host -> recipe (lib/recipe.js)
   jobs: new Map(),  // "downloadId|ifaceId" -> job
-  tabJobs: new Map(),
+  tabJobs: new Map(), // tabId -> job: the job's own tabs and the ones they opened
   creating: new Map(),
+  loaded: false,    // jobs, containers and recipes are read back
+  ready: null,      // settles once they are
+  wake: 0,          // the timeout of the nearest deadline
+  saving: false,
 
   COLORS: ["blue", "turquoise", "green", "yellow", "orange", "red", "pink", "purple"],
   PREFIX: "DMS² · ", // every DMS² container's name starts so
 
-  async init() {
-    const s = await browser.storage.local.get(["containers", "recipes"]);
-    this.recipes = s.recipes || {};
-    // Containers live only while a resolve runs: any left from before (a crash,
-    // a quit mid-resolve) go, found by stored id and by name.
-    const stale = new Set(Object.values(s.containers || {}));
-    const all = await browser.contextualIdentities.query({}).catch(() => []);
-    for (const c of all) if (c.name.startsWith(this.PREFIX)) stale.add(c.cookieStoreId);
-    for (const store of stale) await browser.contextualIdentities.remove(store).catch(() => {});
-    this.containers = {};
-    this.saveContainers();
-
+  // Registers every listener before anything is awaited (an MV3 worker only
+  // gets the event that woke it if they are), then reads the state back.
+  init() {
     browser.proxy.onRequest.addListener((d) => this.proxyFor(d), { urls: ["<all_urls>"] });
     // The second fence: with no proxy to send it through, a container request
     // is cancelled. (Firefox would otherwise fail a dead extension proxy over
     // to the user's own manual or PAC proxy.)
     browser.webRequest.onBeforeRequest.addListener((d) => this.cancelUnrouted(d), { urls: ["<all_urls>"] }, ["blocking"]);
     // Without the engine no resolve can finish: fail them and close their windows.
+    // With it, it learns which sites have a recipe (for its Record recipe button).
     Engine.on("connection", ({ connected }) => {
       if (!connected) for (const job of [...this.jobs.values()]) this.fail(job, "the engine went away");
+      else this.ready.then(() => this.sendRecipeHosts());
     });
     browser.proxy.onError.addListener((e) => console.warn("DMS² proxy:", e.message));
     browser.contextualIdentities.onRemoved.addListener(({ contextualIdentity }) => {
@@ -47,7 +49,55 @@ const Resolver = {
     browser.tabs.onCreated.addListener((tab) => this.onTabCreated(tab));
     browser.windows.onRemoved.addListener((wid) => this.onWindowRemoved(wid));
     browser.runtime.onMessage.addListener((msg, sender) => this.onContentMessage(msg, sender));
-    Engine.on("resolve", (r) => this.request(r));
+    Engine.on("resolve", (r) => this.ready.then(() => this.request(r)));
+    this.ready = this.load();
+    return this.ready;
+  },
+
+  get session() {
+    return browser.storage.session;
+  },
+
+  async load() {
+    const s = await browser.storage.local.get(["containers", "recipes"]);
+    this.recipes = s.recipes || {};
+    // Jobs whose window is still open carry on (a restarted background); the
+    // others went with their window.
+    let saved = [];
+    try { saved = (this.session && (await this.session.get("resolverJobs")).resolverJobs) || []; } catch (e) { /* none */ }
+    for (const job of Array.isArray(saved) ? saved : []) {
+      if (!job || job.done || this.jobs.has(job.key)) continue;
+      if (job.windowId !== null && !(await browser.windows.get(job.windowId).catch(() => null))) continue;
+      this.jobs.set(job.key, job);
+      for (const t of job.tabs) this.tabJobs.set(t, job);
+    }
+    // Containers live only while a resolve runs: any left from before (a crash,
+    // a quit mid-resolve) go, found by stored id and by name, except those of
+    // jobs carrying on.
+    const keep = {};
+    for (const job of this.jobs.values()) {
+      const store = (s.containers || {})[job.iface];
+      if (store && job.mode !== "waiting") keep[job.iface] = store;
+    }
+    const kept = new Set(Object.values(keep));
+    const stale = new Set(Object.values(s.containers || {}).filter((c) => !kept.has(c)));
+    const all = await browser.contextualIdentities.query({}).catch(() => []);
+    for (const c of all) if (c.name.startsWith(this.PREFIX) && !kept.has(c.cookieStoreId)) stale.add(c.cookieStoreId);
+    for (const store of stale) await browser.contextualIdentities.remove(store).catch(() => {});
+    this.containers = { ...keep, ...this.containers };
+    this.saveContainers();
+    this.loaded = true;
+    this.recheck(); // deadlines that passed while the background was away
+  },
+
+  // Writes the jobs to storage.session, once per turn of the event loop.
+  save() {
+    if (!this.session || this.saving) return;
+    this.saving = true;
+    Promise.resolve().then(() => {
+      this.saving = false;
+      this.session.set({ resolverJobs: [...this.jobs.values()] }).catch(() => {});
+    });
   },
 
   reindex() {
@@ -76,51 +126,86 @@ const Resolver = {
     return this.creating.get(iface);
   },
 
-  // The engine's proxy port for a DMS² container, 0 if it has none to use now.
+  // The engine's proxy port for an interface, 0 if it has none to use now.
   // Both the proxy and the cancel listener decide by this.
-  portFor(cookieStoreId) {
-    return containerPort(this.ifaceByStore[cookieStoreId], Engine.connected, Engine.state && Engine.state.interfaces);
+  portFor(iface) {
+    return containerPort(iface, Engine.connected, Engine.state && Engine.state.interfaces);
+  },
+
+  // Which resolver job a request, download or tab belongs to, from what it
+  // carries ({ tabId, windowId, cookieStoreId }): its tab (or the tab that
+  // opened it), its window, then, in Firefox only, its container. Returns
+  // { job, iface } (job null: a DMS² container with no resolve running), or
+  // null when it is the user's own. Proxying and capture both decide by this.
+  ownerOf({ tabId, windowId, cookieStoreId } = {}) {
+    const byTab = tabId >= 0 ? this.tabJobs.get(tabId) : undefined;
+    if (byTab) return { job: byTab, iface: byTab.iface };
+    if (windowId !== undefined && windowId !== null) {
+      for (const j of this.jobs.values()) if (j.windowId === windowId) return { job: j, iface: j.iface };
+    }
+    const iface = cookieStoreId ? this.ifaceByStore[cookieStoreId] : undefined;
+    if (!iface) return null;
+    let job = null;
+    for (const j of this.jobs.values()) {
+      if (j.iface === iface && !j.done && (j.mode === "replay" || j.mode === "record")) job = j;
+    }
+    return { job, iface };
   },
 
   proxyFor(d) {
-    // Outside DMS² containers: {type: "direct"}, which leaves the user's own
-    // proxy in charge. It must never become null: only null forces a request
-    // direct, past the user's proxy.
-    if (!this.ownsStore(d.cookieStoreId)) return { type: "direct" };
-    // Fail closed: a container page must never leave through the wrong
+    if (!this.loaded) return this.ready.then(() => this.proxyFor(d));
+    const owner = this.ownerOf(d);
+    // The user's own: {type: "direct"}, which leaves their own proxy in
+    // charge. It must never become null: only null forces a request direct,
+    // past the user's proxy.
+    if (!owner) return { type: "direct" };
+    // Fail closed: a resolver page must never leave through the wrong
     // connection. Port 1 is a second fence behind the cancel listener.
-    return { type: "socks", host: "127.0.0.1", port: this.portFor(d.cookieStoreId) || 1, proxyDNS: true };
+    return { type: "socks", host: "127.0.0.1", port: this.portFor(owner.iface) || 1, proxyDNS: true };
   },
 
   cancelUnrouted(d) {
-    return this.ownsStore(d.cookieStoreId) && !this.portFor(d.cookieStoreId) ? { cancel: true } : {};
-  },
-
-  ownsStore(cookieStoreId) {
-    return !!this.ifaceByStore[cookieStoreId];
+    if (!this.loaded) return this.ready.then(() => this.cancelUnrouted(d));
+    const owner = this.ownerOf(d);
+    return owner && !this.portFor(owner.iface) ? { cancel: true } : {};
   },
 
   request(r) {
     const key = `${r.id}|${r.iface}`;
-    if (this.jobs.has(key)) return;
+    const running = this.jobs.get(key);
+    if (running) {
+      // The link expired while its recipe was being recorded: the recording's
+      // link is now wanted after all.
+      if (!r.learn && running.learn) {
+        running.learn = false;
+        this.save();
+      }
+      return;
+    }
     const job = {
       key, id: r.id, iface: r.iface, ifaceName: r.ifaceName || r.iface, pageUrl: r.pageUrl,
-      host: hostOf(r.pageUrl), mode: "new", step: 0, recordFrom: 0, recorded: [],
-      tabs: new Set(), tabId: null, windowId: null, loading: false, skipped: false, timers: {},
+      host: hostOf(r.pageUrl), mode: "new", step: 0, recordFrom: 0, recorded: [], learn: !!r.learn,
+      tabs: [], tabId: null, windowId: null, loading: false, skipped: false,
+      deadlines: {},    // name -> { at, action, args }: what to do when, see setTimer
       clicked: null,    // during replay: { index, at, clicks, effects, mark } of the step waiting for an effect
       mark: 0,          // the page's load or the previous click: a step's wait counts from here
       lastClick: 0,     // the download's wait counts from here
       measured: { steps: [] }, // the waits this replay saw, saved when it succeeds
       budgetFor: -1,    // the step whose budget runs
-      retried: new Set(), // steps that had their second chance in a restored window
+      retried: [],      // steps that had their second chance in a restored window
       activity: 0,      // while a person is needed: the last click, page load or captcha change
     };
     this.jobs.set(key, job);
     this.startOrQueue(job);
+    this.save();
   },
 
   startOrQueue(job) {
-    if (this.recipes[job.host]) return this.launch(job, "replay");
+    if (this.recipes[job.host]) {
+      // A learn job always records; with a recipe there already, it has nothing to do.
+      if (job.learn) return this.endLearn(job);
+      return this.launch(job, "replay");
+    }
     // First visit to this site: one job records the clicks, the others wait and replay them.
     const recorder = [...this.jobs.values()].find((j) => j !== job && j.host === job.host && j.mode === "record");
     if (recorder) {
@@ -171,35 +256,41 @@ const Resolver = {
     }
     job.windowId = win.id;
     job.tabId = win.tabs[0].id;
-    job.tabs.add(job.tabId);
-    this.tabJobs.set(job.tabId, job);
+    this.addTab(job, job.tabId);
     if (visible) {
       notify("Show DMS² how to get the link",
         `Click through ${job.host} for ${job.ifaceName} as you normally would. Your clicks are remembered for next time.`);
     }
     if (visible) this.touch(job);
-    else this.setTimer(job, "overall", replayTimeout(this.recipes[job.host]), () => this.fail(job, "timed out"));
+    else this.setTimer(job, "overall", replayTimeout(this.recipes[job.host]), "fail", "timed out");
+  },
+
+  addTab(job, tabId) {
+    if (!job.tabs.includes(tabId)) job.tabs.push(tabId);
+    this.tabJobs.set(tabId, job);
   },
 
   // Something happened while a person is needed (a click, a page load, a
   // captcha coming or going): they get another five minutes.
   touch(job, why = "nobody clicked through the page in time") {
     job.activity = Date.now();
-    this.setTimer(job, "overall", RECORD_IDLE, () => {
-      if (recordingIdle(job.activity, Date.now())) this.fail(job, why);
-    });
+    this.setTimer(job, "overall", RECORD_IDLE, "idleOut", why);
+  },
+
+  idleOut(job, why) {
+    if (recordingIdle(job.activity, Date.now())) this.fail(job, why);
   },
 
   // A step that ran out of time in a minimized window gets one more go with the
   // window shown but not focused: some pages only count down while visible.
   // False once that has been tried, or if the window isn't minimized.
   async secondChance(job, index) {
-    if (job.retried.has(index)) return false;
+    if (job.retried.includes(index)) return false;
     const win = await browser.windows.get(job.windowId).catch(() => null);
     if (!win || win.state !== "minimized") return false;
-    job.retried.add(index);
+    job.retried.push(index);
     await browser.windows.update(job.windowId, { ...this.shownBounds(), focused: false }).catch(() => {});
-    this.setTimer(job, "overall", replayTimeout(this.recipes[job.host]), () => this.fail(job, "timed out"));
+    this.setTimer(job, "overall", replayTimeout(this.recipes[job.host]), "fail", "timed out");
     return true;
   },
 
@@ -207,33 +298,65 @@ const Resolver = {
   async budgetOut(job, index, ms, why) {
     if (job.done || job.mode !== "replay") return;
     if (await this.secondChance(job, index)) {
-      this.setTimer(job, "budget", ms, () => this.budgetOut(job, index, ms, why));
+      this.setTimer(job, "budget", ms, "budgetOut", index, ms, why);
       if (index < this.steps(job).length) this.sendStep(job);
       return;
     }
     this.switchToRecord(job, index, why);
   },
 
-  setTimer(job, name, ms, fn) {
-    clearTimeout(job.timers[name]);
-    job.timers[name] = setTimeout(fn, ms);
+  // In ms, call this[action](job, ...args): a deadline in the job's data, so
+  // it holds across a restart of the background (see recheck).
+  setTimer(job, name, ms, action, ...args) {
+    job.deadlines[name] = { at: Date.now() + ms, action, args };
+    this.schedule();
+  },
+
+  clearTimer(job, name) {
+    delete job.deadlines[name];
+    this.schedule();
   },
 
   clearTimers(job) {
-    for (const t of Object.values(job.timers)) clearTimeout(t);
-    job.timers = {};
+    job.deadlines = {};
+    this.schedule();
+  },
+
+  // One timeout, for the nearest deadline of any job. Losing it loses
+  // nothing: load() rechecks.
+  schedule() {
+    clearTimeout(this.wake);
+    let next = Infinity;
+    for (const j of this.jobs.values()) for (const d of Object.values(j.deadlines)) next = Math.min(next, d.at);
+    if (next < Infinity) this.wake = setTimeout(() => this.recheck(), Math.max(0, next - Date.now()));
+    this.save();
+  },
+
+  // Runs what is due.
+  recheck() {
+    const now = Date.now();
+    for (const job of [...this.jobs.values()]) {
+      for (const [name, d] of Object.entries(job.deadlines)) {
+        if (job.done || d.at > now || job.deadlines[name] !== d) continue;
+        delete job.deadlines[name];
+        this[d.action](job, ...d.args);
+      }
+    }
+    this.schedule();
   },
 
   steps(job) {
     return (this.recipes[job.host] && this.recipes[job.host].steps) || [];
   },
 
+  // A tab opened from a job's tab, or in its window, is the job's too.
   onTabCreated(tab) {
-    const job = tab.openerTabId !== undefined && this.tabJobs.get(tab.openerTabId);
-    if (!job) return;
-    job.tabs.add(tab.id);
-    this.tabJobs.set(tab.id, job);
+    const owner = this.ownerOf({ tabId: tab.openerTabId, windowId: tab.windowId });
+    const job = owner && owner.job;
+    if (!job || job.done) return;
+    this.addTab(job, tab.id);
     if (job.mode === "replay") this.watchNewTab(job, tab);
+    this.save();
   },
 
   // A tab a replayed click opened: the same site carries on there; another
@@ -276,6 +399,7 @@ const Resolver = {
       if (job.captcha) this.captchaDone(job);
       this.drive(job);
     }
+    this.save();
   },
 
   async drive(job) {
@@ -307,8 +431,8 @@ const Resolver = {
   captchaShown(job) {
     if (job.captcha) return;
     job.captcha = true;
-    clearTimeout(job.timers.budget);
-    clearTimeout(job.timers.effect);
+    this.clearTimer(job, "budget");
+    this.clearTimer(job, "effect");
     job.clicked = null;
     this.touch(job, "the captcha wasn't solved in time");
     this.show(job, { drawAttention: true });
@@ -323,7 +447,7 @@ const Resolver = {
     }
     // Back out of the way; the page's script carries on with the next click by itself.
     browser.windows.update(job.windowId, { state: "minimized" }).catch(() => {});
-    this.setTimer(job, "overall", replayTimeout(this.recipes[job.host]), () => this.fail(job, "timed out"));
+    this.setTimer(job, "overall", replayTimeout(this.recipes[job.host]), "fail", "timed out");
     job.budgetFor = -1; // the step gets its budget afresh
     this.sendStep(job);
   },
@@ -348,7 +472,7 @@ const Resolver = {
   armBudget(job, index, ms, why) {
     if (job.budgetFor === index) return;
     job.budgetFor = index;
-    this.setTimer(job, "budget", ms, () => this.budgetOut(job, index, ms, why));
+    this.setTimer(job, "budget", ms, "budgetOut", index, ms, why);
   },
 
   // A replayed click showed an effect: the step is done. After a navigation
@@ -359,7 +483,7 @@ const Resolver = {
     c.effects[kind] = true;
     if (afterClick(c.effects, Date.now() - c.at, c.clicks) !== "done") return;
     job.clicked = null;
-    clearTimeout(job.timers.effect);
+    this.clearTimer(job, "effect");
     job.measured.steps[c.index] = c.at - c.mark;
     job.mark = c.at;
     job.step = c.index + 1;
@@ -372,7 +496,7 @@ const Resolver = {
     if (!c || job.done || job.mode !== "replay") return;
     const verdict = afterClick(c.effects, Date.now() - c.at, c.clicks);
     if (verdict === "wait") {
-      this.setTimer(job, "effect", 250, () => this.judgeClick(job));
+      this.setTimer(job, "effect", 250, "judgeClick");
     } else if (verdict === "retry") {
       this.sendStep(job);
     } else if (verdict === "giveUp") {
@@ -404,7 +528,7 @@ const Resolver = {
         const prev = job.clicked && job.clicked.index === msg.index ? job.clicked : null;
         job.clicked = { index: msg.index, at: Date.now(), clicks: prev ? prev.clicks + 1 : 1, effects: {}, mark: prev ? prev.mark : job.mark };
         job.lastClick = job.clicked.at;
-        this.setTimer(job, "effect", EFFECT_WAIT, () => this.judgeClick(job));
+        this.setTimer(job, "effect", EFFECT_WAIT, "judgeClick");
         break;
       }
       case "effect":
@@ -437,35 +561,24 @@ const Resolver = {
         this.touch(job);
         break;
     }
+    this.save();
   },
 
-  jobForStore(cookieStoreId, tabId) {
-    const byTab = this.tabJobs.get(tabId);
-    if (byTab && !byTab.done) return byTab;
-    const iface = this.ifaceByStore[cookieStoreId];
-    let found = null;
-    for (const j of this.jobs.values()) {
-      if (j.iface === iface && !j.done && (j.mode === "replay" || j.mode === "record")) found = j;
-    }
-    return found;
-  },
-
-  // Called by Capture for responses inside one of our containers.
-  onHeaders(d, cookie) {
+  // Called by Capture for responses ownerOf gives a job: the download the
+  // site starts is the link. Downloads in a finished job's tab go nowhere.
+  onHeaders(d, cookie, owner) {
     const h = headerMap(d.responseHeaders);
     if (d.statusCode >= 300 || isPage(h) || !looksLikeDownload(h)) return {};
     const size = responseSize(h, d.statusCode);
     if (!isAttachment(h) && size >= 0 && size < (1 << 20)) return {};
-    const job = this.jobForStore(d.cookieStoreId, d.tabId);
-    if (!job) return {};
-    this.finish(job, d.url, cookie);
+    if (!owner.job) return {};
+    this.finish(owner.job, d.url, cookie);
     return { cancel: true };
   },
 
-  async onDownload(item) {
-    const job = this.jobForStore(item.cookieStoreId, -1);
+  async onDownload(item, owner) {
     await discardDownload(item.id);
-    if (job) this.finish(job, item.finalUrl || item.url);
+    if (owner.job) this.finish(owner.job, item.finalUrl || item.url);
   },
 
   // cookie: the header sent with the download's request, if one passed by.
@@ -483,6 +596,8 @@ const Resolver = {
       this.recipes[job.host] = withMeasuredWaits(this.recipes[job.host], job.measured);
       browser.storage.local.set({ recipes: this.recipes });
     }
+    // A learn job's link is thrown away: the download keeps its own.
+    if (job.learn) return this.endLearn(job);
     if (cookie === undefined) cookie = await cookieHeader(url, this.containers[job.iface]);
     try {
       await Engine.call("resolved", { id: job.id, iface: job.iface, url, cookie, referer: job.lastUrl || job.pageUrl });
@@ -493,11 +608,21 @@ const Resolver = {
   },
 
   fail(job, error) {
+    if (job.learn) return this.endLearn(job); // nothing changes for the download
     if (job.done) return;
     job.done = true;
     this.clearTimers(job);
     Engine.call("resolveFailed", { id: job.id, iface: job.iface, error }).catch(() => {});
     this.cleanup(job);
+  },
+
+  // A learn job is over, recipe saved or not: the engine may offer the button again.
+  endLearn(job) {
+    const first = !job.ended;
+    job.done = job.ended = true;
+    this.clearTimers(job);
+    if (first) Engine.call("learnEnded", { id: job.id, iface: job.iface }).catch(() => {});
+    if (this.jobs.get(job.key) === job) this.cleanup(job);
   },
 
   // Remember the landing page the user actually started from, for this download
@@ -519,11 +644,18 @@ const Resolver = {
     const downloadWait = job.lastClick ? Date.now() - job.lastClick : 0;
     this.recipes[job.host] = recorded(this.recipes[job.host], job.recordFrom, job.recorded, downloadWait, Date.now());
     browser.storage.local.set({ recipes: this.recipes });
+    this.sendRecipeHosts();
   },
 
   forgetRecipe(host) {
     delete this.recipes[host];
+    this.sendRecipeHosts();
     return browser.storage.local.set({ recipes: this.recipes });
+  },
+
+  // The landing-page hosts this browser has a recipe for, to the engine.
+  sendRecipeHosts() {
+    if (Engine.connected) Engine.call("recipeHosts", { hosts: Object.keys(this.recipes) }).catch(() => {});
   },
 
   cleanup(job) {
@@ -538,9 +670,10 @@ const Resolver = {
       this.saveContainers();
       browser.contextualIdentities.remove(store).catch(() => {});
     }
-    for (const j of this.jobs.values()) {
+    for (const j of [...this.jobs.values()]) {
       if (j.mode === "waiting" && j.host === job.host) this.startOrQueue(j);
     }
+    this.save();
   },
 
   onWindowRemoved(wid) {

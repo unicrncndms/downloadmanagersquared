@@ -101,3 +101,26 @@ test("queued downloads list in the order they will start, and move by drop or to
   assert.equal(moveBefore(list, "run", "q1"), null); // only queued ones move
   assert.equal(moveBefore(list, "q1", "run"), null);
 });
+
+test("interfaces behind one router get one warning naming them all; tunnels and others none", () => {
+  const { routerWarnings } = require("../lib/list.js");
+  assert.deepEqual(routerWarnings([
+    { id: "eth", name: "Ethernet", sameRouter: ["Wi-Fi"] },
+    { id: "wifi", name: "Wi-Fi", sameRouter: ["Ethernet"] },
+    { id: "usb", name: "Phone" },
+    { id: "eth~vpn", name: "VPN via Ethernet", tunnel: true, sameRouter: ["x"] },
+  ]), ["Ethernet and Wi-Fi go through the same router: together they are no faster than one of them."]);
+  assert.deepEqual(routerWarnings([{ id: "a", name: "A" }]), []);
+});
+
+test("Check lines lists each public IP and warns about a shared one", () => {
+  const { lineResults } = require("../lib/list.js");
+  const r = lineResults([
+    { id: "eth", name: "Ethernet", ip: "203.0.113.7" },
+    { id: "mesh", name: "Mesh", ip: "203.0.113.7" },
+    { id: "lte", name: "Phone", ip: "198.51.100.2" },
+    { id: "x", name: "Old", error: "no answer from the STUN server" },
+  ]);
+  assert.deepEqual(r.lines, ["Ethernet: 203.0.113.7", "Mesh: 203.0.113.7", "Phone: 198.51.100.2", "Old: no answer (no answer from the STUN server)"]);
+  assert.deepEqual(r.warnings, ["Ethernet and Mesh reach the internet from the same public IP (203.0.113.7): they share one uplink, so together they are no faster than one."]);
+});

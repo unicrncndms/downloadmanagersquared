@@ -57,9 +57,10 @@ const Capture = {
     });
   },
 
-  onHeaders(d) {
-    const cookie = SentCookies.take(d.requestId); // dropped whatever happens to the response
-    if (Resolver.ownsStore(d.cookieStoreId)) return Resolver.onHeaders(d, cookie);
+  onHeaders(d, cookie = SentCookies.take(d.requestId)) { // dropped whatever happens to the response
+    if (!Resolver.loaded) return Resolver.ready.then(() => this.onHeaders(d, cookie));
+    const owner = Resolver.ownerOf(d);
+    if (owner) return Resolver.onHeaders(d, cookie, owner);
     if (d.method !== "GET") return {};
     const h = headerMap(d.responseHeaders);
     if (!Engine.connected || !Engine.settings) return {};
@@ -79,21 +80,34 @@ const Capture = {
     return { cancel: true };
   },
 
-  // Fallback for downloads that didn't pass through onHeaders (e.g. <a download>).
+  // Downloads that didn't pass through onHeaders (e.g. <a download>), and,
+  // where there is no blocking headers hook (Chromium), every download: the
+  // same thresholds and the same hand-off, after the browser started it.
   async onDownload(item) {
-    if (Resolver.ownsStore(item.cookieStoreId)) return Resolver.onDownload(item);
+    await Resolver.ready;
+    const owner = Resolver.ownerOf(item);
+    if (owner) return Resolver.onDownload(item, owner);
     if (!Engine.connected || !Engine.settings || item.byExtensionId === browser.runtime.id) return;
-    if (this.bypass.delete(item.url)) return;
+    const url = item.finalUrl || item.url;
+    if (this.bypass.delete(item.url) || this.bypass.delete(url)) return;
     const kind = captureDownload(item, Engine.settings.thresholdBytes);
     if (!kind) return;
     await discardDownload(item.id);
     this.handOff({
       torrent: kind === "torrent",
-      url: item.finalUrl || item.url,
-      pages: this.pagesFor(-1, item.finalUrl || item.url, [item.referrer]),
+      url,
+      pages: this.pagesFor(this.tabShowing(item.referrer), url, [item.referrer]),
       filename: (item.filename || "").split(/[\\/]/).pop(),
       cookieStoreId: item.cookieStoreId,
     });
+  },
+
+  // The tab whose current page is url (a download's referrer), -1 if none:
+  // a download item names no tab, so this finds the history to use.
+  tabShowing(url) {
+    if (!url) return -1;
+    for (const [tabId, h] of this.history) if (h[h.length - 1] === url) return tabId;
+    return -1;
   },
 
   recordPage(tabId, url) {

@@ -20,6 +20,7 @@ type Interface struct {
 	Description string   `json:"description"`
 	IPv4        net.IP   `json:"ip"`
 	Gateway     net.IP   `json:"gateway"`
+	GatewayMAC  string   `json:"gatewayMac,omitempty"` // "" until known, or without one (PPP, tunnels)
 	DNS         []net.IP `json:"dns"`
 	VPN         bool     `json:"vpn"`
 	IsDefault   bool     `json:"isDefault"` // carries the Windows default route
@@ -61,6 +62,7 @@ func List() ([]Interface, error) {
 			Description: desc,
 			IPv4:        ip,
 			Gateway:     gw,
+			GatewayMAC:  gatewayMAC(ip, gw),
 			DNS:         dnsServers(a.FirstDnsServerAddress),
 			VPN:         a.IfType == ifTypePropVirtual || a.IfType == ifTypeTunnel || vpnPattern.MatchString(desc) || vpnPattern.MatchString(name),
 			IsDefault:   a.IfIndex == defIdx,

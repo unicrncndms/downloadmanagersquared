@@ -16,6 +16,23 @@ windowHeader("settings");
 // --- connections ---
 
 $("refreshIfaces").onclick = () => act("refreshInterfaces", {}, "Connections refreshed");
+// Only on this click does DMS² contact a STUN server.
+$("checkLines").onclick = async () => {
+  const btn = $("checkLines");
+  const box = $("lineResult");
+  btn.disabled = true;
+  box.hidden = false;
+  box.replaceChildren(el("div", { class: "muted" }, "Asking through each connection…"));
+  try {
+    const r = lineResults(await call("checkLines", {}));
+    box.replaceChildren(...r.lines.map((t) => el("div", { class: "muted" }, t)), ...r.warnings.map((t) => el("div", { class: "warn" }, t)));
+    if (!r.lines.length) box.replaceChildren(el("div", { class: "muted" }, "No connection in use to check."));
+  } catch (e) {
+    box.replaceChildren(el("div", { class: "bad" }, e.message));
+  } finally {
+    btn.disabled = false;
+  }
+};
 $("followWindows").addEventListener("change", () => {
   const main = (latestState.interfaces || []).find((i) => i.isMain);
   act("setSettings", { mainInterface: $("followWindows").checked ? "" : (main ? main.id : "") },
@@ -99,6 +116,9 @@ function renderIfaces(state, settings) {
   const ifaces = all.filter((i) => !i.tunnel);
   const tunnels = new Map(all.filter((i) => i.tunnel).map((t) => [t.of, t]));
   const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort]), settings.mainInterface]);
+  const warnings = routerWarnings(all);
+  $("uplinkWarn").hidden = !warnings.length;
+  $("uplinkWarn").replaceChildren(...warnings.map((t) => el("div", { class: "warn" }, t)));
   const body = $("ifaces");
   if (sig !== ifaceSig && !body.contains(document.activeElement)) {
     ifaceSig = sig;

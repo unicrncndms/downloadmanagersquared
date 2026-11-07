@@ -74,6 +74,9 @@ type client struct {
 	seq       int64  // higher = connected later
 	browser   string // the exe of the browser the extension runs in, from its hello
 	userAgent string // that browser's, from its hello
+	// The landing-page hosts that browser has a recipe for, from recipeHosts;
+	// nil until the extension says.
+	recipeHosts map[string]bool
 }
 
 type resolveReq struct {
@@ -82,7 +85,8 @@ type resolveReq struct {
 	IfaceName string `json:"ifaceName"`
 	PageURL   string `json:"pageUrl"`
 	SocksPort int    `json:"socksPort"`
-	Browser   string `json:"-"` // only the extension in this browser gets it ("" = any)
+	Learn     bool   `json:"learn,omitempty"` // only to record the recipe: no link is reported
+	Browser   string `json:"-"`               // only the extension in this browser gets it ("" = any)
 }
 
 type Engine struct {
@@ -100,6 +104,7 @@ type Engine struct {
 	clients   map[*ipc.Conn]*client
 	clientSeq int64
 	resolves  map[string]resolveReq // waiting for an extension to pick them up
+	learning  map[string]*ipc.Conn  // download id -> the extension recording its recipe (Record recipe)
 	started   map[string]time.Time  // browsers started for a resolve, by exe, so not twice at once
 	userAgent string                // the browser's, from its latest hello; not saved
 	browser   string                // the browser's exe, from its latest hello; not saved
@@ -205,6 +210,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		global:   rate.NewShaper(),
 		clients:  map[*ipc.Conn]*client{},
 		resolves: map[string]resolveReq{},
+		learning: map[string]*ipc.Conn{},
 		started:  map[string]time.Time{},
 		mapPort:  portmap.Map,
 		quit:     make(chan struct{}),
@@ -732,14 +738,7 @@ func (e *Engine) RequestResolve(id, ifaceID, pageURL, browser string) {
 		}
 	}
 	e.mu.Lock()
-	req := resolveReq{ID: id, Iface: ifaceID, PageURL: pageURL, Browser: browser}
-	if base, tun := paths.IfaceOf(ifaceID); tun {
-		if st, ok := e.tunnelStatus(base); ok && e.ifaces[base] != nil {
-			req.IfaceName, req.SocksPort = "VPN via "+e.ifaces[base].info.Name, st.SocksPort
-		}
-	} else if ent := e.ifaces[ifaceID]; ent != nil {
-		req.IfaceName, req.SocksPort = ent.info.Name, ent.socks.Port()
-	}
+	req := e.resolveReqLocked(id, ifaceID, pageURL, browser)
 	e.resolves[id+"|"+ifaceID] = req
 	c := e.extensionForLocked(browser)
 	start := c == nil && browser != "" && time.Since(e.started[strings.ToLower(browser)]) > time.Minute
@@ -756,6 +755,124 @@ func (e *Engine) RequestResolve(id, ifaceID, pageURL, browser string) {
 			log.Printf("starting the browser for a resolve: %v", err)
 		}
 	}
+}
+
+func (e *Engine) resolveReqLocked(id, ifaceID, pageURL, browser string) resolveReq {
+	req := resolveReq{ID: id, Iface: ifaceID, PageURL: pageURL, Browser: browser}
+	if base, tun := paths.IfaceOf(ifaceID); tun {
+		if st, ok := e.tunnelStatus(base); ok && e.ifaces[base] != nil {
+			req.IfaceName, req.SocksPort = "VPN via "+e.ifaces[base].info.Name, st.SocksPort
+		}
+	} else if ent := e.ifaces[ifaceID]; ent != nil {
+		req.IfaceName, req.SocksPort = ent.info.Name, ent.socks.Port()
+	}
+	return req
+}
+
+// RecordRecipe has the browser a download came from record its landing
+// page's recipe now, through the main interface, while the download keeps its
+// link: a resolve marked learn, outside needResolve, so no link changes.
+func (e *Engine) RecordRecipe(id string) error {
+	d, err := e.get(id)
+	if err != nil {
+		return err
+	}
+	st := d.State()
+	if st.PageURL == "" {
+		return fmt.Errorf("%s has no landing page", st.Filename)
+	}
+	e.mu.Lock()
+	c := e.extensionForLocked(st.Browser)
+	if c == nil {
+		e.mu.Unlock()
+		return errors.New("the browser this download came from isn't running")
+	}
+	req := e.resolveReqLocked(id, paths.MainInterface(e.pathSnapshotLocked()), st.PageURL, st.Browser)
+	req.Learn = true
+	e.learning[id] = c
+	e.mu.Unlock()
+	log.Printf("recording a recipe for %s via %s", id, req.IfaceName)
+	c.Emit("resolve", req)
+	return nil
+}
+
+// canRecordLocked: the Record recipe button. An unfinished HTTP download with a
+// landing page whose browser's extension is connected, has said which hosts
+// it has recipes for, and has none for this one; with no resolve or
+// recording running for it.
+func (e *Engine) canRecordLocked(s download.Summary, browser string) bool {
+	if s.Kind != "" || s.Status == download.StatusCompleted || s.PageURL == "" {
+		return false
+	}
+	if c := e.learning[s.ID]; c != nil && e.clients[c] != nil {
+		return false
+	}
+	for k := range e.resolves {
+		if strings.HasPrefix(k, s.ID+"|") {
+			return false
+		}
+	}
+	for _, l := range s.Links {
+		if l.Status == download.LinkResolving {
+			return false
+		}
+	}
+	c := e.extensionForLocked(browser)
+	if c == nil {
+		return false
+	}
+	hosts := e.clients[c].recipeHosts
+	u, err := url.Parse(s.PageURL)
+	return hosts != nil && err == nil && u.Hostname() != "" && !hosts[u.Hostname()]
+}
+
+// LineCheck is one interface's public IP, as Check lines found it.
+type LineCheck struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	IP    string `json:"ip,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// CheckLines asks a public STUN server, through each enabled interface, which
+// public IP it comes from: two with the same one share an uplink (a modem
+// behind a mesh node, say). The only time DMS² contacts a third party for
+// itself, so only when the user clicks.
+func (e *Engine) CheckLines(server string) []LineCheck {
+	type line struct {
+		check LineCheck
+		b     *netif.Binding
+	}
+	e.mu.Lock()
+	var lines []line
+	for id, ent := range e.ifaces {
+		if ent.present && e.enabledLocked(ent) && ent.binding != nil {
+			lines = append(lines, line{LineCheck{ID: id, Name: ent.info.Name}, ent.binding})
+		}
+	}
+	e.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	for i := range lines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ip, err := lines[i].b.PublicIP(ctx, server)
+			if err != nil {
+				lines[i].check.Error = err.Error()
+			} else {
+				lines[i].check.IP = ip.String()
+			}
+		}()
+	}
+	wg.Wait()
+	out := make([]LineCheck, len(lines))
+	for i, l := range lines {
+		out[i] = l.check
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // startBrowser starts a browser so its extension connects; tests replace it.
@@ -1230,6 +1347,9 @@ type IfaceView struct {
 	HasTunnel     bool   `json:"hasTunnel,omitempty"`     // an interface with a tunnel configured
 	Provider      string `json:"provider,omitempty"`      // a tunnel's: "conf" or "pia"
 	ForwardedPort int    `json:"forwardedPort,omitempty"` // an imported tunnel's port typed in by the user
+	// The other enabled interfaces behind the same router (same gateway MAC),
+	// by name: together they are no faster than one. Only a warning.
+	SameRouter []string `json:"sameRouter,omitempty"`
 }
 
 type StateEvent struct {
@@ -1243,8 +1363,14 @@ type StateEvent struct {
 
 func (e *Engine) updateSnapshot(dt time.Duration) {
 	sums := []download.Summary{}
+	browsers := []string{} // each download's browser, for Record recipe
 	for _, d := range e.queue.List() {
 		sums = append(sums, d.Summary())
+		b := ""
+		if hd, ok := d.(*download.Download); ok {
+			b = hd.Browser()
+		}
+		browsers = append(browsers, b)
 	}
 	speeds := map[string]float64{}
 	var total float64
@@ -1265,6 +1391,9 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	for i := range sums {
+		sums[i].Actions.RecordRecipe = e.canRecordLocked(sums[i], browsers[i])
+	}
 	now := time.Now()
 	e.cum += total * dt.Seconds()
 	e.meter.Window = time.Duration(e.settings.ETAWindowSec) * time.Second
@@ -1282,8 +1411,20 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	for _, st := range tunnels {
 		hasTunnel[st.Iface] = true
 	}
+	var used []netif.Interface
+	for _, ent := range e.ifaces {
+		if ent.present && e.enabledLocked(ent) {
+			used = append(used, ent.info)
+		}
+	}
+	sameRouter := netif.SameRouter(used)
 	views := []IfaceView{}
 	for id, ent := range e.ifaces {
+		var same []string
+		for _, other := range sameRouter[id] {
+			same = append(same, e.ifaces[other].info.Name)
+		}
+		sort.Strings(same)
 		up, down := ent.shaper.Limits()
 		views = append(views, IfaceView{
 			ID: id, Name: ent.info.Name, Description: ent.info.Description, IP: ent.info.IPv4.String(),
@@ -1291,7 +1432,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
 			SocksPort: ent.socks.Port(), Speed: speeds[id],
 			Upload: e.uploadLocked(id), UploadLimit: up, DownloadLimit: down,
-			Incoming: incomingText(ent.incoming), HasTunnel: hasTunnel[id],
+			Incoming: incomingText(ent.incoming), HasTunnel: hasTunnel[id], SameRouter: same,
 		})
 	}
 	sort.Slice(views, func(i, j int) bool {

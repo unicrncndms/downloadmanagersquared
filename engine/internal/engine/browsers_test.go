@@ -15,15 +15,16 @@ import (
 // fakeExtension is an extension connected from the browser at exe: the engine
 // writes to it through conn, the test reads what arrives from events.
 type fakeExtension struct {
-	conn   *ipc.Conn
-	events chan string // names of events received
+	conn     *ipc.Conn
+	events   chan string          // names of events received
+	resolves chan json.RawMessage // the data of each resolve event
 }
 
 func connectExtension(t *testing.T, e *Engine, exe, userAgent string) *fakeExtension {
 	t.Helper()
 	ours, theirs := net.Pipe()
 	t.Cleanup(func() { ours.Close(); theirs.Close() })
-	x := &fakeExtension{conn: ipc.NewConn(ours), events: make(chan string, 16)}
+	x := &fakeExtension{conn: ipc.NewConn(ours), events: make(chan string, 16), resolves: make(chan json.RawMessage, 16)}
 	go func() {
 		r := bufio.NewReader(theirs)
 		for {
@@ -36,6 +37,12 @@ func connectExtension(t *testing.T, e *Engine, exe, userAgent string) *fakeExten
 				Data  json.RawMessage `json:"data"`
 			}
 			if json.Unmarshal(line, &ev) == nil && ev.Event != "" {
+				if ev.Event == "resolve" {
+					select {
+					case x.resolves <- ev.Data:
+					default:
+					}
+				}
 				x.events <- ev.Event
 			}
 		}

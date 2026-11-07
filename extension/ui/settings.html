@@ -56,6 +56,8 @@
     .conn-row .vpn input.port { width: 72px; }
     .conn-row .speed { text-align: right; }
     @media (max-width: 760px) { .conn-scroll { overflow-x: auto; } } /* tooltips clip in a scroll box: only when needed */
+    .uplink { margin-top: 10px; font-size: 13px; display: grid; gap: 4px; }
+    .uplink .warn { color: var(--warn); }
     .follow { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--muted); }
 
     .toast { bottom: 16px; }
@@ -96,8 +98,11 @@
           <div id="ifaces"></div>
         </div>
       </div>
+      <div id="uplinkWarn" class="uplink" hidden></div>
       <label class="follow"><input type="checkbox" id="followWindows"> Let Windows pick the main connection</label>
-      <div class="row-actions"><button id="refreshIfaces">Look for connections again</button></div>
+      <div class="row-actions"><button id="refreshIfaces">Look for connections again</button>
+        <button id="checkLines">Check lines</button><span class="info" tabindex="0" data-tip="Asks a public STUN server (stun.cloudflare.com) through each connection which public IP it comes from. Two with the same IP share one line to the internet. Only sent when you click."></span></div>
+      <div id="lineResult" class="uplink" hidden></div>
       <input type="file" id="confFile" accept=".conf,text/plain" hidden>
     </section>
 

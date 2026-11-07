@@ -18,9 +18,10 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
   window.feed = (m) => { for (const f of listeners) f(m); };
 
   window.Host = {
-    // A fixture's `files` answers torrentFiles, by download id.
+    // A fixture's `files` answers torrentFiles, by download id; its `lines` checkLines.
     call: (method, params) => record({ call: method, params })
-      .then(() => method === "torrentFiles" ? (window.fixture().files || {})[params.id] || [] : undefined),
+      .then(() => method === "torrentFiles" ? (window.fixture().files || {})[params.id] || []
+        : method === "checkLines" ? window.fixture().lines || [] : undefined),
     subscribe(fn) {
       listeners.push(fn);
       setTimeout(() => fn(window.fixture()), 0);

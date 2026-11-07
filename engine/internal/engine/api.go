@@ -11,6 +11,7 @@ import (
 
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
+	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/torrent"
 	"downloadmanagersquared/engine/internal/winutil"
@@ -53,6 +54,10 @@ type chooseParams struct {
 type pageParams struct {
 	ID      string `json:"id"`
 	PageURL string `json:"pageUrl"`
+}
+
+type recipeHostsParams struct {
+	Hosts []string `json:"hosts"` // landing-page hosts the extension's browser has a recipe for
 }
 
 type resolvedParams struct {
@@ -271,6 +276,38 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, err
 		}
 		d.SetPageURL(p.PageURL)
+		return nil, nil
+	case "checkLines":
+		return e.CheckLines(netif.StunServer), nil
+	case "recordRecipe":
+		p, err := decode[idParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.RecordRecipe(p.ID)
+	case "learnEnded":
+		p, err := decode[idParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		e.mu.Lock()
+		delete(e.learning, p.ID)
+		e.mu.Unlock()
+		return nil, nil
+	case "recipeHosts":
+		p, err := decode[recipeHostsParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		hosts := make(map[string]bool, len(p.Hosts))
+		for _, h := range p.Hosts {
+			hosts[h] = true
+		}
+		e.mu.Lock()
+		if cl := e.clients[c]; cl != nil {
+			cl.recipeHosts = hosts
+		}
+		e.mu.Unlock()
 		return nil, nil
 	case "resolved", "resolveFailed":
 		p, err := decode[resolvedParams](raw)

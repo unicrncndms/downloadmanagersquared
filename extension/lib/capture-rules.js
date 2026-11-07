@@ -82,7 +82,9 @@ function captureResponse(h, url, status, threshold) {
 // The same for a download the browser started without a response passing by
 // (e.g. <a download>), from its downloads.DownloadItem.
 function captureDownload(item, threshold) {
-  if (item.mime === "application/x-bittorrent" || /\.torrent$/i.test(item.filename || "")) return "torrent";
+  const h = { "content-type": item.mime || "" };
+  if (isTorrentFile(h, item.finalUrl || item.url) || /\.torrent$/i.test(item.filename || "")) return "torrent";
+  if (isPage(h)) return "";
   const size = item.totalBytes > 0 ? item.totalBytes : item.fileSize;
   return size >= threshold ? "download" : "";
 }

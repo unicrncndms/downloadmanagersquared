@@ -61,9 +61,8 @@ Engine.on("openManager", ({ hash } = {}) => {
   return browser.windows.create({ type: "popup", url: DOWNLOADS_URL + "?window", width: 520, height: 680 });
 });
 
-(async () => {
-  SentCookies.init();
-  await Resolver.init();
-  Capture.init();
-  Engine.connect();
-})();
+// Every listener is registered now, before anything is awaited.
+SentCookies.init();
+Resolver.init();
+Capture.init();
+Engine.connect();
