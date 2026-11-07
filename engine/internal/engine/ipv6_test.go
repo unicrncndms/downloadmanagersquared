@@ -15,6 +15,7 @@ import (
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/netif/netiftest"
+	"downloadmanagersquared/engine/internal/paths"
 )
 
 // An IPv6-only connection is one more line: it and an IPv4 one fetch one file
@@ -95,5 +96,24 @@ func TestAnIPv6OnlyAndAnIPv4InterfaceDownloadOneFileTogether(t *testing.T) {
 	}
 	if f := d.Summary().Links["b"].Family; f != "IPv6" {
 		t.Errorf("the IPv6-only link shows family %q", f)
+	}
+}
+
+// The resolve proxy of an interface with IPv6 takes IPv6 targets through its
+// binding; one without IPv6, and a tunnel (IPv4 inside), refuse them.
+func TestTheResolveProxyHasIPv6OnlyWhereItsInterfaceHas(t *testing.T) {
+	lo := loopbackIfaces()[0]
+	v4, dual := lo, lo
+	v4.ID, dual.ID, dual.IPv6 = "a", "b", net.IPv6loopback
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(e.Shutdown)
+	e.mu.Lock()
+	e.refreshInterfacesLocked([]netif.Interface{v4, dual})
+	e.mu.Unlock()
+	if e.socksPath("a").IPv6() || !e.socksPath("b").IPv6() || e.socksPath(paths.Tunnel("b")).IPv6() {
+		t.Errorf("IPv6: a %v, b %v, b's tunnel %v; want only b", e.socksPath("a").IPv6(), e.socksPath("b").IPv6(), e.socksPath(paths.Tunnel("b")).IPv6())
 	}
 }

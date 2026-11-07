@@ -618,6 +618,12 @@ func (e *Engine) socksPath(id string) socks.Path {
 			return nil, err
 		}
 		return b.LookupIP(ctx, host)
+	}, IPv6: func() bool { // a tunnel carries only IPv4
+		if _, tun := paths.IfaceOf(id); tun {
+			return false
+		}
+		b, err := e.bindingOf(id)
+		return err == nil && b.Has6()
 	}}
 }
 

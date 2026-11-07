@@ -6,7 +6,9 @@ import (
 	"errors"
 	"io"
 	"net"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +21,7 @@ type fakePath struct {
 	mu     sync.Mutex
 	dialed []string
 	names  map[string][]net.IP
+	ipv6   bool // the path has IPv6
 }
 
 func (p *fakePath) path() Path {
@@ -37,6 +40,7 @@ func (p *fakePath) path() Path {
 			}
 			return nil, errors.New("no such host")
 		},
+		IPv6: func() bool { return p.ipv6 },
 	}
 }
 
@@ -54,6 +58,13 @@ func listen(t *testing.T, p *fakePath) *Server {
 // code, or -1 if it closed the connection without one.
 func connect(t *testing.T, s *Server, host string) int {
 	t.Helper()
+	code, _ := connectATYP(t, s, host)
+	return code
+}
+
+// connectATYP is connect, also returning the address type of the reply.
+func connectATYP(t *testing.T, s *Server, host string) (code int, atyp byte) {
+	t.Helper()
 	c, err := net.Dial("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(s.Port())))
 	if err != nil {
 		t.Fatal(err)
@@ -61,25 +72,34 @@ func connect(t *testing.T, s *Server, host string) int {
 	defer c.Close()
 	c.SetDeadline(time.Now().Add(5 * time.Second))
 	if _, err := c.Write([]byte{5, 1, 0}); err != nil {
-		return -1
+		return -1, 0
 	}
 	var m [2]byte
 	if _, err := io.ReadFull(c, m[:]); err != nil {
-		return -1
+		return -1, 0
 	}
 	req := []byte{5, 1, 0}
-	if ip := net.ParseIP(host).To4(); ip != nil {
-		req = append(append(req, 1), ip...)
+	if ip := net.ParseIP(host); ip != nil && strings.Contains(host, ":") { // IPv6, also ::ffff:a.b.c.d
+		req = append(append(req, 4), ip.To16()...)
+	} else if ip != nil {
+		req = append(append(req, 1), ip.To4()...)
 	} else {
 		req = append(append(req, 3, byte(len(host))), host...)
 	}
 	req = binary.BigEndian.AppendUint16(req, 443)
 	c.Write(req)
-	var rep [10]byte
+	var rep [4]byte
 	if _, err := io.ReadFull(c, rep[:]); err != nil {
-		return -1
+		return -1, 0
 	}
-	return int(rep[1])
+	rest := 6
+	if rep[3] == 4 {
+		rest = 18
+	}
+	if _, err := io.ReadFull(c, make([]byte, rest)); err != nil {
+		return -1, 0
+	}
+	return int(rep[1]), rep[3]
 }
 
 func TestAClientOfTheSameUserGetsThrough(t *testing.T) {
@@ -247,5 +267,55 @@ func TestGarbageFromAClientClosesOnlyItsConnection(t *testing.T) {
 	}
 	if code := connect(t, s, "93.184.215.14"); code != repSucceeded {
 		t.Fatalf("reply %d after garbage, want success", code)
+	}
+}
+
+// Through a path with IPv6, a public IPv6 target is dialled, given as an
+// address or found by name (AAAA), and the reply says IPv6.
+func TestAPublicIPv6TargetGoesThroughAPathWithIPv6(t *testing.T) {
+	p := &fakePath{ipv6: true, names: map[string][]net.IP{
+		"v6only.example": {net.ParseIP("2606:2800:220:1::1")},
+		"dual.example":   {net.IPv4(93, 184, 215, 14), net.ParseIP("2606:2800:220:1::2")},
+	}}
+	s := listen(t, p)
+	for _, target := range []string{"2606:2800:220:1::1", "v6only.example"} {
+		if code, atyp := connectATYP(t, s, target); code != repSucceeded || atyp != 4 {
+			t.Errorf("%s: reply %d with address type %d, want success over IPv6 (4)", target, code, atyp)
+		}
+	}
+	if code, atyp := connectATYP(t, s, "dual.example"); code != repSucceeded || atyp != 1 {
+		t.Errorf("dual.example: reply %d, address type %d, want IPv4 first", code, atyp)
+	}
+	want := []string{"[2606:2800:220:1::1]:443", "[2606:2800:220:1::1]:443", "93.184.215.14:443"}
+	if !slices.Equal(p.dialed, want) {
+		t.Fatalf("dialed %v, want %v", p.dialed, want)
+	}
+}
+
+// No private IPv6 target, and no mapped or NAT64 address hiding a private
+// IPv4 one, is dialled; a NAT64 address of a public IPv4 one is.
+func TestPrivateIPv6TargetsAreRefused(t *testing.T) {
+	p := &fakePath{ipv6: true, names: map[string][]net.IP{"lan.example": {net.ParseIP("fd00::1"), net.ParseIP("fe80::1")}}}
+	s := listen(t, p)
+	for _, target := range []string{
+		"::1", "::", "fe80::1", "febf::1", "fc00::1", "fd12:3456::1", "ff02::1", "ff0e::1", "2001:db8::1",
+		"::ffff:192.168.1.1", "::ffff:127.0.0.1", "64:ff9b::a00:1" /* 10.0.0.1 */, "64:ff9b::7f00:1", /* 127.0.0.1 */
+		"lan.example",
+	} {
+		if code := connect(t, s, target); code != repNotAllowed {
+			t.Errorf("%s: reply %d, want %d (not allowed)", target, code, repNotAllowed)
+		}
+	}
+	if len(p.dialed) != 0 {
+		t.Fatalf("dialed %v", p.dialed)
+	}
+	if code := connect(t, s, "64:ff9b::5db8:d70e"); code != repSucceeded { // 93.184.215.14
+		t.Errorf("a NAT64 address of a public IPv4 one: reply %d", code)
+	}
+	if code := connect(t, s, "::ffff:93.184.215.14"); code != repSucceeded {
+		t.Errorf("a mapped public IPv4 address: reply %d", code)
+	}
+	if want := []string{"[64:ff9b::5db8:d70e]:443", "93.184.215.14:443"}; !slices.Equal(p.dialed, want) {
+		t.Errorf("dialed %v, want %v", p.dialed, want)
 	}
 }
