@@ -23,24 +23,45 @@ $("toggleAdd").onclick = () => {
   if (!$("addBox").hidden) $("addUrl").focus();
 };
 // A .zip link offers Download as folder, ticked as the settings default.
+const zipLine = (url) => addFolderChoice(url, latest.settings).show;
 $("addUrl").addEventListener("input", () => {
-  const c = addFolderChoice($("addUrl").value, latest.settings);
-  if (c.show === !$("addFolderRow").hidden) return; // leave a box the user ticked alone
-  $("addFolderRow").hidden = !c.show;
+  const c = addFolderChoice("", latest.settings);
+  const show = addLines($("addUrl").value).urls.some((u) => zipLine(u.url));
+  if (show === !$("addFolderRow").hidden) return; // leave a box the user ticked alone
+  $("addFolderRow").hidden = !show;
   $("addFolder").checked = c.checked;
 });
-$("addBox").addEventListener("submit", (e) => {
+// Several links, one per line: each is added as if alone. Lines that fail
+// stay in the box, so they can be fixed and added again.
+$("addBox").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const add = { url: $("addUrl").value, pageUrl: $("addPage").value, vpn: $("addVpn").value };
-  if (Host.userAgent !== null) add.userAgent = Host.userAgent; // else the engine uses the browser's
-  const folder = addFolderParam(!$("addFolderRow").hidden, $("addFolder").checked, latest.settings);
-  if (folder !== undefined) add.folder = folder;
-  act("add", add, "Added").then(() => {
-    $("addUrl").value = "";
-    $("addPage").value = "";
-    $("addFolderRow").hidden = true;
-    $("addBox").hidden = true;
-  });
+  const { urls, bad } = addLines($("addUrl").value);
+  const many = urls.length + bad.length > 1;
+  const failed = bad.map((b) => ({ ...b, error: "not a link" }));
+  for (const { line, url } of urls) {
+    const add = { url, pageUrl: $("addPage").value, vpn: $("addVpn").value };
+    if (Host.userAgent !== null) add.userAgent = Host.userAgent; // else the engine uses the browser's
+    const folder = addFolderParam(!$("addFolderRow").hidden && zipLine(url), $("addFolder").checked, latest.settings);
+    if (folder !== undefined) add.folder = folder;
+    try {
+      await call("add", add);
+    } catch (err) {
+      failed.push({ line, url, error: err.message });
+    }
+  }
+  const added = urls.length + bad.length - failed.length;
+  if (failed.length) {
+    failed.sort((a, b) => a.line - b.line);
+    $("addUrl").value = failed.map((f) => f.url).join("\n");
+    const why = failed.map((f) => (many ? `Line ${f.line}: ${f.error}` : f.error)).join(" · ");
+    toast(added ? `${plural(added, "download")} added. ${why}` : why);
+    return;
+  }
+  toast(added === 1 ? "Added" : `${added} downloads added`);
+  $("addUrl").value = "";
+  $("addPage").value = "";
+  $("addFolderRow").hidden = true;
+  $("addBox").hidden = true;
 });
 
 // An open "⋯" menu closes on a click anywhere else.

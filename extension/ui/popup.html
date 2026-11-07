@@ -26,6 +26,7 @@
     .tools .spacer { flex: 1; }
     #addBox { margin-top: 8px; display: grid; gap: 6px; }
     #addBox[hidden] { display: none; }
+    #addUrl { resize: vertical; min-height: 2.6em; }
     main { flex: 1; overflow-y: auto; padding: 10px 14px; }
     .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
     .card .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -121,8 +122,8 @@
       <button class="small" id="resumeAll">Resume all</button>
     </div>
     <form id="addBox" hidden>
-      <input type="url" id="addUrl" placeholder="File link, landing page, magnet or .torrent link" required>
-      <input type="url" id="addPage" placeholder="Landing page (optional)">
+      <textarea id="addUrl" rows="2" aria-label="Links to add, one per line" placeholder="File link, landing page, magnet or .torrent link (one per line)" required spellcheck="false"></textarea>
+      <input type="url" id="addPage" aria-label="Landing page" placeholder="Landing page (optional, for every link)">
       <select id="addVpn" title="Whether this download goes through the VPN">
         <option value="">VPN as in settings</option>
         <option value="off">No VPN</option>

@@ -158,3 +158,13 @@ test("mirrors show who uses them and why one was dropped", () => {
     { host: "c.example", url: "https://c.example/f.iso", users: [], dropped: "" },
   ]);
 });
+
+test("Add download takes one link per line, skipping blanks and spaces and reporting bad lines by number", () => {
+  const { addLines } = require("../lib/list.js");
+  assert.deepEqual(addLines("https://a.example/1.zip"), { urls: [{ line: 1, url: "https://a.example/1.zip" }], bad: [] });
+  assert.deepEqual(addLines("  https://a.example/1\r\n\n   \nnot a link\nmagnet:?xt=urn:btih:abc  \n"), {
+    urls: [{ line: 1, url: "https://a.example/1" }, { line: 5, url: "magnet:?xt=urn:btih:abc" }],
+    bad: [{ line: 4, url: "not a link" }],
+  });
+  assert.deepEqual(addLines(""), { urls: [], bad: [] });
+});

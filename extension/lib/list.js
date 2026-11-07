@@ -217,6 +217,23 @@ function lineResults(checks) {
   };
 }
 
+// addLines splits Add download's box into one link per non-empty line, with
+// its line number; lines that aren't a link are returned in bad.
+function addLines(text) {
+  const urls = [], bad = [];
+  String(text || "").split(/\r?\n/).forEach((raw, i) => {
+    const url = raw.trim();
+    if (!url) return;
+    try {
+      new URL(url);
+      urls.push({ line: i + 1, url });
+    } catch {
+      bad.push({ line: i + 1, url });
+    }
+  });
+  return { urls, bad };
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
+  module.exports = { addLines, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
 }
