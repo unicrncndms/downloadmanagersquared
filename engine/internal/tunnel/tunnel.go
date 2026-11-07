@@ -25,7 +25,8 @@ import (
 	"golang.zx2c4.com/wireguard/tun/netstack"
 )
 
-// Config is a WireGuard config with one peer, IPv4 only.
+// Config is a WireGuard config with one peer, IPv4 only inside. Its endpoint
+// may be IPv6.
 type Config struct {
 	PrivateKey   [32]byte
 	Address      netip.Addr   // the tunnel's address
@@ -201,13 +202,14 @@ type Tunnel struct {
 }
 
 // Start brings a tunnel up. listen opens the UDP socket its encrypted packets
-// go through; lookup resolves the endpoint's host name, outside the tunnel
-// (nil if the endpoint is an address).
-func Start(cfg Config, listen func() (net.PacketConn, error), lookup func(ctx context.Context, host string) ([]net.IP, error)) (*Tunnel, error) {
+// go through, an IPv6 one for an IPv6 endpoint; lookup resolves the
+// endpoint's host name, outside the tunnel (nil if the endpoint is an
+// address), and its first address is used.
+func Start(cfg Config, listen func(v6 bool) (net.PacketConn, error), lookup func(ctx context.Context, host string) ([]net.IP, error)) (*Tunnel, error) {
 	if len(cfg.DNS) == 0 {
 		return nil, ErrNoDNS
 	}
-	endpoint := ""
+	endpoint, v6 := "", false
 	if cfg.Endpoint != "" {
 		host, port, _ := net.SplitHostPort(cfg.Endpoint)
 		ip, err := netip.ParseAddr(host)
@@ -221,15 +223,16 @@ func Start(cfg Config, listen func() (net.PacketConn, error), lookup func(ctx co
 			if lerr != nil || len(ips) == 0 {
 				return nil, fmt.Errorf("resolving the endpoint %s: %v", host, lerr)
 			}
-			ip, _ = netip.AddrFromSlice(ips[0].To4())
+			ip, _ = netip.AddrFromSlice(ips[0]) // IPv4 first where the interface has it
 		}
-		endpoint = net.JoinHostPort(ip.String(), port)
+		ip = ip.Unmap()
+		endpoint, v6 = net.JoinHostPort(ip.String(), port), ip.Is6()
 	}
 	tdev, tnet, err := netstack.CreateNetTUN([]netip.Addr{cfg.Address}, cfg.DNS, cfg.MTU)
 	if err != nil {
 		return nil, err
 	}
-	bind := &packetBind{listen: listen}
+	bind := &packetBind{listen: func() (net.PacketConn, error) { return listen(v6) }}
 	dev := device.NewDevice(tdev, bind, device.NewLogger(device.LogLevelSilent, ""))
 	var uapi strings.Builder
 	fmt.Fprintf(&uapi, "private_key=%s\npublic_key=%s\n", hex.EncodeToString(cfg.PrivateKey[:]), hex.EncodeToString(cfg.PublicKey[:]))

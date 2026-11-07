@@ -24,9 +24,13 @@ func (c countingPC) WriteTo(p []byte, a net.Addr) (int, error) {
 	return c.PacketConn.WriteTo(p, a)
 }
 
-func listenLoopback(sent *atomic.Int64) func() (net.PacketConn, error) {
-	return func() (net.PacketConn, error) {
-		pc, err := net.ListenPacket("udp4", "127.0.0.1:0")
+func listenLoopback(sent *atomic.Int64) func(v6 bool) (net.PacketConn, error) {
+	return func(v6 bool) (net.PacketConn, error) {
+		network, addr := "udp4", "127.0.0.1:0"
+		if v6 {
+			network, addr = "udp6", "[::1]:0"
+		}
+		pc, err := net.ListenPacket(network, addr)
 		if err != nil {
 			return nil, err
 		}

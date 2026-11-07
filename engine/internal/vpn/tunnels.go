@@ -289,7 +289,12 @@ func (t *Tunnels) startTunnel(te *entry, b *netif.Binding) {
 	cfg, newFw, err := te.prov.config(t.ctx, te, b)
 	var tn *tunnel.Tunnel
 	if err == nil {
-		tn, err = tunnel.Start(cfg, func() (net.PacketConn, error) { return b.ListenPacket(0) }, b.LookupIP)
+		tn, err = tunnel.Start(cfg, func(v6 bool) (net.PacketConn, error) {
+			if v6 {
+				return b.ListenPacket6(0) // an IPv6 endpoint, over the interface's IPv6
+			}
+			return b.ListenPacket(0)
+		}, b.LookupIP)
 	}
 	if err == nil {
 		tn.Shake()

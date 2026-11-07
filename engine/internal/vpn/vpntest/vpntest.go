@@ -39,6 +39,18 @@ type Server struct {
 // NewServer is a server that lets in the client with key clientPub.
 func NewServer(t testing.TB, clientPub string) *Server {
 	t.Helper()
+	return newServer(t, clientPub, "udp4", "127.0.0.1:0")
+}
+
+// NewServer6 is NewServer with its endpoint on ::1: WireGuard over IPv6,
+// IPv4 inside.
+func NewServer6(t testing.TB, clientPub string) *Server {
+	t.Helper()
+	return newServer(t, clientPub, "udp6", "[::1]:0")
+}
+
+func newServer(t testing.TB, clientPub, network, addr string) *Server {
+	t.Helper()
 	priv, pub, err := tunnel.GenerateKey()
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +59,7 @@ func NewServer(t testing.TB, clientPub string) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := tunnel.Start(cfg, func() (net.PacketConn, error) { return net.ListenPacket("udp4", "127.0.0.1:0") }, nil)
+	srv, err := tunnel.Start(cfg, func(bool) (net.PacketConn, error) { return net.ListenPacket(network, addr) }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -64,8 +64,20 @@ func (*piaProvider) name() string         { return "pia" }
 func (*piaProvider) typedPort(*entry) int { return 0 }  // PIA forwards its own
 func (*piaProvider) lostHint() string     { return "" } // a new key each start: nothing to expire
 
-// ready: with no login, or one PIA refused, PIA waits for the user.
-func (p *piaProvider) ready(*entry) bool { return p.acct != nil && !p.acct.refused }
+// ready: with no login, or one PIA refused, PIA waits for the user. PIA's
+// servers have IPv4 endpoints only, so an interface without IPv4 gets none.
+func (p *piaProvider) ready(te *entry) bool {
+	if te == nil { // whether to add tunnels at all
+		return p.acct != nil && !p.acct.refused
+	}
+	if b := p.t.ifaces[te.id].Binding; b != nil && !b.Has4() {
+		te.err = errPIANeedsIPv4
+		return false
+	}
+	return p.acct != nil && !p.acct.refused
+}
+
+const errPIANeedsIPv4 = "PIA needs IPv4"
 
 func (p *piaProvider) file() string { return filepath.Join(p.t.dir, "pia.dat") }
 
