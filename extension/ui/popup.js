@@ -629,9 +629,14 @@ async function clearFinished() {
 
 const groupCards = new Map(); // Metalink group id -> card controller
 
+// The search box narrows the list as it is typed.
+$("search").addEventListener("input", () => { if (latest.state) renderDownloads(latest.state); });
+
 function renderDownloads(state) {
   const list = $("list");
-  const downloads = sortDownloads(state.downloads || []);
+  const all = state.downloads || [];
+  const query = $("search").value;
+  const downloads = sortDownloads(all.filter((d) => matchesSearch(d, query)));
   const seen = new Set();
   const seenGroups = new Set();
   let i = 0;
@@ -672,8 +677,11 @@ function renderDownloads(state) {
       groupCards.delete(id);
     }
   }
-  const empty = $("emptyList");
-  if (!downloads.length && !empty) list.append(el("div", { class: "empty", id: "emptyList" }, "No downloads yet. Big downloads in Firefox are picked up automatically."));
+  const emptyText = !all.length ? "No downloads yet. Big downloads in Firefox are picked up automatically."
+    : `No downloads match “${query.trim()}”.`;
+  let empty = $("emptyList");
+  if (!downloads.length && !empty) list.append(empty = el("div", { class: "empty", id: "emptyList", role: "status" }));
+  if (!downloads.length && empty.textContent !== emptyText) empty.textContent = emptyText;
   if (downloads.length && empty) empty.remove();
 }
 

@@ -168,3 +168,11 @@ test("Add download takes one link per line, skipping blanks and spaces and repor
   });
   assert.deepEqual(addLines(""), { urls: [], bad: [] });
 });
+
+test("the search box matches file name, host and status, in any case", () => {
+  const { matchesSearch } = require("../lib/list.js");
+  const d = dl("a", "running", { filename: "Ubuntu-24.04.iso", url: "https://releases.example.org/x?token=secret", label: "Downloading" });
+  for (const q of ["", "  ", "ubuntu", "ISO", "releases.example", "download"]) assert.ok(matchesSearch(d, q), q);
+  for (const q of ["fedora", "token", "secret"]) assert.ok(!matchesSearch(d, q), q); // the query string isn't searched
+  assert.ok(matchesSearch(dl("m", "queued", { url: "magnet:?xt=urn:btih:abc", groupName: "Debian DVDs" }), "debian"));
+});

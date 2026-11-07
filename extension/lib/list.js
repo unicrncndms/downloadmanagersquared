@@ -217,6 +217,17 @@ function lineResults(checks) {
   };
 }
 
+// matchesSearch is the downloads list's filter box: the words typed, in any
+// case, found in the file name, the source link's host, the status badge or
+// the Metalink's name. An empty box matches everything.
+function matchesSearch(d, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return true;
+  let host = "";
+  try { host = new URL(d.url).hostname; } catch { /* a magnet link has none */ }
+  return [d.filename, host, d.label, d.groupName].some((v) => v && String(v).toLowerCase().includes(q));
+}
+
 // addLines splits Add download's box into one link per non-empty line, with
 // its line number; lines that aren't a link are returned in bad.
 function addLines(text) {
@@ -235,5 +246,5 @@ function addLines(text) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { addLines, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
+  module.exports = { addLines, matchesSearch, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
 }

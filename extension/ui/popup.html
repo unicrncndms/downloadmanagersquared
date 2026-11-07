@@ -23,7 +23,8 @@
     .head h1 img { width: 18px; height: 18px; }
     .head .total { margin-left: auto; font-weight: 600; }
     .tools { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
-    .tools .spacer { flex: 1; }
+    .tools .spacer { flex: 1; min-width: 0; }
+    #search { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 8px; font-size: 12px; }
     #addBox { margin-top: 8px; display: grid; gap: 6px; }
     #addBox[hidden] { display: none; }
     #addUrl { resize: vertical; min-height: 2.6em; }
@@ -117,7 +118,8 @@
     <div class="version-warn" id="versionWarn" hidden></div>
     <div class="tools">
       <button class="small" id="toggleAdd">+ Add</button>
-      <span class="spacer"></span>
+      <input type="search" id="search" class="spacer" aria-label="Search downloads" placeholder="Search downloads">
+
       <button class="small" id="pauseAll">Pause all</button>
       <button class="small" id="resumeAll">Resume all</button>
     </div>
