@@ -1,6 +1,6 @@
 # Privacy
 
-DMS² has no server of its own and collects nothing. **Nothing leaves your PC except the downloads themselves**: the requests to the sites and torrent swarms you download from, through your own connections (and through your VPN, if you set one up). There is no telemetry, no crash reporting and no update check by the engine. The extension is updated by Firefox from the project's GitHub releases.
+DMS² has no server of its own and collects nothing. **It talks only to the sites and torrent swarms you download from, and to the few services listed under *Who else DMS² contacts* below**, through your own connections (and through your VPN, if you set one up). There is no telemetry, no crash reporting and no update check by the engine. The developer receives no data of any kind, and nothing is sold or shared. Firefox updates the extension from addons.mozilla.org, or from the project's GitHub releases if you installed it from there.
 
 ## What the extension tells the engine
 
@@ -23,3 +23,17 @@ In `%APPDATA%\downloadmanagersquared\`: your settings, the download list (with t
 ## Other users of the PC
 
 The engine accepts requests only from processes of your Windows user, and its proxies connect only to public internet addresses. Programs running as your own user, and administrators of the PC, are not kept out.
+
+## Who else DMS² contacts
+
+Each of these sees the public IP address of the connection used, as any site you visit does.
+
+- **Torrent swarms.** Torrents upload as well as download: while a torrent downloads, and while it seeds afterwards, DMS² sends pieces of it to other peers. Peers, trackers and the DHT see your IP address and which torrent you share. For private torrents DMS² stays off the DHT and peer exchange.
+- **Your router.** For torrents, DMS² may ask your router (UPnP or NAT-PMP) to forward a port to your PC.
+- **Private Internet Access**, only if you set it up: your login, the server list and the tunnels go to PIA.
+- **stun.cloudflare.com**, only when you use *Check lines*: one request per connection, to learn its public IP address and find connections that share one.
+- **GitHub**, only when you click *Add to …* in setup, or open the releases page: the extension is downloaded from the project's GitHub releases.
+
+## Contact
+
+Questions about privacy: open an issue at https://github.com/unicrncndms/downloadmanagersquared/issues. Security problems: see [SECURITY.md](SECURITY.md).
