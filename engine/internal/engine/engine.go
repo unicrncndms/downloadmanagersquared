@@ -4,6 +4,7 @@ package engine
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -17,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -29,6 +31,7 @@ import (
 	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
+	"downloadmanagersquared/engine/internal/metalink"
 	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/portmap"
@@ -1100,10 +1103,11 @@ type AddRequest struct {
 	Cookie    string `json:"cookie"`
 	Referer   string `json:"referer"`
 	UserAgent string `json:"userAgent"`
-	Torrent   bool   `json:"torrent"` // the URL serves a .torrent file
-	VPN       string `json:"vpn"`     // "off", "alongside" or "vpn"; "" = the default for its type
-	Folder    *bool  `json:"folder"`  // Download as folder: on (asks for the folder), off, or nil for the default
-	Browser   string `json:"-"`       // the exe of the browser that sent it, known from its connection
+	Torrent   bool   `json:"torrent"`  // the URL serves a .torrent file
+	Metalink  bool   `json:"metalink"` // the URL serves a Metalink (.meta4)
+	VPN       string `json:"vpn"`      // "off", "alongside" or "vpn"; "" = the default for its type
+	Folder    *bool  `json:"folder"`   // Download as folder: on (asks for the folder), off, or nil for the default
+	Browser   string `json:"-"`        // the exe of the browser that sent it, known from its connection
 }
 
 func (e *Engine) Add(r AddRequest) (string, error) {
@@ -1129,6 +1133,9 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	}
 	if r.Torrent || isTorrentURL(r.URL) {
 		return e.addTorrentURL(r)
+	}
+	if r.Metalink || isMetalinkURL(r.URL) {
+		return e.addMetalinkURL(r)
 	}
 	e.mu.Lock()
 	st := download.State{
@@ -1228,10 +1235,15 @@ func isTorrentURL(u string) bool {
 	return err == nil && strings.HasSuffix(strings.ToLower(p.Path), ".torrent")
 }
 
-const maxTorrentFile = 16 << 20
+func isMetalinkURL(u string) bool {
+	p, err := url.Parse(u)
+	return err == nil && strings.HasSuffix(strings.ToLower(p.Path), ".meta4")
+}
 
-// fetchTorrentFile downloads a .torrent file the way the browser would have.
-func fetchTorrentFile(ctx context.Context, c *http.Client, r AddRequest) ([]byte, error) {
+const maxSmallFile = 16 << 20
+
+// fetchSmallFile downloads a .torrent or .meta4 file (what) the way the browser would have.
+func fetchSmallFile(ctx context.Context, c *http.Client, r AddRequest, what string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL, nil)
@@ -1249,14 +1261,14 @@ func fetchTorrentFile(ctx context.Context, c *http.Client, r AddRequest) ([]byte
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("the torrent file's server answered %s", resp.Status)
+		return nil, fmt.Errorf("the %s's server answered %s", what, resp.Status)
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxTorrentFile+1))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxSmallFile+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > maxTorrentFile {
-		return nil, errors.New("too big for a torrent file")
+	if len(b) > maxSmallFile {
+		return nil, errors.New("too big for a " + what)
 	}
 	return b, nil
 }
@@ -1271,11 +1283,73 @@ func (e *Engine) addTorrentURL(r AddRequest) (string, error) {
 	if len(ps) == 0 {
 		return "", errors.New("no connection to fetch the torrent file through")
 	}
-	b, err := fetchTorrentFile(context.Background(), ps[0].Client, r)
+	b, err := fetchSmallFile(context.Background(), ps[0].Client, r, "torrent file")
 	if err != nil {
 		return "", err
 	}
 	return e.addTorrentFile(b, r.VPN)
+}
+
+// addMetalinkURL fetches a Metalink through the main interface and adds a
+// download for each file in it, with its mirrors and checksums. Several files
+// share a group. The ID returned is the first file's.
+func (e *Engine) addMetalinkURL(r AddRequest) (string, error) {
+	e.mu.Lock()
+	m := paths.ParseMode(r.VPN, e.settings.VPNHTTP)
+	e.mu.Unlock()
+	ps := e.Paths(m)
+	if len(ps) == 0 {
+		return "", errors.New("no connection to fetch the Metalink through")
+	}
+	b, err := fetchSmallFile(context.Background(), ps[0].Client, r, "Metalink")
+	if err != nil {
+		return "", err
+	}
+	return e.addMetalink(b, r, m)
+}
+
+func (e *Engine) addMetalink(b []byte, r AddRequest, m paths.Mode) (string, error) {
+	files, err := metalink.Parse(b)
+	if err != nil {
+		return "", err
+	}
+	group, name := "", ""
+	if len(files) > 1 {
+		group = newID()
+		name = download.SanitizeFilename(r.Filename)
+		if p, err := url.Parse(r.URL); err == nil && name == "" {
+			name = download.SanitizeFilename(path.Base(p.Path))
+		}
+		name = strings.TrimSuffix(cmp.Or(name, "Metalink"), ".meta4")
+	}
+	e.mu.Lock()
+	var ids []string
+	var ds []*download.Download
+	for _, f := range files {
+		st := download.State{
+			VPN: m, ID: newID(), URL: f.URLs[0], UserAgent: r.UserAgent, Browser: r.Browser,
+			Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(path.Base(f.Name)),
+			Size: -1, MetaSize: f.Size, SHA256: f.SHA256, MD5: f.MD5,
+			Status: download.StatusQueued, Added: time.Now(), Group: group, GroupName: name,
+		}
+		// No cookie or referer: they were the Metalink site's, not the mirrors'.
+		for i, u := range f.URLs {
+			if i < download.MaxMirrors {
+				st.Mirrors = append(st.Mirrors, download.Mirror{URL: u})
+			}
+		}
+		if st.SHA256 == "" && st.MD5 == "" && e.settings.FolderDefault {
+			st.Folder = &download.Folder{Auto: true, Into: e.settings.folderDir()}
+		}
+		ids = append(ids, st.ID)
+		ds = append(ds, download.New(e, st))
+	}
+	e.mu.Unlock()
+	for _, d := range ds {
+		e.queue.Add(d)
+	}
+	log.Printf("added Metalink: %d downloads", len(ids))
+	return ids[0], nil
 }
 
 func (e *Engine) addTorrentFile(b []byte, vpn string) (string, error) {

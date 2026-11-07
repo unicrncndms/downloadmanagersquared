@@ -401,7 +401,7 @@ func TestTheServersMD5IsSkippedWithANote(t *testing.T) {
 	env := &testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}
 	d := runToEnd(t, env, State{ID: "f7", URL: srv.URL + "/dl", Dir: into, Filename: "big.zip", Size: -1, Folder: &Folder{On: true, Into: into}})
 	s := d.Summary()
-	if s.Status != StatusCompleted || !strings.Contains(s.Folder.Note, "MD5 wasn't checked") {
+	if s.Status != StatusCompleted || !strings.Contains(s.Folder.Note, "checksum wasn't checked") {
 		t.Fatalf("status %s %q, note %q", s.Status, s.Error, s.Folder.Note)
 	}
 	checkTree(t, filepath.Join(into, "big"), files, "")

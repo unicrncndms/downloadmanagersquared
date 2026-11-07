@@ -55,9 +55,26 @@ const FOLDER_DOWNLOADS = [
     { sha256: "a".repeat(64) }),
   zipDownload("f2", "dataset.zip", { on: true, into: "E:\\Data", out: "E:\\Data\\dataset", locked: true, why: "Some files are already extracted and their space freed, so this can't change any more", files: 412, of: 1280,
     refetch: 3435973837, moveWarning: "Moving now re-downloads about 3.2 GiB",
-    renamed: ["CON.txt → _CON.txt", "notes:v2.md → notes_v2.md"], note: "The server's MD5 wasn't checked: the archive was extracted as it downloaded, so there was no whole file to check" },
+    renamed: ["CON.txt → _CON.txt", "notes:v2.md → notes_v2.md"], note: "The server's checksum wasn't checked: the archive was extracted as it downloaded, so there was no whole file to check" },
     { note: "412 of 1,280 files extracted" }),
   zipDownload("f1", "big.zip", { on: true, files: 0, of: 0 }, { note: "choose a folder to extract into" }),
+];
+
+// A Metalink of two files: one group card, each file on its own mirrors.
+const metaFile = (id, filename, extra) => ({
+  kind: "http", id, url: `https://mirror-a.example.org/${filename}`, filename, dir: "C:\\Users\\you\\Downloads", size: 4.7e9, done: 1.2e9,
+  status: "running", speed: 8.4e6, eta: 420, probed: true, rangeOk: true, label: "Downloading", sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  actions: { pause: true, showInFolder: true, remove: true }, partialFile: true, group: "m", groupName: "fedora-43",
+  mirrors: [{ url: `https://mirror-a.example.org/${filename}` }, { url: `https://ftp.uni.example/pub/${filename}` },
+    { url: `https://bad.example.net/${filename}`, dropped: "different file size (4700000001 vs 4700000000 bytes)" }],
+  links: { eth: { status: "ready", conns: 4, speed: 5.1e6, label: "Downloading", tone: "ok", mirror: "mirror-a.example.org" },
+    wifi: { status: "ready", conns: 3, speed: 3.3e6, label: "Downloading", tone: "ok", mirror: "ftp.uni.example" } },
+  added: "2026-11-07T09:00:00Z", ...extra,
+});
+const METALINK_DOWNLOADS = [
+  metaFile("m1", "Fedora-43-x86_64.iso"),
+  metaFile("m2", "Fedora-43-aarch64.iso", { status: "queued", done: 0, speed: 0, eta: -1, label: "Queued", tone: "dim", actions: { resume: false, pause: true, remove: true }, partialFile: false }),
+  DOWNLOADS[0],
 ];
 
 const STATE = { downloads: DOWNLOADS, interfaces: IFACES, pia: { state: "off" }, speed: 11.5e6, eta: 322, active: 1 };
@@ -81,6 +98,7 @@ const FIXTURES = {
   uplink: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
     state: { ...STATE, interfaces: IFACES.map((i) => (i.id === "eth" ? { ...i, sameRouter: ["Wi-Fi"] } : i.id === "wifi" ? { ...i, sameRouter: ["Ethernet"] } : i)) },
     lines: [{ id: "eth", name: "Ethernet", ip: "203.0.113.7" }, { id: "wifi", name: "Wi-Fi", ip: "203.0.113.7" }] },
+  metalink: { connected: true, state: { ...STATE, downloads: METALINK_DOWNLOADS }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   empty: { connected: true, state: { ...STATE, downloads: [], active: 0, speed: 0 }, settings: SETTINGS, autostart: true, recipes: {}, engineVersion: "0.3.0" },
   offline: { connected: false, error: "engine disconnected", state: null, settings: null, recipes: RECIPES },
   notInstalled: { connected: false, notInstalled: true, error: "No such native application downloadmanagersquared", state: null, settings: null, recipes: {} },

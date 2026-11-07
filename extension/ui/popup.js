@@ -198,6 +198,9 @@ function makeCard(id) {
 
   const fileFacts = el("dl", { class: "facts" });
   const fileSection = section("File", fileFacts);
+  // Mirrors: each source of the file, who uses it, and why one was dropped.
+  const mirrorList = el("div", { class: "conns mirrors num" });
+  const mirrorSection = section("Mirrors", mirrorList);
 
   // Checks: the landing page and checksums as values, Edit for boxes.
   const checkFacts = el("dl", { class: "facts" });
@@ -215,7 +218,7 @@ function makeCard(id) {
   const checkSection = section("Checks", checkFacts, checkEdit, checkForm);
 
   const details = el("details", { ontoggle: () => { if (d) update(d); } },
-    el("summary", {}, "Details"), connSection, foldSection, fileSection, checkSection);
+    el("summary", {}, "Details"), connSection, mirrorSection, foldSection, fileSection, checkSection);
 
   const root = el("div", { class: "card" },
     el("div", { class: "top" }, name, vpn, status, size, showDone, dropDone),
@@ -393,6 +396,14 @@ function makeCard(id) {
       [el("dt", {}, k), el("dd", k.endsWith("link") ? { class: "mono one-line", title: v } : { class: k === "Info hash" ? "mono" : "" }, v)]));
     fileSection.hidden = !fileFacts.children.length;
 
+    const mirrors = mirrorRows(d, (ifc) => ifaceName(ifc, latest.state, latest.settings));
+    mirrorSection.hidden = !mirrors.length;
+    mirrorList.replaceChildren(...mirrors.flatMap((m) => [
+      el("span", { class: "mono one-line", title: m.url }, m.host),
+      m.dropped ? el("span", { class: "badge bad" }, "Dropped") : el("span", { class: "muted" }, m.users.join(", ") || "unused"),
+      m.dropped ? el("div", { class: "why" }, m.dropped) : null,
+    ].filter(Boolean)));
+
     checkSection.hidden = torrent;
     if (!torrent && checkForm.hidden) {
       checkFacts.replaceChildren(...[["Landing page", d.pageUrl], ["SHA-256", d.sha256], ["MD5", d.md5]].flatMap(([k, v]) =>
@@ -472,6 +483,87 @@ function makeCard(id) {
   return { root, update, isLine: () => root.classList.contains("line") };
 }
 
+// A Metalink's files as one card: their progress added up, pause, resume
+// and remove for all of them, and the files' own cards inside.
+function makeGroupCard(gid) {
+  let g = null; // the group as last shown
+  let open = false;
+  const ids = () => (g ? g.items.map((d) => d.id) : []);
+  const each = async (method, params, okText, pick) => {
+    for (const d of g.items) if (!pick || pick(d)) await call(method, { id: d.id, ...params }).catch((e) => toast(e.message));
+    if (okText) toast(okText);
+  };
+
+  const name = el("span", { class: "name expandable" });
+  const count = el("span", { class: "badge dim" });
+  const status = el("span", { class: "badge" });
+  const fill = el("div");
+  const bar = el("div", { class: "bar" }, fill);
+  const left = el("span", { class: "muted num left" });
+  const right = el("span", { class: "num" });
+  const pause = iconButton("pause", "Pause all files", () => each("pause", {}, "", (d) => d.actions && d.actions.pause));
+  const resume = iconButton("play", "Resume all files", () => each("resume", {}, "", (d) => d.actions && d.actions.resume));
+  const ask = el("div", { class: "actions ask", hidden: true },
+    el("span", { class: "muted" }, "Remove all these files' downloads?"),
+    el("button", { class: "small primary", onclick: () => each("remove", { deleteFile: true }, "Removed, unfinished files deleted") }, "Remove and delete unfinished files"),
+    el("button", { class: "small", onclick: () => each("remove", { deleteFile: false }, "Removed from list (files kept)") }, "Remove, keep files"),
+    el("button", { class: "small", onclick: () => { ask.hidden = true; } }, "Cancel"));
+  const menuRemove = el("button", { onclick: () => {
+    closeMenu();
+    if (groupView(g.items).partialFile) ask.hidden = false;
+    else each("remove", { deleteFile: false }, "Removed from list (files kept)");
+  } }, "Remove all…");
+  const menu = el("div", { class: "menu", hidden: true }, menuRemove);
+  const more = iconButton("more", "More", (e) => {
+    e.stopPropagation();
+    const was = !menu.hidden;
+    closeMenu();
+    if (!was) { menu.hidden = false; openMenu = menu; }
+  });
+  const toggle = el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); open = !open; update(g); } });
+  const files = el("div", { class: "group-files" });
+  const root = el("div", { class: "card group" },
+    el("div", { class: "top" }, name, count, status),
+    bar, el("div", { class: "meta" }, left, el("span", { class: "end" }, right, pause, resume, el("span", { class: "more" }, more, menu))),
+    ask, toggle, files);
+  name.addEventListener("click", () => { open = !open; update(g); });
+
+  function update(next) {
+    g = next;
+    const v = groupView(g.items);
+    name.textContent = g.name;
+    name.title = open ? "Hide the files" : "Show the files";
+    count.textContent = `${g.items.length} files`;
+    status.textContent = v.label;
+    status.className = "badge " + v.tone;
+    fill.style.width = v.percent + "%";
+    left.textContent = v.left;
+    right.textContent = v.right;
+    pause.hidden = !v.pause;
+    resume.hidden = !v.resume;
+    toggle.textContent = open ? "Hide files" : "Show files";
+    files.hidden = !open;
+    let i = 0;
+    for (const d of g.items) {
+      const c = cardFor(d.id);
+      c.update(d);
+      place(files, c.root, i++);
+    }
+    while (files.children.length > i) files.lastChild.remove();
+  }
+
+  return { root, update, ids };
+}
+
+function cardFor(id) {
+  let c = cards.get(id);
+  if (!c) {
+    c = makeCard(id);
+    cards.set(id, c);
+  }
+  return c;
+}
+
 // Whether any VPN tunnel is set up, so a torrent can be sent through one.
 function hasVpn() {
   return ((latest.state && latest.state.interfaces) || []).some((i) => i.tunnel);
@@ -514,31 +606,49 @@ async function clearFinished() {
   toast(done.length === 1 ? "1 finished download cleared (files kept)" : `${done.length} finished downloads cleared (files kept)`);
 }
 
+const groupCards = new Map(); // Metalink group id -> card controller
+
 function renderDownloads(state) {
   const list = $("list");
   const downloads = sortDownloads(state.downloads || []);
   const seen = new Set();
+  const seenGroups = new Set();
   let i = 0;
   let headed = false;
-  for (const d of downloads) {
-    seen.add(d.id);
-    let c = cards.get(d.id);
-    if (!c) {
-      c = makeCard(d.id);
-      cards.set(d.id, c);
-    }
-    if (finished(d) && !headed) {
+  for (const e of listEntries(downloads)) {
+    const done = e.d ? finished(e.d) : e.items.every(finished);
+    if (done && !headed) {
       place(list, finishedHead, i++);
       headed = true;
     }
-    c.update(d);
-    place(list, c.root, i++);
+    if (e.d) {
+      seen.add(e.d.id);
+      const c = cardFor(e.d.id);
+      c.update(e.d);
+      place(list, c.root, i++);
+      continue;
+    }
+    seenGroups.add(e.group);
+    for (const d of e.items) seen.add(d.id);
+    let g = groupCards.get(e.group);
+    if (!g) {
+      g = makeGroupCard(e.group);
+      groupCards.set(e.group, g);
+    }
+    g.update(e);
+    place(list, g.root, i++);
   }
   if (!headed) finishedHead.remove();
   for (const [id, c] of cards) {
     if (!seen.has(id)) {
       c.root.remove();
       cards.delete(id);
+    }
+  }
+  for (const [id, g] of groupCards) {
+    if (!seenGroups.has(id)) {
+      g.root.remove();
+      groupCards.delete(id);
     }
   }
   const empty = $("emptyList");
@@ -580,6 +690,7 @@ connectUI((m) => {
         "The download engine isn't reachable. Make sure it's running in the tray, or run dms-engine.exe from the release zip again.",
         m.error ? el("div", { class: "muted mono" }, m.error) : null));
     cards.clear();
+    groupCards.clear();
     return;
   }
   if ($("list").querySelector(".offline")) $("list").replaceChildren();

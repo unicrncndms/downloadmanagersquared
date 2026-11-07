@@ -43,6 +43,10 @@ _Avoid_: Check, test request
 **Mismatch**:
 A link that turns out to serve a different file, so its interface is left out of the download.
 
+**Mirror**:
+Another server with the same file, listed by a Metalink or by the server's `Link: rel=duplicate` header. Each interface's link uses one mirror. Mirrors are matched by size and checksum, and a mirror that serves another file or refuses it is dropped.
+_Avoid_: Source, alternate
+
 **Retrying**:
 A link the engine will try again by itself after a pause. An unreachable interface retries indefinitely; a repeated HTTP error becomes a failed link after five tries, unless data arrives in between. A server that pushes back sets the pause and costs no try. An engine restart retries it at once.
 

@@ -3,6 +3,7 @@ package download
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 // KindTorrent is a torrent's Summary.Kind; an HTTP download's is empty.
@@ -98,8 +99,8 @@ func Present(s Summary) Summary {
 		s.Note = ""
 		if s.hashResult == "match" && !s.checking {
 			s.Note = matched(s.SHA256 != "", s.MD5 != "")
-			if s.serverMD5 {
-				s.Note = "MD5 from the server matches"
+			if s.serverSHA || s.serverMD {
+				s.Note = strings.Replace(matched(s.serverSHA, s.serverMD), " match", " from the server match", 1)
 			}
 		}
 	case !known && torrent:

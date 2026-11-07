@@ -89,7 +89,11 @@ type State struct {
 	Remaining  []Range          `json:"remaining,omitempty"`
 	Added      time.Time        `json:"added"`
 	Finished   time.Time        `json:"finished,omitzero"`
-	Folder     *Folder          `json:"folder,omitempty"` // Download as folder; nil when never asked for
+	Folder     *Folder          `json:"folder,omitempty"`    // Download as folder; nil when never asked for
+	Mirrors    []Mirror         `json:"mirrors,omitempty"`   // the file's sources, URL among them; nil for one source
+	MetaSize   int64            `json:"metaSize,omitempty"`  // the size a Metalink gives; every mirror must match it
+	Group      string           `json:"group,omitempty"`     // the files of one Metalink share it
+	GroupName  string           `json:"groupName,omitempty"` // the Metalink's name
 
 	plainCookies bool // read with a cookie saved readable, before encryption
 }
@@ -229,6 +233,7 @@ func (d *Download) State() State {
 	}
 	st.Remaining = append([]Range(nil), d.st.Remaining...)
 	st.Folder = d.st.Folder.clone()
+	st.Mirrors = slices.Clone(d.st.Mirrors)
 	return st
 }
 
@@ -525,7 +530,7 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 		d.ifRun(ifc.ID).backoff.conns = ifc.Conns
 		l := d.st.Links[ifc.ID]
 		if l == nil {
-			l = &Link{URL: d.st.URL, Cookie: d.st.Cookie, Referer: d.st.Referer, Status: LinkPending}
+			l = d.newLinkLocked(ifc.ID, ifc.ID == mainID)
 			d.st.Links[ifc.ID] = l
 			changed = true
 		}
@@ -683,6 +688,8 @@ func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
 }
 
 func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err error) {
+	defer d.leaveMirrorLocked(ifaceID, l)
+	mirror := d.mirrorLocked(l.URL) != nil
 	if err != nil {
 		log.Printf("download %s probe via %s: %s", d.st.ID, ifaceID, shortErr(err))
 		l.unreachable(time.Now(), shortErr(err))
@@ -696,21 +703,28 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 		return
 	}
 	if r.rejected() {
-		if r.isPage && d.st.PageURL == "" && l.URL == d.st.URL {
-			// Either the link is a landing page, or it is the file link and this
-			// interface got an error page for it. Decide once every interface has answered.
-			l.webPage()
-			return
-		}
 		reason := fmt.Sprintf("link not valid on this connection (HTTP %d)", r.status)
 		if r.isPage {
 			reason = "link leads to a web page, not the file"
 		}
-		d.needResolveLocked(ifaceID, l, reason)
+		switch {
+		case mirror:
+			l.fail(reason) // a mirror has no landing page: the next mirror is tried
+		case r.isPage && d.st.PageURL == "" && l.URL == d.st.URL:
+			// Either the link is a landing page, or it is the file link and this
+			// interface got an error page for it. Decide once every interface has answered.
+			l.webPage()
+		default:
+			d.needResolveLocked(ifaceID, l, reason)
+		}
 		return
 	}
 	if r.status >= 400 {
 		l.httpError(time.Now(), fmt.Sprintf("HTTP %d", r.status))
+		return
+	}
+	if why := d.mirrorMismatchLocked(r); mirror && why != "" {
+		l.mismatch(why)
 		return
 	}
 	if !d.st.Probed {
@@ -723,12 +737,16 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 			d.st.Filename = "download"
 		}
 		d.folderProbedLocked()
+		if len(d.st.Mirrors) == 0 && len(r.dups) > 0 && r.version.hashed() {
+			// Only with the server's checksum: it is what tells the mirrors' copies apart.
+			d.addMirrorsLocked(ifaceID, r.dups)
+		}
 	} else {
 		if r.size != d.st.Size {
 			l.mismatch(fmt.Sprintf("different file size (%d vs %d bytes)", r.size, d.st.Size))
 			return
 		}
-		if d.st.RemoteName != "" && r.name != "" && !strings.EqualFold(r.name, d.st.RemoteName) {
+		if !mirror && d.st.RemoteName != "" && r.name != "" && !strings.EqualFold(r.name, d.st.RemoteName) {
 			l.mismatch(fmt.Sprintf("different file name (%q vs %q)", r.name, d.st.RemoteName))
 			return
 		}
@@ -736,11 +754,12 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 			l.fail("this link does not allow split downloading")
 			return
 		}
-		if d.st.RangeOK && !r.version.same(d.st.Version) {
+		if d.st.RangeOK && !mirror && !r.version.same(d.st.Version) {
 			l.mismatch(versionMsg) // its bytes don't belong with the ones on disk
 			return
 		}
 	}
+	l.Version = r.version
 	l.ready()
 }
 
@@ -968,6 +987,9 @@ func (d *Download) workerFailedLocked(w *worker, err error) {
 	now := time.Now()
 	ir := w.ir
 	l := d.st.Links[w.iface]
+	if l != nil {
+		defer d.leaveMirrorLocked(w.iface, l)
+	}
 	var fe *fetchError
 	if !errors.As(err, &fe) {
 		fe = &fetchError{kind: kindNet, msg: shortErr(err)}
@@ -1049,6 +1071,9 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 	d.mu.Lock()
 	start, end, ranged := seg.pos, seg.end, d.plan.splittable
 	size, ver := d.st.Size, d.st.Version
+	if d.mirrorLocked(w.link.URL) != nil {
+		ver = w.link.Version // each mirror's server has its own ETag and dates
+	}
 	d.mu.Unlock()
 	if start >= end {
 		return nil
@@ -1183,9 +1208,9 @@ func (d *Download) complete(ctx context.Context) error {
 	d.file = nil
 	sparse := d.st.RangeOK
 	sha, md := d.st.SHA256, d.st.MD5
-	fromServer := sha == "" && md == "" && d.st.Version.MD5 != "" // a pasted checksum wins
+	fromServer := sha == "" && md == "" && d.st.Version.hashed() // a pasted checksum wins
 	if fromServer {
-		md = d.st.Version.MD5
+		sha, md = d.st.Version.SHA256, d.st.Version.MD5
 	}
 	part := d.partPath()
 	dir, name := d.st.Dir, d.st.Filename
@@ -1222,7 +1247,7 @@ func (d *Download) complete(ctx context.Context) error {
 		if err := verify(ctx, part, sha, md); err != nil {
 			switch {
 			case errors.Is(err, errMismatch) && fromServer:
-				return fmt.Errorf("MD5 from the server %w: the file arrived damaged, remove the download and add it again", errMismatch)
+				return fmt.Errorf("%s from the server %w: the file arrived damaged, remove the download and add it again", strings.Fields(err.Error())[0], errMismatch)
 			case errors.Is(err, errMismatch):
 				return fmt.Errorf("%w: remove the download and add it again, or check the value", err)
 			}
@@ -1357,8 +1382,9 @@ type LinkSummary struct {
 	Error    string     `json:"error,omitempty"`
 	Speed    float64    `json:"speed"`
 	Conns    int        `json:"conns"`
-	Resolved bool       `json:"resolved"`     // fetched by the browser for this interface
-	Up       float64    `json:"up,omitempty"` // torrents: upload speed to the peers on this path
+	Resolved bool       `json:"resolved"`         // fetched by the browser for this interface
+	Mirror   string     `json:"mirror,omitempty"` // the host of the mirror it uses, when the file has several
+	Up       float64    `json:"up,omitempty"`     // torrents: upload speed to the peers on this path
 
 	// Filled in by present.
 	Label    string `json:"label"`
@@ -1398,6 +1424,10 @@ type Summary struct {
 
 	Folder *FolderSummary `json:"folder,omitempty"` // Download as folder, once asked for
 
+	Mirrors   []Mirror `json:"mirrors,omitempty"`   // the file's sources, when it has several
+	Group     string   `json:"group,omitempty"`     // the files of one Metalink share it
+	GroupName string   `json:"groupName,omitempty"` // the Metalink's name
+
 	// Torrents only: the files to choose from (while choosing), then the upload once complete.
 	// Files stays out of the state sent every second: a torrent of many files
 	// would make it bigger than Firefox takes. The picker asks for it ("torrentFiles").
@@ -1415,7 +1445,8 @@ type Summary struct {
 	InSwarm   bool          `json:"inSwarm,omitempty"` // exchanging pieces with peers right now
 
 	hashResult string // State.HashResult, for the label and note
-	serverMD5  bool   // no checksum pasted: the server's MD5 is the one checked
+	serverSHA  bool   // no checksum pasted: the server's SHA-256 is the one checked
+	serverMD   bool   // and its MD5
 	checking   bool   // a finished file is being checked against new checksums
 
 	// Filled in by present.
@@ -1544,16 +1575,21 @@ func (d *Download) Summary() Summary {
 		Speed: d.speed, ETA: -1, RangeOK: d.st.RangeOK, Probed: d.st.Probed,
 		SHA256: d.st.SHA256, MD5: d.st.MD5, Links: map[string]LinkSummary{},
 		hashResult: d.st.HashResult, checking: d.checking,
-		serverMD5: d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.MD5 != "",
+		serverSHA: d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.SHA256 != "",
+		serverMD:  d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.MD5 != "",
 		Added:     d.st.Added, Finished: d.st.Finished, VPN: d.st.VPN,
 		Folder: d.folderSummaryLocked(), Limit: d.st.Limit,
+		Mirrors: slices.Clone(d.st.Mirrors), Group: d.st.Group, GroupName: d.st.GroupName,
 	}
 	if d.running {
 		s.ETA = d.eta.Seconds()
 	}
 	now := time.Now()
 	for id, l := range d.st.Links {
-		ls := LinkSummary{Status: l.Status, Error: l.Error, Resolved: l.URL != d.st.URL}
+		ls := LinkSummary{Status: l.Status, Error: l.Error, Resolved: l.URL != d.st.URL && d.mirrorLocked(l.URL) == nil}
+		if len(d.st.Mirrors) > 0 {
+			ls.Mirror = hostOf(l.URL)
+		}
 		if ir := d.ifs[id]; ir != nil && d.running {
 			ls.Speed, ls.Conns = ir.ewma.Value(), ir.active
 			ls.allowed, ls.maxConns, ls.busy = ir.backoff.target(), ir.backoff.conns, ir.backoff.busy(now)

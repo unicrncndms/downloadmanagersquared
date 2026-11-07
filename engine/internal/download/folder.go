@@ -125,7 +125,7 @@ const (
 	checksumNote = "A checksum is entered, and only a whole file can be checked against it: clear it first"
 	noRangesNote = "The server doesn't allow split downloading, so it can't be extracted as it downloads"
 	hashNote     = "Downloaded as a file: a checksum was entered, and only a whole file can be checked against it"
-	serverMD5    = "The server's MD5 wasn't checked: the archive was extracted as it downloaded, so there was no whole file to check"
+	serverMD5    = "The server's checksum wasn't checked: the archive was extracted as it downloaded, so there was no whole file to check"
 )
 
 // SetFolder switches Download as folder on or off. It can't change once

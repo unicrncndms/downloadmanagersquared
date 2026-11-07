@@ -60,6 +60,59 @@ function sortDownloads(downloads) {
     .map((x) => x.d);
 }
 
+// listEntries is what the list draws, in order: a download on its own, or
+// the files of one Metalink together as a group, where the first of them
+// would be. A group down to one file shows that file on its own.
+function listEntries(sorted) {
+  const out = [];
+  const groups = new Map();
+  for (const d of sorted) {
+    if (!d.group) { out.push({ d }); continue; }
+    let g = groups.get(d.group);
+    if (!g) {
+      g = { group: d.group, name: d.groupName || "Metalink", items: [] };
+      groups.set(d.group, g);
+      out.push(g);
+    }
+    g.items.push(d);
+  }
+  return out.map((e) => (e.items && e.items.length === 1 ? { d: e.items[0] } : e));
+}
+
+// groupView is a group card's lines: its files added up, the badge of the
+// file that needs the most attention (items come sorted, so the first), and
+// what its buttons can do to the files.
+function groupView(items) {
+  const n = items.length;
+  const known = items.every((d) => d.size > 0);
+  const size = known ? items.reduce((a, d) => a + d.size, 0) : -1;
+  const done = items.reduce((a, d) => a + (d.done || 0), 0);
+  const speed = items.reduce((a, d) => a + (d.status === "running" ? d.speed || 0 : 0), 0);
+  const nDone = items.filter(finished).length;
+  const all = nDone === n;
+  const files = all ? `${n} files` : `${nDone} of ${n} files done`;
+  const left = (size > 0 ? `${Math.round(Math.min(100, (done / size) * 100))}% · ${fmtBytes(done)} / ${fmtBytes(size)}` : fmtBytes(done)) + ` · ${files}`;
+  const can = (k) => items.some((d) => d.actions && d.actions[k]);
+  return {
+    left, right: speed > 0 ? `↓ ${fmtSpeed(speed)}` : "",
+    percent: size > 0 ? Math.min(100, (done / size) * 100) : 0,
+    label: all ? "Completed" : items[0].label, tone: all ? "ok" : items[0].tone || "",
+    pause: can("pause"), resume: can("resume"), finished: all,
+    partialFile: items.some((d) => d.partialFile),
+  };
+}
+
+// mirrorRows are a download's mirrors for Details: host, which interfaces
+// use it (nameOf names one), and why it was dropped.
+function mirrorRows(d, nameOf) {
+  return (d.mirrors || []).map((m) => {
+    let host = m.url;
+    try { host = new URL(m.url).host; } catch (e) { /* the URL as it is */ }
+    const users = Object.keys(d.links || {}).filter((id) => d.links[id].mirror === host).map(nameOf).sort();
+    return { host, url: m.url, users, dropped: m.dropped || "" };
+  });
+}
+
 // moveBefore is the engine "move" a queued download id takes, as its
 // "before": dropped on target, it takes target's place (after it when
 // dragged down); target "first" or "last" is an end of the queue. null:
@@ -165,5 +218,5 @@ function lineResults(checks) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
+  module.exports = { fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
 }

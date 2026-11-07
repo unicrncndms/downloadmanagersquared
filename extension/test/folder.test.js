@@ -43,10 +43,10 @@ test("unavailable, with the engine's reason: a checksum, no ranges, not a .zip",
 });
 
 test("Details lists the folder, the fallback reason, renamed Entries and a skipped digest", () => {
-  const v = folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big", note: "The server's MD5 wasn't checked", renamed: ["CON.txt → _CON.txt", "a?.txt → a_.txt"] }), SETTINGS);
+  const v = folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big", note: "The server's checksum wasn't checked", renamed: ["CON.txt → _CON.txt", "a?.txt → a_.txt"] }), SETTINGS);
   assert.deepEqual(v.facts, [
     ["Folder", "D:\\x\\big"],
-    ["Note", "The server's MD5 wasn't checked"],
+    ["Note", "The server's checksum wasn't checked"],
     ["Renamed", "CON.txt → _CON.txt\na?.txt → a_.txt"],
   ]);
   const fell = folderView(zip({ on: false, note: "Downloaded as a file: not a ZIP" }), SETTINGS);

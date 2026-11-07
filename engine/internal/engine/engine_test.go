@@ -204,7 +204,7 @@ func TestTorrentFileIsFetchedWithTheBrowsersCookie(t *testing.T) {
 	}))
 	defer srv.Close()
 	r := AddRequest{URL: srv.URL + "/dl/1", Cookie: "sid=1", Referer: "https://tracker.example/t/1", UserAgent: "test"}
-	got, err := fetchTorrentFile(context.Background(), srv.Client(), r)
+	got, err := fetchSmallFile(context.Background(), srv.Client(), r, "torrent file")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestTorrentFileIsFetchedWithTheBrowsersCookie(t *testing.T) {
 		t.Fatalf("fetched %q, want %q", got, file)
 	}
 	r.Cookie = ""
-	if _, err := fetchTorrentFile(context.Background(), srv.Client(), r); err == nil {
+	if _, err := fetchSmallFile(context.Background(), srv.Client(), r, "torrent file"); err == nil {
 		t.Fatal("a refused fetch was taken as a torrent file")
 	}
 }
@@ -570,5 +570,50 @@ func TestDownloadAsFolderDefaultAndLastFolder(t *testing.T) {
 	}
 	if _, err := e.Call(nil, "setFolder", []byte(fmt.Sprintf(`{"id":%q,"into":"relative"}`, off))); err == nil {
 		t.Fatal("a relative folder was taken")
+	}
+}
+
+func TestAMetalinkAddsAGroupOfDownloadsWithTheirMirrors(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	e.settings.MaxParallel = 0
+	sha := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	b := []byte(`<metalink xmlns="urn:ietf:params:xml:ns:metalink">
+  <file name="disc1.iso"><size>100</size><hash type="sha-256">` + sha + `</hash>
+    <url priority="2">https://b.example/disc1.iso</url><url priority="1">https://a.example/disc1.iso</url></file>
+  <file name="sub/disc2.iso"><url>https://a.example/disc2.iso</url></file>
+</metalink>`)
+	id, err := e.addMetalink(b, AddRequest{URL: "https://site.example/discs.meta4", Cookie: "sid=1"}, paths.Off)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := summaryOf(t, e, id)
+	if s.Filename != "disc1.iso" || s.SHA256 != sha || s.URL != "https://a.example/disc1.iso" || len(s.Mirrors) != 2 || s.GroupName != "discs" || s.Group == "" {
+		t.Fatalf("first file %+v", s)
+	}
+	d, _ := e.get(id)
+	if st := d.State(); st.Cookie != "" || st.MetaSize != 100 {
+		t.Fatalf("cookie %q (the Metalink site's, not the mirrors'), size %d", st.Cookie, st.MetaSize)
+	}
+	n := 0
+	for _, o := range e.Snapshot().Downloads {
+		if o.Group == s.Group {
+			n++
+			if o.ID != id && o.Filename != "disc2.iso" {
+				t.Fatalf("second file named %q", o.Filename)
+			}
+		}
+	}
+	if n != 2 {
+		t.Fatalf("%d downloads in the group, want 2", n)
+	}
+}
+
+func TestMetalinkLinksAreRecognised(t *testing.T) {
+	if !isMetalinkURL("https://example.com/ubuntu.iso.META4?x=1") || isMetalinkURL("https://example.com/ubuntu.iso") {
+		t.Fatal("isMetalinkURL")
 	}
 }

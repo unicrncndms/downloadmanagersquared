@@ -34,6 +34,8 @@ type Link struct {
 	Resolves int        `json:"resolves,omitempty"`
 	// HTTPErrors counts error answers in a row; kept across restarts so a dead link still gives up.
 	HTTPErrors int `json:"httpErrors,omitempty"`
+	// Version is what the link's server said of the file; a mirror's chunks are checked against it.
+	Version Version `json:"version,omitzero"`
 
 	retryAt time.Time
 	pageHit bool         // got a web page for the source URL; what that means is decided once every interface has answered
@@ -125,6 +127,15 @@ func (l *Link) needResolve(pageKnown bool, reason string) bool {
 	l.Resolves++
 	l.Status, l.Error = LinkResolving, reason
 	return true
+}
+
+// moveTo starts the link over on another mirror. Only the download's source
+// URL gets its cookie and referer: they were the browser's for that site.
+func (l *Link) moveTo(url string, st State) {
+	*l = Link{URL: url, Status: LinkPending}
+	if url == st.URL {
+		l.Cookie, l.Referer = st.Cookie, st.Referer
+	}
 }
 
 // resolved stores the link the browser fetched; it gets probed next.

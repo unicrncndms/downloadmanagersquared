@@ -124,3 +124,37 @@ test("Check lines lists each public IP and warns about a shared one", () => {
   assert.deepEqual(r.lines, ["Ethernet: 203.0.113.7", "Mesh: 203.0.113.7", "Phone: 198.51.100.2", "Old: no answer (no answer from the STUN server)"]);
   assert.deepEqual(r.warnings, ["Ethernet and Mesh reach the internet from the same public IP (203.0.113.7): they share one uplink, so together they are no faster than one."]);
 });
+
+test("a Metalink's files are drawn as one group where its first file sorts", () => {
+  const { listEntries } = require("../lib/list.js");
+  const sorted = [dl("a", "running", { group: "g", groupName: "discs" }), dl("x", "running"), dl("b", "queued", { group: "g" }), dl("c", "queued", { group: "h" })];
+  const e = listEntries(sorted);
+  assert.deepEqual(e.map((x) => x.d ? x.d.id : `${x.name}:${x.items.map((d) => d.id).join(",")}`), ["discs:a,b", "x", "c"]);
+});
+
+test("a group card adds its files up and offers what any file can do", () => {
+  const { groupView } = require("../lib/list.js");
+  const v = groupView([
+    dl("a", "running", { size: 100e6, done: 50e6, speed: 2e6, label: "Downloading", actions: { pause: true }, partialFile: true }),
+    dl("b", "completed", { size: 100e6, done: 100e6, label: "Completed" }),
+  ]);
+  assert.equal(v.left, "75% · 150 MB / 200 MB · 1 of 2 files done");
+  assert.equal(v.right, "↓ 2.0 MB/s");
+  assert.equal(v.label, "Downloading");
+  assert.ok(v.pause && !v.resume && v.partialFile && !v.finished);
+  const done = groupView([dl("a", "completed", { size: 1, done: 1 }), dl("b", "completed", { size: 1, done: 1 })]);
+  assert.ok(done.finished && done.label === "Completed" && done.left.endsWith("· 2 files"));
+});
+
+test("mirrors show who uses them and why one was dropped", () => {
+  const { mirrorRows } = require("../lib/list.js");
+  const d = dl("a", "running", {
+    mirrors: [{ url: "https://a.example/f.iso" }, { url: "https://b.example/f.iso", dropped: "different file size" }, { url: "https://c.example/f.iso" }],
+    links: { eth: { mirror: "a.example" }, wifi: { mirror: "a.example" } },
+  });
+  assert.deepEqual(mirrorRows(d, (id) => id.toUpperCase()), [
+    { host: "a.example", url: "https://a.example/f.iso", users: ["ETH", "WIFI"], dropped: "" },
+    { host: "b.example", url: "https://b.example/f.iso", users: [], dropped: "different file size" },
+    { host: "c.example", url: "https://c.example/f.iso", users: [], dropped: "" },
+  ]);
+});

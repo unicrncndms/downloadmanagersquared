@@ -39,6 +39,15 @@ test("a torrent file is recognised by type, name or path", () => {
   assert.ok(!r.isTorrentFile(h({}), "https://x/a.iso"));
 });
 
+test("a Metalink is recognised by type, name or path, and captured at any size", () => {
+  assert.ok(r.isMetalinkFile(h({ "content-type": "application/metalink4+xml" }), "https://x/y"));
+  assert.ok(r.isMetalinkFile(h({ "content-disposition": "attachment; filename=\"a.meta4\"" }), "https://x/dl"));
+  assert.ok(r.isMetalinkFile(h({}), "https://x/a.iso.META4?k=1"));
+  assert.ok(!r.isMetalinkFile(h({}), "https://x/a.iso"));
+  assert.equal(r.captureResponse(h({ "content-type": "application/metalink4+xml", "content-length": "900" }), "https://x/m", 200, 100 * MB), "metalink");
+  assert.equal(r.captureDownload({ totalBytes: 900, filename: "C:\D\a.meta4" }, 100 * MB), "metalink");
+});
+
 test("a response is captured at the threshold, a torrent at any size", () => {
   const big = h({ "content-type": "application/octet-stream", "content-length": String(100 * MB) });
   assert.equal(r.captureResponse(big, "https://x/a.iso", 200, 100 * MB), "download");

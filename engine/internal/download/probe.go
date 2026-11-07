@@ -23,6 +23,7 @@ type probeResult struct {
 	name    string
 	version Version
 	wait    time.Duration // how long a busy server asked us to stay away
+	dups    []string      // mirrors the server named (Link: rel=duplicate)
 }
 
 // busy: the server pushed back. That says nothing about the link itself.
@@ -89,6 +90,7 @@ func probeLink(ctx context.Context, client *http.Client, l Link, ua string) (pro
 	}
 	if r.status == http.StatusOK || r.status == http.StatusPartialContent {
 		r.version = versionOf(resp.Header)
+		r.dups = duplicates(resp.Header.Values("Link"), resp.Request.URL)
 	}
 	r.name = remoteName(resp)
 	if r.busy() {

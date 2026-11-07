@@ -69,6 +69,7 @@ const Capture = {
     if (this.bypass.delete(d.url)) return {};
     this.handOff({
       torrent: kind === "torrent",
+      metalink: kind === "metalink",
       url: d.url,
       pages: this.pagesFor(d.tabId, d.url, [d.originUrl, d.documentUrl]),
       filename: dispositionName(h),
@@ -95,6 +96,7 @@ const Capture = {
     await discardDownload(item.id);
     this.handOff({
       torrent: kind === "torrent",
+      metalink: kind === "metalink",
       url,
       pages: this.pagesFor(this.tabShowing(item.referrer), url, [item.referrer]),
       filename: (item.filename || "").split(/[\\/]/).pop(),
@@ -140,13 +142,13 @@ const Capture = {
 
   // cookie: the header the browser sent with the download's request; without
   // a request (context menu, browser downloads) the container's cookies.
-  async handOff({ url, pageUrl, pages, filename, cookieStoreId, cookie, tabId, closeBlankTab, torrent }) {
+  async handOff({ url, pageUrl, pages, filename, cookieStoreId, cookie, tabId, closeBlankTab, torrent, metalink }) {
     pages = pages || (pageUrl ? [pageUrl] : []);
     if (pageUrl === undefined) pageUrl = this.landingPage(pages);
     const referer = pages[pages.length - 1] || pageUrl;
     if (cookie === undefined) cookie = await cookieHeader(url, cookieStoreId);
     try {
-      const { id } = await Engine.call("add", { url, pageUrl, filename, cookie, referer, userAgent: navigator.userAgent, torrent: !!torrent });
+      const { id } = await Engine.call("add", { url, pageUrl, filename, cookie, referer, userAgent: navigator.userAgent, torrent: !!torrent, metalink: !!metalink });
       if (torrent) {
         this.torrentAdded();
       } else {

@@ -14,10 +14,14 @@ import (
 type Version struct {
 	ETag         string `json:"etag,omitempty"`
 	LastModified string `json:"lastModified,omitempty"`
-	// MD5 of the whole file in hex, when the server vouches for one: the
-	// finished file is checked against it unless a checksum was pasted.
-	MD5 string `json:"md5,omitempty"`
+	// MD5 and SHA-256 of the whole file in hex, when the server vouches for
+	// them: the finished file is checked against them unless a checksum was pasted.
+	MD5    string `json:"md5,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
 }
+
+// hashed: the server vouches for the whole file's content.
+func (v Version) hashed() bool { return v.MD5 != "" || v.SHA256 != "" }
 
 // versionMsg is why a link was dropped for serving another version.
 const versionMsg = "a different version of the file: it changed on the server, or this connection gets another copy"
@@ -46,41 +50,66 @@ func (d *Download) allMismatchedLocked(usable map[string]Iface, mainID string) b
 }
 
 func versionOf(h http.Header) Version {
-	return Version{ETag: h.Get("ETag"), LastModified: h.Get("Last-Modified"), MD5: wholeFileMD5(h)}
+	v := Version{ETag: h.Get("ETag"), LastModified: h.Get("Last-Modified")}
+	v.MD5, v.SHA256 = wholeFileHashes(h)
+	return v
 }
 
-// wholeFileMD5 is the MD5 of the whole file a server vouches for, in hex, or
-// "". Only Google Cloud Storage's x-goog-hash counts: it describes the stored
-// object even on a range answer. It's left out when the bytes sent aren't the
-// ones stored (GCS unzipping a gzipped object, or any Content-Encoding).
-// Content-MD5 is not used: it's the body's, so a range's on a 206.
-func wholeFileMD5(h http.Header) string {
+// wholeFileHashes are the MD5 and SHA-256 of the whole file a server vouches
+// for, in hex, or "". Only headers that describe the whole file even on a
+// range answer count: Google Cloud Storage's x-goog-hash, Digest (RFC 3230,
+// what RFC 6249 mirrors send) and Repr-Digest (RFC 9530). They're left out
+// when the bytes sent aren't the ones stored (GCS unzipping a gzipped object,
+// or any Content-Encoding). Content-MD5 and Content-Digest are not used:
+// they're the body's, so a range's on a 206.
+func wholeFileHashes(h http.Header) (md, sha string) {
 	if enc := h.Get("Content-Encoding"); enc != "" && enc != "identity" {
-		return ""
+		return "", ""
 	}
+	gcs := true
 	if enc := h.Get("X-Goog-Stored-Content-Encoding"); enc != "" && enc != "identity" {
-		return ""
+		gcs = false
 	}
-	for _, v := range h.Values("X-Goog-Hash") {
-		for part := range strings.SplitSeq(v, ",") {
-			b64, ok := strings.CutPrefix(strings.TrimSpace(part), "md5=")
-			if !ok {
-				continue
-			}
-			if b, err := base64.StdEncoding.DecodeString(b64); err == nil && len(b) == 16 {
-				return hex.EncodeToString(b)
+	put := func(alg, b64 string) {
+		b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b64))
+		switch {
+		case err != nil:
+		case alg == "md5" && len(b) == 16 && md == "":
+			md = hex.EncodeToString(b)
+		case alg == "sha-256" && len(b) == 32 && sha == "":
+			sha = hex.EncodeToString(b)
+		}
+	}
+	each := func(name string, f func(alg, val string)) {
+		for _, v := range h.Values(name) {
+			for part := range strings.SplitSeq(v, ",") {
+				if alg, val, ok := strings.Cut(strings.TrimSpace(part), "="); ok {
+					f(strings.ToLower(strings.TrimSpace(alg)), strings.TrimSpace(val))
+				}
 			}
 		}
 	}
-	return ""
+	if gcs {
+		each("X-Goog-Hash", put)
+	}
+	each("Repr-Digest", func(alg, val string) { // sha-256=:base64:
+		if v, ok := strings.CutPrefix(val, ":"); ok {
+			put(alg, strings.TrimSuffix(v, ":"))
+		}
+	})
+	each("Digest", put)
+	return md, sha
 }
 
-// same reports whether a and b can be the same file. The servers' MD5s decide
-// when both have one: two that differ vouch for different files. Then
+// same reports whether a and b can be the same file. The servers' SHA-256s,
+// then MD5s, decide when both have one: two that differ vouch for different files. Then
 // Last-Modified decides when both have one: mirrors in step share it even when each makes up its own
 // ETag (Apache's inode-based ones do). Otherwise strong ETags decide. Weak
 // ETags, or nothing to compare, can't tell versions apart, so they count as the same.
 func (a Version) same(b Version) bool {
+	if a.SHA256 != "" && b.SHA256 != "" {
+		return a.SHA256 == b.SHA256
+	}
 	if a.MD5 != "" && b.MD5 != "" {
 		return a.MD5 == b.MD5
 	}

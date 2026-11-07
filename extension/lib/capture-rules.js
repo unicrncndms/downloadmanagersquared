@@ -38,6 +38,14 @@ function isTorrentFile(h, url) {
   try { return /\.torrent$/i.test(new URL(url).pathname); } catch (e) { return false; }
 }
 
+// A Metalink (.meta4): always DMS²'s too. It lists a file's mirrors, which
+// the engine spreads its connections over.
+function isMetalinkFile(h, url) {
+  if (mediaType(h) === "application/metalink4+xml") return true;
+  if (/\.meta4$/i.test(dispositionName(h))) return true;
+  try { return /\.meta4$/i.test(new URL(url).pathname); } catch (e) { return false; }
+}
+
 // Full file size from Content-Length, or from Content-Range on a 206.
 function responseSize(h, status) {
   if (status === 206) {
@@ -71,11 +79,13 @@ function isHttp(url) {
   return /^https?:/.test(url || "");
 }
 
-// Whether a GET response is DMS²'s: "torrent" for a torrent file, "download"
+// Whether a GET response is DMS²'s: "torrent" for a torrent file, "metalink"
+// for a Metalink, "download"
 // for a file at or above the threshold, "" to leave it to the browser.
 function captureResponse(h, url, status, threshold) {
   if (isPage(h) || (status !== 200 && status !== 206)) return "";
   if (isTorrentFile(h, url)) return "torrent";
+  if (isMetalinkFile(h, url)) return "metalink";
   return responseSize(h, status) >= threshold && looksLikeDownload(h) ? "download" : "";
 }
 
@@ -84,6 +94,7 @@ function captureResponse(h, url, status, threshold) {
 function captureDownload(item, threshold) {
   const h = { "content-type": item.mime || "" };
   if (isTorrentFile(h, item.finalUrl || item.url) || /\.torrent$/i.test(item.filename || "")) return "torrent";
+  if (isMetalinkFile(h, item.finalUrl || item.url) || /\.meta4$/i.test(item.filename || "")) return "metalink";
   if (isPage(h)) return "";
   const size = item.totalBytes > 0 ? item.totalBytes : item.fileSize;
   return size >= threshold ? "download" : "";
@@ -144,7 +155,7 @@ function learnedStepBack(pages, firstClickUrl) {
 
 if (typeof module !== "undefined") {
   module.exports = {
-    headerMap, mediaType, isPage, isAttachment, looksLikeDownload, isTorrentFile, responseSize,
+    headerMap, mediaType, isPage, isAttachment, looksLikeDownload, isTorrentFile, isMetalinkFile, responseSize,
     dispositionName, hostOf, siteOf, isHttp, captureResponse, captureDownload, pagesFor, landingPage,
     stepBackFor, learnedStepBack, cookieHeaderFor,
   };

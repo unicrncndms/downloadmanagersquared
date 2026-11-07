@@ -7,9 +7,10 @@ For Windows 10/11 with Firefox, LibreWolf, Waterfox or Floorp. Free and open sou
 ## What it does
 
 - **Adds up your connections.** Each file is split into pieces fetched over every connection in parallel. A faster connection takes over more of the work, nothing is downloaded twice, and a download survives crashes, sleep and restarts.
-- **Takes over your browser's downloads.** Download as usual: files over 100 MB, magnet links and `.torrent` files go to DMS² by themselves.
+- **Takes over your browser's downloads.** Download as usual: files over 100 MB, magnet links, `.torrent` and Metalink (`.meta4`) files go to DMS² by themselves.
 - **Handles file hosts that hand out a link per IP address.** DMS² opens the site once per connection, repeats the clicks you made the first time, and takes each connection's link.
 - **Downloads torrents** over all connections too.
+- **Uses mirrors.** A Metalink, or a server that names mirrors with a checksum, lets each connection fetch from its own mirror, so one slow mirror doesn't hold back the rest. A mirror serving another file is dropped, and the finished file is checked against the checksum.
 - **Unpacks ZIPs while they download.** With *Download as folder*, each file in the archive is extracted and checked as soon as its part has arrived, and that part of the archive is freed. You end up with the folder, never the `.zip`, and need only about the extracted size in free space instead of archive plus extracted size.
 - **A VPN per connection, if you want one.** Each connection can get its own WireGuard tunnel (Private Internet Access, or a `.conf` from your provider). The tunnels run inside DMS²: no admin rights, and other programs aren't affected.
 - **Checks files.** Paste a SHA-256 or MD5 and DMS² checks the file when it finishes.
