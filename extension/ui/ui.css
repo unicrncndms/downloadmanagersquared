@@ -4,10 +4,11 @@
   --text: #16181d;
   --muted: #646b78;
   --line: #e2e5ea;
-  --accent: #2563eb;
+  --accent: #1d4ed8;
   --accent-soft: #e6eefe;
-  --ok: #15803d;
-  --warn: #b45309;
+  --on-accent: #ffffff; /* text on --accent */
+  --ok: #166534;
+  --warn: #92400e;
   --bad: #b91c1c;
   --bar: #dfe3ea;
   color-scheme: light;
@@ -21,6 +22,7 @@
     --line: #2c3038;
     --accent: #5b8cff;
     --accent-soft: #1f2a44;
+    --on-accent: #0b1020;
     --ok: #4ade80;
     --warn: #fbbf24;
     --bad: #f87171;
@@ -45,7 +47,7 @@ button {
   cursor: pointer;
 }
 button:hover { border-color: var(--accent); }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 button.small { padding: 2px 8px; font-size: 12px; }
 input[type=text], input[type=password], input[type=number], input[type=url], select, textarea {
   border: 1px solid var(--line);
@@ -53,7 +55,8 @@ input[type=text], input[type=password], input[type=number], input[type=url], sel
   border-radius: 6px;
   padding: 5px 8px;
 }
-input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible,
+[role=button]:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .muted { color: var(--muted); }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
 .num { font-variant-numeric: tabular-nums; }
@@ -90,6 +93,8 @@ input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px s
   width: max-content; max-width: min(520px, calc(100vw - 32px)); line-height: 1.45;
 }
 .toast.show { opacity: 1; }
+/* Read by screen readers, not shown. */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* An (i) that explains what it sits next to, on hover or keyboard focus. */
 .info {

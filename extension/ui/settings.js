@@ -75,20 +75,21 @@ function vpnCell(i, tun) {
 
 function ifaceRow(i, tun, settings) {
   const set = (patch, ok) => act("setInterface", Object.assign({ id: i.id }, patch), ok);
-  const check = (on, key) => {
-    const c = el("input", { type: "checkbox", checked: on });
+  // Each control is named after its column, for screen readers.
+  const check = (on, key, label) => {
+    const c = el("input", { type: "checkbox", checked: on, "aria-label": `${label}: ${i.name}` });
     c.addEventListener("change", () => set({ [key]: c.checked }));
     return c;
   };
-  const conns = el("input", { type: "number", min: 1, max: 32, value: i.connections });
+  const conns = el("input", { type: "number", min: 1, max: 32, value: i.connections, "aria-label": `Requests at once: ${i.name}` });
   conns.addEventListener("change", () => set({ connections: Number(conns.value) }));
   const limit = (bps, key, title) => {
-    const input = el("input", { type: "number", min: 0, step: "any", placeholder: "–", title: title + " (empty: none)", value: bps ? +(bps / MB).toFixed(3) : "" });
+    const input = el("input", { type: "number", min: 0, step: "any", placeholder: "–", title: title + " (empty: none)", "aria-label": `${title} in MB/s: ${i.name}`, value: bps ? +(bps / MB).toFixed(3) : "" });
     input.addEventListener("change", () => set({ [key]: Math.round((Number(input.value) || 0) * MB) }));
     return input;
   };
   // Shows the main connection in effect, chosen or Windows'.
-  const main = el("input", { type: "radio", name: "main", checked: i.isMain });
+  const main = el("input", { type: "radio", name: "main", checked: i.isMain, "aria-label": `Main connection: ${i.name}` });
   main.addEventListener("change", () => act("setSettings", { mainInterface: i.id }, `${i.name} is now the main connection`));
 
   // What the connection is, then the few facts worth a badge.
@@ -102,10 +103,10 @@ function ifaceRow(i, tun, settings) {
       el("b", {}, i.name),
       el("div", { class: "sub" }, i.present ? el("span", { class: "mono" }, i.ip) : "not connected", " · ", i.description),
       badges.length ? el("div", { class: "badges" }, badges) : null),
-    el("span", { class: "center" }, check(i.enabled, "enabled")),
+    el("span", { class: "center" }, check(i.enabled, "enabled", "Use")),
     el("span", { class: "center" }, main),
     conns,
-    el("span", { class: "center" }, check(i.upload, "upload")),
+    el("span", { class: "center" }, check(i.upload, "upload", "Upload")),
     el("span", { class: "limits" }, "↓", limit(i.downloadLimit, "downloadLimit", "Download limit"), "↑", limit(i.uploadLimit, "uploadLimit", "Upload limit")),
     vpnCell(i, tun),
     el("span", { class: "speed num", "data-speed": i.id }));

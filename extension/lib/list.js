@@ -217,6 +217,24 @@ function lineResults(checks) {
   };
 }
 
+// announcements is what a screen reader is told as the list changes: a
+// download finishing or failing, once. prev maps id to the status last seen;
+// a download seen for the first time says nothing, so opening the popup
+// doesn't read out old news. Returns the texts and the map for next time.
+function announcements(prev, downloads) {
+  const next = new Map();
+  const texts = [];
+  for (const d of downloads || []) {
+    next.set(d.id, d.status);
+    const was = prev && prev.get(d.id);
+    if (!was || was === d.status) continue;
+    const name = d.filename || d.url;
+    if ((d.status === "completed" && was !== "seeding") || (d.status === "seeding" && was !== "completed")) texts.push(`${name} finished`);
+    else if (d.status === "failed") texts.push(`${name} failed${d.error ? ": " + d.error : ""}`);
+  }
+  return { texts, seen: next };
+}
+
 // logLines is a download's activity log as lines, newest first: local date
 // and time, the interface it concerns (if any), and what happened.
 function logLines(events, nameOf) {
@@ -257,5 +275,5 @@ function addLines(text) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { addLines, matchesSearch, logLines, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
+  module.exports = { addLines, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
 }

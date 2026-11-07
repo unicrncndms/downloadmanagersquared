@@ -187,3 +187,22 @@ test("the activity log reads newest first, with local time and the connection's 
   assert.deepEqual(lines, ["2026-11-07 10:05:09 · Wi-Fi · Link expired: HTTP 403", "2026-11-07 09:05:09 · Queued"]);
   assert.deepEqual(logLines(null, () => ""), []);
 });
+
+test("a screen reader hears a download finish or fail once, and nothing about downloads already there", () => {
+  const { announcements } = require("../lib/list.js");
+  let r = announcements(null, [dl("a", "running", { filename: "a.iso" }), dl("b", "failed", { filename: "b.iso" })]);
+  assert.deepEqual(r.texts, []); // just opened: old news stays quiet
+  r = announcements(r.seen, [dl("a", "completed", { filename: "a.iso" }), dl("b", "failed", { filename: "b.iso" }), dl("c", "running")]);
+  assert.deepEqual(r.texts, ["a.iso finished"]);
+  r = announcements(r.seen, [dl("a", "completed", { filename: "a.iso" }), dl("c", "failed", { url: "https://x/c", error: "disk full" })]);
+  assert.deepEqual(r.texts, ["https://x/c failed: disk full"]);
+  r = announcements(r.seen, [dl("t", "running", { kind: "torrent", filename: "t" })]);
+  r = announcements(r.seen, [dl("t", "seeding", { kind: "torrent", filename: "t" })]);
+  assert.deepEqual(r.texts, ["t finished"]);
+});
+
+test("a torrent that finishes seeding isn't announced a second time", () => {
+  const { announcements } = require("../lib/list.js");
+  let r = announcements(new Map([["t", "seeding"]]), [dl("t", "completed", { kind: "torrent", filename: "t" })]);
+  assert.deepEqual(r.texts, []);
+});

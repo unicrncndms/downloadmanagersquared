@@ -73,6 +73,33 @@ function closeMenu() {
   if (openMenu) openMenu.hidden = true;
   openMenu = null;
 }
+// Escape closes it too, and gives the focus back to its "⋯" button.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !openMenu) return;
+  const more = openMenu.parentElement.querySelector("button.icon");
+  closeMenu();
+  if (more) more.focus();
+});
+
+// pressable lets a name that opens and closes something work by keyboard:
+// focusable, announced as a button, Enter and Space click it. on false
+// makes it plain text again.
+function pressable(node, on, expanded) {
+  if (!on) {
+    for (const a of ["tabindex", "role", "aria-expanded"]) node.removeAttribute(a);
+    return;
+  }
+  node.setAttribute("tabindex", "0");
+  node.setAttribute("role", "button");
+  node.setAttribute("aria-expanded", String(!!expanded));
+  if (node.dataset.pressable) return;
+  node.dataset.pressable = "1";
+  node.addEventListener("keydown", (e) => {
+    if (node.getAttribute("role") !== "button" || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    node.click();
+  });
+}
 
 // Small line icons, drawn in the text colour.
 const ICONS = {
@@ -316,6 +343,7 @@ function makeCard(id) {
     root.classList.toggle("line", line);
     name.textContent = d.filename || d.url;
     name.title = done ? (expanded ? "Fold back into a line" : "Open this download") : d.filename || d.url;
+    pressable(name, done, expanded);
     vpn.textContent = VPN_TEXT[d.vpn] || "";
     vpn.hidden = line || !VPN_TEXT[d.vpn];
     status.textContent = d.label;
@@ -582,6 +610,7 @@ function makeGroupCard(gid) {
     const v = groupView(g.items);
     name.textContent = g.name;
     name.title = open ? "Hide the files" : "Show the files";
+    pressable(name, true, open);
     count.textContent = `${g.items.length} files`;
     status.textContent = v.label;
     status.className = "badge " + v.tone;
@@ -660,9 +689,14 @@ const groupCards = new Map(); // Metalink group id -> card controller
 // The search box narrows the list as it is typed.
 $("search").addEventListener("input", () => { if (latest.state) renderDownloads(latest.state); });
 
+let announced = null; // id -> status last seen, for the screen reader's news
+
 function renderDownloads(state) {
   const list = $("list");
   const all = state.downloads || [];
+  const news = announcements(announced, all);
+  announced = news.seen;
+  if (news.texts.length) $("announce").textContent = news.texts.join(". ");
   const query = $("search").value;
   const downloads = sortDownloads(all.filter((d) => matchesSearch(d, query)));
   const seen = new Set();
