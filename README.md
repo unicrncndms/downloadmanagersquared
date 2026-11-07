@@ -14,6 +14,7 @@ For Windows 10/11 with Firefox, LibreWolf, Waterfox or Floorp. Free and open sou
 - **Unpacks ZIPs while they download.** With *Download as folder*, each file in the archive is extracted and checked as soon as its part has arrived, and that part of the archive is freed. You end up with the folder, never the `.zip`, and need only about the extracted size in free space instead of archive plus extracted size.
 - **A VPN per connection, if you want one.** Each connection can get its own WireGuard tunnel (Private Internet Access, or a `.conf` from your provider). The tunnels run inside DMS²: no admin rights, and other programs aren't affected.
 - **Checks files.** Paste a SHA-256 or MD5 and DMS² checks the file when it finishes.
+- **IPv6 (experimental, off by default).** With *Enable IPv6* on, a connection with only IPv6, such as some phone tethers, is added up too, and the others reach servers that have only IPv6. Not checked on a real carrier network: NAT64/DNS64 and 464XLAT have never been tried live.
 
 No account, no server, no telemetry: see [PRIVACY.md](PRIVACY.md).
 
@@ -47,7 +48,7 @@ Unfinished files end in `.dms.part`. Progress is saved every few seconds.
 
 ## Settings
 
-- **Connections:** turn each on or off, set its parallel requests (4) and speed limit, and choose the main connection, used alone for servers that can't split a file. VPN adapters start off.
+- **Connections:** turn each on or off, set its parallel requests (4) and speed limit, and choose the main connection, used alone for servers that can't split a file. VPN adapters start off. *Enable IPv6 (experimental)* (off) uses IPv6 too; each connection shows a badge with what it has: IPv4, IPv6 or IPv4 + IPv6.
 - **Downloads:** takeover size (100 MB), save folder, downloads at once (1), Download as folder for new ZIPs (off).
 - **Torrents:** seed ratio (1).
 - **Startup:** start with Windows.
@@ -75,7 +76,7 @@ Settings and the download list live in DMS² itself, so every browser shares the
 ## Limitations
 
 - Windows only, and only Firefox-based browsers.
-- IPv4 only.
+- IPv6 is experimental and off by default. Inside VPN tunnels it's IPv4 only, torrents get no port forwarding over IPv6, and on an IPv6-only connection a link with a bare IPv4 address fails (there is no NAT64 prefix discovery).
 - Replayed clicks are synthetic: sites that only accept real clicks ask every time.
 - Links a site creates through a form POST can't be fetched again.
 - Servers that fingerprint TLS may refuse DMS² despite your browser's User-Agent.

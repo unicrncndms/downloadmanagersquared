@@ -31,6 +31,7 @@ Each of these sees the public IP address of the connection used, as any site you
 - **Torrent swarms.** Torrents upload as well as download: while a torrent downloads, and while it seeds afterwards, DMS² sends pieces of it to other peers. Peers, trackers and the DHT see your IP address and which torrent you share. For private torrents DMS² stays off the DHT and peer exchange.
 - **Your router.** For torrents, DMS² may ask your router (UPnP or NAT-PMP) to forward a port to your PC.
 - **Private Internet Access**, only if you set it up: your login, the server list and the tunnels go to PIA.
+- **Public DNS resolvers**, only for a connection that has no DNS server of its own: Cloudflare (1.1.1.1) and Google (8.8.8.8), or over IPv6 2606:4700:4700::1111 and 2001:4860:4860::8888. They see the names that connection looks up.
 - **stun.cloudflare.com**, only when you use *Check lines*: one request per connection, to learn its public IP address and find connections that share one.
 - **GitHub**, once a day: the engine asks `api.github.com` for the latest release's version, to show *Update available*. The request carries no data about you or your downloads. GitHub is also contacted when you click *Add to …* in setup, or open the releases page: the extension is downloaded from the project's GitHub releases.
 

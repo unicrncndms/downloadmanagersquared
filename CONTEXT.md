@@ -7,7 +7,7 @@ A download manager that fetches one file over several network interfaces at once
 ### Fetching
 
 **Interface**:
-A network adapter the file can be fetched through, such as Wi-Fi, Ethernet or a phone tether. Users see it called a "connection", since "interface" means little to them.
+A network adapter the file can be fetched through, such as Wi-Fi, Ethernet or a phone tether, over IPv4, IPv6 or both (IPv6 only with the experimental setting on). Users see it called a "connection", since "interface" means little to them.
 _Avoid_: Connection (except in user-facing text), adapter, route
 
 **Main interface**:
