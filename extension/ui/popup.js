@@ -704,10 +704,32 @@ function renderVersion(m) {
   }
 }
 
+// A newer engine release, as the engine found it on GitHub (at most once a
+// day). Dismissed, it stays away until the next release; the choice is kept
+// in this browser only.
+const DISMISSED_UPDATE = "dms.dismissedUpdate";
+function dismissedUpdate() {
+  try { return localStorage.getItem(DISMISSED_UPDATE) || ""; } catch { return ""; }
+}
+function renderUpdate(u) {
+  const note = $("updateNote");
+  const show = !!(u && u.version && u.version !== dismissedUpdate());
+  note.hidden = !show;
+  if (!show || note.dataset.version === u.version) return;
+  note.dataset.version = u.version;
+  note.replaceChildren(
+    el("span", {}, `DMS² v${u.version} is available: `, link(u.url, "see the release")),
+    iconButton("close", "Dismiss this update notice", () => {
+      try { localStorage.setItem(DISMISSED_UPDATE, u.version); } catch { /* shown again next time */ }
+      note.hidden = true;
+    }));
+}
+
 connectUI((m) => {
   latest = m;
   renderConn(m);
   renderVersion(m);
+  renderUpdate(m.connected && m.state && m.state.update);
   if (!m.connected || !m.state) {
     $("list").replaceChildren(m.notInstalled
       ? el("div", { class: "offline" },

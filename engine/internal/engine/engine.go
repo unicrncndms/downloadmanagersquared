@@ -39,6 +39,7 @@ import (
 	"downloadmanagersquared/engine/internal/rate"
 	"downloadmanagersquared/engine/internal/socks"
 	"downloadmanagersquared/engine/internal/torrent"
+	"downloadmanagersquared/engine/internal/update"
 	"downloadmanagersquared/engine/internal/vpn"
 	"downloadmanagersquared/engine/internal/winutil"
 )
@@ -125,6 +126,9 @@ type Engine struct {
 	eta      rate.ETA
 	snapshot StateEvent
 
+	upd         update.State // the last check for a newer release; under mu
+	updChecking bool         // a check is running; under mu
+
 	mapPort func(ctx context.Context, gw portmap.Gateway, port int, lifetime time.Duration) error
 	vpn     *vpn.Tunnels
 
@@ -204,6 +208,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	}
 	e := &Engine{
 		dir: dir,
+		upd: update.Load(filepath.Join(dir, "update.json")),
 		pickFolder: func(owner uintptr, start, title string) (string, bool) {
 			return winutil.PickFolder(windows.Handle(owner), start, title)
 		},
@@ -355,6 +360,7 @@ func (e *Engine) Run() {
 				e.refreshInterfaces()
 			}
 			e.tickVPN(now)
+			e.checkUpdate(now)
 			e.syncTorrentIfaces()
 			e.schedule()
 			e.queue.Save()
@@ -1433,6 +1439,7 @@ type StateEvent struct {
 	Speed      float64            `json:"speed"`
 	ETA        float64            `json:"eta"`
 	Active     int                `json:"active"`
+	Update     *UpdateView        `json:"update,omitempty"` // a newer release exists
 }
 
 func (e *Engine) updateSnapshot(dt time.Duration) {
@@ -1518,7 +1525,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	tviews := e.tunnelViewsLocked(tunnels, speeds)
 	sort.Slice(tviews, func(i, j int) bool { return tviews[i].Name < tviews[j].Name })
 	views = append(views, tviews...)
-	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, PIA: e.vpn.PIA(), Speed: total, ETA: e.eta.Seconds(), Active: active}
+	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, PIA: e.vpn.PIA(), Speed: total, ETA: e.eta.Seconds(), Active: active, Update: e.updateViewLocked()}
 }
 
 func incomingText(in incoming) string {

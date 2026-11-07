@@ -101,6 +101,8 @@
     footer button { flex: 1; }
     .version-warn { margin-top: 6px; padding: 5px 8px; border-radius: 6px; background: var(--accent-soft); font-size: 12px; }
     .version-warn[hidden] { display: none; }
+    #updateNote { display: flex; align-items: center; gap: 6px; }
+    #updateNote > span { flex: 1; }
     #addBox .check { display: flex; gap: 6px; align-items: center; font-size: 12px; }
     #addBox .check[hidden] { display: none; }
     .facts dd.lines { white-space: pre-line; }
@@ -116,6 +118,7 @@
       <span class="total num" id="total"></span>
     </div>
     <div class="version-warn" id="versionWarn" hidden></div>
+    <div class="version-warn" id="updateNote" role="status" hidden></div>
     <div class="tools">
       <button class="small" id="toggleAdd">+ Add</button>
       <input type="search" id="search" class="spacer" aria-label="Search downloads" placeholder="Search downloads">

@@ -22,7 +22,7 @@ Both halves are MIT-licensed and live in one repository: `extension/` (this add-
 
 Messages go over `runtime.connectNative("downloadmanagersquared")` to `dms-host.exe`, which relays them over a named pipe only the same Windows user can open. Nothing goes anywhere else.
 
-- `hello`: the browser's User-Agent. The engine answers with its version, settings and state.
+- `hello`: the browser's User-Agent. The engine answers with its version, settings and state. The state can carry `update` (a newer release's version and GitHub release page), which the engine learns by asking `api.github.com` once a day; the popup shows it as a notice with a link, and nothing is downloaded.
 - `add`: a download's URL, file name, the page it was started on, its Referer, the User-Agent, and the `Cookie` header Firefox sent for it. With no request to read (context menu, `downloads.onCreated`), the cookies Firefox would send for that URL in that container, filtered to the download's own site.
 - `resolved` / `resolveFailed` / `setPageUrl` / `learnEnded`: a link fetched for one connection (URL, the temporary container's cookies, Referer), or why it failed, the landing page the add-on found, and the end of a recording.
 - `recipeHosts`: the host names the add-on has recorded clicks for, so the engine knows when to offer **Record recipe**. The clicks themselves stay in the add-on.
