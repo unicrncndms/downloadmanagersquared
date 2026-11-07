@@ -73,6 +73,16 @@ function closeMenu() {
   if (openMenu) openMenu.hidden = true;
   openMenu = null;
 }
+// Below its button, pushed up and left as far as needed to stay inside the window.
+function showMenu(menu, button) {
+  menu.hidden = false;
+  openMenu = menu;
+  const b = button.getBoundingClientRect();
+  menu.style.top = Math.max(4, Math.min(b.bottom + 4, innerHeight - menu.offsetHeight - 4)) + "px";
+  menu.style.left = Math.max(4, Math.min(b.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 4)) + "px";
+}
+// A fixed menu would stay put while its row scrolls away.
+document.addEventListener("scroll", () => closeMenu(), true);
 // Escape closes it too, and gives the focus back to its "⋯" button.
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || !openMenu) return;
@@ -157,7 +167,7 @@ function makeCard(id) {
     e.stopPropagation();
     const was = !menu.hidden;
     closeMenu();
-    if (!was) { menu.hidden = false; openMenu = menu; }
+    if (!was) showMenu(menu, e.currentTarget);
   });
   const meta = el("div", { class: "meta" }, left, el("span", { class: "end" }, right, pause, resume, el("span", { class: "more" }, more, menu)));
   const sub = el("div", { class: "sub muted num" });
@@ -597,7 +607,7 @@ function makeGroupCard(gid) {
     e.stopPropagation();
     const was = !menu.hidden;
     closeMenu();
-    if (!was) { menu.hidden = false; openMenu = menu; }
+    if (!was) showMenu(menu, e.currentTarget);
   });
   const toggle = el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); open = !open; update(g); } });
   const files = el("div", { class: "group-files" });
