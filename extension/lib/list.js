@@ -206,6 +206,18 @@ function routerWarnings(interfaces) {
     `${andList(names)} go through the same router: together they are no faster than one of them.`);
 }
 
+// The address families a connection is used with, as its badge says: "IPv4",
+// "IPv6" or "IPv4 + IPv6". "" from an engine that doesn't say.
+function familyText(i) {
+  return (i.families || []).join(" + ");
+}
+
+// One hint per adapter left out because it has only IPv6 while IPv6 is off.
+function ipv6Hints(state) {
+  return ((state && state.ipv6Only) || []).map((name) =>
+    `${name} has only IPv6: turn on Enable IPv6 (experimental) to use it.`);
+}
+
 // Check lines' answer: each line's public IP, and a warning per IP shared.
 function lineResults(checks) {
   const byIP = new Map();
@@ -275,5 +287,5 @@ function addLines(text) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { addLines, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults };
+  module.exports = { addLines, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
 }

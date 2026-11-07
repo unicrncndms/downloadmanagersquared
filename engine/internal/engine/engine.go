@@ -113,6 +113,7 @@ type Engine struct {
 	resolves  map[string]resolveReq // waiting for an extension to pick them up
 	learning  map[string]*ipc.Conn  // download id -> the extension recording its recipe (Record recipe)
 	started   map[string]time.Time  // browsers started for a resolve, by exe, so not twice at once
+	ipv6Only  []string              // adapters with only IPv6, left out while IPv6 is off: Settings hints at them
 	userAgent string                // the browser's, from its latest hello; not saved
 	browser   string                // the browser's exe, from its latest hello; not saved
 
@@ -427,12 +428,16 @@ func (e *Engine) saveSettingsLocked() {
 }
 
 func (e *Engine) refreshInterfaces() {
-	list, err := netif.List()
+	e.mu.Lock()
+	ipv6 := e.settings.IPv6
+	e.mu.Unlock()
+	list, ipv6Only, err := netif.List(ipv6)
 	if err != nil {
 		log.Printf("listing interfaces: %v", err)
 		return
 	}
 	e.mu.Lock()
+	e.ipv6Only = ipv6Only
 	e.refreshInterfacesLocked(list)
 	e.mu.Unlock()
 	e.tickVPN(time.Now())
@@ -453,9 +458,9 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 			}
 			ent = &ifaceEntry{socks: srv, shaper: rate.NewShaper().Under(e.global)}
 			e.ifaces[i.ID] = ent
-			log.Printf("interface %s (%s) %s, socks port %d", i.Name, i.Description, i.IPv4, srv.Port())
+			log.Printf("interface %s (%s) %s, socks port %d", i.Name, i.Description, strings.Join(addrs(i), " "), srv.Port())
 		}
-		if ent.binding == nil || !ent.info.IPv4.Equal(i.IPv4) || ent.info.Index != i.Index || !slices.EqualFunc(ent.info.DNS, i.DNS, net.IP.Equal) {
+		if ent.binding == nil || !ent.info.IPv4.Equal(i.IPv4) || !ent.info.IPv6.Equal(i.IPv6) || ent.info.Index != i.Index || !slices.EqualFunc(ent.info.DNS, i.DNS, net.IP.Equal) {
 			if ent.binding != nil {
 				ent.binding.Close()
 			}
@@ -482,6 +487,17 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 		e.saveSettingsLocked()
 	}
 	e.applyLimitsLocked()
+}
+
+// addrs are an interface's addresses, IPv4 first.
+func addrs(i netif.Interface) []string {
+	var out []string
+	for _, ip := range []net.IP{i.IPv4, i.IPv6} {
+		if ip != nil {
+			out = append(out, ip.String())
+		}
+	}
+	return out
 }
 
 func (e *Engine) applyLimitsLocked() {
@@ -1412,18 +1428,20 @@ func (e *Engine) Remove(id string, deleteFile bool) error {
 }
 
 type IfaceView struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	IP          string  `json:"ip"`
-	Present     bool    `json:"present"`
-	Enabled     bool    `json:"enabled"`
-	VPN         bool    `json:"vpn"`
-	IsDefault   bool    `json:"isDefault"`
-	IsMain      bool    `json:"isMain"`
-	Connections int     `json:"connections"`
-	SocksPort   int     `json:"socksPort"`
-	Speed       float64 `json:"speed"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	IP          string   `json:"ip"` // IPv4, else IPv6
+	IP6         string   `json:"ip6,omitempty"`
+	Families    []string `json:"families,omitempty"` // "IPv4", "IPv6": the badge
+	Present     bool     `json:"present"`
+	Enabled     bool     `json:"enabled"`
+	VPN         bool     `json:"vpn"`
+	IsDefault   bool     `json:"isDefault"`
+	IsMain      bool     `json:"isMain"`
+	Connections int      `json:"connections"`
+	SocksPort   int      `json:"socksPort"`
+	Speed       float64  `json:"speed"`
 
 	Upload        bool   `json:"upload"`
 	UploadLimit   int64  `json:"uploadLimit"`   // bytes per second, 0 = none
@@ -1450,7 +1468,8 @@ type StateEvent struct {
 	Speed      float64            `json:"speed"`
 	ETA        float64            `json:"eta"`
 	Active     int                `json:"active"`
-	Update     *UpdateView        `json:"update,omitempty"` // a newer release exists
+	Update     *UpdateView        `json:"update,omitempty"`   // a newer release exists
+	IPv6Only   []string           `json:"ipv6Only,omitempty"` // adapters left out because they have only IPv6 and IPv6 is off
 }
 
 func (e *Engine) updateSnapshot(dt time.Duration) {
@@ -1519,8 +1538,9 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		sort.Strings(same)
 		up, down := ent.shaper.Limits()
 		views = append(views, IfaceView{
-			ID: id, Name: ent.info.Name, Description: ent.info.Description, IP: ent.info.IPv4.String(),
-			Present: ent.present, Enabled: e.enabledLocked(ent), VPN: ent.info.VPN,
+			ID: id, Name: ent.info.Name, Description: ent.info.Description, IP: ipText(ent.info.IP()), IP6: ipText(ent.info.IPv6),
+			Families: ent.info.Families(),
+			Present:  ent.present, Enabled: e.enabledLocked(ent), VPN: ent.info.VPN,
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
 			SocksPort: ent.socks.Port(), Speed: speeds[id],
 			Upload: e.uploadLocked(id), UploadLimit: up, DownloadLimit: down,
@@ -1536,7 +1556,14 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	tviews := e.tunnelViewsLocked(tunnels, speeds)
 	sort.Slice(tviews, func(i, j int) bool { return tviews[i].Name < tviews[j].Name })
 	views = append(views, tviews...)
-	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, PIA: e.vpn.PIA(), Speed: total, ETA: e.eta.Seconds(), Active: active, Update: e.updateViewLocked()}
+	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, PIA: e.vpn.PIA(), Speed: total, ETA: e.eta.Seconds(), Active: active, Update: e.updateViewLocked(), IPv6Only: e.ipv6Only}
+}
+
+func ipText(ip net.IP) string {
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
 }
 
 func incomingText(in incoming) string {

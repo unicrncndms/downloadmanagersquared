@@ -30,7 +30,7 @@ func TestListAndBind(t *testing.T) {
 	if os.Getenv("DMS_LIVE_NET") != "1" {
 		t.Skip("set DMS_LIVE_NET=1 to test this machine's real connections")
 	}
-	list, err := List()
+	list, _, err := List(false)
 	if err != nil {
 		t.Fatal(err)
 	}

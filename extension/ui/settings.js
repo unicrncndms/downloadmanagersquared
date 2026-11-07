@@ -94,6 +94,7 @@ function ifaceRow(i, tun, settings) {
 
   // What the connection is, then the few facts worth a badge.
   const badges = [
+    familyText(i) ? badge(familyText(i), "dim", i.ip6 && i.ip6 !== i.ip ? i.ip6 : undefined) : null,
     i.isDefault ? badge("Windows default") : null,
     i.vpn ? badge("System VPN", "warn") : null,
     i.incoming ? badge(i.incoming === "reachable" ? "Reachable" : "Outgoing only", i.incoming === "reachable" ? "ok" : "dim", INCOMING_TITLE[i.incoming]) : null,
@@ -116,8 +117,11 @@ function renderIfaces(state, settings) {
   const all = state.interfaces || [];
   const ifaces = all.filter((i) => !i.tunnel);
   const tunnels = new Map(all.filter((i) => i.tunnel).map((t) => [t.of, t]));
-  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort]), settings.mainInterface]);
+  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort, i.ip6, i.families]), settings.mainInterface]);
   const warnings = routerWarnings(all);
+  const hints = ipv6Hints(state);
+  $("ipv6Hint").hidden = !hints.length;
+  $("ipv6Hint").replaceChildren(...hints.map((t) => el("div", { class: "muted" }, t)));
   $("uplinkWarn").hidden = !warnings.length;
   $("uplinkWarn").replaceChildren(...warnings.map((t) => el("div", { class: "warn" }, t)));
   const body = $("ifaces");
@@ -159,6 +163,7 @@ for (const [id, [key, , parse]] of Object.entries(FIELDS)) {
 }
 $("sAuto").addEventListener("change", () => act("setAutostart", { on: $("sAuto").checked }, "Saved"));
 $("sFolder").addEventListener("change", () => act("setSettings", { folderDefault: $("sFolder").checked }, "Saved"));
+$("sIPv6").addEventListener("change", () => act("setSettings", { ipv6: $("sIPv6").checked }, $("sIPv6").checked ? "IPv6 on" : "IPv6 off"));
 
 // fillSettings shows what the engine has, except in the field being edited.
 function fillSettings(s) {
@@ -166,6 +171,8 @@ function fillSettings(s) {
     if (document.activeElement !== $(id)) $(id).value = show(s);
   }
   $("sFolder").checked = !!s.folderDefault;
+  $("sIPv6").checked = !!s.ipv6;
+
 }
 
 // --- VPN provider ---

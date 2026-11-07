@@ -105,7 +105,16 @@ const FIXTURES = {
   uplink: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
     state: { ...STATE, interfaces: IFACES.map((i) => (i.id === "eth" ? { ...i, sameRouter: ["Wi-Fi"] } : i.id === "wifi" ? { ...i, sameRouter: ["Ethernet"] } : i)) },
     lines: [{ id: "eth", name: "Ethernet", ip: "203.0.113.7" }, { id: "wifi", name: "Wi-Fi", ip: "203.0.113.7" }] },
-  metalink: { connected: true, state: { ...STATE, downloads: METALINK_DOWNLOADS }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
+  // IPv6 on: Wi-Fi is dual-stack, a phone tether has only IPv6.
+  ipv6: { connected: true, settings: { ...SETTINGS, ipv6: true }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
+    state: { ...STATE, interfaces: [
+      ...IFACES.map((i) => (i.id === "wifi" ? { ...i, ip6: "2a02:2c60:f110:a80:1e29:3239:c102:ce4a", families: ["IPv4", "IPv6"] } : i.tunnel ? i : { ...i, families: ["IPv4"] })),
+      { id: "phone", name: "Phone", description: "Remote NDIS", ip: "2a00:20:6000::42", ip6: "2a00:20:6000::42", families: ["IPv6"], present: true, enabled: true,
+        connections: 4, socksPort: 50005, speed: 1.3e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" }] } },
+  // IPv6 off, with an adapter that has only IPv6: the hint.
+  ipv6hint: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", state: { ...STATE, ipv6Only: ["Phone"] } },
+  metalink: { connected: true,
+ state: { ...STATE, downloads: METALINK_DOWNLOADS }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   empty: { connected: true, state: { ...STATE, downloads: [], active: 0, speed: 0 }, settings: SETTINGS, autostart: true, recipes: {}, engineVersion: "0.3.0" },
   offline: { connected: false, error: "engine disconnected", state: null, settings: null, recipes: RECIPES },
   notInstalled: { connected: false, notInstalled: true, error: "No such native application downloadmanagersquared", state: null, settings: null, recipes: {} },

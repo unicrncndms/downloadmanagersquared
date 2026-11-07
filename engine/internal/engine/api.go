@@ -83,6 +83,7 @@ type settingsPatch struct {
 	VPNTorrent         *string  `json:"vpnTorrent"`
 	VPNProvider        *string  `json:"vpnProvider"`
 	FolderDefault      *bool    `json:"folderDefault"`
+	IPv6               *bool    `json:"ipv6"`
 }
 
 type folderParams struct {
@@ -391,7 +392,13 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			if p.FolderDefault != nil {
 				s.FolderDefault = *p.FolderDefault
 			}
+			if p.IPv6 != nil {
+				s.IPv6 = *p.IPv6
+			}
 		})
+		if p.IPv6 != nil {
+			e.refreshInterfaces() // IPv6-only interfaces come or go, the others get new bindings
+		}
 		// The VPN modes apply to every download of that type, not only new ones.
 		if p.VPNHTTP != nil {
 			e.setVPNAll(false, s.VPNHTTP)

@@ -41,6 +41,7 @@ type Settings struct {
 	VPNTorrent         paths.Mode                `json:"vpnTorrent"`  // the same for a torrent
 	PIARegion          string                    `json:"piaRegion"`   // "" = the lowest latency
 	VPNProvider        string                    `json:"vpnProvider"` // the settings page's provider choice: "", "conf" or "pia"
+	IPv6               bool                      `json:"ipv6"`        // Enable IPv6 (experimental); off: IPv4 only, no AAAA lookups, no IPv6 sockets
 
 	// Download as folder
 	FolderDefault bool     `json:"folderDefault"`        // new .zip downloads are one

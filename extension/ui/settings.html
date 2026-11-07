@@ -99,7 +99,10 @@
         </div>
       </div>
       <div id="uplinkWarn" class="uplink" hidden></div>
+      <div id="ipv6Hint" class="uplink" hidden></div>
       <label class="follow"><input type="checkbox" id="followWindows"> Let Windows pick the main connection</label>
+      <label class="follow"><input type="checkbox" id="sIPv6"> Enable IPv6 (experimental)<span class="info" tabindex="0" data-tip="Off by default. On: a connection with only IPv6 (some phone tethers) is used too, and the others may use IPv6 to reach servers that have only IPv6. Not yet tested on a real mobile network with NAT64."></span></label>
+
       <div class="row-actions"><button id="refreshIfaces">Look for connections again</button>
         <button id="checkLines">Check lines</button><span class="info" tabindex="0" data-tip="Asks a public STUN server (stun.cloudflare.com) through each connection which public IP it comes from. Two with the same IP share one line to the internet. Only sent when you click."></span></div>
       <div id="lineResult" class="uplink" hidden></div>

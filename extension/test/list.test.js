@@ -206,3 +206,13 @@ test("a torrent that finishes seeding isn't announced a second time", () => {
   let r = announcements(new Map([["t", "seeding"]]), [dl("t", "completed", { kind: "torrent", filename: "t" })]);
   assert.deepEqual(r.texts, []);
 });
+
+test("each connection's badge names its families; IPv6-only adapters left out get a hint", () => {
+  const { familyText, ipv6Hints } = require("../lib/list.js");
+  assert.equal(familyText({ families: ["IPv4"] }), "IPv4");
+  assert.equal(familyText({ families: ["IPv6"] }), "IPv6");
+  assert.equal(familyText({ families: ["IPv4", "IPv6"] }), "IPv4 + IPv6");
+  assert.equal(familyText({}), ""); // an older engine: no badge
+  assert.deepEqual(ipv6Hints({ ipv6Only: ["Phone"] }), ["Phone has only IPv6: turn on Enable IPv6 (experimental) to use it."]);
+  assert.deepEqual(ipv6Hints({}), []);
+});
