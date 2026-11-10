@@ -435,16 +435,6 @@ func (d *Download) wantTailLocked(fr *folderRun) bool {
 	return false
 }
 
-// onDisk: none of [start, end) is missing.
-func onDisk(missing []Range, start, end int64) bool {
-	for _, r := range missing {
-		if r.Start < end && start < r.End {
-			return false
-		}
-	}
-	return true
-}
-
 func (d *Download) folderLoop(ctx context.Context, fr *folderRun) {
 	defer func() {
 		d.mu.Lock()
@@ -704,20 +694,6 @@ func (d *Download) folderRecord(fr *folderRun, res archive.Result) error {
 	return err
 }
 
-// mergeRanges sorts ranges and joins those that touch.
-func mergeRanges(rs []Range) []Range {
-	slices.SortFunc(rs, func(a, b Range) int { return cmp.Compare(a.Start, b.Start) })
-	out := rs[:0]
-	for _, r := range rs {
-		if n := len(out); n > 0 && r.Start <= out[n-1].End {
-			out[n-1].End = max(out[n-1].End, r.End)
-			continue
-		}
-		out = append(out, r)
-	}
-	return out
-}
-
 // thousands writes n with commas: 1,280.
 func thousands(n int) string {
 	s := fmt.Sprint(n)
@@ -768,26 +744,4 @@ func (d *Download) reclaimLocked(a *archive.Archive) {
 	for _, r := range lost {
 		d.refetchLocked(r)
 	}
-}
-
-// subtractRanges is rs without the bytes in cut. rs is left alone.
-func subtractRanges(rs, cut []Range) []Range {
-	out := slices.Clone(rs)
-	for _, c := range cut {
-		var next []Range
-		for _, r := range out {
-			if c.End <= r.Start || r.End <= c.Start {
-				next = append(next, r)
-				continue
-			}
-			if r.Start < c.Start {
-				next = append(next, Range{r.Start, c.Start})
-			}
-			if c.End < r.End {
-				next = append(next, Range{c.End, r.End})
-			}
-		}
-		out = next
-	}
-	return out
 }

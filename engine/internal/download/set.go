@@ -599,15 +599,6 @@ func partsMissing(gone []int) string {
 	return "Parts " + strings.Join(s[:len(s)-1], ", ") + " and " + s[len(s)-1] + " missing"
 }
 
-func onDiskA(missing []archive.Range, start, end int64) bool {
-	for _, r := range missing {
-		if r.Start < end && start < r.End {
-			return false
-		}
-	}
-	return true
-}
-
 // follow has every part take part 1's switch and folder: the Set is one
 // download as folder.
 func (s *Set) follow(p1 partInfo, members map[int]partInfo) {
@@ -721,18 +712,6 @@ func (d *Download) refetch(r Range) {
 	d.env.Changed(d)
 }
 
-func intersectRanges(a, b []Range) []Range {
-	var out []Range
-	for _, x := range a {
-		for _, y := range b {
-			if lo, hi := max(x.Start, y.Start), min(x.End, y.End); lo < hi {
-				out = append(out, Range{lo, hi})
-			}
-		}
-	}
-	return out
-}
-
 // record saves what Extract did: the blocks done on part 1, the bytes freed
 // on the part they are in, and wrong blocks fetched again.
 func (s *Set) record(run *setRun, members map[int]partInfo, res archive.Result) {
@@ -808,14 +787,6 @@ func (r *setRun) arcCovers(i int) bool {
 	}
 	// The list of files sits at the end of the last part: once read, it isn't needed again.
 	return true
-}
-
-func sumRanges(rs []Range) int64 {
-	var n int64
-	for _, r := range rs {
-		n += r.End - r.Start
-	}
-	return n
 }
 
 // finish deletes every part's .part: all is extracted.
