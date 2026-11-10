@@ -1,6 +1,7 @@
 "use strict";
 
 // Connection to the native engine through the dms-host native-messaging shim.
+const TOO_LONG = "The downloads list is too long for Firefox to show, so this one is out of date. Clear finished downloads in the DMS² window (its tray icon).";
 const Engine = {
   port: null,
   connected: false,
@@ -61,8 +62,17 @@ const Engine = {
         this.lastError = "engine could not start: " + msg.data;
         return;
       }
+      if (msg.event === "tooLong") {
+        // dms-host dropped a message Firefox wouldn't take (over 1 MB): in
+        // practice the state, with thousands of downloads listed.
+        if (this.connected && this.lastError !== TOO_LONG) this.setConnected(true, TOO_LONG);
+        return;
+      }
       if (msg.event === "quit") this.quit = true;
-      if (msg.event === "state") this.state = msg.data;
+      if (msg.event === "state") {
+        this.state = msg.data;
+        if (this.lastError === TOO_LONG) this.lastError = "";
+      }
       if (msg.event === "settings") this.settings = msg.data;
       this.emit(msg.event, msg.data);
       return;

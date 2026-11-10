@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -140,6 +141,8 @@ type Engine struct {
 
 	quit     chan struct{}
 	quitOnce sync.Once
+	running  atomic.Bool   // Run was called
+	ran      chan struct{} // closed when Run returns
 	quitReq  chan struct{} // closed when a client asks the engine to quit
 	reqOnce  sync.Once
 }
@@ -228,6 +231,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		started:  map[string]time.Time{},
 		mapPort:  portmap.Map,
 		quit:     make(chan struct{}),
+		ran:      make(chan struct{}),
 		quitReq:  make(chan struct{}),
 	}
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
@@ -348,6 +352,8 @@ func readStates[S interface{ download.State | torrent.State }](dir string) (out 
 
 // Run serves the API and drives the queue until Shutdown.
 func (e *Engine) Run() {
+	e.running.Store(true)
+	defer close(e.ran)
 	if e.ln != nil {
 		go ipc.Serve(e.ln, e)
 	}
@@ -356,6 +362,7 @@ func (e *Engine) Run() {
 	defer t.Stop()
 	last := time.Now()
 	n := 0
+	var sent []byte // the state event last sent
 	for {
 		select {
 		case <-e.quit:
@@ -373,7 +380,12 @@ func (e *Engine) Run() {
 			e.queue.Save()
 			e.updateSnapshot(now.Sub(last))
 			last = now
-			e.broadcast("state", e.Snapshot())
+			// Only a state that changed: idle, the clients redraw nothing. A new
+			// client asks for the state itself (hello, getState).
+			if b, err := ipc.EncodeEvent("state", e.Snapshot()); err == nil && !bytes.Equal(b, sent) {
+				sent = b
+				e.sendAll(b)
+			}
 		}
 	}
 }
@@ -391,6 +403,11 @@ func (e *Engine) QuitByUser() { e.broadcast("quit", nil) }
 func (e *Engine) Shutdown() {
 	e.quitOnce.Do(func() {
 		close(e.quit)
+		if e.running.Load() {
+			// A tick under way would start downloads again after they are
+			// stopped, and use the sessions after they are closed.
+			<-e.ran
+		}
 		e.setsMu.Lock()
 		for _, s := range e.sets {
 			s.Stop() // first: what they freed is saved with the parts
@@ -1005,21 +1022,26 @@ func (e *Engine) extensionForLocked(exe string) *ipc.Conn {
 }
 
 func (e *Engine) broadcast(name string, data any) {
+	if b, err := ipc.EncodeEvent(name, data); err == nil {
+		e.sendAll(b)
+	}
+}
+
+// sendAll writes an encoded event to every client.
+func (e *Engine) sendAll(b []byte) {
 	e.mu.Lock()
 	cs := make([]*ipc.Conn, 0, len(e.clients))
 	for c := range e.clients {
 		cs = append(cs, c)
 	}
 	e.mu.Unlock()
-	if len(cs) == 0 {
-		return
-	}
-	b, err := ipc.EncodeEvent(name, data)
-	if err != nil {
-		return
-	}
 	for _, c := range cs {
-		c.WriteRaw(b)
+		if err := c.WriteRaw(b); err != nil {
+			// A client that takes nothing for 10 s would hold up every tick by
+			// that long: it is hung up on, and connects again when it can.
+			log.Printf("dropping a client that doesn't take events: %v", err)
+			c.Close()
+		}
 	}
 }
 

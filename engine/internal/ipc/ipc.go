@@ -72,6 +72,9 @@ func (c *Conn) WriteRaw(line []byte) error {
 	return err
 }
 
+// Close hangs up on the client: its serving ends as if it had left.
+func (c *Conn) Close() error { return c.c.Close() }
+
 // NewConn wraps an accepted connection; Serve does this for each client, and
 // tests for one end of a net.Pipe.
 func NewConn(c net.Conn) *Conn { return &Conn{c: c} }

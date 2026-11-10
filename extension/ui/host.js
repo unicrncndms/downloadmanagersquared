@@ -102,7 +102,9 @@ function windowHost(win, bridge) {
     call,
     subscribe(fn) {
       subscribers.add(fn);
-      fn({ ...latest });
+      // Nothing before the engine's first answer: the page would draw
+      // "Engine offline" for a moment each time it opens.
+      if (latest.connected || latest.error) fn({ ...latest });
       if (!connecting) connect();
       return () => subscribers.delete(fn);
     },

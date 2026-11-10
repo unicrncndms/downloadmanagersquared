@@ -101,7 +101,7 @@ func TestTheWindowsClientGetsBroadcastsButNoResolves(t *testing.T) {
 
 	w.send(t, 1, "getState", nil) // the pipe is served: requests are answered
 	w.answer(t, 1)
-	e.broadcast("state", e.Snapshot()) // as Run does every second
+	e.broadcast("state", e.Snapshot()) // as Run does each second the state changed
 	if !w.event("state", 2*time.Second) {
 		t.Fatal("the window didn't get the state broadcast")
 	}
@@ -158,5 +158,26 @@ func TestGetAutostartAndVersionAnswer(t *testing.T) {
 	}
 	if on != winutil.Autostart() {
 		t.Fatalf("getAutostart is %v, want %v", on, winutil.Autostart())
+	}
+}
+
+// An idle engine sends its state once, not every second: nothing changed, so
+// the pages have nothing to redraw.
+func TestAnUnchangedStateIsNotSentAgain(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	w := dialWindow(t, e)
+	w.send(t, 1, "getState", nil)
+	w.answer(t, 1) // connected before the first tick
+	go e.Run()
+	n := 0
+	for w.event("state", 3500*time.Millisecond) {
+		n++
+	}
+	if n != 1 {
+		t.Fatalf("got %d state events from an idle engine in three ticks, want the first only", n)
 	}
 }

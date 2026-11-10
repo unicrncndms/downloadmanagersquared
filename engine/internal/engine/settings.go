@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
 	"downloadmanagersquared/engine/internal/atomicfile"
@@ -52,6 +53,20 @@ type Settings struct {
 	// theme's as the extension last saw it, else the pages' own.
 	Accent      string `json:"accent,omitempty"`      // "" = follow Firefox
 	ThemeAccent string `json:"themeAccent,omitempty"` // "" = Firefox's theme has none
+}
+
+// clone is a copy that shares nothing with s, to read (and encode) after the
+// engine's lock is released: encoding the engine's own map while an interface
+// is added to it would stop the process.
+func (s Settings) clone() Settings {
+	ifs := make(map[string]*IfaceSettings, len(s.Interfaces))
+	for id, is := range s.Interfaces {
+		c := *is
+		ifs[id] = &c
+	}
+	s.Interfaces = ifs
+	s.FolderDirs = slices.Clone(s.FolderDirs)
+	return s
 }
 
 var hexColor = regexp.MustCompile(`^#[0-9a-f]{6}$`)

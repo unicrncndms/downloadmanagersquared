@@ -61,13 +61,14 @@ func TestAnOversizedFrameFromFirefoxIsSkipped(t *testing.T) {
 	}
 }
 
-func TestALineTooLongForFirefoxIsSkipped(t *testing.T) {
+func TestALineTooLongForFirefoxIsSkippedAndSaidSo(t *testing.T) {
 	var in bytes.Buffer
 	in.WriteString(`{"event":"big","data":"` + strings.Repeat("x", maxToFirefox) + "\"}\n")
 	in.WriteString(`{"id":1,"result":"ok"}` + "\n")
 	var out bytes.Buffer
 	relayOut(&in, &out)
-	if want := frame([]byte(`{"id":1,"result":"ok"}`)); !bytes.Equal(out.Bytes(), want) {
+	want := append(frame([]byte(`{"event":"tooLong"}`)), frame([]byte(`{"id":1,"result":"ok"}`))...)
+	if !bytes.Equal(out.Bytes(), want) {
 		t.Fatalf("relayed %q", out.Bytes())
 	}
 }

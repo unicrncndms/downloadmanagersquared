@@ -190,9 +190,19 @@ func (q *Queue) Resume(id string) error {
 }
 
 func (q *Queue) PauseAll() {
+	q.stopAll(func(Entry) bool { return true }, download.StatusPaused)
+}
+
+// stopAll stops the entries which picks, at once: each Stop waits for its
+// own connections to end, so one after another the waits would add up.
+func (q *Queue) stopAll(which func(Entry) bool, as download.Status) {
+	var wg sync.WaitGroup
 	for _, e := range q.List() {
-		e.Stop(download.StatusPaused)
+		if which(e) {
+			wg.Go(func() { e.Stop(as) })
+		}
 	}
+	wg.Wait()
 }
 
 func (q *Queue) ResumeAll() {
@@ -296,10 +306,8 @@ func (q *Queue) Save() {
 
 // Close stops every running entry, to queue again at the next start, and saves them all.
 func (q *Queue) Close() {
+	q.stopAll(Entry.Running, download.StatusQueued)
 	for _, e := range q.List() {
-		if e.Running() {
-			e.Stop(download.StatusQueued)
-		}
 		q.MarkDirty(e.ID())
 	}
 	q.Save()

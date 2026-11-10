@@ -309,3 +309,18 @@ test("the accent of Firefox's theme goes to the engine on connecting and when th
   await b.settle();
   assert.deepEqual(sent(), ["#ff0080", ""], "the default theme clears it");
 });
+
+test("a message too long for Firefox, dropped by dms-host, is said until a state comes through again", async () => {
+  const b = load();
+  await b.settle();
+  b.connect();
+  let said = 0;
+  b.Engine.on("connection", () => said++);
+  b.fire("port.onMessage", { event: "tooLong" });
+  b.fire("port.onMessage", { event: "tooLong" }); // every second, while it lasts
+  assert.match(b.Engine.lastError, /too long for Firefox/);
+  assert.equal(b.Engine.connected, true);
+  assert.equal(said, 1);
+  b.fire("port.onMessage", { event: "state", data: { downloads: [] } });
+  assert.equal(b.Engine.lastError, "");
+});

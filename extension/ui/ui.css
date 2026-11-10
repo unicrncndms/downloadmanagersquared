@@ -47,8 +47,12 @@ button {
   cursor: pointer;
 }
 button:hover { border-color: var(--accent); }
+button:active { background: var(--accent-soft); }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-button.small { padding: 2px 8px; font-size: 12px; }
+button.primary:active { background: var(--accent); filter: brightness(.9); }
+button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+button.small { padding: 2px 8px; font-size: 12px; min-height: 24px; }
+input[type=checkbox], input[type=radio] { width: 16px; height: 16px; accent-color: var(--accent); }
 input[type=text], input[type=password], input[type=number], input[type=url], select, textarea {
   border: 1px solid var(--line);
   background: var(--panel);
@@ -93,6 +97,9 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
   width: max-content; max-width: min(520px, calc(100vw - 32px)); line-height: 1.45;
 }
 .toast.show { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .bar > div, .toast, .info::after { transition: none; }
+}
 /* Read by screen readers, not shown. */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 

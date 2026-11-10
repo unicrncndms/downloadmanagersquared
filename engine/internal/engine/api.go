@@ -364,7 +364,7 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 	case "getSettings":
 		e.mu.Lock()
 		defer e.mu.Unlock()
-		return e.settings, nil
+		return e.settings.clone(), nil
 	case "setSettings":
 		p, err := decode[settingsPatch](raw)
 		if err != nil {
@@ -545,7 +545,7 @@ func (e *Engine) applySettings(f func(*Settings)) Settings {
 	e.settings.normalize()
 	e.saveSettingsLocked()
 	e.applyLimitsLocked()
-	s := e.settings
+	s := e.settings.clone()
 	e.mu.Unlock()
 	e.tickVPN(time.Now()) // a tunnel follows its interface being switched off or on
 	e.syncTorrentIfaces() // enabled interfaces, upload or the main one may have changed
@@ -573,7 +573,7 @@ func (e *Engine) hello(c *ipc.Conn, p helloParams) hello {
 			pending = append(pending, r)
 		}
 	}
-	h := hello{Settings: e.settings, State: e.snapshot, Version: Version}
+	h := hello{Settings: e.settings.clone(), State: e.snapshot, Version: Version}
 	e.mu.Unlock()
 	h.Autostart = winutil.Autostart()
 

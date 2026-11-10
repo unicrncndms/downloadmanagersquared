@@ -154,8 +154,7 @@ test("the window's subscribe sends the extension's message shape, connected once
   const host = pickHost(f.win);
   const got = [];
   host.subscribe((m) => got.push(m));
-  assert.equal(got.length, 1);
-  assert.equal(got[0].connected, false);
+  assert.equal(got.length, 0); // nothing before the engine answers: no "Engine offline" for a moment
   assert.deepEqual(f.sent.map((r) => r.method).sort(), ["getAutostart", "getSettings", "getState", "version"]);
   f.answer("getState", { downloads: [] });
   f.answer("getSettings", { maxParallel: 3 });
@@ -166,6 +165,11 @@ test("the window's subscribe sends the extension's message shape, connected once
     connected: true, error: "", notInstalled: false, engineVersion: "1.4.0",
     state: { downloads: [] }, settings: { maxParallel: 3 }, autostart: true, recipes: null,
   });
+  assert.equal(got.length, 1);
+  const later = [];
+  host.subscribe((m) => later.push(m)); // a later subscriber gets what is known at once
+  assert.equal(later.length, 1);
+  assert.equal(later[0].connected, true);
   assert.equal(host.version, "1.4.0");
 });
 

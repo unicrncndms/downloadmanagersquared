@@ -633,3 +633,17 @@ func TestTheAccentIsAColorOrNothing(t *testing.T) {
 		}
 	}
 }
+
+// Settings handed out to be encoded share nothing with the engine's own:
+// a write to the engine's map while they are encoded would stop the process.
+func TestSettingsCloneSharesNothing(t *testing.T) {
+	on := true
+	s := Settings{Interfaces: map[string]*IfaceSettings{"eth": {Name: "Ethernet", Enabled: &on}}, FolderDirs: []string{`C:\a`}}
+	c := s.clone()
+	s.Interfaces["wifi"] = &IfaceSettings{}
+	s.Interfaces["eth"].Name = "renamed"
+	s.FolderDirs[0] = `C:\b`
+	if len(c.Interfaces) != 1 || c.Interfaces["eth"].Name != "Ethernet" || !*c.Interfaces["eth"].Enabled || c.FolderDirs[0] != `C:\a` {
+		t.Fatalf("the clone changed with the original: %+v", c)
+	}
+}

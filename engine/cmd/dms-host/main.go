@@ -82,12 +82,16 @@ func relayIn(from io.Reader, to io.Writer, browser string) {
 
 // relayOut passes the engine's lines to Firefox as messages, until either side
 // closes. A line too long for Firefox is skipped rather than costing the
-// connection.
+// connection, and Firefox is told so: a state too long would otherwise leave
+// the pages showing an old list with nothing to say why.
 func relayOut(from io.Reader, to io.Writer) {
 	r := bufio.NewReaderSize(from, 64<<10)
 	for {
 		line, err := ipc.ReadLine(r, maxToFirefox)
 		if errors.Is(err, ipc.ErrTooLong) {
+			if writeFrame(to, []byte(`{"event":"tooLong"}`)) != nil {
+				return
+			}
 			continue
 		}
 		if err != nil {

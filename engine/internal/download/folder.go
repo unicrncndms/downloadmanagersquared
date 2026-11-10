@@ -231,6 +231,15 @@ func (d *Download) setFolderLocked(on bool) error {
 // called off, and the tail is no longer fetched first.
 func (d *Download) folderOffLocked() {
 	f := d.st.Folder
+	if p := d.parked; p != nil {
+		// Nothing starts it again with the mode off: close it, so its
+		// decompressor and its files in the output folder are let go.
+		d.parked = nil
+		p.x.Close()
+		if p.file != nil {
+			p.file.Close()
+		}
+	}
 	if f.Out != "" && os.Remove(f.Out) == nil {
 		f.Out = ""
 	}

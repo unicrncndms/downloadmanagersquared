@@ -242,6 +242,7 @@ func TestResumeLeavesFinishedEntriesAlone(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	d.Stop(StatusPaused)
+	d.dropParked() // d2 runs in its place, as after an engine restart
 	st := d.State()
 	if len(st.Folder.Done) >= len(files) {
 		t.Fatal("finished before it could be stopped")

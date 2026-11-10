@@ -60,7 +60,7 @@ function vpnCell(i, tun) {
   // The port the VPN provider forwards to this tunnel, where it can't tell DMS² itself.
   let port = null;
   if (!pia) {
-    port = el("input", { type: "number", class: "port", min: 1, max: 65535, placeholder: "Port", title: "A port your VPN provider forwards to this connection, for torrent peers to connect in (empty: none, or found by NAT-PMP). AirVPN: leave the port's Local field empty, and with several connections give each its own port, linked to that connection's device.", value: tun.forwardedPort || "" });
+    port = el("input", { type: "number", class: "port", min: 1, max: 65535, placeholder: "Port", "aria-label": `Forwarded port: ${i.name}`, title: "A port your VPN provider forwards to this connection, for torrent peers to connect in (empty: none, or found by NAT-PMP). AirVPN: leave the port's Local field empty, and with several connections give each its own port, linked to that connection's device.", value: tun.forwardedPort || "" });
     port.addEventListener("change", () => {
       const n = Number(port.value) || 0;
       act("setForwardedPort", { iface: i.id, port: n }, n ? `Forwarded port ${n} set` : "Forwarded port cleared");
@@ -204,13 +204,26 @@ function showProvider(p) {
 
 $("vpnProvider").addEventListener("change", async () => {
   const p = $("vpnProvider").value;
+  // Asked in the page, like removing a download: no browser dialog.
   if (piaSignedIn && p !== "pia") {
-    if (!confirm("Sign out of Private Internet Access? Its tunnels will close.")) return showProvider("pia");
-    await act("clearPia", {}, "Signed out of PIA");
+    $("piaOut").hidden = false;
+    return;
   }
   showProvider(p);
   await act("setSettings", { vpnProvider: p });
 });
+$("piaOutNo").onclick = () => {
+  $("piaOut").hidden = true;
+  showProvider("pia");
+};
+$("piaOutYes").onclick = async () => {
+  const p = $("vpnProvider").value;
+  $("piaOut").hidden = true;
+  $("vpnProvider").focus(); // while it has the focus, renderPIA leaves the choice alone
+  await act("clearPia", {}, "Signed out of PIA");
+  showProvider(p);
+  await act("setSettings", { vpnProvider: p });
+};
 
 // --- PIA ---
 
@@ -264,13 +277,29 @@ function renderRecipes(recipes) {
     box.replaceChildren(el("div", { class: "muted" }, "None yet. The first time a site needs it, DMS² asks you to click through once."));
     return;
   }
-  box.replaceChildren(el("div", { class: "conn-scroll" }, el("table", { style: "width:100%;border-collapse:collapse;font-size:13px" },
-    el("tbody", {}, hosts.map((h) => el("tr", { style: "border-top:1px solid var(--line)" },
-      el("td", { style: "padding:6px 8px 6px 0" }, h),
-      el("td", { class: "muted", style: "padding:6px 8px" }, recipes[h].steps.map((s) => s.text || s.tag).join(" → ") || "no clicks (the download starts by itself)"),
-      el("td", { class: "muted", style: "padding:6px 8px;white-space:nowrap" }, new Date(recipes[h].learned).toLocaleDateString()),
-      el("td", { style: "padding:6px 0;text-align:right" }, el("button", { class: "small", onclick: () => Host.forgetRecipe(h).then(() => toast("Forgotten")) }, "Forget"))))))));
+  box.replaceChildren(el("div", { class: "conn-scroll" }, el("table", { class: "recipes" },
+    el("tbody", {}, hosts.map((h) => el("tr", {},
+      el("td", {}, h),
+      el("td", { class: "muted" }, recipes[h].steps.map((s) => s.text || s.tag).join(" → ") || "no clicks (the download starts by itself)"),
+      el("td", { class: "muted when" }, new Date(recipes[h].learned).toLocaleDateString()),
+      el("td", {}, el("button", { class: "small", onclick: () => Host.forgetRecipe(h).then(() => toast("Forgotten")) }, "Forget"))))))));
 }
+
+// --- the header's links: the section being read is marked ---
+
+const navLinks = [...document.querySelectorAll("header nav a")];
+function markSection() {
+  let cur = navLinks[0];
+  for (const a of navLinks) if ($(a.hash.slice(1)).getBoundingClientRect().top <= 90) cur = a;
+  // The last sections are too short to reach the top.
+  if (scrollY > 0 && innerHeight + scrollY >=document.documentElement.scrollHeight - 2) cur = navLinks[navLinks.length - 1];
+  for (const a of navLinks) {
+    if (a === cur) a.setAttribute("aria-current", "location");
+    else a.removeAttribute("aria-current");
+  }
+}
+addEventListener("scroll", markSection, { passive: true });
+markSection();
 
 // --- wiring ---
 

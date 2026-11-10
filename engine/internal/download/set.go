@@ -196,10 +196,17 @@ func (s *Set) loop(ctx context.Context) {
 	}()
 	t := time.NewTicker(200 * time.Millisecond)
 	defer t.Stop()
+	logged := "" // the error last logged: one that stays is tried again five times a second
 	for {
 		more, err := s.step(ctx, run)
+		if err == nil {
+			logged = ""
+		}
 		if err != nil && ctx.Err() == nil {
-			log.Printf("set %s: %v", s.set, err)
+			if err.Error() != logged {
+				logged = err.Error()
+				log.Printf("set %s: %v", s.set, err)
+			}
 			run.note = err.Error()
 			if run.parts != nil {
 				run.close()

@@ -133,9 +133,42 @@ function iconButton(name, title, onclick) {
   return el("button", { class: "icon", title, "aria-label": title, onclick }, icon(name));
 }
 
-function makeCard(id) {
+// fresh rebuilds node's children only when what they show (sig) changed:
+// rebuilt every second, text in them couldn't be selected to copy.
+const shownSig = new WeakMap();
+function fresh(node, sig, build) {
+  const s = JSON.stringify(sig);
+  if (shownSig.get(node) === s) return;
+  shownSig.set(node, s);
+  node.replaceChildren(...build());
+}
+
+// makeLine is a finished download before it is ever opened: only its line.
+// Its card (makeCard, about a hundred elements) is built when open is called:
+// building one for each of thousands of finished downloads took seconds.
+function makeLine(id, open) {
+  const name = el("span", { class: "name", title: "Open this download", onclick: open });
+  pressable(name, true, false);
+  const size = el("span", { class: "muted num size" });
+  const show = iconButton("folder", "Show in folder", () => act("showInFolder", { id }));
+  const drop = iconButton("close", "Remove from list (files stay)", () => act("remove", { id, deleteFile: false }, "Removed from list"));
+  const root = el("div", { class: "card line" }, el("div", { class: "top" }, name, size, show, drop));
+  let sig = "";
+  function update(d) {
+    const can = !!(d.actions || {}).showInFolder;
+    const s = JSON.stringify([d.filename, d.url, d.size, can]);
+    if (s === sig) return;
+    sig = s;
+    name.textContent = d.filename || d.url;
+    size.textContent = d.size > 0 ? fmtBytes(d.size) : "";
+    show.hidden = !can;
+  }
+  return { root, update };
+}
+
+// expanded: a finished download opened back into its card.
+function makeCard(id, expanded = false) {
   let d = null; // the download as last shown
-  let expanded = false; // a finished download opened back into its card
 
   const name = el("span", { class: "name", title: "" });
   const status = el("span", { class: "badge" });
@@ -359,11 +392,16 @@ function makeCard(id) {
     editChecks(false);
   }
 
+  let lineSig = ""; // the finished line as last drawn
   function update(next) {
     d = next;
     const torrent = d.kind === "torrent";
     const done = finished(d);
     const line = done && !expanded;
+    // A finished line never changes: with thousands listed, redrawing each every second adds up.
+    const sig = line ? JSON.stringify(d) : "";
+    if (line && sig === lineSig) return;
+    lineSig = sig;
     root.classList.toggle("line", line);
     name.textContent = d.filename || d.url;
     name.title = done ? (expanded ? "Fold back into a line" : "Open this download") : d.filename || d.url;
@@ -451,7 +489,7 @@ function makeCard(id) {
         moveErr.hidden = !fv.move.error;
       }
       foldFacts.hidden = !fv.facts.length;
-      foldFacts.replaceChildren(...fv.facts.flatMap(([k, v]) =>
+      fresh(foldFacts, fv.facts, () => fv.facts.flatMap(([k, v]) =>
         [el("dt", {}, k), el("dd", { class: k === "Renamed" ? "lines" : "" }, v)]));
     }
     wording = removeWording(d);
@@ -497,13 +535,13 @@ function makeCard(id) {
     ];
     // A link stays on one line, cut short; all of it shows on hover, and the
     // ⋯ menu copies it.
-    fileFacts.replaceChildren(...facts.filter(([, v]) => v).flatMap(([k, v]) =>
+    fresh(fileFacts, facts, () => facts.filter(([, v]) => v).flatMap(([k, v]) =>
       [el("dt", {}, k), el("dd", k.endsWith("link") ? { class: "mono one-line", title: v } : { class: k === "Info hash" ? "mono" : "" }, v)]));
     fileSection.hidden = !fileFacts.children.length;
 
     const mirrors = mirrorRows(d, (ifc) => ifaceName(ifc, latest.state, latest.settings));
     mirrorSection.hidden = !mirrors.length;
-    mirrorList.replaceChildren(...mirrors.flatMap((m) => [
+    fresh(mirrorList, mirrors, () => mirrors.flatMap((m) => [
       el("span", { class: "mono one-line", title: m.url }, m.host),
       m.dropped ? el("span", { class: "badge bad" }, "Dropped") : el("span", { class: "muted" }, m.users.join(", ") || "unused"),
       m.dropped ? el("div", { class: "why" }, m.dropped) : null,
@@ -514,7 +552,8 @@ function makeCard(id) {
 
     checkSection.hidden = torrent;
     if (!torrent && checkForm.hidden) {
-      checkFacts.replaceChildren(...[["Landing page", d.pageUrl], ["SHA-256", d.sha256], ["MD5", d.md5]].flatMap(([k, v]) =>
+      const checks = [["Landing page", d.pageUrl], ["SHA-256", d.sha256], ["MD5", d.md5]];
+      fresh(checkFacts, checks, () => checks.flatMap(([k, v]) =>
         [el("dt", {}, k), el("dd", !v ? { class: "muted" } : k === "Landing page" ? { class: "mono one-line", title: v } : { class: "mono" }, v || "none")]));
     }
   }
@@ -537,7 +576,7 @@ function makeCard(id) {
       }
       for (const n of [r.name, r.state, r.info, r.speed, r.why]) place(grid, n, k++);
       r.name.textContent = ifaceName(ifc, latest.state, latest.settings);
-      r.state.replaceChildren(...[
+      fresh(r.state, [l.tone, l.label, l.resolved, l.family], () => [
         el("span", { class: "badge " + (l.tone || "dim") }, l.label),
         l.resolved ? el("span", { class: "muted" }, " own link") : null,
         l.family ? el("span", { class: "muted", title: "The address family this connection fetches the file over" }, " " + l.family) : null,
@@ -589,7 +628,7 @@ function makeCard(id) {
         el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, "Cancelled") }, "Cancel")));
   }
 
-  return { root, update, isLine: () => root.classList.contains("line") };
+  return { root, update, name };
 }
 
 // A Metalink's files, or a split archive's parts, as one card: their progress added up, pause, resume
@@ -668,7 +707,27 @@ function makeGroupCard(gid) {
 function cardFor(id) {
   let c = cards.get(id);
   if (!c) {
-    c = makeCard(id);
+    let line = null, full = null, d = null;
+    const open = () => {
+      full = makeCard(id, true);
+      line.root.replaceWith(full.root);
+      line = null;
+      full.update(d);
+      full.name.focus(); // the name pressed is gone: the keyboard stays on its successor
+    };
+    c = {
+      get root() { return (full || line).root; },
+      update(next) {
+        d = next;
+        if (!full && !finished(d)) { // back at work (a checksum being checked), or never finished
+          full = makeCard(id);
+          if (line) line.root.replaceWith(full.root);
+          line = null;
+        }
+        if (!full && !line) line = makeLine(id, open);
+        (full || line).update(d);
+      },
+    };
     cards.set(id, c);
   }
   return c;
@@ -733,19 +792,25 @@ function renderDownloads(state) {
   const downloads = sortDownloads(all.filter((d) => matchesSearch(d, query)));
   const seen = new Set();
   const seenGroups = new Set();
-  let i = 0;
+  // Like place, by walking along: list.children[i] counts from the start
+  // each time the list changed, which made a first draw of thousands take seconds.
+  let at = list.firstElementChild;
+  const put = (node) => {
+    if (at === node) at = at.nextElementSibling;
+    else list.insertBefore(node, at);
+  };
   let headed = false;
   for (const e of listEntries(downloads)) {
     const done = e.d ? finished(e.d) : e.items.every(finished);
     if (done && !headed) {
-      place(list, finishedHead, i++);
+      put(finishedHead);
       headed = true;
     }
     if (e.d) {
       seen.add(e.d.id);
       const c = cardFor(e.d.id);
       c.update(e.d);
-      place(list, c.root, i++);
+      put(c.root);
       continue;
     }
     seenGroups.add(e.group);
@@ -756,7 +821,7 @@ function renderDownloads(state) {
       groupCards.set(e.group, g);
     }
     g.update(e);
-    place(list, g.root, i++);
+    put(g.root);
   }
   if (!headed) finishedHead.remove();
   for (const [id, c] of cards) {
@@ -771,7 +836,7 @@ function renderDownloads(state) {
       groupCards.delete(id);
     }
   }
-  const emptyText = !all.length ? "No downloads yet. Big downloads in Firefox are picked up automatically."
+  const emptyText = !all.length ? "No downloads yet. Big downloads in Firefox are picked up automatically, or paste a link under + Add."
     : `No downloads match “${query.trim()}”.`;
   let empty = $("emptyList");
   if (!downloads.length && !empty) list.append(empty = el("div", { class: "empty", id: "emptyList", role: "status" }));
@@ -824,6 +889,9 @@ connectUI((m) => {
   renderConn(m);
   renderVersion(m);
   renderUpdate(m.connected && m.state && m.state.update);
+  // Connected, yet with an error: what is shown is out of date (see TOO_LONG in background/engine.js).
+  $("staleWarn").hidden = !(m.connected && m.error);
+  $("staleWarn").textContent = (m.connected && m.error) || "";
   if (!m.connected || !m.state) {
     $("list").replaceChildren(m.notInstalled
       ? el("div", { class: "offline" },
