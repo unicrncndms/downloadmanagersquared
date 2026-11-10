@@ -61,7 +61,7 @@ function sortDownloads(downloads) {
 }
 
 // listEntries is what the list draws, in order: a download on its own, or
-// the files of one Metalink together as a group, where the first of them
+// the files of one Metalink or the parts of one split archive together as a group, where the first of them
 // would be. A group down to one file shows that file on its own.
 function listEntries(sorted) {
   const out = [];
@@ -138,8 +138,9 @@ function statusLine(d) {
   else if (d.done > 0) left = fmtBytes(d.done);
   const right = d.status === "running" ? `↓ ${fmtSpeed(d.speed)} · ${fmtETA(d.eta)} left` : "";
   const f = d.kind !== "torrent" && d.folder;
-  const sub = f && f.on && f.into && f.of > 0
-    ? `${f.files.toLocaleString("en-US")} / ${f.of.toLocaleString("en-US")} files`
+  // A RAR's count of files is only known once it is done: until then, how many so far.
+  const sub = f && f.on && f.into && f.of > 0 ? `${f.files.toLocaleString("en-US")} / ${f.of.toLocaleString("en-US")} files`
+    : f && f.on && f.into && f.files > 0 ? `${f.files.toLocaleString("en-US")} files extracted`
     : d.note && d.note !== "complete" ? d.note : "";
   return { left, right, sub, error: d.error || "" };
 }

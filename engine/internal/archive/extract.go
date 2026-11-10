@@ -57,6 +57,8 @@ type Extractor struct {
 
 	s *stream // the large Entry being extracted as its bytes arrive, if any
 
+	z *blockExtract // a 7z's or a RAR's
+
 	// Mark, if set, is called on each file before it takes its final name.
 	Mark func(path string)
 }
@@ -90,6 +92,12 @@ func (f *Failure) Error() string { return fmt.Sprintf("%s: %s", f.Entry.Name, f.
 // again, whatever has happened to their files since.
 func NewExtractor(a *Archive, f *os.File, dir string, done []int64) (*Extractor, error) {
 	x := &Extractor{a: a, f: f, dir: dir, done: make([]bool, len(a.Entries)), folders: map[string]int{}}
+	if a.z != nil {
+		return newSevenExtractor(x, done)
+	}
+	if a.rar {
+		return newRarExtractor(x, done)
+	}
 	was := map[int64]bool{}
 	for _, s := range done {
 		was[s] = true
@@ -147,10 +155,20 @@ func (x *Extractor) skipDone() {
 }
 
 // Progress is how many of the archive's files are extracted.
-func (x *Extractor) Progress() (files, of int) { return x.extracted, x.files }
+// A RAR's files are only known as they come: of is 0 until it is finished.
+func (x *Extractor) Progress() (files, of int) {
+	if x.z != nil && x.z.rar != nil {
+		n := int(x.z.rar.files.Load())
+		if x.Finished() {
+			return n, n
+		}
+		return n, 0
+	}
+	return x.extracted, x.files
+}
 
 // Finished: every Entry is done.
-func (x *Extractor) Finished() bool { return x.first == len(x.done) }
+func (x *Extractor) Finished() bool { return x.first == len(x.done) && (x.z == nil || x.z.prepared) }
 
 // Extract extracts every Entry not done yet whose bytes are all on disk, in
 // archive order. missing is what isn't on disk yet, as the download's plan
@@ -158,6 +176,12 @@ func (x *Extractor) Finished() bool { return x.first == len(x.done) }
 // disk, the output folder, ctx), returning what it did up to then.
 func (x *Extractor) Extract(ctx context.Context, missing []Range) (Result, error) {
 	missing = merge(missing)
+	if x.z != nil && x.z.rar != nil {
+		return x.extractRar(ctx, missing)
+	}
+	if x.z != nil {
+		return x.extract7z(ctx, missing)
+	}
 	var r Result
 	touched := map[string]bool{} // folders written into
 	defer x.restoreFolderTimes(touched)
@@ -442,7 +466,7 @@ func copyEntry(ctx context.Context, e Entry, src io.Reader, out *os.File) (bad s
 	switch {
 	case n != e.Size:
 		return fmt.Sprintf("it came out %d bytes long instead of %d", n, e.Size), nil
-	case sum.Sum32() != e.CRC32:
+	case !e.noCRC && sum.Sum32() != e.CRC32:
 		return "its checksum doesn't match", nil
 	}
 	return "", nil

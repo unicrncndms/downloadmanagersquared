@@ -22,7 +22,7 @@ $("toggleAdd").onclick = () => {
   $("addBox").hidden = !$("addBox").hidden;
   if (!$("addBox").hidden) $("addUrl").focus();
 };
-// A .zip link offers Download as folder, ticked as the settings default.
+// A .zip, .7z or .rar link offers Download as folder, ticked as the settings default.
 const zipLine = (url) => addFolderChoice(url, latest.settings).show;
 $("addUrl").addEventListener("input", () => {
   const c = addFolderChoice("", latest.settings);
@@ -572,7 +572,7 @@ function makeCard(id) {
   return { root, update, isLine: () => root.classList.contains("line") };
 }
 
-// A Metalink's files as one card: their progress added up, pause, resume
+// A Metalink's files, or a split archive's parts, as one card: their progress added up, pause, resume
 // and remove for all of them, and the files' own cards inside.
 function makeGroupCard(gid) {
   let g = null; // the group as last shown
@@ -696,7 +696,7 @@ async function clearFinished() {
   toast(done.length === 1 ? "1 finished download cleared (files kept)" : `${done.length} finished downloads cleared (files kept)`);
 }
 
-const groupCards = new Map(); // Metalink group id -> card controller
+const groupCards = new Map(); // group id (a Metalink or a split archive) -> card controller
 
 // The search box narrows the list as it is typed.
 $("search").addEventListener("input", () => { if (latest.state) renderDownloads(latest.state); });

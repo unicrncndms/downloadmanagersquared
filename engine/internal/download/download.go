@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"downloadmanagersquared/engine/internal/archive"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/rate"
 	"downloadmanagersquared/engine/internal/winutil"
@@ -93,8 +94,8 @@ type State struct {
 	Folder      *Folder          `json:"folder,omitempty"`    // Download as folder; nil when never asked for
 	Mirrors     []Mirror         `json:"mirrors,omitempty"`   // the file's sources, URL among them; nil for one source
 	MetaSize    int64            `json:"metaSize,omitempty"`  // the size a Metalink gives; every mirror must match it
-	Group       string           `json:"group,omitempty"`     // the files of one Metalink share it
-	GroupName   string           `json:"groupName,omitempty"` // the Metalink's name
+	Group       string           `json:"group,omitempty"`     // the files of one Metalink share it, and the parts of a split archive
+	GroupName   string           `json:"groupName,omitempty"` // the Metalink's name, or the split archive's
 	Log         []Event          `json:"log,omitempty"`       // the activity log, oldest first, at most maxEvents
 
 	plainCookies bool // read with a cookie saved readable, before encryption
@@ -1460,8 +1461,8 @@ type Summary struct {
 	Folder *FolderSummary `json:"folder,omitempty"` // Download as folder, once asked for
 
 	Mirrors   []Mirror `json:"mirrors,omitempty"`   // the file's sources, when it has several
-	Group     string   `json:"group,omitempty"`     // the files of one Metalink share it
-	GroupName string   `json:"groupName,omitempty"` // the Metalink's name
+	Group     string   `json:"group,omitempty"`     // the files of one Metalink share it, and the parts of a split archive
+	GroupName string   `json:"groupName,omitempty"` // the Metalink's name, or the split archive's
 
 	// Torrents only: the files to choose from (while choosing), then the upload once complete.
 	// Files stays out of the state sent every second: a torrent of many files
@@ -1615,6 +1616,12 @@ func (d *Download) Summary() Summary {
 		Added:     d.st.Added, Finished: d.st.Finished, VPN: d.st.VPN,
 		Folder: d.folderSummaryLocked(), Limit: d.st.Limit,
 		Mirrors: slices.Clone(d.st.Mirrors), Group: d.st.Group, GroupName: d.st.GroupName,
+	}
+	if s.Group == "" && s.Filename != "" {
+		// The parts of a split archive show as one group, however they were added.
+		if set, _, ok := archive.PartOf(s.Filename); ok {
+			s.Group, s.GroupName = archive.SetKey(s.Dir, set), set
+		}
 	}
 	if d.running {
 		s.ETA = d.eta.Seconds()

@@ -151,4 +151,9 @@ func (x *Extractor) stopStream() {
 // Close stops extracting: a large Entry under way is dropped, to start over
 // from its front with the next Extractor. Its bytes freed so far were
 // reported, and must be fetched again first.
-func (x *Extractor) Close() { x.stopStream() }
+func (x *Extractor) Close() {
+	x.stopStream()
+	if x.z != nil {
+		x.stopBlock()
+	}
+}

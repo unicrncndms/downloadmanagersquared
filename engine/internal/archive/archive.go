@@ -1,6 +1,6 @@
-// Package archive reads a ZIP archive's central directory for Download as
-// folder: where each Entry's bytes are, how big the extracted folder will be,
-// and whether DMS² can extract the archive at all.
+// Package archive reads a ZIP archive's central directory, or a 7z's list of
+// files, for Download as folder: where each Entry's bytes are, how big the
+// extracted folder will be, and whether DMS² can extract the archive at all.
 //
 // It reads only the archive's tail, so it works on a download whose other
 // bytes haven't arrived yet: Need says how much of the tail that is, and Read
@@ -83,6 +83,8 @@ type Entry struct {
 
 	Modified time.Time
 	ReadOnly bool
+
+	noCRC bool // a 7z file the archive gives no CRC32 for
 }
 
 // Rename is an Entry name changed so Windows can use it.
@@ -100,6 +102,9 @@ type Archive struct {
 
 	Total             int64 // uncompressed size of all Entries
 	LargestCompressed int64 // the largest Entry's compressed size
+
+	z   *sevenZip // a 7z: its Entries are its blocks, and this has its files
+	rar bool      // a RAR: its one Entry is the whole archive
 }
 
 // Unsupported is an archive that can't be downloaded as a folder, with the
@@ -115,11 +120,18 @@ func unsupported(format string, a ...any) error {
 var errNotZip = &Unsupported{Reason: "It isn't a ZIP file, or its list of files can't be read"}
 
 // Need is how many bytes from the end of the archive Read needs, given that
-// the last have bytes of the size-byte file are there. Only those are read.
+// the last have bytes of the size-byte file are there, and its first HeadLen.
+// Only those are read.
 // When the answer is more than have, fetch that much and ask again: the first
 // answer can be a guess, the one that fits in have is exact.
 func Need(r io.ReaderAt, size, have int64) (int64, error) {
 	have = min(have, size)
+	if is7z(r) {
+		return need7z(r, size, have)
+	}
+	if rarVersion(r) != 0 {
+		return have, nil // nothing at its end: its front says it all
+	}
 	t, err := findTail(r, size, have)
 	if err != nil {
 		return 0, err
@@ -136,6 +148,12 @@ func Need(r io.ReaderAt, size, have int64) (int64, error) {
 // back as it has looked so far. An archive that can't be downloaded as a
 // folder is an *Unsupported error.
 func Read(r io.ReaderAt, size int64) (*Archive, error) {
+	if is7z(r) {
+		return read7z(r, size)
+	}
+	if v := rarVersion(r); v != 0 {
+		return readRar(r, size, v)
+	}
 	// Start from the shortest possible end record and widen to what the
 	// end records say, so nothing before the central directory is read.
 	var t tail

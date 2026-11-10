@@ -32,6 +32,8 @@ test("the status line is short: percent and sizes, with speed and time left whil
 test("a Download as folder counts its files on the second line", () => {
   const d = dl("a", "running", { size: 42e9, done: 13e9, speed: 1, eta: 1, note: "412 of 1,280 files extracted", folder: { on: true, into: "E:\\x", files: 412, of: 1280 } });
   assert.equal(statusLine(d).sub, "412 / 1,280 files");
+  const rar = dl("r", "running", { size: 42e9, done: 13e9, folder: { on: true, into: "E:\\x", files: 1203, of: 0 } });
+  assert.equal(statusLine(rar).sub, "1,203 files extracted");
 });
 
 test("an error takes the status line's place", () => {

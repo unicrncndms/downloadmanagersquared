@@ -20,7 +20,7 @@ import (
 // it is extracted and checked (ADR 0006).
 type Folder struct {
 	On   bool `json:"on"`
-	Auto bool `json:"auto,omitempty"` // from the default: on once the name is known to end in .zip
+	Auto bool `json:"auto,omitempty"` // from the default: on once the name is known to end in .zip, .7z or .rar
 
 	Into string `json:"into,omitempty"` // the folder to extract into, "" until confirmed
 	Out  string `json:"out,omitempty"`  // the output folder in it, once named
@@ -62,7 +62,7 @@ type FolderSummary struct {
 	Of      int      `json:"of"`
 	Renamed []string `json:"renamed,omitempty"`
 	Note    string   `json:"note,omitempty"`
-	Why     string   `json:"why,omitempty"` // why the switch can't change: locked, not a .zip, a checksum typed, no ranges
+	Why     string   `json:"why,omitempty"` // why the switch can't change: locked, not a .zip, .7z or .rar, a checksum typed, no ranges
 
 	Moving      string `json:"moving,omitempty"`      // the folder it is moving to, until it has
 	MovingNow   bool   `json:"movingNow,omitempty"`   // copying to another drive right now
@@ -80,11 +80,11 @@ func (f *Folder) summary() *FolderSummary {
 }
 
 // folderSummaryLocked is the toggle Details shows: for a download whose name
-// ends in .zip, or once the mode was asked for, with why it can't change.
+// ends in .zip, .7z or .rar, or once the mode was asked for, with why it can't change.
 func (d *Download) folderSummaryLocked() *FolderSummary {
 	s := d.st.Folder.summary()
 	if s == nil {
-		if !isZip(d.st.Filename) {
+		if !archive.Extractable(d.st.Filename) {
 			return nil
 		}
 		s = &FolderSummary{}
@@ -98,13 +98,13 @@ func (d *Download) folderSummaryLocked() *FolderSummary {
 }
 
 // folderWhyNotLocked is why the switch can't change, as SetFolder refuses it:
-// locked, or (to switch it on) not a .zip, a checksum typed, no ranges. ""
+// locked, or (to switch it on) not a .zip, .7z or .rar, a checksum typed, no ranges. ""
 // when it can; a complete download has no switch.
 func (d *Download) folderWhyNotLocked() string {
 	switch {
 	case d.st.Folder.locked():
 		return lockedNote
-	case d.st.Filename != "" && !isZip(d.st.Filename):
+	case d.st.Filename != "" && !archive.Extractable(d.st.Filename):
 		return notZipNote
 	case d.st.SHA256 != "" || d.st.MD5 != "":
 		return checksumNote
@@ -114,14 +114,12 @@ func (d *Download) folderWhyNotLocked() string {
 	return ""
 }
 
-func isZip(name string) bool { return strings.EqualFold(filepath.Ext(name), ".zip") }
-
 // folderOnLocked: the download is a Download as folder.
 func (d *Download) folderOnLocked() bool { return d.st.Folder != nil && d.st.Folder.On }
 
 const (
 	lockedNote   = "Some files are already extracted and their space freed, so this can't change any more"
-	notZipNote   = "Only a .zip can be downloaded as a folder"
+	notZipNote   = "Only a .zip, .7z or .rar can be downloaded as a folder"
 	checksumNote = "A checksum is entered, and only a whole file can be checked against it: clear it first"
 	noRangesNote = "The server doesn't allow split downloading, so it can't be extracted as it downloads"
 	hashNote     = "Downloaded as a file: a checksum was entered, and only a whole file can be checked against it"
@@ -129,7 +127,7 @@ const (
 )
 
 // SetFolder switches Download as folder on or off. It can't change once
-// anything has been freed, and can't go on for a file that isn't a .zip, with
+// anything has been freed, and can't go on for a file that isn't a .zip, .7z or .rar, with
 // a checksum typed in, or when the server doesn't allow ranges.
 func (d *Download) SetFolder(on bool) error {
 	// Not while Entries are being freed: once one is, the mode is locked.
@@ -257,12 +255,12 @@ func (d *Download) folderProbedLocked() {
 	}
 	if f.Auto {
 		f.Auto = false
-		f.On = isZip(d.st.Filename) && d.st.SHA256 == "" && d.st.MD5 == ""
+		f.On = archive.Extractable(d.st.Filename) && d.st.SHA256 == "" && d.st.MD5 == ""
 	}
 	switch {
 	case !f.On:
 		return
-	case !isZip(d.st.Filename):
+	case !archive.Extractable(d.st.Filename):
 		d.st.Folder = nil // not offered
 		return
 	case !d.st.RangeOK:
@@ -319,12 +317,13 @@ func (d *Download) stopFolder() {
 }
 
 // wantTailLocked has the tail fetched before anything else when it isn't on
-// disk yet, and reports whether it is.
+// disk yet, and reports whether it is, and the head (archive.HeadLen) too.
+// The head comes with the front, as the download fetches it anyway.
 func (d *Download) wantTailLocked(fr *folderRun) bool {
 	start := d.st.Size - fr.need
 	if onDisk(d.plan.ranges(), start, d.st.Size) {
 		d.plan.prefer = -1
-		return true
+		return onDisk(d.plan.ranges(), 0, min(archive.HeadLen, d.st.Size))
 	}
 	d.plan.cut(start)
 	d.plan.prefer = start
@@ -495,7 +494,7 @@ func (d *Download) folderFallback(err error) (bool, error) {
 	}
 	d.mu.Lock()
 	d.folderOffLocked()
-	d.st.Folder.On, d.st.Folder.Note = false, u.Reason+", so it is downloaded as a .zip"
+	d.st.Folder.On, d.st.Folder.Note = false, u.Reason+", so it is downloaded as a "+strings.ToLower(filepath.Ext(d.st.Filename))
 	d.mu.Unlock()
 	log.Printf("download %s: not as a folder: %s", d.st.ID, u.Reason)
 	d.env.Changed(d)
@@ -503,14 +502,14 @@ func (d *Download) folderFallback(err error) (bool, error) {
 }
 
 // nameOut picks and makes the output folder: the archive's Root, or else the
-// ZIP's name without .zip, numbered if taken.
+// archive's name without its extension, numbered if taken.
 func (d *Download) nameOut(a *archive.Archive, into, zipName string) (string, error) {
 	base := a.Root
 	if base == "" {
 		base = zipName[:len(zipName)-len(filepath.Ext(zipName))]
 	}
 	if strings.TrimSpace(base) == "" {
-		base = "download" // a ZIP named only ".zip"
+		base = "download" // an archive named only ".zip"
 	}
 	if err := os.MkdirAll(into, 0o755); err != nil {
 		return "", err

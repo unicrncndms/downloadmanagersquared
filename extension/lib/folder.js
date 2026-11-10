@@ -9,7 +9,7 @@
 
 // folderView is the toggle, the add step and the facts for Details, or null
 // when the download has nothing to do with it (a torrent, a name that isn't
-// .zip and never asked for it).
+// .zip, .7z or .rar and never asked for it).
 //   toggle: { on, disabled, reason } while unfinished and not locked, else null
 //   extracting: locked (Entries freed), so Details just says it extracts
 //   ask:   { prefill } while it waits for a folder to extract into, else null
@@ -76,12 +76,12 @@ function removeWording(d) {
 }
 
 // addFolderChoice is the add form's "Download as folder" box: offered for a
-// link whose path ends in .zip, ticked as the settings default. (A name
+// link whose path ends in .zip, .7z or .rar, ticked as the settings default. (A name
 // learned only from the server is offered in Details instead.)
 function addFolderChoice(url, settings) {
   let show = false;
   try {
-    show = /\.zip$/i.test(new URL(url).pathname);
+    show = /\.(zip|7z|rar)$/i.test(new URL(url).pathname);
   } catch { /* not a link yet */ }
   return { show, checked: !!(settings && settings.folderDefault) };
 }

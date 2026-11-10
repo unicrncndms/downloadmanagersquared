@@ -77,6 +77,16 @@ const METALINK_DOWNLOADS = [
   DOWNLOADS[0],
 ];
 
+// A RAR split into parts: the engine groups them by name and folder.
+const part = (n, extra) => metaFile("p" + n, `holiday-video.part${n}.rar`, { mirrors: undefined, sha256: "", size: 1e9,
+  group: "parts:holiday-video.rar", groupName: "holiday-video.rar", ...extra });
+const SPLIT_DOWNLOADS = [
+  part(1, { status: "completed", done: 1e9, speed: 0, eta: -1, label: "Completed", tone: "ok", partialFile: false }),
+  part(2, { done: 4e8 }),
+  part(3, { status: "queued", done: 0, speed: 0, eta: -1, label: "Queued", tone: "dim", partialFile: false }),
+  DOWNLOADS[0],
+];
+
 const STATE = { downloads: DOWNLOADS, interfaces: IFACES, pia: { state: "off" }, speed: 11.5e6, eta: 322, active: 1 };
 
 const RECIPES = {
@@ -115,6 +125,7 @@ const FIXTURES = {
         connections: 4, socksPort: 50005, speed: 1.3e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" }] } },
   // IPv6 off, with an adapter that has only IPv6: the hint.
   ipv6hint: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", state: { ...STATE, ipv6Only: ["Phone"] } },
+  split: { connected: true, state: { ...STATE, downloads: SPLIT_DOWNLOADS }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   metalink: { connected: true,
  state: { ...STATE, downloads: METALINK_DOWNLOADS }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   empty: { connected: true, state: { ...STATE, downloads: [], active: 0, speed: 0 }, settings: SETTINGS, autostart: true, recipes: {}, engineVersion: "0.3.0" },
