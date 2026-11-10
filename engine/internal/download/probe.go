@@ -3,12 +3,14 @@ package download
 import (
 	"context"
 	"fmt"
+	"log"
 	"mime"
 	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -204,4 +206,179 @@ func statusError(resp *http.Response) *fetchError {
 		return &fetchError{kind: kindHTTP, msg: fmt.Sprintf("HTTP %s", resp.Status)}
 	}
 	return nil
+}
+
+func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
+	res, err := probeLink(ctx, ifc.Client, l, d.st.UserAgent)
+	usable := map[string]Iface{}
+	all := d.env.Paths(d.VPN())
+	for _, u := range all {
+		usable[u.ID] = u
+	}
+	mainID := mainOf(all)
+	d.mu.Lock()
+	delete(d.probing, ifc.ID)
+	cur := d.st.Links[ifc.ID]
+	if cur == nil || cur.URL != l.URL || cur.Status != LinkProbing {
+		d.mu.Unlock()
+		return
+	}
+	if ctx.Err() != nil {
+		cur.requeue()
+		d.mu.Unlock()
+		return
+	}
+	if err == nil && ifc.ByFamily != nil {
+		cur.Family = res.family // a new probe chooses again
+	}
+	if err == nil && !res.rejected() && res.status < 400 && ifc.ID != mainID && d.mainMayAnswerLocked(usable, mainID) {
+		cur.hold(time.Now(), res) // the main interface decides what the file is
+	} else {
+		d.applyProbeLocked(ifc.ID, cur, res, err)
+	}
+	d.mu.Unlock()
+	d.env.Changed(d)
+}
+
+func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err error) {
+	defer d.leaveMirrorLocked(ifaceID, l)
+	mirror := d.mirrorLocked(l.URL) != nil
+	if err != nil {
+		log.Printf("download %s probe via %s: %s", d.st.ID, ifaceID, shortErr(err))
+		l.unreachable(time.Now(), shortErr(err))
+		return
+	}
+	log.Printf("download %s probe via %s: HTTP %d, size %d, ranges %v, page %v", d.st.ID, ifaceID, r.status, r.size, r.rangeOK, r.isPage)
+	if r.busy() {
+		now := time.Now()
+		d.ifRun(ifaceID).backoff.pushedBack(now, r.wait)
+		l.serverBusy(now, r.wait, fmt.Sprintf("server busy: HTTP %d", r.status))
+		return
+	}
+	if r.rejected() {
+		reason := fmt.Sprintf("link not valid on this connection (HTTP %d)", r.status)
+		if r.isPage {
+			reason = "link leads to a web page, not the file"
+		}
+		switch {
+		case mirror:
+			l.fail(reason) // a mirror has no landing page: the next mirror is tried
+		case r.isPage && d.st.PageURL == "" && l.URL == d.st.URL:
+			// Either the link is a landing page, or it is the file link and this
+			// interface got an error page for it. Decide once every interface has answered.
+			l.webPage()
+		default:
+			d.needResolveLocked(ifaceID, l, reason)
+		}
+		return
+	}
+	if r.status >= 400 {
+		l.httpError(time.Now(), fmt.Sprintf("HTTP %d", r.status))
+		return
+	}
+	if why := d.mirrorMismatchLocked(r); mirror && why != "" {
+		l.mismatch(why)
+		return
+	}
+	if !d.st.Probed {
+		d.st.Size, d.st.RangeOK, d.st.RemoteName, d.st.Probed = r.size, r.rangeOK && r.size > 0, r.name, true
+		d.st.Version = r.version
+		if d.st.Filename == "" {
+			d.st.Filename = r.name
+		}
+		if d.st.Filename == "" {
+			d.st.Filename = "download"
+		}
+		d.folderProbedLocked()
+		if len(d.st.Mirrors) == 0 && len(r.dups) > 0 && r.version.hashed() {
+			// Only with the server's checksum: it is what tells the mirrors' copies apart.
+			d.addMirrorsLocked(ifaceID, r.dups)
+		}
+	} else {
+		if r.size != d.st.Size {
+			l.mismatch(fmt.Sprintf("different file size (%d vs %d bytes)", r.size, d.st.Size))
+			return
+		}
+		if !mirror && d.st.RemoteName != "" && r.name != "" && !strings.EqualFold(r.name, d.st.RemoteName) {
+			l.mismatch(fmt.Sprintf("different file name (%q vs %q)", r.name, d.st.RemoteName))
+			return
+		}
+		if d.st.RangeOK && !r.rangeOK {
+			l.fail("this link does not allow split downloading")
+			return
+		}
+		if d.st.RangeOK && !mirror && !r.version.same(d.st.Version) {
+			l.mismatch(versionMsg) // its bytes don't belong with the ones on disk
+			return
+		}
+	}
+	l.Version = r.version
+	l.ready()
+}
+
+// decidePageHitsLocked settles interfaces that got a web page for the source URL.
+// If another interface got the file, the link is the file and those interfaces
+// need their own link from the landing page. Only if no interface got the file is
+// the link itself the landing page.
+func (d *Download) decidePageHitsLocked(usable map[string]Iface) {
+	var hits []string
+	for id, l := range d.st.Links {
+		if l.pageHit {
+			hits = append(hits, id)
+		}
+	}
+	if len(hits) == 0 || len(d.probing) > 0 {
+		return
+	}
+	if !d.st.Probed && d.st.PageURL == "" {
+		for id := range usable {
+			if l := d.st.Links[id]; l == nil || l.answering() {
+				return // still waiting on an interface that might get the file
+			}
+		}
+		d.st.PageURL = d.st.URL
+	}
+	for _, id := range hits {
+		l := d.st.Links[id]
+		d.needResolveLocked(id, l, "this connection gets a web page instead of the file")
+	}
+}
+
+// mainMayAnswerLocked: the main interface's probe is still to come, so answers
+// from the other interfaces wait for it.
+func (d *Download) mainMayAnswerLocked(usable map[string]Iface, mainID string) bool {
+	if d.st.Probed {
+		return false
+	}
+	if _, ok := usable[mainID]; !ok {
+		return false
+	}
+	l := d.st.Links[mainID]
+	return l == nil || l.answering()
+}
+
+// settleHeldLocked applies held answers once the main interface has decided the
+// file, or can't. In the second case the earliest answer decides it.
+func (d *Download) settleHeldLocked(usable map[string]Iface, mainID string) {
+	if d.mainMayAnswerLocked(usable, mainID) {
+		return
+	}
+	var ids []string
+	for id, l := range d.st.Links {
+		if l.held != nil {
+			ids = append(ids, id)
+		}
+	}
+	slices.SortFunc(ids, func(a, b string) int { return d.st.Links[a].heldAt.Compare(d.st.Links[b].heldAt) })
+	for _, id := range ids {
+		l := d.st.Links[id]
+		d.applyProbeLocked(id, l, *l.takeHeld(), nil)
+	}
+}
+
+func (d *Download) needResolveLocked(ifaceID string, l *Link, reason string) {
+	if l.needResolve(d.st.PageURL != "", reason) {
+		id, page, browser := d.st.ID, d.st.PageURL, d.st.Browser
+		go d.env.RequestResolve(id, ifaceID, page, browser)
+	}
 }
