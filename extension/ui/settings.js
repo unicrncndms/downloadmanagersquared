@@ -165,6 +165,21 @@ $("sAuto").addEventListener("change", () => act("setAutostart", { on: $("sAuto")
 $("sFolder").addEventListener("change", () => act("setSettings", { folderDefault: $("sFolder").checked }, "Saved"));
 $("sIPv6").addEventListener("change", () => act("setSettings", { ipv6: $("sIPv6").checked }, $("sIPv6").checked ? "IPv6 on" : "IPv6 off"));
 
+// The accent: Follow Firefox, a preset, or any color (lib/accent.js).
+const setAccent = (c, said) => act("setSettings", { accent: c }, said);
+function renderAccents(s) {
+  const chosen = s.accent || "";
+  const custom = chosen && !ACCENT_PRESETS.some(([, c]) => c === chosen);
+  const radio = (checked, attrs, ...kids) => el("button", { role: "radio", "aria-checked": String(checked), ...attrs }, ...kids);
+  const picker = el("input", { type: "color", value: chosen || pageAccent(s) || "#1d4ed8", "aria-label": "Custom color" });
+  picker.addEventListener("change", () => setAccent(picker.value, "Accent color saved"));
+  $("accents").replaceChildren(
+    radio(!chosen, { class: "follow", onclick: () => setAccent("", "Accent follows Firefox") }, "Follow Firefox"),
+    ...ACCENT_PRESETS.map(([name, c]) => radio(chosen === c,
+      { title: name, "aria-label": name, style: `background:${c}`, onclick: () => setAccent(c, `Accent: ${name}`) })),
+    el("label", { title: "Custom color" }, picker, custom ? "Custom" : "Other…"));
+}
+
 // fillSettings shows what the engine has, except in the field being edited.
 function fillSettings(s) {
   for (const [id, [, show]] of Object.entries(FIELDS)) {
@@ -269,6 +284,7 @@ connectUI((m) => {
   if (JSON.stringify(m.settings) !== JSON.stringify(latestSettings)) {
     latestSettings = m.settings;
     fillSettings(m.settings);
+    renderAccents(m.settings);
     if (!piaSignedIn && document.activeElement !== $("vpnProvider")) showProvider(m.settings.vpnProvider || "");
   }
   if (document.activeElement !== $("sAuto")) $("sAuto").checked = m.autostart;

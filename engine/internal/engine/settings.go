@@ -47,7 +47,14 @@ type Settings struct {
 	FolderDefault bool     `json:"folderDefault"`        // new .zip downloads are one
 	FolderDir     string   `json:"folderDir,omitempty"`  // the folder last extracted into; "" = SaveDir
 	FolderDirs    []string `json:"folderDirs,omitempty"` // the folders last extracted into, newest first: Change… offers them
+
+	// The pages' accent color, "#rrggbb": the one chosen, else Firefox's
+	// theme's as the extension last saw it, else the pages' own.
+	Accent      string `json:"accent,omitempty"`      // "" = follow Firefox
+	ThemeAccent string `json:"themeAccent,omitempty"` // "" = Firefox's theme has none
 }
+
+var hexColor = regexp.MustCompile(`^#[0-9a-f]{6}$`)
 
 // pickTorrentPort draws ports from pick until one can be bound: Windows
 // reserves ranges (Hyper-V, dynamic port exclusions) where a listen is
@@ -144,6 +151,11 @@ func (s *Settings) normalize() {
 	case "", "conf", "pia":
 	default:
 		s.VPNProvider = ""
+	}
+	for _, c := range []*string{&s.Accent, &s.ThemeAccent} {
+		if *c = strings.ToLower(*c); !hexColor.MatchString(*c) {
+			*c = ""
+		}
 	}
 	if s.TorrentPort < 1024 || s.TorrentPort > 65535 {
 		s.TorrentPort = pickTorrentPort(func() int { return 20000 + mrand.IntN(40000) })

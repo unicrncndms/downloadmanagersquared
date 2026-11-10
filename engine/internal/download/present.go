@@ -113,9 +113,15 @@ func Present(s Summary) Summary {
 
 	if f := s.Folder; f != nil && f.On {
 		switch {
+		case f.Set != nil && f.Set.Note != "":
+			s.Note = f.Set.Note
+		case s.Status == StatusCompleted && f.Set != nil && !f.Set.Finished:
+			s.Note = "kept until its set is extracted"
 		case s.Status == StatusCompleted && f.Out != "":
 			s.Note = "Extracted to " + filepath.Base(f.Out)
 		case s.Status == StatusCompleted:
+		case f.Ask != "":
+			s.Note = joinNote(s.Note, "needs the archive's password")
 		case f.Into == "":
 			s.Note = joinNote(s.Note, "choose a folder to extract into")
 		case f.Of > 0:

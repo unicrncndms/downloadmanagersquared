@@ -13,8 +13,10 @@ import (
 // The RAR test archives were made with WinRAR 7's Rar.exe (RAR5) from the
 // same Game folder as the 7z ones: solid.rar (-s), nonsolid.rar,
 // password.rar (-psecret), password-header.rar (-hpsecret) and
-// volume.part1.rar (the first of three -v100k volumes).
-var rars = []string{"solid.rar", "nonsolid.rar"}
+// volume.part1.rar… (three -v100k volumes, see volumes_test.go). The RAR4 ones were
+// made with WinRAR 6.24's Rar.exe -ma4 the same way: rar4.rar (-s),
+// rar4-header.rar (-hpsecret) and rar4-volume.part1.rar (-v100k).
+var rars = []string{"solid.rar", "nonsolid.rar", "rar4.rar"}
 
 func TestARarIsOneEntryReadFromItsFront(t *testing.T) {
 	for _, name := range rars {
@@ -36,6 +38,7 @@ func TestARarIsOneEntryReadFromItsFront(t *testing.T) {
 func TestRarsDMSCantExtractAreTurnedDown(t *testing.T) {
 	for name, want := range map[string]error{
 		"password.rar": errPassword, "password-header.rar": errPassword, "volume.part1.rar": errSplit,
+		"rar4-header.rar": errPassword, "rar4-volume.part1.rar": errSplit,
 	} {
 		b := testdata7z(t, name)
 		if _, err := Read(bytes.NewReader(b), int64(len(b))); !errors.Is(err, want) {

@@ -2,14 +2,13 @@ package archive
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/bodgit/sevenzip"
-
-	"downloadmanagersquared/engine/internal/winutil"
 )
 
 // blockExtract is an Extractor's state for a 7z or a RAR. Its Entries are
@@ -38,7 +37,7 @@ type blockRun struct {
 // block under way wait until its bytes up to front are on disk; read is how
 // far they have got, so the bytes before it can be freed.
 type gate struct {
-	f      *os.File
+	f      io.ReaderAt
 	mu     sync.Mutex
 	cond   *sync.Cond
 	lo, hi int64 // the block under way, if any
@@ -50,7 +49,7 @@ type gate struct {
 	ended   bool // the decompressor is done with the block
 }
 
-func newGate(f *os.File) *gate {
+func newGate(f io.ReaderAt) *gate {
 	g := &gate{f: f}
 	g.cond = sync.NewCond(&g.mu)
 	return g
@@ -121,6 +120,19 @@ func (g *gate) close() {
 	g.cond.Broadcast()
 }
 
+// idle says the decompressor waits for something besides bytes (a RAR's next
+// volume), so advance doesn't wait on it; false once the gate is closed.
+func (g *gate) idle() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.stop {
+		return false
+	}
+	g.waiting = true
+	g.cond.Broadcast()
+	return true
+}
+
 func (g *gate) readTo() int64 {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -130,11 +142,11 @@ func (g *gate) readTo() int64 {
 func newSevenExtractor(x *Extractor, done []int64) (*Extractor, error) {
 	a := x.a
 	g := newGate(x.f)
-	fi, err := x.f.Stat()
+	size, err := x.f.Size()
 	if err != nil {
 		return nil, err
 	}
-	zr, err := sevenzip.NewReader(g, fi.Size())
+	zr, err := sevenzip.NewReaderWithPassword(g, size, a.password)
 	if err != nil || len(zr.File) != len(a.z.files) {
 		return nil, errNot7z
 	}
@@ -248,6 +260,9 @@ func (x *Extractor) extract7z(ctx context.Context, missing []Range) (Result, err
 				return r, err
 			}
 		}
+		if x.wrongPassword(bad) {
+			return r, ErrWrongPassword
+		}
 		if bad != "" {
 			r.Failed = append(r.Failed, &Failure{Entry: e, Range: Range{e.Start, e.End}, Reason: bad})
 			continue
@@ -303,7 +318,7 @@ func (x *Extractor) blockStep(i int, missing []Range, r *Result) (bad string, fi
 	default:
 	}
 	if to := x.z.gate.readTo(); to-run.freed >= FreeStep {
-		if err := winutil.FreeRange(x.f, run.freed, to-run.freed); err != nil {
+		if err := x.f.Free(run.freed, to-run.freed); err != nil {
 			x.stopBlock()
 			return "", false, err
 		}

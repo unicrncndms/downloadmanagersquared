@@ -99,41 +99,64 @@ func TestALargeEntryIsFreedWhileItIsExtracted(t *testing.T) {
 	}
 }
 
-// Stopped halfway through a large Entry, the download fetches again only the
-// bytes of it that were freed, and ends correct.
-func TestAStopHalfwayRefetchesOnlyTheFreedPart(t *testing.T) {
+// pauseHalfway pauses a download of a zip with a large Entry partway
+// through extracting it, and says how much is left and how much was freed.
+func pauseHalfway(t *testing.T, id string) (d *Download, env *testEnv, files []zipFile, sent *atomic.Int64, missing, freed int64) {
+	t.Helper()
 	lowerLarge(t, 1<<20, 1<<20)
 	files, data, e := largeZip(t, 24<<20)
 	srv, sent := countingServer(data)
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 	into := t.TempDir()
-	env := &testEnv{ifaces: []Iface{iface("eth", 1, 4*time.Millisecond)}, main: "eth", finished: make(chan struct{})}
-	d := New(env, State{ID: "l2", URL: srv.URL + "/dl", Dir: into, Size: -1, Folder: &Folder{On: true, Into: into}})
+	env = &testEnv{ifaces: []Iface{iface("eth", 1, 4*time.Millisecond)}, main: "eth", finished: make(chan struct{})}
+	d = New(env, State{ID: id, URL: srv.URL + "/dl", Dir: into, Size: -1, Folder: &Folder{On: true, Into: into}})
 	d.Start()
-	deadline := time.Now().Add(30 * time.Second)
-	for freedIn(d.State().Folder.Freed, e) < 4<<20 {
-		if time.Now().After(deadline) {
-			t.Fatalf("nothing of the large Entry freed: %+v", d.Summary())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitUntil(t, "some of the large Entry freed", func() bool { return freedIn(d.State().Folder.Freed, e) >= 4<<20 })
 	d.Stop(StatusPaused)
 	st := d.State()
 	if slices.Contains(st.Folder.Done, e.Start) {
 		t.Fatal("the large Entry finished before it could be stopped")
 	}
-	freed := freedIn(st.Folder.Freed, e)
-	var missing int64
 	for _, r := range st.Remaining {
 		missing += r.End - r.Start
 	}
+	sent.Store(0)
+	return d, env, files, sent, missing, freedIn(st.Folder.Freed, e)
+}
+
+// Paused halfway through a large Entry and resumed, the download goes on where
+// its decompressor stopped: nothing freed is fetched again.
+func TestAPausedLargeEntryGoesOnWhereItStopped(t *testing.T) {
+	d, env, files, sent, missing, _ := pauseHalfway(t, "l3")
+	env.finished = make(chan struct{})
+	d.Start()
+	select {
+	case <-env.finished:
+	case <-time.After(60 * time.Second):
+		t.Fatalf("did not finish: %+v", d.Summary())
+	}
+	if s := d.Summary(); s.Status != StatusCompleted {
+		t.Fatalf("status %s: %s", s.Status, s.Error)
+	}
+	out := d.State().Folder.Out
+	checkTree(t, out, files, "")
+	if got := sent.Load(); got != missing {
+		t.Fatalf("fetched %d bytes after the pause, want only the %d missing", got, missing)
+	}
+}
+
+// Stopped halfway through a large Entry, as by a crash, the download fetches
+// again only the bytes of it that were freed, and ends correct.
+func TestAStopHalfwayRefetchesOnlyTheFreedPart(t *testing.T) {
+	d, env, files, sent, missing, freed := pauseHalfway(t, "l2")
+	st := d.State()
+	d.dropParked() // as after a crash: the decompressor is gone
 	out := st.Folder.Out
 	// As after a crash: the unfinished file is still there.
 	if err := os.WriteFile(filepath.Join(out, "huge.bin"+archive.PartSuffix), []byte("half"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	sent.Store(0)
 	st.Status = StatusQueued
 	d2 := runToEnd(t, env, st)
 	if s := d2.Summary(); s.Status != StatusCompleted {

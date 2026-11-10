@@ -114,6 +114,10 @@ _Avoid_: Unpack in place, streaming unzip, auto-extract
 One file or folder stored inside a ZIP archive. In a 7z, an Entry is a block: packed bytes that decompress into one or more files, front to back. A RAR is one Entry: the whole archive, as it has no list of files to read first.
 _Avoid_: File (that is the download), member, item
 
+**Set**:
+The parts of one split archive (x.7z.001…, RAR volumes x.part1.rar… or x.rar, x.r00…, split ZIPs x.z01…, x.zip or x.zip.001…), each a download of its own, extracted as one archive into one folder. Each part completes once fetched and leaves its bytes to the Set, which frees them as it extracts and deletes the part once all of it is freed. A part not added stops extraction at that point: "Part 2 missing". A RAR's volumes are laid out as their downloads are known and its decompressor waits for the next; a plain x.rar or x.zip joins a Set only beside its other parts.
+_Avoid_: Multi-part download, volume group
+
 ### VPN
 
 **Tunnel**:

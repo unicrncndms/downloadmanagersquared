@@ -60,6 +60,13 @@
     .uplink .warn { color: var(--warn); }
     .follow { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--muted); }
 
+    .swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .swatches button { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--line); }
+    .swatches button[aria-checked=true] { box-shadow: 0 0 0 2px var(--text); }
+    .swatches button.follow { width: auto; border-radius: 13px; padding: 0 10px; border: 1px solid var(--line); box-shadow: none; font-size: 12px; }
+    .swatches button.follow[aria-checked=true] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+    .swatches label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); cursor: pointer; }
+    .swatches input[type=color] { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
     .toast { bottom: 16px; }
     @media (max-width: 700px) {
       header, main { padding-left: 16px; padding-right: 16px; }
@@ -78,6 +85,7 @@
       <a href="#torrents">Torrents</a>
       <a href="#vpn">VPN</a>
       <a href="#sites">Sites</a>
+      <a href="#appearance">Appearance</a>
     </nav>
   </header>
   <main>
@@ -197,6 +205,15 @@
       <div id="recipes"></div>
     </section>
 
+    <section id="appearance" class="panel">
+      <h2>Appearance</h2>
+      <div class="fields">
+        <span>Accent color
+          <span class="info" tabindex="0" data-tip="Follow Firefox takes the color of your Firefox theme; the default themes have none, so the pages stay blue."></span></span>
+        <div class="swatches" id="accents" role="radiogroup" aria-label="Accent color"></div>
+      </div>
+    </section>
+
     <section id="startup" class="panel">
       <h2>Startup</h2>
       <div class="fields">
@@ -207,6 +224,7 @@
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="../lib/list.js"></script>
+  <script src="../lib/accent.js"></script>
   <script src="host.js"></script>
   <script src="common.js"></script>
   <script src="settings.js"></script>

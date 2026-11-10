@@ -55,6 +55,16 @@ Engine.on("connection", ({ connected }) => {
   if (connected) handOverProvider(browser.storage.local, Engine.settings, (m, p) => Engine.call(m, p)).catch(() => {});
 });
 
+// The accent follows Firefox's theme: the engine keeps its color, so the
+// Downloads window (which can't read the theme) gets it too.
+async function sendThemeAccent() {
+  if (!Engine.connected || !Engine.settings) return;
+  const c = themeAccent(await browser.theme.getCurrent().catch(() => null));
+  if (c !== (Engine.settings.themeAccent || "")) await Engine.call("setSettings", { themeAccent: c }).catch(() => {});
+}
+Engine.on("connection", ({ connected }) => { if (connected) sendThemeAccent(); });
+browser.theme.onUpdated.addListener(() => { sendThemeAccent(); });
+
 // The engine shows the downloads and settings in its own Downloads window. It
 // asks this extension only when that window can't be created (WebView2
 // missing): this listener is all that's left for that fallback.

@@ -103,8 +103,12 @@ type Archive struct {
 	Total             int64 // uncompressed size of all Entries
 	LargestCompressed int64 // the largest Entry's compressed size
 
-	z   *sevenZip // a 7z: its Entries are its blocks, and this has its files
-	rar bool      // a RAR: its one Entry is the whole archive
+	z       *sevenZip // a 7z: its Entries are its blocks, and this has its files
+	rar     bool      // a RAR: its one Entry is the whole archive
+	volumes *Parts    // a RAR in volumes: the parts the decompressor opens one after another
+
+	password  string // what ReadWith was given, for the extractor
+	encrypted bool   // its data needs the password
 }
 
 // Unsupported is an archive that can't be downloaded as a folder, with the
@@ -124,10 +128,13 @@ var errNotZip = &Unsupported{Reason: "It isn't a ZIP file, or its list of files 
 // Only those are read.
 // When the answer is more than have, fetch that much and ask again: the first
 // answer can be a guess, the one that fits in have is exact.
-func Need(r io.ReaderAt, size, have int64) (int64, error) {
+func Need(r io.ReaderAt, size, have int64) (int64, error) { return NeedWith(r, size, have, "") }
+
+// NeedWith is Need for an archive whose list of files may be encrypted.
+func NeedWith(r io.ReaderAt, size, have int64, password string) (int64, error) {
 	have = min(have, size)
 	if is7z(r) {
-		return need7z(r, size, have)
+		return need7z(r, size, have, password)
 	}
 	if rarVersion(r) != 0 {
 		return have, nil // nothing at its end: its front says it all
@@ -147,13 +154,29 @@ func Need(r io.ReaderAt, size, have int64) (int64, error) {
 // when an archive comment hides the end record it searches up to twice as far
 // back as it has looked so far. An archive that can't be downloaded as a
 // folder is an *Unsupported error.
-func Read(r io.ReaderAt, size int64) (*Archive, error) {
-	if is7z(r) {
-		return read7z(r, size)
+func Read(r io.ReaderAt, size int64) (*Archive, error) { return ReadWith(r, size, "") }
+
+// ReadWith is Read with the password of an encrypted RAR or 7z. Without one,
+// an encrypted archive is ErrPassword; with the wrong one, ErrWrongPassword
+// where the archive says so, else the extractor finds out (Extract).
+func ReadWith(r io.ReaderAt, size int64, password string) (*Archive, error) {
+	var a *Archive
+	var err error
+	switch v := rarVersion(r); {
+	case is7z(r):
+		a, err = read7z(r, size, password)
+	case v != 0:
+		a, err = readRar(r, size, v, password, false)
+	default:
+		return readZip(r, size)
 	}
-	if v := rarVersion(r); v != 0 {
-		return readRar(r, size, v)
+	if a != nil && a.encrypted {
+		a.password = password
 	}
+	return a, err
+}
+
+func readZip(r io.ReaderAt, size int64) (*Archive, error) {
 	// Start from the shortest possible end record and widen to what the
 	// end records say, so nothing before the central directory is read.
 	var t tail
@@ -167,7 +190,18 @@ func Read(r io.ReaderAt, size int64) (*Archive, error) {
 		}
 		have = t.more
 	}
-	if t.disks {
+	// A split ZIP's parts laid out end to end: each Entry's offset is from
+	// the start of the part ("disk") it starts on.
+	var starts []int64
+	if p, ok := r.(*Parts); ok && t.disks {
+		if t.lastDisk != uint32(p.Len()-1) {
+			return nil, unsupported("It says it has %d parts, not %d", t.lastDisk+1, p.Len())
+		}
+		for i := range p.Len() {
+			starts = append(starts, p.Span(i).Start)
+		}
+	}
+	if t.disks && starts == nil {
 		return nil, errSplit
 	}
 	// Every central directory header is at least centralLen bytes, which
@@ -179,7 +213,7 @@ func Read(r io.ReaderAt, size int64) (*Archive, error) {
 	br := bufio.NewReaderSize(io.NewSectionReader(r, t.dirStart, t.dirSize), 64<<10)
 	entries := make([]Entry, 0, t.count)
 	for range t.count {
-		e, err := readCentral(br, t.base)
+		e, err := readCentral(br, t.base, starts)
 		if err != nil {
 			return nil, err
 		}
@@ -209,13 +243,17 @@ func Read(r io.ReaderAt, size int64) (*Archive, error) {
 
 var errSplit = &Unsupported{Reason: "It's one part of a split archive"}
 
+// ErrSplit is Read's error for one part of a split archive.
+var ErrSplit error = errSplit
+
 type tail struct {
 	more     int64 // > 0: read this much from the end and ask again
 	dirStart int64 // where the central directory really is
 	dirSize  int64
 	base     int64 // added to the archive's own offsets: bytes before the archive
 	count    uint64
-	disks    bool // the archive says it spans several disks
+	disks    bool   // the archive says it spans several disks
+	lastDisk uint32 // the disk the end record is on, from 0: a split ZIP's parts less one
 }
 
 // findTail finds the end records and the central directory, reading only the
@@ -251,9 +289,10 @@ func findTail(r io.ReaderAt, size, have int64) (tail, error) {
 	disk, dirDisk := binary.LittleEndian.Uint16(e[4:]), binary.LittleEndian.Uint16(e[6:])
 	onDisk, count := binary.LittleEndian.Uint16(e[8:]), binary.LittleEndian.Uint16(e[10:])
 	t := tail{
-		dirSize: int64(binary.LittleEndian.Uint32(e[12:])),
-		count:   uint64(count),
-		disks:   disk != 0 || dirDisk != 0 || onDisk != count,
+		dirSize:  int64(binary.LittleEndian.Uint32(e[12:])),
+		count:    uint64(count),
+		disks:    disk != 0 || dirDisk != 0 || onDisk != count,
+		lastDisk: uint32(disk),
 	}
 	dirOffset := int64(binary.LittleEndian.Uint32(e[16:]))
 	dirEnd := endAt
@@ -270,6 +309,7 @@ func findTail(r io.ReaderAt, size, have int64) (tail, error) {
 		if binary.LittleEndian.Uint32(l[:]) == sigLocator {
 			if binary.LittleEndian.Uint32(l[4:]) != 0 || binary.LittleEndian.Uint32(l[16:]) > 1 {
 				t.disks = true
+				t.lastDisk = max(binary.LittleEndian.Uint32(l[16:]), 1) - 1
 			}
 			recAt, more, err := findEnd64(r, size, have, int64(binary.LittleEndian.Uint64(l[8:])), endAt-locatorLen)
 			if err != nil {
@@ -332,7 +372,9 @@ func findEnd64(r io.ReaderAt, size, have, said, locatorAt int64) (at, more int64
 }
 
 // readCentral reads one central directory header.
-func readCentral(br *bufio.Reader, base int64) (Entry, error) {
+// readCentral reads one central directory header. With starts (a split ZIP),
+// its offset is from the start of the part it names.
+func readCentral(br *bufio.Reader, base int64, starts []int64) (Entry, error) {
 	var h [centralLen]byte
 	if _, err := io.ReadFull(br, h[:]); err != nil {
 		return Entry{}, errNotZip
@@ -390,6 +432,12 @@ func readCentral(br *bufio.Reader, base int64) (Entry, error) {
 	}
 	if modified.IsZero() {
 		modified = dosToTime(dosDate, dosTime)
+	}
+	if starts != nil {
+		if int64(disk) >= int64(len(starts)) {
+			return Entry{}, errNotZip
+		}
+		base, disk = starts[disk], 0
 	}
 	if csize > math.MaxInt64 || usize > math.MaxInt64 || offset > math.MaxInt64-uint64(base) {
 		return Entry{}, errNotZip

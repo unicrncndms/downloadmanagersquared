@@ -8,7 +8,17 @@ function call(method, params) {
 }
 
 function connectUI(onUpdate) {
-  return Host.subscribe(onUpdate);
+  return Host.subscribe((m) => { applyAccent(m.settings); onUpdate(m); });
+}
+
+// Sets the accent tokens (lib/accent.js) from the engine's settings; without
+// settings (engine offline) the last ones stay.
+function applyAccent(settings) {
+  if (!settings) return;
+  let style = document.getElementById("accent");
+  if (!style) style = document.head.appendChild(Object.assign(document.createElement("style"), { id: "accent" }));
+  const css = accentCSS(pageAccent(settings));
+  if (style.textContent !== css) style.textContent = css;
 }
 
 // A link that leaves DMS²: Host opens it (a new tab, or the default browser).

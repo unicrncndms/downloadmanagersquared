@@ -25,6 +25,7 @@ func startUntil(t *testing.T, env *testEnv, st State, ok func(*Download) bool) *
 	t.Helper()
 	env.finished = make(chan struct{})
 	d := New(env, st)
+	t.Cleanup(d.dropParked) // a test that ends paused leaves its .part open otherwise
 	d.Start()
 	deadline := time.Now().Add(30 * time.Second)
 	for !ok(d) {
@@ -288,6 +289,7 @@ func TestAPausedCrossDriveMoveHappensOnResume(t *testing.T) {
 	}
 	st := d.State()
 	st.Status = StatusQueued
+	d.dropParked() // d2 runs in its place, as after an engine restart
 	d2 := runToEnd(t, env, st)
 	if s := d2.Summary(); s.Status != StatusCompleted {
 		t.Fatalf("status %s: %s", s.Status, s.Error)

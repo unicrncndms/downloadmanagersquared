@@ -5,8 +5,6 @@ import (
 	"errors"
 	"io"
 	"os"
-
-	"downloadmanagersquared/engine/internal/winutil"
 )
 
 // LargeEntry: an Entry with more compressed bytes than this is extracted as
@@ -85,7 +83,7 @@ func (x *Extractor) streamStep(ctx context.Context, i int, missing []Range, r *R
 		}
 		s.fed += n
 		if s.fed-s.freed >= FreeStep {
-			if err := winutil.FreeRange(x.f, s.freed, s.fed-s.freed); err != nil {
+			if err := x.f.Free(s.freed, s.fed-s.freed); err != nil {
 				x.stopStream()
 				return "", false, err
 			}

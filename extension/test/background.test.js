@@ -292,3 +292,20 @@ test("a lost engine it didn't quit is reconnected", async () => {
   await b.advance(2000);
   assert.equal(b.listeners["port.onMessage"].length, before + 1);
 });
+
+test("the accent of Firefox's theme goes to the engine on connecting and when the theme changes, only when it differs", async () => {
+  const shared = { local: {}, session: {}, windows: new Map(), nextId: { v: 100 }, theme: { colors: { tab_line: "#ff0080" } } };
+  const b = load({ shared });
+  b.connect(undefined, { thresholdBytes: 100e6 });
+  await b.settle();
+  const sent = () => b.engine.filter((c) => c.method === "setSettings" && "themeAccent" in c.params).map((c) => c.params.themeAccent);
+  assert.deepEqual(sent(), ["#ff0080"]);
+  b.Engine.settings = { thresholdBytes: 100e6, themeAccent: "#ff0080" };
+  b.fire("theme.onUpdated", {});
+  await b.settle();
+  assert.deepEqual(sent(), ["#ff0080"], "the same color isn't sent again");
+  shared.theme = { colors: null };
+  b.fire("theme.onUpdated", {});
+  await b.settle();
+  assert.deepEqual(sent(), ["#ff0080", ""], "the default theme clears it");
+});

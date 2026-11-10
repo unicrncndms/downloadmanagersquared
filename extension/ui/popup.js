@@ -230,6 +230,20 @@ function makeCard(id) {
     askChange.box,
     el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); act("setFolder", { id, on: false }, "Downloading it as a file"); } }, "Download as a file instead"));
 
+  // An encrypted archive: it keeps downloading while this asks for the password.
+  const passWhy = el("span", { class: "grow" });
+  const passIn = el("input", { type: "password", class: "grow", "aria-label": "Archive password", placeholder: "Password", autocomplete: "off" });
+  const foldPass = el("form", { class: "extract", hidden: true, onsubmit: (e) => {
+    e.preventDefault();
+    const password = passIn.value;
+    if (!password) return;
+    passIn.value = "";
+    act("setArchivePassword", { id, password }, "Trying the password");
+  } },
+    el("div", { class: "row" }, passWhy),
+    el("div", { class: "row" }, passIn, el("button", { class: "small primary" }, "Unlock")),
+    el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); act("setFolder", { id, on: false }, "Downloading it as a file"); } }, "Download as a file instead"));
+
   // Details, in sections: Connections, Folder, File, Checks.
   const section = (title, ...body) => el("section", {}, el("h3", {}, title), ...body);
   // An HTTP download's own speed limit, on top of the connections' and the global one.
@@ -306,7 +320,7 @@ function makeCard(id) {
   const root = el("div", { class: "card" },
     el("div", { class: "top" }, name, vpn, status, size, showDone, dropDone),
     bar, meta, sub, via,
-    cardConns, recordRow, pick, foldAsk, ask,
+    cardConns, recordRow, pick, foldPass, foldAsk, ask,
     details);
   const queued = () => d && d.status === "queued";
   root.addEventListener("dragstart", (e) => {
@@ -363,7 +377,7 @@ function makeCard(id) {
     size.textContent = d.size > 0 ? fmtBytes(d.size) : "";
     showDone.hidden = !line || !(d.actions || {}).showInFolder;
     if (line) {
-      for (const n of [bar, meta, sub, via, cardConns, recordRow, pick, foldAsk, ask, details]) n.hidden = true;
+      for (const n of [bar, meta, sub, via, cardConns, recordRow, pick, foldPass, foldAsk, ask, details]) n.hidden = true;
       return;
     }
 
@@ -412,6 +426,12 @@ function makeCard(id) {
     foldAsk.hidden = !(fv && fv.ask);
     if (fv && fv.ask) sub.hidden = true; // the engine's "choose a folder" says what the step shows
     if (fv && fv.ask) askInto.textContent = fv.ask.prefill;
+    foldPass.hidden = !(fv && fv.password);
+    if (fv && fv.password) {
+      sub.hidden = true; // the engine's "needs the archive's password" says what the form asks
+      passWhy.textContent = fv.password.wrong ? "That password didn't open it. Try another:" : "It's protected with a password:";
+      passWhy.classList.toggle("bad", fv.password.wrong);
+    }
     foldSection.hidden = !fv;
     if (fv) {
       foldSwitch.hidden = !fv.toggle;
@@ -443,7 +463,7 @@ function makeCard(id) {
       ifaceName(a, latest.state, latest.settings).localeCompare(ifaceName(b, latest.state, latest.settings)));
     const problems = new Set(problemLinks(d));
     const shown = ids.filter((ifc) => problems.has(ifc));
-    cardConns.hidden = !shown.length;
+    cardConns.hidden = !shown.length || details.open; // open, Details lists them under Connections
     renderLinks(cardConns, cardRows, shown);
     connSection.hidden = done || !ids.length;
 
@@ -623,7 +643,7 @@ function makeGroupCard(gid) {
     name.textContent = g.name;
     name.title = open ? "Hide the files" : "Show the files";
     pressable(name, true, open);
-    count.textContent = `${g.items.length} files`;
+    count.textContent = `${g.items.length} ${String(g.group).startsWith("parts:") ? "parts" : "files"}`;
     status.textContent = v.label;
     status.className = "badge " + v.tone;
     fill.style.width = v.percent + "%";

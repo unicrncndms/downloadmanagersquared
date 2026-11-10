@@ -84,6 +84,14 @@ type settingsPatch struct {
 	VPNProvider        *string  `json:"vpnProvider"`
 	FolderDefault      *bool    `json:"folderDefault"`
 	IPv6               *bool    `json:"ipv6"`
+	Accent             *string  `json:"accent"`
+	ThemeAccent        *string  `json:"themeAccent"`
+}
+
+// passwordParams carry an archive's password: never logged.
+type passwordParams struct {
+	ID       string `json:"id"`
+	Password string `json:"password"`
 }
 
 type folderParams struct {
@@ -274,6 +282,16 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, err
 		}
 		return nil, e.SetFolder(p.ID, p.On, p.Into)
+	case "setArchivePassword":
+		p, err := decode[passwordParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		d, err := e.get(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		return nil, d.SetArchivePassword(p.Password)
 	case "pickFolder":
 		p, err := decode[idParams](raw)
 		if err != nil {
@@ -394,6 +412,12 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			}
 			if p.IPv6 != nil {
 				s.IPv6 = *p.IPv6
+			}
+			if p.Accent != nil {
+				s.Accent = *p.Accent
+			}
+			if p.ThemeAccent != nil {
+				s.ThemeAccent = *p.ThemeAccent
 			}
 		})
 		if p.IPv6 != nil {

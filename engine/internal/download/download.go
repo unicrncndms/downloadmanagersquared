@@ -172,6 +172,8 @@ type Download struct {
 	file    *os.File
 	plan    *plan      // nil unless running with the file open
 	fold    *folderRun // extracting, in Download as folder
+	parked  *folderRun // extraction kept with its .part open while stopped, to go on where it was
+	set     *Set       // the split archive it is a part of, which extracts it
 	moving  bool       // copying the folder and the .part to another drive
 	mvmu    sync.Mutex // held while the folder and the .part move; taken before mu
 	xmu     sync.Mutex // held while Entries are extracted and freed; taken before mu
@@ -470,7 +472,12 @@ func (d *Download) run(ctx context.Context) {
 	}
 	d.mu.Unlock()
 	d.wg.Wait()
-	d.stopFolder()
+	d.mu.Lock()
+	// Paused or queued, not failed: a large Entry under way waits as it is,
+	// so the bytes freed of it needn't be fetched again.
+	keep := err != nil && (d.stopAs != "" || errors.As(err, new(*pauseError)))
+	d.mu.Unlock()
+	d.stopFolder(keep)
 
 	if err == nil {
 		err = d.complete(ctx)
@@ -480,7 +487,11 @@ func (d *Download) run(ctx context.Context) {
 	d.syncRemainingLocked()
 	if d.file != nil {
 		d.file.Sync() // a clean stop: what the saved state records is on disk
-		d.file.Close()
+		if d.parked != nil {
+			d.parked.file = d.file // the parked extraction reads it
+		} else {
+			d.file.Close()
+		}
 		d.file = nil
 	}
 	d.plan = nil
@@ -601,7 +612,7 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 		}
 		changed = true
 	}
-	d.startFolderLocked(ctx) // before any claim, so the archive's tail comes first
+	d.startFolderLocked() // before any claim, so the archive's tail comes first
 
 	for w := range d.workers {
 		l := d.st.Links[w.iface]
@@ -866,6 +877,11 @@ func (d *Download) needResolveLocked(ifaceID string, l *Link, reason string) {
 }
 
 func (d *Download) openFileLocked() error {
+	if p := d.parked; p != nil && p.file != nil {
+		d.file, p.file = p.file, nil
+		d.plan = newPlan(d.st.Size, true, d.st.Remaining)
+		return nil
+	}
 	if err := os.MkdirAll(d.st.Dir, 0o755); err != nil {
 		return err
 	}
@@ -1250,8 +1266,20 @@ func (d *Download) complete(ctx context.Context) error {
 	part := d.partPath()
 	dir, name := d.st.Dir, d.st.Filename
 	folder := d.folderOnLocked()
+	set := d.set
 	d.mu.Unlock()
 
+	if _, _, ok := Splittable(name); (ok || set != nil) && folder {
+		// A part of a split archive: its Set reads the .part, frees it and
+		// deletes it once extracted.
+		if f != nil {
+			f.Close()
+		}
+		if set != nil && set.finished.Load() {
+			os.Remove(part)
+		}
+		return nil
+	}
 	if folder {
 		// Every Entry is extracted and checked: the archive itself isn't kept.
 		if f != nil {
@@ -1508,6 +1536,7 @@ func (d *Download) Resume() { d.Stop(StatusQueued) }
 func (d *Download) Discard(deleteFile bool) {
 	finished := d.Status() == StatusCompleted
 	d.Stop(StatusPaused)
+	d.dropParked()
 	if !deleteFile || finished {
 		return
 	}

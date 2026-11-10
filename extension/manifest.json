@@ -26,6 +26,7 @@
     "storage",
     "contextMenus",
     "notifications",
+    "theme",
     "<all_urls>"
   ],
   "background": {
@@ -35,6 +36,7 @@
       "lib/ready.js",
       "lib/route.js",
       "lib/provider.js",
+      "lib/accent.js",
       "background/util.js",
       "background/engine.js",
       "background/resolver.js",

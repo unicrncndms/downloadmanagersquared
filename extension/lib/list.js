@@ -32,7 +32,8 @@ function percent(d) {
 // finished: complete and done with, so it shrinks to one line. A seeding
 // torrent is still at work.
 function finished(d) {
-  return d.status === "completed";
+  // A part of a split archive is done once its set is extracted.
+  return d.status === "completed" && !(d.folder && d.folder.set && !d.folder.set.finished);
 }
 
 // The groups, in the order they are listed: what needs you (failed, a pause
@@ -88,15 +89,25 @@ function groupView(items) {
   const size = known ? items.reduce((a, d) => a + d.size, 0) : -1;
   const done = items.reduce((a, d) => a + (d.done || 0), 0);
   const speed = items.reduce((a, d) => a + (d.status === "running" ? d.speed || 0 : 0), 0);
-  const nDone = items.filter(finished).length;
-  const all = nDone === n;
-  const files = all ? `${n} files` : `${nDone} of ${n} files done`;
-  const left = (size > 0 ? `${Math.round(Math.min(100, (done / size) * 100))}% · ${fmtBytes(done)} / ${fmtBytes(size)}` : fmtBytes(done)) + ` · ${files}`;
+  const nDone = items.filter((d) => d.status === "completed").length;
+  // A split archive's parts: its Set (engine) knows how many there are and
+  // extracts them once fetched.
+  const set = items.map((d) => d.folder && d.folder.set).find(Boolean);
+  const unit = String(items[0].group || "").startsWith("parts:") ? "parts" : "files";
+  const count = set && set.parts ? set.parts : n;
+  const waiting = set && !set.finished; // every part fetched isn't the end: extracting, or a part missing
+  const all = nDone === n && !waiting;
+  const files = nDone === count ? `${count} ${unit}` : `${nDone} of ${count} ${unit} done`;
+  let left = (size > 0 ? `${Math.round(Math.min(100, (done / size) * 100))}% · ${fmtBytes(done)} / ${fmtBytes(size)}` : fmtBytes(done)) + ` · ${files}`;
+  if (waiting && set.of) left += ` · ${set.files} of ${set.of} files extracted`;
+  if (waiting && set.note) left += ` · ${set.note}`;
   const can = (k) => items.some((d) => d.actions && d.actions[k]);
+  let label = all ? "Completed" : items[0].label, tone = all ? "ok" : items[0].tone || "";
+  if (waiting && nDone === n) [label, tone] = set.note ? ["Waiting", "warn"] : ["Extracting", ""];
   return {
     left, right: speed > 0 ? `↓ ${fmtSpeed(speed)}` : "",
     percent: size > 0 ? Math.min(100, (done / size) * 100) : 0,
-    label: all ? "Completed" : items[0].label, tone: all ? "ok" : items[0].tone || "",
+    label, tone,
     pause: can("pause"), resume: can("resume"), finished: all,
     partialFile: items.some((d) => d.partialFile),
   };

@@ -45,7 +45,7 @@ const freeReach = 1 << 20
 // An Extractor is not safe for use by several goroutines at once.
 type Extractor struct {
 	a         *Archive
-	f         *os.File
+	f         File
 	dir       string
 	rel       []string // per Entry: its path under dir, '/'-separated; "" is dir itself
 	done      []bool
@@ -91,6 +91,34 @@ func (f *Failure) Error() string { return fmt.Sprintf("%s: %s", f.Entry.Name, f.
 // every Entry already extracted before: those are never checked or written
 // again, whatever has happened to their files since.
 func NewExtractor(a *Archive, f *os.File, dir string, done []int64) (*Extractor, error) {
+	return NewExtractorFrom(a, Sparse(f), dir, done)
+}
+
+// File is what an Extractor reads an archive from and frees its bytes in: a
+// download's sparse .part (Sparse), or a split archive's parts end to end.
+type File interface {
+	io.ReaderAt
+	Size() (int64, error)
+	Free(off, n int64) error // frees whole allocation units within [off, off+n)
+}
+
+// Sparse is a sparse file as a File.
+func Sparse(f *os.File) File { return sparseFile{f} }
+
+type sparseFile struct{ *os.File }
+
+func (s sparseFile) Size() (int64, error) {
+	fi, err := s.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return fi.Size(), nil
+}
+
+func (s sparseFile) Free(off, n int64) error { return winutil.FreeRange(s.File, off, n) }
+
+// NewExtractorFrom is NewExtractor for any File.
+func NewExtractorFrom(a *Archive, f File, dir string, done []int64) (*Extractor, error) {
 	x := &Extractor{a: a, f: f, dir: dir, done: make([]bool, len(a.Entries)), folders: map[string]int{}}
 	if a.z != nil {
 		return newSevenExtractor(x, done)
@@ -168,6 +196,9 @@ func (x *Extractor) Progress() (files, of int) {
 }
 
 // Finished: every Entry is done.
+// Done says whether Entry i is extracted.
+func (x *Extractor) Done(i int) bool { return x.done[i] }
+
 func (x *Extractor) Finished() bool { return x.first == len(x.done) && (x.z == nil || x.z.prepared) }
 
 // Extract extracts every Entry not done yet whose bytes are all on disk, in
@@ -292,7 +323,7 @@ func (x *Extractor) free(i int) error {
 	for j := i + 1; j < len(es) && x.done[j] && hi < es[i].End+freeReach; j++ {
 		hi = min(es[j].End, es[i].End+freeReach)
 	}
-	return winutil.FreeRange(x.f, lo, hi-lo)
+	return x.f.Free(lo, hi-lo)
 }
 
 // extractFile writes the Entry to path. bad is why its bytes are wrong; err is
@@ -519,4 +550,12 @@ func (x *Extractor) restoreFolderTimes(touched map[string]bool) {
 			os.Chtimes(x.path(i), t, t)
 		}
 	}
+}
+
+// wrongPassword: in an encrypted archive, the first Entry that comes out wrong
+// is the password's fault, not the bytes', so nothing is fetched again.
+// shortcut: wrong bytes in that first Entry ask for the password again too;
+// telling them apart needs a check the archive formats don't all have.
+func (x *Extractor) wrongPassword(bad string) bool {
+	return bad != "" && x.a.encrypted && !slices.Contains(x.done, true)
 }

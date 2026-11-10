@@ -13,6 +13,8 @@
 //   toggle: { on, disabled, reason } while unfinished and not locked, else null
 //   extracting: locked (Entries freed), so Details just says it extracts
 //   ask:   { prefill } while it waits for a folder to extract into, else null
+//   password: { wrong } while an encrypted archive waits for its password
+//           (wrong: the last one given didn't open it), else null
 //   move:   { into, moving, warning, error } once it has one, while unfinished:
 //           "Extract into" with Browse… to move it, else null
 //   facts:  [label, value] pairs
@@ -34,7 +36,8 @@ function folderView(d, settings) {
   if (f.on && f.out) facts.push([done ? "Extracted to" : "Folder", f.out]);
   if (f.note) facts.push(["Note", f.note]);
   if (f.renamed && f.renamed.length) facts.push(["Renamed", f.renamed.join("\n")]);
-  return { toggle, extracting: !done && !!f.locked, ask, move, facts };
+  const password = f.on && f.ask && !done ? { wrong: f.ask === "wrong" } : null;
+  return { toggle, extracting: !done && !!f.locked, ask, password, move, facts };
 }
 
 // lastFolder is where a Download as folder extracts unless told otherwise:

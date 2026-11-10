@@ -14,13 +14,21 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
   const record = (m) => { window.calls.push(m); return Promise.resolve(); };
   const hostFixture = () => Object.assign({ version: "0.3.0", userAgent: navigator.userAgent, recipesHere: true }, window.fixture().host);
 
+  // setSettings changes the fixture's settings, as the engine would, and feeds them.
+  const applySettings = (patch) => {
+    const f = window.fixture();
+    f.settings = { ...f.settings, ...patch };
+    window.feed(f);
+    return f.settings;
+  };
+
   // Hands every subscriber a message, as the background does on each change.
   window.feed = (m) => { for (const f of listeners) f(m); };
 
   window.Host = {
     // A fixture's `files` answers torrentFiles, by download id; its `lines` checkLines.
     call: (method, params) => record({ call: method, params })
-      .then(() => method === "torrentFiles" ? (window.fixture().files || {})[params.id] || []
+      .then(() => method === "setSettings" ? applySettings(params) : method === "torrentFiles" ? (window.fixture().files || {})[params.id] || []
         : method === "checkLines" ? window.fixture().lines || []
         : method === "downloadLog" ? (window.fixture().logs || {})[params.id] || [] : undefined),
     subscribe(fn) {

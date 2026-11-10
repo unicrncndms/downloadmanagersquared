@@ -148,6 +148,21 @@ test("a group card adds its files up and offers what any file can do", () => {
   assert.ok(done.finished && done.label === "Completed" && done.left.endsWith("· 2 files"));
 });
 
+test("a split archive's card counts its parts, says which is missing, and is done once extracted", () => {
+  const { groupView } = require("../lib/list.js");
+  const p = (id, status, set) => dl(id, status, { size: 100, done: status === "completed" ? 100 : 0, group: "parts:x.7z", label: "Completed",
+    folder: { on: true, set } });
+  const gap = { parts: 3, missing: [2], note: "Part 2 missing", files: 1, of: 4 };
+  const v = groupView([p("a", "completed", gap), p("c", "completed", gap)]);
+  assert.equal(v.left, "100% · 200 B / 200 B · 2 of 3 parts done · 1 of 4 files extracted · Part 2 missing");
+  assert.ok(!v.finished && v.label === "Waiting" && v.tone === "warn");
+  const busy = { parts: 2, files: 1, of: 4 };
+  assert.equal(groupView([p("a", "completed", busy), p("b", "completed", busy)]).label, "Extracting");
+  const fin = { parts: 2, files: 4, of: 4, finished: true };
+  const done = groupView([p("a", "completed", fin), p("b", "completed", fin)]);
+  assert.ok(done.finished && done.label === "Completed" && done.left.endsWith("· 2 parts"));
+});
+
 test("mirrors show who uses them and why one was dropped", () => {
   const { mirrorRows } = require("../lib/list.js");
   const d = dl("a", "running", {

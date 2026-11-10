@@ -617,3 +617,19 @@ func TestMetalinkLinksAreRecognised(t *testing.T) {
 		t.Fatal("isMetalinkURL")
 	}
 }
+
+func TestTheAccentIsAColorOrNothing(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for in, want := range map[string]string{"#1A2B3C": "#1a2b3c", "": "", "red": "", "#12345": "", "#1234567": ""} {
+		r, err := e.Call(nil, "setSettings", []byte(`{"accent":"`+in+`","themeAccent":"`+in+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s := r.(Settings); s.Accent != want || s.ThemeAccent != want {
+			t.Fatalf("%q: accent %q, theme accent %q, want %q", in, s.Accent, s.ThemeAccent, want)
+		}
+	}
+}

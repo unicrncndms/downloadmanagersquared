@@ -98,6 +98,11 @@ func (d *Download) relocate(ctx context.Context) error {
 		d.mu.Unlock()
 		return nil
 	}
+	if d.parked != nil {
+		d.mu.Unlock()
+		d.dropParked() // its .part can't move while open
+		d.mu.Lock()
+	}
 	m := &move{
 		target: target, oldOut: f.Out, oldPart: d.partPath(), partName: d.st.Filename, hasPart: d.st.Allocated,
 		moveOut: f.MoveOut, movePart: f.MovePart,
@@ -484,6 +489,9 @@ func copySparse(ctx context.Context, src, dst string) error {
 // Entries not done, a large Entry under way, which starts over after it.
 func (d *Download) moveRefetchLocked() int64 {
 	fr := d.fold
+	if fr == nil {
+		fr = d.parked
+	}
 	if fr == nil || fr.arc == nil {
 		return 0
 	}

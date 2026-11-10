@@ -19,6 +19,14 @@ func Extractable(name string) bool {
 	case ".zip", ".7z", ".rar":
 		return true
 	}
+	// A part of a split 7z or ZIP, or a RAR volume (x.rar.001 isn't one: a cut RAR).
+	set, part, ok := PartOf(name)
+	switch strings.ToLower(filepath.Ext(set)) {
+	case ".7z", ".zip":
+		return ok && part >= 1
+	case ".rar":
+		return ok && part >= 1 && !strings.HasPrefix(strings.ToLower(name), strings.ToLower(set)+".")
+	}
 	return false
 }
 
@@ -97,13 +105,15 @@ var errNot7z = &Unsupported{Reason: "It isn't a 7z file, or its list of files ca
 
 // open7z reads a 7z's list of files from its tail from `from` on. A needFrom
 // error says where the tail it needs starts.
-func open7z(r io.ReaderAt, size, from int64) (*sevenzip.Reader, int64, error) {
+func open7z(r io.ReaderAt, size, from int64, password string) (*sevenzip.Reader, int64, error) {
 	ht := &headTail{r: r, size: size, from: from, low: size}
-	zr, err := sevenzip.NewReader(ht, size)
+	zr, err := sevenzip.NewReaderWithPassword(ht, size, password)
 	var nf *needFrom
 	switch {
 	case errors.As(err, &nf):
 		return nil, 0, nf
+	case encrypted(err) && password != "":
+		return nil, 0, ErrWrongPassword
 	case encrypted(err):
 		return nil, 0, errPassword
 	case err != nil:
@@ -112,15 +122,24 @@ func open7z(r io.ReaderAt, size, from int64) (*sevenzip.Reader, int64, error) {
 	return zr, ht.low, nil
 }
 
-var errPassword = &Unsupported{Reason: "It's protected with a password"}
+// ErrPassword is an encrypted archive read without a password. It is
+// Unsupported, so a caller that can't ask for one downloads it as a file.
+var (
+	ErrPassword = errPassword
+	errPassword = &Unsupported{Reason: "It's protected with a password"}
+)
+
+// ErrWrongPassword is an encrypted archive read or extracted with a password
+// that doesn't open it.
+var ErrWrongPassword = errors.New("the password is wrong")
 
 func encrypted(err error) bool {
 	var re *sevenzip.ReadError
 	return errors.As(err, &re) && re.Encrypted
 }
 
-func need7z(r io.ReaderAt, size, have int64) (int64, error) {
-	_, low, err := open7z(r, size, size-have)
+func need7z(r io.ReaderAt, size, have int64, password string) (int64, error) {
+	_, low, err := open7z(r, size, size-have, password)
 	var nf *needFrom
 	if errors.As(err, &nf) {
 		return size - nf.at, nil
@@ -132,10 +151,10 @@ func need7z(r io.ReaderAt, size, have int64) (int64, error) {
 }
 
 // read7z reads a 7z's list of files, widening the tail it reads as needed.
-func read7z(r io.ReaderAt, size int64) (*Archive, error) {
+func read7z(r io.ReaderAt, size int64, password string) (*Archive, error) {
 	from := size
 	for range 16 {
-		zr, low, err := open7z(r, size, from)
+		zr, low, err := open7z(r, size, from, password)
 		var nf *needFrom
 		if errors.As(err, &nf) {
 			from = nf.at
@@ -144,7 +163,7 @@ func read7z(r io.ReaderAt, size int64) (*Archive, error) {
 		if err != nil {
 			return nil, err
 		}
-		return build7z(zr, low)
+		return build7z(zr, low, password != "")
 	}
 	return nil, errNot7z
 }
@@ -155,12 +174,13 @@ var aesID = []byte{0x06, 0xf1, 0x07, 0x01}
 // build7z turns the list into Entries, one per block, with where each
 // block's bytes are: the sevenzip package keeps that to itself, so it is read
 // from its fields (TestSevenZipNeedAndReadUseOnlyTheHeadAndTail notices if they change).
-func build7z(zr *sevenzip.Reader, dirStart int64) (*Archive, error) {
+func build7z(zr *sevenzip.Reader, dirStart int64, password bool) (*Archive, error) {
 	v := reflect.ValueOf(zr).Elem()
 	start := v.FieldByName("start").Int()
 	si := v.FieldByName("si")
 	var blocks []Entry
 	var multi []bool
+	enc := false
 	if !si.IsNil() && !si.Elem().FieldByName("packInfo").IsNil() && !si.Elem().FieldByName("unpackInfo").IsNil() {
 		pi := si.Elem().FieldByName("packInfo").Elem()
 		at := start + int64(pi.FieldByName("position").Uint())
@@ -173,7 +193,10 @@ func build7z(zr *sevenzip.Reader, dirStart int64) (*Archive, error) {
 			coders := f.FieldByName("coder")
 			for j := range coders.Len() {
 				if bytes.Equal(coders.Index(j).Elem().FieldByName("id").Bytes(), aesID) {
-					return nil, errPassword
+					if !password {
+						return nil, errPassword
+					}
+					enc = true
 				}
 			}
 			e := Entry{Method: method7z, Start: at}
@@ -225,7 +248,7 @@ func build7z(zr *sevenzip.Reader, dirStart int64) (*Archive, error) {
 	for i := range z.files {
 		z.files[i].Entry = named.Entries[i]
 	}
-	a := &Archive{DirStart: dirStart, Renamed: named.Renamed, Root: named.Root, Total: named.Total, z: z}
+	a := &Archive{DirStart: dirStart, Renamed: named.Renamed, Root: named.Root, Total: named.Total, z: z, encrypted: enc}
 	for i, e := range blocks {
 		fs := z.blocks[i]
 		if len(fs) == 0 {

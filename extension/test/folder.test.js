@@ -100,3 +100,10 @@ test("Change… offers the recent folders, then the Save folder, without the one
   assert.deepEqual(folderChoices({ saveDir: "C:\Downloads", folderDirs: ["E:\Data"] }, ""), ["E:\Data", "C:\Downloads"]);
   assert.deepEqual(folderChoices(null, ""), []);
 });
+
+test("an encrypted archive asks for its password until it's done, and says when one was wrong", () => {
+  assert.deepEqual(folderView(zip({ on: true, into: "E:\\x", ask: "password" }), SETTINGS).password, { wrong: false });
+  assert.deepEqual(folderView(zip({ on: true, into: "E:\\x", ask: "wrong" }), SETTINGS).password, { wrong: true });
+  assert.equal(folderView(zip({ on: true, into: "E:\\x" }), SETTINGS).password, null);
+  assert.equal(folderView(zip({ on: true, into: "E:\\x", ask: "password" }, { status: "completed" }), SETTINGS).password, null);
+});

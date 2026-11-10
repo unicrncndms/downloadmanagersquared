@@ -71,19 +71,54 @@ func TestSevenZipDownloadsAsAFolder(t *testing.T) {
 	}
 }
 
-func TestAPasswordProtected7zDownloadsAsA7z(t *testing.T) {
-	data, srv := serve7z(t, "password.7z")
-	into := t.TempDir()
-	env := &testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}
-	d := runToEnd(t, env, State{ID: "z8", URL: srv.URL + "/dl", Dir: into, Size: -1, Folder: &Folder{On: true, Into: into}})
-	s := d.Summary()
-	if s.Status != StatusCompleted {
-		t.Fatalf("status %s: %s", s.Status, s.Error)
+// An encrypted archive waits for its password while it downloads: a wrong
+// one is asked for again, the right one extracts it.
+func TestAnEncryptedArchiveAsksForItsPassword(t *testing.T) {
+	for _, name := range []string{"password.7z", "password-header.7z", "password.rar", "password-header.rar"} {
+		_, srv := serve7z(t, name)
+		into := t.TempDir()
+		env := &testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth", finished: make(chan struct{})}
+		d := New(env, State{ID: "z8", URL: srv.URL + "/dl", Dir: into, Size: -1, Folder: &Folder{On: true, Into: into}})
+		if err := d.SetArchivePassword("early"); err == nil {
+			t.Fatalf("%s: a password taken before one is asked for", name)
+		}
+		d.Start()
+		waitAsk := func(want string) {
+			t.Helper()
+			for end := time.Now().Add(20 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+				s := d.Summary()
+				if s.Folder != nil && s.Folder.Ask == want {
+					if !s.Folder.On || s.Status == StatusCompleted || !strings.Contains(s.Note, "password") {
+						t.Fatalf("%s: %s, %q, folder %+v", name, s.Status, s.Note, s.Folder)
+					}
+					return
+				}
+				if time.Now().After(end) {
+					t.Fatalf("%s: never asked (%q): %+v", name, want, s.Folder)
+				}
+			}
+		}
+		waitAsk(AskPassword)
+		if err := d.SetArchivePassword("wrong"); err != nil {
+			t.Fatal(err)
+		}
+		waitAsk(AskWrong)
+		if err := d.SetArchivePassword("secret"); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-env.finished:
+		case <-time.After(60 * time.Second):
+			t.Fatalf("%s: did not finish: %+v", name, d.Summary())
+		}
+		s := d.Summary()
+		if s.Status != StatusCompleted || s.Folder.Files != 1 || d.State().Folder.Password != "" {
+			t.Fatalf("%s: %s %s, folder %+v", name, s.Status, s.Error, s.Folder)
+		}
+		if got := names(t, into); len(got) != 1 {
+			t.Fatalf("%s: left in the folder: %v", name, got)
+		}
 	}
-	if s.Folder == nil || s.Folder.On || !strings.Contains(s.Folder.Note, "password") || !strings.HasSuffix(s.Folder.Note, "downloaded as a .7z") {
-		t.Fatalf("folder summary %+v, want off with the reason", s.Folder)
-	}
-	checkFile(t, filepath.Join(into, "big.7z"), data)
 }
 
 // A RAR has no list of files to take a Root from: it is extracted into a

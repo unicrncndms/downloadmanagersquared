@@ -43,7 +43,7 @@ func rarVersion(r io.ReaderAt) int {
 }
 
 var (
-	errNotRar = &Unsupported{Reason: "It isn't a RAR file, or its first files can't be read"}
+	errNotRar  = &Unsupported{Reason: "It isn't a RAR file, or its first files can't be read"}
 	errRarDict = unsupported("It was packed with a dictionary over %d MB, more than DMS² extracts with", rarMaxDict>>20)
 )
 
@@ -99,7 +99,7 @@ func mainFlags(front []byte, ver int) (volume, encrypted bool, err error) {
 // and a first file DMS² can decompress. The rest is only known as it is
 // extracted, so its one Entry is the whole archive and nothing is renamed or
 // taken as the Root.
-func readRar(r io.ReaderAt, size int64, ver int) (*Archive, error) {
+func readRar(r io.ReaderAt, size int64, ver int, password string, set bool) (*Archive, error) {
 	front := make([]byte, min(HeadLen, size))
 	n, err := r.ReadAt(front, 0)
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -110,19 +110,24 @@ func readRar(r io.ReaderAt, size int64, ver int) (*Archive, error) {
 	switch {
 	case err != nil:
 		return nil, err
-	case encrypted:
+	case encrypted && password == "":
 		return nil, errPassword
-	case volume:
+	case volume && !set:
 		return nil, errSplit
 	}
-	rr, err := rardecode.NewReader(bytes.NewReader(front), rardecode.MaxDictionarySize(rarMaxDict))
+	rr, err := rardecode.NewReader(bytes.NewReader(front), rarOptions(password)...)
+	if errors.Is(err, rardecode.ErrBadPassword) {
+		return nil, ErrWrongPassword
+	}
 	if err != nil {
 		return nil, errNotRar
 	}
 	h, err := rr.Next()
 	whole := int64(len(front)) == size
 	switch {
-	case errors.Is(err, rardecode.ErrArchiveEncrypted), err == nil && h.Encrypted:
+	case errors.Is(err, rardecode.ErrBadPassword):
+		return nil, ErrWrongPassword
+	case errors.Is(err, rardecode.ErrArchiveEncrypted), err == nil && h.Encrypted && password == "":
 		return nil, errPassword
 	case errors.Is(err, rardecode.ErrDictionaryTooLarge):
 		return nil, errRarDict
@@ -137,7 +142,16 @@ func readRar(r io.ReaderAt, size int64, ver int) (*Archive, error) {
 	}
 	e := Entry{Name: "the archive", Stored: "the archive", Method: methodRar, CompressedSize: size, Size: size, Start: 0, End: size}
 	// Total is a guess: the files' sizes are only known as they come.
-	return &Archive{Entries: []Entry{e}, DirStart: size, Total: size, LargestCompressed: margin, rar: true}, nil
+	return &Archive{Entries: []Entry{e}, DirStart: size, Total: size, LargestCompressed: margin, rar: true,
+		encrypted: encrypted || err == nil && h.Encrypted}, nil
+}
+
+func rarOptions(password string) []rardecode.Option {
+	o := []rardecode.Option{rardecode.MaxDictionarySize(rarMaxDict)}
+	if password != "" {
+		o = append(o, rardecode.Password(password))
+	}
+	return o
 }
 
 // rarState is what a RAR's extraction has found so far: its files are only
@@ -186,6 +200,9 @@ func (x *Extractor) extractRar(ctx context.Context, missing []Range) (Result, er
 			return r, err
 		}
 	}
+	if x.wrongPassword(bad) {
+		return r, ErrWrongPassword
+	}
 	if bad != "" {
 		r.Failed = append(r.Failed, &Failure{Entry: e, Range: Range{e.Start, e.End}, Reason: bad})
 		return r, nil
@@ -204,9 +221,24 @@ func (x *Extractor) extractRar(ctx context.Context, missing []Range) (Result, er
 // checked by the decoder and put in place. bad is why its bytes are wrong.
 func (x *Extractor) decodeRar(ctx context.Context, _ int) (bad string, err error) {
 	s := x.z.rar
-	rr, err := rardecode.NewReader(io.NewSectionReader(x.z.gate, 0, x.a.Entries[0].End), rardecode.MaxDictionarySize(rarMaxDict))
-	if err != nil {
-		return rarBad(err)
+	var rr interface {
+		io.Reader
+		Next() (*rardecode.FileHeader, error)
+	}
+	if p := x.a.volumes; p != nil {
+		// The name only starts the decompressor's count: volumeFS opens each part by its number.
+		rc, err := rardecode.OpenReader("v.part1.rar", append(rarOptions(x.a.password), rardecode.FileSystem(&volumeFS{p, x.z.gate}))...)
+		if err != nil {
+			return rarBad(err)
+		}
+		defer rc.Close()
+		rr = rc
+	} else {
+		r, err := rardecode.NewReader(io.NewSectionReader(x.z.gate, 0, x.a.Entries[0].End), rarOptions(x.a.password)...)
+		if err != nil {
+			return rarBad(err)
+		}
+		rr = r
 	}
 	for {
 		h, err := rr.Next()
@@ -216,7 +248,7 @@ func (x *Extractor) decodeRar(ctx context.Context, _ int) (bad string, err error
 		if err != nil {
 			return rarBad(err)
 		}
-		if h.Encrypted {
+		if h.Encrypted && x.a.password == "" {
 			return "", errPassword
 		}
 		name, _, err := cleanName(h.Name)
@@ -287,6 +319,8 @@ func rarBad(err error) (bad string, _ error) {
 	switch {
 	case fileError(err):
 		return "", err
+	case errors.Is(err, rardecode.ErrBadPassword):
+		return "", ErrWrongPassword
 	case errors.Is(err, rardecode.ErrArchiveEncrypted), errors.Is(err, rardecode.ErrArchivedFileEncrypted):
 		return "", errPassword
 	case errors.Is(err, rardecode.ErrDictionaryTooLarge):

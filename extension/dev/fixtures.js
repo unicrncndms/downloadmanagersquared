@@ -128,6 +128,21 @@ const FIXTURES = {
   split: { connected: true, state: { ...STATE, downloads: SPLIT_DOWNLOADS }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   metalink: { connected: true,
  state: { ...STATE, downloads: METALINK_DOWNLOADS }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
+  // A split 7z extracting as one folder, part 2 not added.
+  splitGap: { connected: true, state: { ...STATE, downloads: [1, 3].map((n) => metaFile("s" + n, `holiday-video.7z.00${n}`, {
+    mirrors: undefined, sha256: "", size: n === 3 ? 3e8 : 1e9, done: n === 3 ? 3e8 : 1e9, status: "completed", speed: 0, eta: -1,
+    label: "Completed", tone: "ok", partialFile: false, note: "Part 2 missing", group: "parts:holiday-video.7z", groupName: "holiday-video.7z",
+    folder: { on: true, into: "E:\\Data", files: 0, of: 0, set: { parts: 3, missing: [2], note: "Part 2 missing", files: 12, of: 40 } } })) },
+    settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
+  // The accent: a dark Firefox theme's color, a pale one, and a preset chosen over the theme's.
+  themeDark: { connected: true, state: STATE, settings: { ...SETTINGS, themeAccent: "#0b3d2e" }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
+  themeLight: { connected: true, state: STATE, settings: { ...SETTINGS, themeAccent: "#ffd84d" }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
+  preset: { connected: true, state: STATE, settings: { ...SETTINGS, accent: "#db2777", themeAccent: "#0b3d2e" }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
+  // An encrypted archive waiting for its password, and one whose password was wrong.
+  password: { connected: true, state: { ...STATE, downloads: [
+    zipDownload("p1", "backup.7z", { on: true, into: "E:\\Data", ask: "password", files: 0, of: 0 }, { note: "needs the archive's password" }),
+    zipDownload("p2", "photos.rar", { on: true, into: "E:\\Data", ask: "wrong", files: 0, of: 0 }, { note: "needs the archive's password" }),
+  ] }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   empty: { connected: true, state: { ...STATE, downloads: [], active: 0, speed: 0 }, settings: SETTINGS, autostart: true, recipes: {}, engineVersion: "0.3.0" },
   offline: { connected: false, error: "engine disconnected", state: null, settings: null, recipes: RECIPES },
   quit: { connected: false, quit: true, error: "", state: null, settings: null, recipes: RECIPES },
