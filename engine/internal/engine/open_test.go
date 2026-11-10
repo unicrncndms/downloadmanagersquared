@@ -50,12 +50,12 @@ func openWithWindow(t *testing.T, w Window) *Engine {
 	return e
 }
 
-func TestOpenManagerOpensTheWindowWithTheViewAskedFor(t *testing.T) {
+func TestOpenWindowOpensTheWindowWithTheViewAskedFor(t *testing.T) {
 	w := &fakeWindow{}
 	e := openWithWindow(t, w)
-	e.OpenManager("")
-	e.OpenManager("#settings")
-	e.OpenManager("#pia")
+	e.OpenWindow("")
+	e.OpenWindow("#settings")
+	e.OpenWindow("#pia")
 	got, want := w.opened(), []string{"", "#settings", "#pia"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
 		t.Fatalf("the window was opened with %q, want %q", got, want)
@@ -81,8 +81,8 @@ func TestWithTheWindowWorkingNoBrowserIsAskedToShowAnything(t *testing.T) {
 	started := browsersStarted(t)
 	x := connectExtension(t, e, fakeBrowserExe(t, "firefox.exe"), "")
 
-	e.OpenManager("")
-	e.OpenManager("#settings")
+	e.OpenWindow("")
+	e.OpenWindow("#settings")
 	if x.next("openManager", 300*time.Millisecond) {
 		t.Fatal("the extension was asked to show the downloads, though the window opened")
 	}
@@ -99,7 +99,7 @@ func TestWithoutWebView2TheBrowserTheExtensionLastRanInIsStarted(t *testing.T) {
 	x := connectExtension(t, e, firefox, "")
 	e.Disconnected(x.conn) // Firefox closed since
 
-	e.OpenManager("")
+	e.OpenWindow("")
 	select {
 	case exe := <-started:
 		if exe != firefox {
@@ -138,7 +138,7 @@ func TestWithoutAWindowTheBrowserFallbackRuns(t *testing.T) {
 	}
 	defer e.Shutdown()
 	x := connectExtension(t, e, fakeBrowserExe(t, "firefox.exe"), "")
-	e.OpenManager("")
+	e.OpenWindow("")
 	if !x.next("openManager", 2*time.Second) {
 		t.Fatal("an engine given no window didn't fall back to the extension")
 	}

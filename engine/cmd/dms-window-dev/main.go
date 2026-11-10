@@ -36,7 +36,7 @@ func main() {
 	w := window.New(window.Config{DataDir: *dir, Dial: e.Dial, Icon: tray.Icon(), Pages: os.DirFS(*pages)})
 	e.SetWindow(w)
 	go e.Run()
-	go e.OpenManager("")
+	go e.OpenWindow("")
 	tray.Run(e, w)
 	log.Printf("stopped")
 }

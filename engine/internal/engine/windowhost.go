@@ -15,17 +15,17 @@ type Window interface {
 // dialog opens over it: the real one (Handle is 0 while it is closed).
 type windowHandle interface{ Handle() uintptr }
 
-// SetWindow gives the engine the Downloads window, for OpenManager.
+// SetWindow gives the engine the Downloads window, for OpenWindow.
 func (e *Engine) SetWindow(w Window) {
 	e.mu.Lock()
 	e.window = w
 	e.mu.Unlock()
 }
 
-// OpenManager shows view ("" the downloads, "#settings" or another "#hash" the
+// OpenWindow shows view ("" the downloads, "#settings" or another "#hash" the
 // settings page) in the Downloads window. Only if the window can't be created
 // (WebView2 missing) does it fall back to the browser the extension last ran in.
-func (e *Engine) OpenManager(view string) {
+func (e *Engine) OpenWindow(view string) {
 	e.mu.Lock()
 	w := e.window
 	e.mu.Unlock()
@@ -47,7 +47,7 @@ func (e *Engine) OpenManager(view string) {
 	e.openInBrowser(view)
 }
 
-// openInBrowser is OpenManager's fallback, the only path left that asks a
+// openInBrowser is OpenWindow's fallback, the only path left that asks a
 // browser to show the UI: a connected extension is told to show view;
 // otherwise the browser the extension last ran in is started (its toolbar
 // button then shows the downloads).

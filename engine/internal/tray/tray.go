@@ -18,7 +18,7 @@ import (
 const ifaceRows = 6
 
 // Window is the Downloads window (internal/window). The menu opens it
-// through the engine (Engine.OpenManager), which is given it with SetWindow.
+// through the engine (Engine.OpenWindow), which is given it with SetWindow.
 type Window interface {
 	Close()
 }
@@ -210,10 +210,10 @@ func menuFor(s engine.StateEvent, used map[string]time.Time, now time.Time) menu
 }
 
 // openDownloads is a left click and "Show downloads": the Downloads window's downloads view.
-func openDownloads(e *engine.Engine) { e.OpenManager("") }
+func openDownloads(e *engine.Engine) { e.OpenWindow("") }
 
 // openSettings is "Connections & settings": the Downloads window's settings view.
-func openSettings(e *engine.Engine) { e.OpenManager(window.Settings) }
+func openSettings(e *engine.Engine) { e.OpenWindow(window.Settings) }
 
 func Speed(bps float64) string {
 	if bps < 1 {

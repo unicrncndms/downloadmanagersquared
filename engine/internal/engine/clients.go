@@ -147,7 +147,7 @@ func (e *Engine) canRecordLocked(s download.Summary, browser string) bool {
 var startBrowser = winutil.OpenBrowser
 
 // extensionLocked is the most recently connected browser extension. Only
-// OpenManager's fallback (WebView2 missing) still needs it.
+// OpenWindow's fallback (WebView2 missing) still needs it.
 func (e *Engine) extensionLocked() *ipc.Conn { return e.extensionForLocked("") }
 
 // extensionForLocked is the most recently connected extension in the browser

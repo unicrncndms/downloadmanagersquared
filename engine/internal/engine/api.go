@@ -416,11 +416,11 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		// The caller waits for this process to exit before replacing or removing it.
 		e.reqOnce.Do(func() { close(e.quitReq) })
 		return map[string]int{"pid": os.Getpid()}, nil
-	case "openManager":
+	case "openManager": // the name from before the Downloads window: an upgrade still calls the old engine with it
 		p, _ := decode[struct {
 			Hash string `json:"hash"`
 		}](raw)
-		e.OpenManager(p.Hash)
+		e.OpenWindow(p.Hash)
 		return nil, nil
 	}
 	return nil, fmt.Errorf("unknown method %q", method)
