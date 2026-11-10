@@ -811,6 +811,10 @@ connectUI((m) => {
         "DMS² needs its download engine on this PC. Download the zip from the ",
         link(RELEASES_URL, "release page"),
         ", extract it and run dms-engine.exe.")
+      : m.quit && Host.startEngine
+      ? el("div", { class: "offline" },
+        "DMS² was quit from its tray icon, so Firefox handles downloads itself. ",
+        el("button", { onclick: () => Host.startEngine() }, "Start DMS²"))
       : el("div", { class: "offline" },
         "The download engine isn't reachable. Make sure it's running in the tray, or run dms-engine.exe from the release zip again.",
         m.error ? el("div", { class: "muted mono" }, m.error) : null));

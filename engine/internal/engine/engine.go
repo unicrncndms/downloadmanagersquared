@@ -379,6 +379,10 @@ func (e *Engine) Run() {
 // the engine to quit; the tray then quits as if from its menu.
 func (e *Engine) QuitRequested() <-chan struct{} { return e.quitReq }
 
+// QuitByUser tells the browsers the user quit the engine, so they don't start
+// it again by reconnecting. An upgrade's quit doesn't: its new engine is wanted.
+func (e *Engine) QuitByUser() { e.broadcast("quit", nil) }
+
 // Shutdown saves everything, then lets go of the pipe: whoever waits for the
 // pipe to be free finds the state on disk.
 func (e *Engine) Shutdown() {

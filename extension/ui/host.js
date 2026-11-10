@@ -10,6 +10,7 @@
 //   openSettings(hash)               show the settings page (hash like "#pia")
 //   openUrl(url)                     a link that leaves DMS²
 //   forgetRecipe(host)               drop a learned site
+//   startEngine()                    start the engine again after the user quit it (extension only)
 //   version                          this UI's version, compared with the engine's
 //   userAgent                        sent with "Add download"; null leaves it to the engine
 //   recipesHere                      whether learned sites can be shown and forgotten here
@@ -27,6 +28,7 @@ function extensionHost(browser, navigator) {
     openSettings: (hash) => browser.runtime.sendMessage({ type: "openSettings", hash: hash || "" }),
     openUrl: (url) => browser.tabs.create({ url }),
     forgetRecipe: (host) => browser.runtime.sendMessage({ type: "forgetRecipe", host }),
+    startEngine: () => browser.runtime.sendMessage({ type: "startEngine" }),
     version: browser.runtime.getManifest().version,
     userAgent: navigator.userAgent,
     recipesHere: true,

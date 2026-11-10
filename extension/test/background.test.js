@@ -267,3 +267,28 @@ test("a download with no known store uses the normal window's cookies, and a pri
   await recording(b, { cookieStore: "firefox-private" });
   assert.equal(b.calls.filter((c) => c[0] === "cookies.set").length, 0);
 });
+
+test("after the user quits the engine from its tray, the extension doesn't start it again until asked", async () => {
+  const b = load();
+  await b.settle();
+  const ports = () => b.listeners["port.onMessage"].length; // one per connectNative
+  const before = ports();
+  b.fire("port.onMessage", { event: "quit" });
+  b.fire("port.onDisconnect", {});
+  await b.advance(60000);
+  assert.equal(ports(), before);
+  assert.equal(b.Engine.quit, true);
+  assert.equal(b.Engine.lastError, "");
+  await b.fire("runtime.onMessage", { type: "startEngine" }, {})[0];
+  assert.equal(ports(), before + 1);
+  assert.equal(b.Engine.quit, false);
+});
+
+test("a lost engine it didn't quit is reconnected", async () => {
+  const b = load();
+  await b.settle();
+  const before = b.listeners["port.onMessage"].length;
+  b.fire("port.onDisconnect", {});
+  await b.advance(2000);
+  assert.equal(b.listeners["port.onMessage"].length, before + 1);
+});

@@ -33,6 +33,7 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
     // Only in the Downloads window.
     get openDownloads() { return hostFixture().openDownloads ? () => record({ openDownloads: true }) : undefined; },
     forgetRecipe: (host) => record({ forgetRecipe: host }),
+    startEngine: () => record({ startEngine: true }),
     get version() { return hostFixture().version; },
     get userAgent() { return hostFixture().userAgent; },
     get recipesHere() { return hostFixture().recipesHere; },

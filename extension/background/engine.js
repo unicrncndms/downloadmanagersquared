@@ -14,6 +14,15 @@ const Engine = {
   pending: new Map(),
   listeners: new Map(),
   retryDelay: 2000,
+  quit: false,         // the user quit the engine from its tray: don't start it again by reconnecting
+
+  // start connects again after the user quit the engine, which starts it.
+  start() {
+    if (this.port) return;
+    this.quit = false;
+    this.retryDelay = 2000;
+    this.connect();
+  },
 
   connect() {
     const port = browser.runtime.connectNative("downloadmanagersquared");
@@ -25,7 +34,8 @@ const Engine = {
       for (const { reject } of this.pending.values()) reject(new Error("engine disconnected"));
       this.pending.clear();
       this.notInstalled = /no such native application/i.test(msg);
-      this.setConnected(false, msg || this.lastError || "engine disconnected");
+      this.setConnected(false, this.quit ? "" : msg || this.lastError || "engine disconnected");
+      if (this.quit) return;
       setTimeout(() => this.connect(), this.retryDelay);
       this.retryDelay = Math.min(this.retryDelay * 2, 30000);
     };
@@ -51,6 +61,7 @@ const Engine = {
         this.lastError = "engine could not start: " + msg.data;
         return;
       }
+      if (msg.event === "quit") this.quit = true;
       if (msg.event === "state") this.state = msg.data;
       if (msg.event === "settings") this.settings = msg.data;
       this.emit(msg.event, msg.data);

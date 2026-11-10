@@ -70,6 +70,7 @@ func onReady(e *engine.Engine, w Window) {
 			case <-resume.item.ClickedCh:
 				go e.ResumeAll()
 			case <-quit.ClickedCh:
+				e.QuitByUser()
 				w.Close()
 				systray.Quit()
 				return

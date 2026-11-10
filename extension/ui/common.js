@@ -22,7 +22,7 @@ const RELEASES_URL = "https://github.com/unicrncndms/downloadmanagersquared/rele
 // Engine connection badge in the page header.
 function renderConn(m) {
   const conn = $("conn");
-  conn.textContent = m.connected ? "Engine connected" : m.notInstalled ? "Engine not installed" : "Engine offline";
+  conn.textContent = m.connected ? "Engine connected" : m.notInstalled ? "Engine not installed" : m.quit ? "Engine quit" : "Engine offline";
   conn.className = "badge " + (m.connected ? "ok" : "bad");
   conn.title = m.error || "";
 }

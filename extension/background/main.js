@@ -7,6 +7,7 @@ browser.runtime.onConnect.addListener((port) => {
     connected: Engine.connected,
     error: Engine.lastError,
     notInstalled: Engine.notInstalled,
+    quit: Engine.quit,
     engineVersion: Engine.version,
     state: Engine.state,
     settings: Engine.settings,
@@ -26,6 +27,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     if (msg.method === "setAutostart") p.then(() => { Engine.autostart = msg.params.on; });
     return p;
   }
+  if (msg.type === "startEngine") return Engine.start();
   if (msg.type === "forgetRecipe") return Resolver.forgetRecipe(msg.host);
   if (msg.type === "openSettings") return openSettings(msg.hash || "");
   return undefined;
