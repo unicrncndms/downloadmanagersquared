@@ -11,8 +11,7 @@ const Engine = {
   settings: null,
   state: null,
   autostart: false,
-  nextId: 1,
-  pending: new Map(),
+  rpc: rpcClient((m) => Engine.port.postMessage(m), (f, ms) => setTimeout(f, ms)),
   listeners: new Map(),
   retryDelay: 2000,
   quit: false,         // the user quit the engine from its tray: don't start it again by reconnecting
@@ -32,8 +31,7 @@ const Engine = {
     const lost = (msg) => {
       if (this.port !== port) return;
       this.port = null;
-      for (const { reject } of this.pending.values()) reject(new Error("engine disconnected"));
-      this.pending.clear();
+      this.rpc.drop("engine disconnected");
       this.notInstalled = /no such native application/i.test(msg);
       this.setConnected(false, this.quit ? "" : msg || this.lastError || "engine disconnected");
       if (this.quit) return;
@@ -77,23 +75,12 @@ const Engine = {
       this.emit(msg.event, msg.data);
       return;
     }
-    const p = this.pending.get(msg.id);
-    if (!p) return;
-    this.pending.delete(msg.id);
-    if (msg.error) p.reject(new Error(msg.error));
-    else p.resolve(msg.result);
+    this.rpc.answer(msg);
   },
 
   call(method, params) {
     if (!this.port) return Promise.reject(new Error("engine not connected"));
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.port.postMessage({ id, method, params: params || {} });
-      setTimeout(() => {
-        if (this.pending.delete(id)) reject(new Error("engine did not answer"));
-      }, 60000);
-    });
+    return this.rpc.call(method, params);
   },
 
   // Returns a function that removes the listener.

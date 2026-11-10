@@ -37,6 +37,7 @@
       "lib/route.js",
       "lib/provider.js",
       "lib/accent.js",
+      "lib/rpc.js",
       "background/util.js",
       "background/engine.js",
       "background/resolver.js",

@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
+globalThis.rpcClient = require("../lib/rpc.js").rpcClient; // the pages load it as a script before host.js
 const { pickHost } = require("../ui/host.js");
 
 // A browser that records what the pages send and lets the test play the background.

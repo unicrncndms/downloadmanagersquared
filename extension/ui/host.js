@@ -37,13 +37,12 @@ function extensionHost(browser, navigator) {
 
 // In the Downloads window (WebView2 in dms-engine.exe): the page speaks the
 // engine's JSON lines itself, through bridge (window.dmsWindow, set up by the
-// window before the page loads), over the window's in-memory pipe. Request
-// ids, the timeout and events work as in background/engine.js. The window
+// window before the page loads), over the window's in-memory pipe. Requests
+// go through lib/rpc.js, as in background/engine.js. The window
 // never says hello, so it gets no resolves and leaves the browser's user agent
 // alone.
 function windowHost(win, bridge) {
-  let nextId = 1;
-  const pending = new Map();
+  const rpc = rpcClient((m) => bridge.send(JSON.stringify(m)), (f, ms) => win.setTimeout(f, ms));
   const subscribers = new Set();
   const latest = {
     connected: false, error: "", notInstalled: false, engineVersion: "",
@@ -66,22 +65,11 @@ function windowHost(win, bridge) {
       if (latest.connected) emit();
       return;
     }
-    const p = pending.get(msg.id);
-    if (!p) return;
-    pending.delete(msg.id);
-    if (msg.error) p.reject(new Error(msg.error));
-    else p.resolve(msg.result);
+    rpc.answer(msg);
   };
 
   function call(method, params) {
-    const id = nextId++;
-    const p = new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      bridge.send(JSON.stringify({ id, method, params: params || {} }));
-      win.setTimeout(() => {
-        if (pending.delete(id)) reject(new Error("engine did not answer"));
-      }, 60000);
-    });
+    const p = rpc.call(method, params);
     if (method === "setAutostart") p.then(() => { latest.autostart = !!(params && params.on); }, () => {});
     return p;
   }

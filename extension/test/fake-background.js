@@ -114,7 +114,7 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
 
   // The engine: connected, with one interface per entry of ifaces.
   const E = get("Engine");
-  E.pending.clear(); // the real hello, never answered here
+  E.rpc.pending.clear(); // the real hello, never answered here
   E.call = (method, params) => {
     engine.push({ method, params: clone(params) });
     return Promise.resolve(method === "add" ? { id: "d" + engine.length } : {});
