@@ -21,16 +21,20 @@ header .sections a[aria-current] { color: var(--accent); background: var(--accen
 .recipes td:first-child { padding-left: 0; }
 .recipes td:last-child { padding-right: 0; text-align: right; }
 .recipes .when { white-space: nowrap; }
-main { max-width: 1040px; margin: 0 auto; padding: 20px 24px 60px; }
+main { max-width: 980px; margin: 0 auto; padding: 8px 24px 60px; }
 section { scroll-margin-top: 70px; }
-h2 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; }
-h3 { font-size: 13px; margin: 18px 0 10px; color: var(--muted); font-weight: 600; display: flex; align-items: center; }
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+/* A section as in the downloads list: its name, then a line to the edge. No boxes. */
+h2 { display: flex; align-items: center; gap: 8px; margin: 22px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); }
+h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+h3 { font-size: 13px; margin: 22px 0 6px; font-weight: 600; display: flex; align-items: center; }
+.panel { margin-bottom: 28px; }
 .row-actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
 
 /* Settings: label on the left, control on the right, one per line. */
-.fields { display: grid; grid-template-columns: minmax(200px, 300px) minmax(0, 360px); gap: 10px 20px; align-items: center; }
-.fields label { display: flex; align-items: center; }
+.fields { display: grid; grid-template-columns: minmax(200px, 320px) minmax(0, 380px); column-gap: 24px; align-items: center; font-size: 13px; }
+.fields { row-gap: 12px; padding-top: 6px; }
+.fields > label, .fields > span { display: flex; align-items: center; min-height: 30px; }
 .fields input[type=text], .fields input[type=password], .fields select { width: 100%; }
 .fields input[type=number] { width: 110px; }
 
@@ -41,7 +45,7 @@ h3 { font-size: 13px; margin: 18px 0 10px; color: var(--muted); font-weight: 600
   grid-template-columns: minmax(140px, 1.5fr) 40px 46px 72px 58px 128px minmax(110px, 1fr) 64px;
   border-top: 1px solid var(--line); font-size: 13px;
 }
-.conn-row.head { border-top: 0; padding-top: 0; color: var(--muted); font-size: 12px; font-weight: 500; }
+.conn-row.head { border-top: 0; padding-top: 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .conn-row.head > span { display: flex; align-items: center; }
 .conn-row.absent { opacity: .5; }
 .conn-row .center { justify-self: center; }
@@ -60,12 +64,12 @@ h3 { font-size: 13px; margin: 18px 0 10px; color: var(--muted); font-weight: 600
 .follow { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--muted); }
 
 .swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.swatches button { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--line); }
+.swatches button { width: 26px; height: 26px; padding: 0; border-radius: var(--r); border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--line); }
 .swatches button[aria-checked=true] { box-shadow: 0 0 0 2px var(--text); }
-.swatches button.follow { width: auto; border-radius: 13px; padding: 0 10px; border: 1px solid var(--line); box-shadow: none; font-size: 12px; }
+.swatches button.follow { width: auto; border-radius: var(--r); padding: 0 10px; border: 1px solid var(--line); box-shadow: none; font-size: 12px; }
 .swatches button.follow[aria-checked=true] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .swatches label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); cursor: pointer; }
-.swatches input[type=color] { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+.swatches input[type=color] { width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--r); background: none; cursor: pointer; }
 .toast { bottom: 16px; }
 @media (max-width: 700px) {
   header, main { padding-left: 16px; padding-right: 16px; }

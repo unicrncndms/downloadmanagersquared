@@ -179,7 +179,13 @@ function makeCard(id) {
   // A queued download moves with these, or by dragging it onto another queued one.
   const menuNext = el("button", { onclick: () => { closeMenu(); moveDownload(id, "first"); } }, "Start next");
   const menuLast = el("button", { onclick: () => { closeMenu(); moveDownload(id, "last"); } }, "Start last");
-  const menu = el("div", { class: "menu", hidden: true }, menuNext, menuLast, menuFolder, menuCopy, menuRemove);
+  // Record the site's clicks: the site has no recipe yet, so a link that
+  // expires later would need someone at the browser. Recording now, while
+  // someone is here, lets DMS² renew it alone. Only an offer: nothing records
+  // without the click. In the menu, and explained in Details.
+  const record = () => act("recordRecipe", { id }, "Click through the page in the window that opens");
+  const menuRecord = el("button", { onclick: () => { closeMenu(); record(); } }, "Record the site's clicks…");
+  const menu = el("div", { class: "menu", hidden: true }, menuNext, menuLast, menuFolder, menuCopy, menuRecord, menuRemove);
   const more = iconButton("more", "More", (e) => {
     e.stopPropagation();
     const was = !menu.hidden;
@@ -190,6 +196,7 @@ function makeCard(id) {
   const tools = el("span", { class: "end" }, openDetails, moveUp, moveDown, pause, resume, showDone, dropDone, el("span", { class: "more" }, more, menu));
   const sub = el("span", { class: "muted num" });
   const via = el("span", { class: "via muted num" }); // which interfaces, how many connections each
+  const mini = el("span", { class: "mini num" }); // the same in a narrow list: colours and counts by the name
   const line = el("div", { class: "what" }, status, vpn, left, via, sub);
   const extract = extractBar();
 
@@ -203,7 +210,7 @@ function makeCard(id) {
     delButton, keepButton,
     el("button", { class: "small", onclick: () => { ask.hidden = true; } }, "Cancel"));
 
-  // Interfaces with a problem, on the card; all of them in Details.
+  // Interfaces that failed, on the card; all of them in Details.
   const cardConns = el("div", { class: "conns num" });
   const allConns = el("div", { class: "conns num" });
   const cardRows = new Map();
@@ -212,10 +219,9 @@ function makeCard(id) {
   // Record recipe: the site has no recipe yet, so a link that expires later
   // would need someone at the browser. Recording now, while someone is here,
   // lets DMS² renew it alone. Only an offer: nothing records without the click.
-  const recordRow = el("div", { class: "extract", hidden: true },
-    el("div", { class: "row" },
-      el("span", { class: "grow muted" }, "If this link expires, DMS² will need you to click through the site again."),
-      el("button", { class: "small primary", onclick: () => act("recordRecipe", { id }, "Click through the page in the window that opens") }, "Record recipe")));
+  const recordSection = el("section", {}, el("h3", {}, "Site"),
+    el("p", { class: "muted" }, "If this link expires, DMS² will need you to click through the site again. Recorded once, your clicks are repeated for you."),
+    el("button", { class: "small", onclick: record }, "Record the site's clicks"));
 
   // The add step: a torrent waits here until its files and folder are chosen.
   const pick = el("div", { class: "pick", hidden: true });
@@ -297,7 +303,7 @@ function makeCard(id) {
   const bigGrid = chunkGrid(4);
   const bigNums = el("div", { class: "muted num" });
   const details = el("details", { ontoggle: () => { activityAt = 0; if (d) update(d); } },
-    el("summary", {}, "Details"), bigGrid.root, bigNums, connSection, mirrorSection, foldSection, fileSection, checkSection, activitySection);
+    el("summary", {}, "Details"), bigGrid.root, bigNums, connSection, recordSection, mirrorSection, foldSection, fileSection, checkSection, activitySection);
   function syncDetail() {
     const on = detail.id === id;
     if (on && details.parentNode !== detail.body) {
@@ -313,8 +319,8 @@ function makeCard(id) {
     openDetails.setAttribute("aria-expanded", String(on));
   }
 
-  const extras = [extract.bar, extract.line, cardConns, recordRow, pick, fold.row, fold.pass, fold.ask, ask];
-  const root = el("div", { class: "card", tabindex: "-1", "data-id": id }, num, name, tools, prog, nums, line, ...extras);
+  const extras = [extract.bar, extract.line, cardConns, pick, fold.row, fold.pass, fold.ask, ask];
+  const root = el("div", { class: "card", tabindex: "-1", "data-id": id }, num, name, mini, tools, prog, nums, line, ...extras);
   const queued = () => d && d.status === "queued";
   const takes = () => d && (d.status === "queued" || d.status === "running"); // a drop: its place, or its slot
   root.addEventListener("dragstart", (e) => {
@@ -374,7 +380,8 @@ function makeCard(id) {
     vpn.hidden = done || !VPN_TEXT[d.vpn];
     status.textContent = d.label;
     status.className = "badge st " + (d.tone || "");
-    status.hidden = slim; // its section's heading says it
+    // Its section's heading says it, unless it says more (Checking, Extracting) or warns.
+    status.hidden = slim || (["Downloading", "Seeding", "Paused", "Queued"].includes(d.label) && !["warn", "bad"].includes(d.tone));
     dropDone.hidden = !done;
     showDone.hidden = !done || !(d.actions || {}).showInFolder;
     const nm = rowNums(d);
@@ -400,13 +407,19 @@ function makeCard(id) {
     sub.textContent = s.error || slim ? "" : [!seeding && torrent ? up : "", s.sub].filter(Boolean).join(" · ");
     sub.hidden = !sub.textContent;
     const used = s.error ? [] : viaLinks(d);
-    via.hidden = !used.length;
-    const viaText = (ifc) => `${ifaceName(ifc, latest.state, latest.settings)} ${torrent ? plural(d.links[ifc].conns, "peer") : d.links[ifc].conns + "×"}`;
-    fresh(via, used.map((ifc) => [viaText(ifc), ifaceHue(ifc, latest.state)]), () => used.map((ifc) => {
+    via.hidden = mini.hidden = !used.length;
+    const count = (ifc) => (torrent ? plural(d.links[ifc].conns, "peer") : d.links[ifc].conns + "×");
+    const nameOf = (ifc) => ifaceName(ifc, latest.state, latest.settings);
+    // A connection held back (the server busy, backing off) says so in its tone; why on hover and in Details.
+    const held = (ifc) => (d.links[ifc].tone === "warn" ? d.links[ifc].label : "");
+    const viaSig = used.map((ifc) => [nameOf(ifc), count(ifc), held(ifc), ifaceHue(ifc, latest.state)]);
+    const entry = (ifc, text) => {
       const dot = el("i", { class: "dot" });
       dot.style.color = ifaceHue(ifc, latest.state);
-      return el("span", {}, dot, viaText(ifc));
-    }));
+      return el("span", { class: held(ifc) ? "held" : "", title: [`${nameOf(ifc)}: ${count(ifc)}`, held(ifc)].filter(Boolean).join(" · ") }, dot, text);
+    };
+    fresh(via, viaSig, () => used.map((ifc) => entry(ifc, `${nameOf(ifc)} ${count(ifc)}`)));
+    fresh(mini, viaSig, () => used.map((ifc) => entry(ifc, torrent ? String(d.links[ifc].conns) : count(ifc))));
     line.hidden = done || (slim && left.hidden && vpn.hidden);
     extract.update(extractView([d]));
 
@@ -416,7 +429,7 @@ function makeCard(id) {
     menuFolder.hidden = !can.showInFolder;
     menuRemove.hidden = !can.remove; // a torrent being added has its own Cancel
     menuCopy.hidden = !d.url;
-    recordRow.hidden = !can.recordRecipe;
+    menuRecord.hidden = recordSection.hidden = !can.recordRecipe;
     menuNext.hidden = menuLast.hidden = !queued();
     const all = (latest.state && latest.state.downloads) || [];
     moveUp.hidden = !queued() || moveBefore(all, id, "up") === null;
@@ -461,8 +474,9 @@ function makeCard(id) {
     // The interfaces: those with a problem on the card, all in Details.
     const ids = Object.keys(d.links || {}).sort((a, b) =>
       ifaceName(a, latest.state, latest.settings).localeCompare(ifaceName(b, latest.state, latest.settings)));
+    // Held back shows on the connection's colour; failed gets a row with why, and Retry.
     const problems = new Set(problemLinks(d));
-    const shown = ids.filter((ifc) => problems.has(ifc));
+    const shown = ids.filter((ifc) => problems.has(ifc) && d.links[ifc].tone !== "warn");
     cardConns.hidden = !shown.length;
     renderLinks(cardConns, cardRows, shown);
     connSection.hidden = done || !ids.length;
