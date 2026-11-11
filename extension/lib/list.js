@@ -108,7 +108,18 @@ function listEntries(sorted) {
     }
     g.items.push(d);
   }
-  return out.map((e) => (e.items && e.items.length === 1 ? { d: e.items[0] } : e));
+  return out.map((e) => (e.items && e.items.length === 1 ? { d: e.items[0] }
+    : e.items ? { ...e, items: groupOrder(e.items) } : e));
+}
+
+// groupOrder is the order of a group's files or parts under its row: what
+// needs you, then downloading, seeding, queued, paused, and last whatever is
+// fetched (a part waiting for its archive to extract too); by name within
+// each, so part 2 comes before part 10.
+function groupOrder(items) {
+  const rank = (d) => (group(d) === 0 ? 0 : d.status === "completed" ? 5 : group(d));
+  return [...items].sort((a, b) => rank(a) - rank(b) ||
+    String(a.filename).localeCompare(String(b.filename), undefined, { numeric: true }));
 }
 
 // groupView is a group card's lines: its files added up, the badge of the
@@ -418,5 +429,5 @@ function addView(text) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { addLines, addView, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, extractView, predict, viaLinks, sectionName, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
+  module.exports = { addLines, addView, groupOrder, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, extractView, predict, viaLinks, sectionName, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
 }

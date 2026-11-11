@@ -361,3 +361,12 @@ test("time left counts days past two days", () => {
   assert.equal(fmtETA(47 * 3600), "47h 00m");
   assert.equal(fmtETA(987654), "11d 10h");
 });
+
+test("a group's parts: needs you, downloading, queued, paused, then fetched; by name within each", () => {
+  const { listEntries } = require("../lib/list.js");
+  const p = (n, status, extra) => ({ id: "p" + n, filename: `x.part${n}.rar`, group: "g", status, links: {}, ...extra });
+  const items = [p(1, "completed", { folder: { on: true, into: "E:\\", set: {} } }), p(10, "running"), p(3, "queued"), p(2, "running"),
+    p(4, "paused"), p(5, "failed"), p(6, "completed")];
+  const [g] = listEntries(items);
+  assert.deepEqual(g.items.map((d) => d.id), ["p5", "p2", "p10", "p3", "p4", "p1", "p6"]);
+});
