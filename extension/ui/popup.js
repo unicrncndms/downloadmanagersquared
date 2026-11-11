@@ -164,6 +164,13 @@ function shortName(name) {
   return w.length > 6 ? w.slice(0, 3) : w;
 }
 
+// stripSpeed is a speed in MB/s with no unit, short enough for the strip:
+// 4.4, 87, and from 1 GB/s on 1.2G.
+function stripSpeed(bps) {
+  const mb = bps / 1e6;
+  return mb >= 1000 ? (mb / 1000).toFixed(1) + "G" : mb.toFixed(mb < 100 ? 1 : 0);
+}
+
 // The connections in the header: each one's colour, name and speed now. One
 // that carries nothing while downloads run shows a hollow square and "idle":
 // a dead line is seen without its colour.
@@ -180,10 +187,25 @@ function renderStrip(s) {
     return el("button", { class: "chip" + (idle(i) ? " idle" : ""), title: `${i.name}: ${said}`, "aria-label": `${i.name}, ${said}. Open Connections`,
       onclick: () => { Host.openSettings("#connections"); if (!document.body.classList.contains("windowed")) window.close(); } },
       sq, el("span", { class: "nm" }, i.name), el("span", { class: "nm short" }, shortName(i.name)),
-      el("span", { class: "muted num" }, idle(i) ? "idle" : ((i.speed || 0) / 1e6).toFixed(1)),
+      el("span", { class: "muted num" }, idle(i) ? "idle" : stripSpeed(i.speed || 0)),
       busy.has(i.id) ? el("span", { class: "busy" }, "busy") : null);
   }));
+  fitStrip();
 }
+
+// fitStrip gives the window's strip the short names when the full ones
+// don't fit on the header's line, and only the colours and speeds when the
+// short ones don't either (each still says its name on hover).
+function fitStrip() {
+  const strip = $("strip");
+  if (!document.body.classList.contains("windowed")) return;
+  // The chips reach 4px past the strip by design (their hover box); that is not running out of room.
+  const over = () => strip.scrollWidth > strip.clientWidth + 5;
+  strip.classList.remove("tight", "tighter");
+  if (over()) strip.classList.add("tight");
+  if (over()) strip.classList.add("tighter");
+}
+addEventListener("resize", fitStrip);
 
 if (new URLSearchParams(location.search).has("window")) document.body.classList.add("windowed");
 

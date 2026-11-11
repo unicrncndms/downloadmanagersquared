@@ -27,6 +27,14 @@ function applyAccent(settings) {
   if (style.textContent !== css) style.textContent = css;
 }
 
+// An (i)'s note opens to the right, or to the left when the right has less room.
+function sideInfo(e) {
+  const i = e.target.closest && e.target.closest(".info");
+  if (i) { const r = i.getBoundingClientRect(); i.classList.toggle("left", innerWidth - r.left < r.right); }
+}
+addEventListener("pointerover", sideInfo);
+addEventListener("focusin", sideInfo);
+
 // A link that leaves DMS²: Host opens it (a new tab, or the default browser).
 function link(url, text) {
   return el("a", { href: url, onclick: (e) => { e.preventDefault(); Host.openUrl(url); } }, text);

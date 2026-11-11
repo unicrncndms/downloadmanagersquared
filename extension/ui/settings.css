@@ -36,7 +36,8 @@ h3 { display: flex; align-items: center; margin: 0 0 var(--s2); font-size: 12px;
 .setting { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 380px); column-gap: var(--s4); align-items: center;
   min-height: 52px; padding: var(--s2) var(--s4); }
 .setting + .setting { border-top: 1px solid var(--line); }
-.setting > label, .setting > span:first-child { display: flex; align-items: center; }
+/* Block, not flex: a label that wraps keeps its (i) right after its last word. */
+.setting > label, .setting > span:first-child { display: block; }
 .setting input[type=text], .setting input[type=password], .setting select { width: 100%; height: var(--tile); }
 .setting input[type=number] { width: 110px; height: var(--tile); }
 .setting .buttons { display: flex; flex-wrap: wrap; gap: var(--s2); }
@@ -94,3 +95,4 @@ h3 { display: flex; align-items: center; margin: 0 0 var(--s2); font-size: 12px;
 /* The connections in one box, like the settings under them. */
 #ifaces { border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); padding: 0 var(--s4); }
 .recipes tr:first-child { border-top: 0; }
+.setting input:user-invalid { border-color: var(--bad); }

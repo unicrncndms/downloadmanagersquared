@@ -189,7 +189,8 @@ const FIELDS = {
 };
 
 for (const [id, [key, , parse]] of Object.entries(FIELDS)) {
-  $(id).addEventListener("change", () => act("setSettings", { [key]: parse($(id).value) }, "Saved"));
+  // Out of its min/max, or empty where a number is needed: say so, send nothing.
+  $(id).addEventListener("change", () => $(id).reportValidity() && act("setSettings", { [key]: parse($(id).value) }, "Saved"));
 }
 $("sAuto").addEventListener("change", () => act("setAutostart", { on: $("sAuto").checked }, "Saved"));
 $("sFolder").addEventListener("change", () => act("setSettings", { folderDefault: $("sFolder").checked }, "Saved"));

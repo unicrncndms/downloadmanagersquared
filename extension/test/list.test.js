@@ -354,3 +354,10 @@ test("a row's status tile says its section: what needs you, at work, seeding, qu
     .map((d) => { const t = tileOf(d); return t.kind + ":" + t.icon; });
   assert.deepEqual(kinds, ["need:alert", "run:down", "seed:up", ":", ":pause", "done:check"]);
 });
+
+test("time left counts days past two days", () => {
+  const { fmtETA } = require("../lib/list.js");
+  assert.equal(fmtETA(3 * 3600 + 5 * 60), "3h 05m");
+  assert.equal(fmtETA(47 * 3600), "47h 00m");
+  assert.equal(fmtETA(987654), "11d 10h");
+});

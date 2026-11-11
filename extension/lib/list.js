@@ -20,6 +20,7 @@ function fmtSpeed(bps) {
 function fmtETA(sec) {
   if (!(sec >= 0) || !isFinite(sec)) return "—";
   const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = Math.floor(sec % 60);
+  if (h >= 48) return `${Math.floor(h / 24)}d ${h % 24}h`;
   if (h) return `${h}h ${String(m).padStart(2, "0")}m`;
   if (m) return `${m}m ${String(s).padStart(2, "0")}s`;
   return `${s}s`;

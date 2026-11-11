@@ -103,6 +103,33 @@ const CHOOSING = { kind: "torrent", id: "t", url: "magnet:?xt=urn:btih:9f1c", fi
   size: 3e9, done: 0, status: "choosing", speed: 0, eta: -1, fileCount: 2, filesSize: 3e9, label: "Choose files",
   actions: { remove: true }, partialFile: false, links: {}, added: "2026-11-06T11:00:00Z" };
 
+// Hardening: long, emoji, CJK and RTL names, huge sizes, six connections with
+// long names, a failed link, and 300 downloads in the queue.
+const LONG = "Very.Long.Release.Name.With.Many.Dots.And.No.Spaces.2026.Remastered.Director's.Cut.Extended.Edition.4K.HDR.x265.mkv";
+const STRESS_IFACES = [
+  ...IFACES,
+  { id: "phone", name: "Pixel 9 Pro USB-Tethering (Remote NDIS based Internet Sharing Device #2)", description: "Remote NDIS", ip: "192.168.42.129",
+    present: true, enabled: true, connections: 32, socksPort: 50005, speed: 1.23e9, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" },
+  { id: "lte", name: "Mobilfunk-Breitbandverbindung", description: "Qualcomm X65", ip: "10.64.1.9",
+    present: true, enabled: true, connections: 4, socksPort: 50006, speed: 0, upload: true, uploadLimit: 0, downloadLimit: 0 },
+];
+const STRESS = { connected: true, settings: { ...SETTINGS, saveDir: "D:\\" + "Sehr langer Ordnername\\".repeat(6) }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
+  state: { ...STATE, interfaces: STRESS_IFACES, speed: 1.24e9, eta: 987654, active: 3, downloads: [
+    { ...DOWNLOADS[0], id: "s1", filename: LONG, size: 9.87e12, done: 1.2e12, speed: 1.24e9, eta: 987654,
+      links: { eth: DOWNLOADS[0].links.eth, wifi: DOWNLOADS[0].links.wifi,
+        phone: { status: "ready", conns: 32, speed: 1.23e9, label: "Downloading", tone: "ok" },
+        lte: { status: "failed", conns: 0, speed: 0, label: "Failed: the server answered 403 Forbidden for this connection's own link", tone: "bad" },
+        "eth~vpn": { status: "ready", conns: 4, speed: 2.1e6, label: "Downloading", tone: "ok" } }, mapBy: ["eth", "wifi", "phone"] },
+    { ...DOWNLOADS[0], id: "s2", filename: "🎬 映画コレクション 2026 — 完全版.zip", links: { eth: DOWNLOADS[0].links.eth } },
+    { ...DOWNLOADS[0], id: "s3", filename: "نسخة احتياطية كاملة للمشروع.7z", links: { wifi: DOWNLOADS[0].links.wifi } },
+    { ...DOWNLOADS[1], id: "s4", status: "failed", speed: 0, eta: -1, label: "Failed", tone: "bad",
+      note: "The server refused every connection: 404 Not Found. The link may have expired; open the page again to get a new one.", actions: { remove: true, retry: true } },
+    ...Array.from({ length: 300 }, (_, i) => ({ ...DOWNLOADS[0], id: "q" + i, filename: `episode-${String(i + 1).padStart(3, "0")}.mkv`,
+      url: `https://example.com/e/${i}`, status: "queued", done: 0, map: "", note: "Waiting in the queue", speed: 0, eta: -1, label: "Queued", tone: "dim",
+      links: {}, partialFile: false, actions: { remove: true, pause: true } })),
+    { ...DOWNLOADS[2], id: "s5", filename: "x", size: 1 },
+  ] } };
+
 const FIXTURES = {
   choosing: { connected: true, state: { ...STATE, downloads: [CHOOSING], active: 0 }, settings: SETTINGS, autostart: true, recipes: RECIPES,
     engineVersion: "0.3.0", files: { t: [{ path: "datasets/a.csv", size: 1e9, selected: true }, { path: "datasets/b.csv", size: 2e9, selected: false }] } },
@@ -161,6 +188,7 @@ const FIXTURES = {
   quit: { connected: false, quit: true, error: "", state: null, settings: null, recipes: RECIPES },
   notInstalled: { connected: false, notInstalled: true, error: "No such native application downloadmanagersquared", state: null, settings: null, recipes: {} },
   otherVersion: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.4.1" },
+  stress: STRESS,
   // The Downloads window: no recipes or user agent here, and the versions always match.
   window: { connected: true, state: STATE, settings: { ...SETTINGS, vpnProvider: "pia" }, autostart: true, recipes: null, engineVersion: "0.3.0",
     host: { version: "0.3.0", userAgent: null, recipesHere: false, openDownloads: true } },

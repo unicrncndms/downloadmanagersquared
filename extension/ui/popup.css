@@ -18,7 +18,22 @@ body:not(.windowed) .head .strip { order: 1; flex-basis: 100%; }
 .engine-window header { padding: var(--win-pad); }
 .windowed .head { gap: var(--s4); flex-wrap: nowrap; white-space: nowrap; }
 .engine-window .head { height: var(--win-row1); }
-.windowed .head .strip { margin-left: auto; gap: 0 var(--s3); }
+.windowed .head .strip { margin-left: auto; gap: 0 var(--s3); flex-wrap: nowrap; min-width: 0; overflow: clip; overflow-clip-margin: 4px; }
+/* Too many or too long for the line (popup.js fitStrip): the short names, as in the popup. */
+.windowed .strip.tight .nm { display: none; }
+.windowed .strip.tight .nm.short { display: inline; }
+.windowed .strip.tighter .nm.short { display: none; }
+/* Still short of room: "Engine connected" gives its words up too, as in the popup. */
+.windowed .head:has(.strip.tighter) #conn.ok { width: 7px; overflow: hidden; white-space: nowrap; }
+.windowed .head > :not(.strip) { flex: none; }
+/* A window narrower than the popup: the popup's header, the connections on their own line. */
+@media (max-width: 520px) {
+  .windowed .head, .engine-window .head { flex-wrap: wrap; height: auto; }
+  .windowed .head .strip { order: 3; flex-basis: 100%; margin-left: 0; }
+  body.windowed .head .total { margin-left: auto; }
+  .windowed #conn.ok { width: 7px; overflow: hidden; white-space: nowrap; }
+  .engine-window .tools { height: auto; }
+}
 .windowed .head .total { order: 1; margin-left: 0; display: flex; align-items: baseline; gap: var(--s2); }
 .windowed .head .total b, .windowed .head .total small { display: inline; }
 .windowed .head .total small { font-size: 12px; }
@@ -80,6 +95,10 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .card { display: grid; grid-template-columns: var(--tile-sm) minmax(0, 1fr) auto auto; gap: var(--s1) var(--s3); align-items: center;
   padding: var(--s2) var(--s1); border: 1px solid transparent; border-radius: var(--r); background: var(--bg); }
 .card + .card { box-shadow: 0 -1px 0 var(--line); }
+/* A long queue: rows out of view skip layout and paint until scrolled to. Not
+   a row with its menu open or the focus: containment would trap the fixed
+   menu inside the row and clip focus rings. */
+.card:not(:focus-within, :has(.menu:not([hidden]))) { content-visibility: auto; contain-intrinsic-size: auto 48px; }
 .card:hover { background: var(--panel); }
 .card.sel, .card.sel:hover { background: var(--accent-soft); border-color: var(--accent); box-shadow: none; }
 .card.sel + .card, .card.detailed + .card { box-shadow: none; }
@@ -92,9 +111,11 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .card.one > .title { grid-area: 1 / 2; }
 .title > .name { flex: 1 1 auto; }
 .card > .name, .title > .name { grid-area: 1 / 2; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 24px; line-height: 24px; }
+/* A file name in Arabic or Hebrew reads in its own direction, still at the left. */
+.name, #detailTitle { unicode-bidi: plaintext; text-align: left; }
 /* Calm: a row's buttons show on hover, keyboard focus and selection; what asks for an answer always shows. */
 .card > .end { grid-area: 1 / 4; display: flex; align-items: center; justify-content: flex-end; white-space: nowrap; opacity: 0; transition: opacity .12s; }
-.card:hover > .end, .card:focus-within > .end, .card.sel > .end, .card.detailed > .end { opacity: 1; }
+.card:hover > .end, .card:focus-within > .end, .card.sel > .end, .card.detailed > .end, .card:has(.menu:not([hidden])) > .end { opacity: 1; }
 @media (hover: none) { .card > .end { opacity: 1; } }
 /* The connections by the name: a tile each, how many connections inside, and "busy" in words. */
 .card .mini { flex: none; display: flex; gap: var(--s1); align-items: center; font-size: 11px; white-space: nowrap; }
@@ -117,6 +138,15 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .what .left.bad { color: var(--bad); }
 .card.group > .name .badge { margin-left: var(--s1); font-weight: 400; line-height: 1.5; vertical-align: 1px; }
 .prog > .bar { margin: 5px 0; max-width: 318px; }
+/* A very wide window: the list keeps a readable width in the middle, as the settings do. */
+@container (min-width: 1040px) {
+  main > * { max-width: 1000px; margin-left: auto !important; margin-right: auto !important; }
+  main > .sec { max-width: calc(1000px - 2 * var(--s1)); }
+}
+/* Narrower than the popup's list: smaller squares, so the 32 columns still fit beside the numbers. */
+@container (max-width: 459px) {
+  .card .chunks { --sq: 6px; }
+}
 @container (min-width: 680px) {
   /* A wide list: bigger squares, more room. */
   .card { padding: var(--s2); }
