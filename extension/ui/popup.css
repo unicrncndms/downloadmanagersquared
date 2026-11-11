@@ -299,3 +299,6 @@ kbd { font: inherit; font-size: 11px; padding: 0 var(--s1); border: 1px solid va
 .group-files .card.one > .name { grid-area: 1 / 1; }
 .group-files .card.one > .nums { grid-area: 1 / 2; }
 .group-files .card.one > .title { grid-area: 1 / 1; }
+/* As big as the room beside the part's numbers allows, 6 to 12px, whole pixels (62px: the 31 gaps). */
+.group-files .card > .prog { container-type: inline-size; }
+.group-files .card .chunks { --sq: clamp(6px, round(down, calc((100cqw - 62px) / 32), 1px), 12px); }
