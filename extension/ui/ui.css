@@ -14,9 +14,14 @@
   --bad: #b91c1c;
   --bar: #dfe3ea;
   --r: 4px; /* corners: squared, not sharp */
+  /* One spacing scale for every gap and padding. */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px;
+  /* Tiles: everything is built from the square. A status tile, a connection's tile, a button. */
+  --tile: 30px; --tile-sm: 20px;
   /* A connection's colour, by its place among the connections (card.js ifaceHue). */
   /* Never a status hue (green, amber, red) nor the default accent blue. */
   --c0: #7c4ddb; --c1: #0e7c90; --c2: #c2377a; --c3: #8a6b45; --c4: #5d7a1f; --c5: #64748b;
+  --on-c: #ffffff; /* text on a connection's colour, whatever the accent */
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -34,6 +39,7 @@
     --bad: #f87171;
     --bar: #2c3038;
     --c0: #b197fc; --c1: #4fc8dc; --c2: #f17ec0; --c3: #c9a37a; --c4: #a8c95a; --c5: #a3aec2;
+    --on-c: #0b1020;
     color-scheme: dark;
   }
 }
@@ -108,13 +114,32 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .badge.st.bad { color: var(--bad); } .badge.st.bad::before { background: var(--bad); }
 /* The Downloads window's header is the same two lines on both pages, at
    every width: neither line wraps, so it never changes height. */
-:root { --win-row1: 30px; --win-row2: 26px; --win-gap: 8px; --win-pad: 12px 24px 10px; }
+:root { --win-row1: 30px; --win-row2: 30px; --win-gap: 8px; --win-pad: 12px 24px 10px; }
 
 /* The Downloads window's tabs between the downloads and the settings. */
-.tabs { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); }
-.tabs .tab { border: 0; background: transparent; color: var(--muted); padding: 3px 12px; border-radius: 3px; font-size: 13px; text-decoration: none; }
-.tabs .tab:hover { color: var(--text); }
-.tabs .tab[aria-current] { background: var(--accent-soft); color: var(--accent); font-weight: 600; cursor: default; }
+.tabs { display: inline-flex; gap: var(--s1); }
+.tabs .tab { border: 0; background: transparent; color: var(--muted); padding: 4px var(--s3); border-radius: var(--r); font-size: 13px; font-weight: 500; text-decoration: none; }
+.tabs .tab:hover { color: var(--text); background: var(--bg); }
+.tabs .tab[aria-current] { background: var(--accent-soft); color: var(--accent); cursor: default; }
+
+/* The name: DMS and the ² as a tile in the accent. */
+.logo { display: flex; align-items: center; gap: 2px; margin: 0; font-size: 16px; font-weight: 600; white-space: nowrap; }
+.logo .t2 { width: 20px; height: 20px; margin-left: 2px; border-radius: var(--r); background: var(--accent); color: var(--on-accent);
+  display: grid; place-items: center; font-size: 12px; line-height: 1; }
+/* A heading's mark: four small squares, two filled. */
+.mk::before { content: ""; flex: none; width: 4px; height: 4px; margin: 0 10px 0 0; transform: translateY(-3px); /* centred with its shadows */ border-radius: 1px; background: var(--accent);
+  box-shadow: 6px 0 var(--accent), 0 6px var(--mk-dim), 6px 6px var(--mk-dim); --mk-dim: color-mix(in srgb, var(--accent) 35%, transparent); }
+.mk.bad::before { background: var(--bad); box-shadow: 6px 0 var(--bad), 0 6px var(--mk-dim), 6px 6px var(--mk-dim); --mk-dim: color-mix(in srgb, var(--bad) 35%, transparent); }
+/* A status tile: what a download is doing, as a square with an icon or its place in the queue. */
+.st-tile { width: var(--tile-sm); height: var(--tile-sm); border-radius: var(--r); display: grid; place-items: center; flex: none;
+  font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--line); }
+.st-tile svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.st-tile.run { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+.st-tile.seed, .st-tile.done { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
+.st-tile.need { color: var(--bad); box-shadow: inset 0 0 0 1.5px var(--bad); }
+/* A connection's tile: its colour, how many connections or peers inside; its name on hover and to a screen reader. */
+.ctile { min-width: 18px; height: 18px; padding: 0 var(--s1); border-radius: var(--r); background: currentColor; display: inline-grid; place-items: center; flex: none; }
+.ctile > span { color: var(--on-c); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 /* What found nothing in a search of the settings. */
 .unfound { display: none !important; }
 .empty { padding: 24px; text-align: center; color: var(--muted); }

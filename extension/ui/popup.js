@@ -282,9 +282,11 @@ function sectionHead(name) {
       folded.has(name) ? folded.delete(name) : folded.add(name);
       try { localStorage.setItem(FOLDED, JSON.stringify([...folded])); } catch { /* until the page closes */ }
       renderDownloads(latest.state);
-    } }, icon("chevron"), name);
+    } });
+    button.className = name === "Needs you" ? "mk bad" : "mk";
     h = { button, count: el("span", { class: "count num" }) };
-    h.root = el("h2", { class: "sec" }, button, h.count,
+    button.append(name, h.count, icon("chevron"));
+    h.root = el("h2", { class: "sec" }, button,
       name === "Finished" ? el("a", { href: "#", onclick: (e) => { e.preventDefault(); clearFinished(); } }, "Clear finished") : null);
     heads.set(name, h);
   }
@@ -379,9 +381,9 @@ function renderDownloads(state) {
   for (const id of cards.keys()) if (!seen.has(id)) cards.delete(id);
   for (const id of groupCards.keys()) if (!seenGroups.has(id)) groupCards.delete(id);
   renderSelBar();
-  const emptyText = !all.length ? "No downloads yet. Big downloads in Firefox are picked up automatically, or paste a link under + Add."
-    : `No downloads match “${query.trim()}”.`;
-  if (!downloads.length) {
+  const emptyText = `No downloads match “${query.trim()}”.`;
+  if (!all.length) want.push(welcome(state));
+  else if (!downloads.length) {
     if (emptyNote.textContent !== emptyText) emptyNote.textContent = emptyText;
     want.push(emptyNote);
   }
@@ -393,6 +395,40 @@ function renderDownloads(state) {
   }
 }
 const emptyNote = el("div", { class: "empty", role: "status" });
+
+// field is a row of squares: what an empty list waits to fill, or (off)
+// hollow, with the one that failed in red, while the engine is away.
+function field(off) {
+  return el("div", { class: "field" + (off ? " off" : ""), "aria-hidden": "true" },
+    Array.from({ length: 48 }, (_, k) => {
+      const i = el("i");
+      if (off && k === 22) i.className = "x";
+      return i;
+    }));
+}
+
+// The empty list: how many connections stand ready, how to add a link, and
+// what DMS² takes on by itself.
+let welcomeNode = null, welcomeSig = "";
+function welcome(state) {
+  const ready = (state.interfaces || []).filter((i) => !i.tunnel && i.present !== false && i.enabled);
+  const sig = ready.map((i) => i.id).join();
+  if (welcomeNode && sig === welcomeSig) return welcomeNode;
+  welcomeSig = sig;
+  const f = field(false);
+  // The connections' colours in a few squares: they are what fills a file.
+  [3, 4, 20, 19, 35].forEach((k, n) => { if (ready.length) f.children[k].style.background = ifaceHue(ready[n % ready.length].id, state); });
+  const feat = (name, text) => [el("span", { class: "st-tile seed" }, icon(name)), el("span", {}, text)];
+  welcomeNode = el("div", { class: "void", role: "status" }, f,
+    el("div", { class: "big" }, ready.length > 1 ? `${ready.length} connections ready to fill one file together.` : "Ready for your first download."),
+    el("div", { class: "go" }, el("button", { class: "primary", onclick: () => openAdd(true) }, "+ Add a link"),
+      el("span", { class: "muted" }, "or ", el("kbd", {}, "Ctrl"), "+", el("kbd", {}, "V"), " anywhere here")),
+    el("div", { class: "feats" },
+      feat("down", "Firefox downloads over 100 MB come here by themselves"),
+      feat("link", "Magnet links, .torrent and Metalink work too"),
+      feat("box", ".zip, .7z and .rar can be extracted while they download")));
+  return welcomeNode;
+}
 
 // place puts node at index in parent, moving it only if it isn't there:
 // moving an element takes the focus out of a field in it and closes a
@@ -475,18 +511,18 @@ function render(m) {
   if (!m.connected || !m.state) $("addBox").hidden = true;
   if (!m.connected || !m.state) {
     $("list").replaceChildren(m.notInstalled
-      ? el("div", { class: "offline" },
-        el("b", {}, "Engine not installed. "),
-        "DMS² needs its download engine on this PC. Download the zip from the ",
-        link(RELEASES_URL, "release page"),
-        ", extract it and run dms-engine.exe.")
+      ? el("div", { class: "offline" }, field(true),
+        el("div", { class: "big" }, "The download engine isn't installed."),
+        el("div", {}, "DMS² needs its engine on this PC. Download the zip from the ", link(RELEASES_URL, "release page"),
+          ", extract it and run dms-engine.exe."))
       : m.quit && Host.startEngine
-      ? el("div", { class: "offline calm" },
-        el("div", {}, "DMS² was quit from its tray icon, so Firefox handles downloads itself."),
+      ? el("div", { class: "offline calm" }, field(true),
+        el("div", { class: "big" }, "DMS² was quit from its tray icon."),
+        el("div", {}, "Firefox handles downloads itself until it runs again."),
         el("div", { class: "actions" }, el("button", { class: "primary", onclick: () => Host.startEngine() }, "Start DMS²")))
-      : el("div", { class: "offline", role: "alert" },
-        el("div", {}, el("b", {}, "The download engine isn't reachable. "),
-          "Make sure DMS² is running in the tray, or run dms-engine.exe from the release zip again."),
+      : el("div", { class: "offline", role: "alert" }, field(true),
+        el("div", { class: "big" }, "The download engine isn't reachable."),
+        el("div", {}, "Make sure DMS² is running in the tray, or run dms-engine.exe from the release zip again."),
         el("div", { class: "actions" },
           Host.startEngine ? el("button", { class: "primary", onclick: () => Host.startEngine() }, "Start DMS²") : null,
           el("button", { onclick: () => location.reload() }, "Check again")),
@@ -499,7 +535,9 @@ function render(m) {
   }
   if ($("list").querySelector(".offline")) $("list").replaceChildren();
   const s = m.state;
-  $("total").textContent = s.active ? `${fmtSpeed(s.speed)} · ${fmtETA(s.eta)} left` : "idle";
+  fresh($("total"), s.active ? [fmtSpeed(s.speed), fmtETA(s.eta)] : [], () => s.active
+    ? [el("b", {}, fmtSpeed(s.speed)), el("small", {}, `${fmtETA(s.eta)} left`)]
+    : [el("small", {}, "Idle")]);
   const bulk = bulkActions(s.downloads || []);
   $("pauseAll").hidden = !bulk.pauseAll;
   $("resumeAll").hidden = !bulk.resumeAll;

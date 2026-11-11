@@ -347,3 +347,10 @@ test("what waits for the user is in Needs you, however the download itself is do
   // A part fetched while the rest of its archive downloads and extracts is at work, not paused.
   assert.equal(sectionName(dl("x", "completed", { folder: folder({ set: { finished: false } }) })), "Downloading");
 });
+
+test("a row's status tile says its section: what needs you, at work, seeding, queued by number, resting, finished", () => {
+  const { tileOf } = require("../lib/list.js");
+  const kinds = [dl("a", "failed"), dl("b", "running"), dl("c", "seeding"), dl("d", "queued"), dl("e", "paused"), dl("f", "completed")]
+    .map((d) => { const t = tileOf(d); return t.kind + ":" + t.icon; });
+  assert.deepEqual(kinds, ["need:alert", "run:down", "seed:up", ":", ":pause", "done:check"]);
+});

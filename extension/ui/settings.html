@@ -10,7 +10,7 @@
 </head>
 <body>
   <header>
-    <h1><img src="../icons/icon.svg" alt="">DMS²</h1>
+    <h1 class="logo" aria-label="DMS²">DMS<span class="t2" aria-hidden="true">2</span></h1>
     <span id="conn" class="badge st dim">…</span>
     <nav class="tabs" id="pages" aria-label="Pages">
       <a class="tab" href="#connections">Connections</a>
@@ -29,7 +29,7 @@
   </header>
   <main>
     <section id="connections" class="panel">
-      <h2>Network connections</h2>
+      <h2 class="mk">Network connections</h2>
       <div id="ifaces"></div>
       <div id="uplinkWarn" class="uplink" hidden></div>
       <div id="ipv6Hint" class="uplink" hidden></div>
@@ -43,7 +43,7 @@
     </section>
 
     <section id="vpn" class="panel">
-      <h2>VPN</h2>
+      <h2 class="mk">VPN</h2>
       <div class="fields">
         <label for="vpnProvider">VPN provider
           <span class="info" tabindex="0" data-tip="Signing in to a provider gives every connection without its own .conf a tunnel. For other VPNs, import a .conf per connection above."></span></label>
@@ -91,7 +91,7 @@
     </section>
 
     <section id="downloads" class="panel">
-      <h2>Downloads</h2>
+      <h2 class="mk">Downloads</h2>
       <div class="fields">
         <label for="sDir">Download folder</label>
         <input type="text" id="sDir" data-setting>
@@ -127,7 +127,7 @@
     </section>
 
     <section id="torrents" class="panel">
-      <h2>Torrents</h2>
+      <h2 class="mk">Torrents</h2>
       <div class="fields">
         <label for="sRatio">Seed until ratio
           <span class="info" tabindex="0" data-tip="A finished torrent keeps uploading until it has sent this many times its size. 0 stops as soon as it's done."></span></label>
@@ -136,7 +136,7 @@
     </section>
 
     <section id="sites" class="panel">
-      <h2>Sites that need a link per connection
+      <h2 class="mk">Sites that need a link per connection
         <span class="info" tabindex="0" data-tip="Some sites give a download link that only works for the address that opened the page. DMS² then opens the page once through each connection to get each its own link."></span>
       </h2>
       <h3>Learned sites</h3>
@@ -144,7 +144,7 @@
     </section>
 
     <section id="appearance" class="panel">
-      <h2>Appearance</h2>
+      <h2 class="mk">Appearance</h2>
       <div class="fields">
         <span>Accent color
           <span class="info" tabindex="0" data-tip="Follow Firefox takes the color of your Firefox theme; the default themes have none, so the pages stay blue."></span></span>
@@ -153,7 +153,7 @@
     </section>
 
     <section id="startup" class="panel">
-      <h2>Startup</h2>
+      <h2 class="mk">Startup</h2>
       <div class="fields">
         <label for="sAuto">Start with Windows</label>
         <span><input type="checkbox" id="sAuto"></span>

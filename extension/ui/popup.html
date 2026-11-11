@@ -11,7 +11,7 @@
 <body>
   <header>
     <div class="head">
-      <h1><img src="../icons/icon.svg" alt="">DMS²</h1>
+      <h1 class="logo" aria-label="DMS²">DMS<span class="t2" aria-hidden="true">2</span></h1>
       <span id="conn" class="badge dim">…</span>
       <span class="total num" id="total"></span>
       <span class="strip" id="strip"></span>
@@ -21,11 +21,11 @@
     <div class="version-warn" id="updateNote" role="status" hidden></div>
     <div class="version-warn" id="staleWarn" role="status" hidden></div>
     <div class="tools">
-      <button class="small" id="toggleAdd">+ Add</button>
+      <button class="primary" id="toggleAdd">+ Add</button>
       <input type="search" id="search" class="spacer" aria-label="Search downloads" placeholder="Search downloads">
 
-      <button class="small" id="pauseAll">Pause all</button>
-      <button class="small" id="resumeAll">Resume all</button>
+      <button id="pauseAll">Pause all</button>
+      <button id="resumeAll">Resume all</button>
       <div id="selBar" role="toolbar" aria-label="Selected downloads" hidden></div>
     </div>
     <form id="addBox" hidden>

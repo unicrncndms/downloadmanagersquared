@@ -62,6 +62,16 @@ function sectionName(d) {
   return SECTIONS[finished(d) ? 5 : Math.min(group(d), 4)];
 }
 
+// tileOf is a row's status tile: its tone (need, run, seed, done, or plain)
+// and its icon. A queued one shows its place in the queue instead ("").
+function tileOf(d) {
+  if (finished(d)) return { kind: "done", icon: "check" };
+  return [
+    { kind: "need", icon: "alert" }, { kind: "run", icon: "down" }, { kind: "seed", icon: "up" },
+    { kind: "", icon: "" }, { kind: "", icon: "pause" },
+  ][Math.min(group(d), 4)];
+}
+
 // rowNums are the two numbers at the end of a download's row: what matters
 // most now, and under it what places it. Running: the speed, then how far and
 // how long. At rest: how far, then the bytes. Not begun or finished: its size.
@@ -407,5 +417,5 @@ function addView(text) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { addLines, addView, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, extractView, predict, viaLinks, sectionName, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
+  module.exports = { addLines, addView, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, extractView, predict, viaLinks, sectionName, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
 }

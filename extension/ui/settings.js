@@ -127,13 +127,15 @@ function ifaceRow(i, tun, settings) {
     toggle.setAttribute("aria-expanded", String(on));
     on ? openConns.add(i.id) : openConns.delete(i.id);
   } }, "Settings");
-  return el("div", { class: "conn-row" + (i.present ? "" : " absent") },
+  // Its tile: its colour, with what it fetches now inside (speedTile).
+  const tile = el("span", { class: "tile num", "data-speed": i.id });
+  tile.style.color = ifaceHue(i.id, latestState);
+  return el("div", { class: "conn-row" + (i.present ? "" : " absent") }, tile,
     el("div", { class: "who" },
-      el("b", {}, colorOf(i.id), i.name, i.isMain ? badge("Main") : null, tun ? badge("VPN", TUNNEL_CLASS[tun.tunnelState]) : null),
+      el("b", {}, i.name, i.isMain ? badge("Main") : null, tun ? badge("VPN", TUNNEL_CLASS[tun.tunnelState]) : null),
       el("div", { class: "sub" }, i.present ? el("span", { class: "mono" }, i.ip) : "not connected", " · ", i.description),
       badges.length ? el("div", { class: "badges" }, badges) : null),
     el("span", { class: "badge st " + tone, "data-state": i.id }, word),
-    el("span", { class: "speed num", "data-speed": i.id }),
     el("label", { class: "use" }, check(i.enabled, "enabled", "Use"), " Use"),
     toggle, more);
 }
@@ -160,7 +162,7 @@ function renderIfaces(state, settings) {
     const c = body.querySelector(`[data-speed="${i.id}"]`);
     const t = tunnels.get(i.id);
     const total = (i.speed || 0) + ((t && t.speed) || 0);
-    if (c) c.textContent = total > 0 ? fmtSpeed(total) : "";
+    if (c) speedTile(c, total);
     const w = body.querySelector(`[data-state="${i.id}"]`);
     const [word, tone] = connState(i, t);
     if (w && w.textContent !== word) { w.textContent = word; w.className = "badge st " + tone; }
@@ -315,11 +317,15 @@ function renderRecipes(recipes) {
       el("td", {}, el("button", { class: "small", onclick: () => Host.forgetRecipe(h).then(() => toast("Forgotten")) }, "Forget"))))))));
 }
 
-// A connection's colour, as on its downloads.
-function colorOf(id) {
-  const sq = el("i", { class: "dot" });
-  sq.style.color = ifaceHue(id, latestState);
-  return sq;
+// speedTile shows a connection's speed in its tile: the number, the unit
+// under it; hollow while it fetches nothing.
+function speedTile(tile, speed) {
+  const [n, unit] = speed > 0 ? fmtSpeed(speed).split(" ") : ["–", ""];
+  if (tile.dataset.n === n + unit) return;
+  tile.dataset.n = n + unit;
+  tile.classList.toggle("idle", !(speed > 0));
+  tile.replaceChildren(el("span", {}, n, unit ? el("small", {}, unit) : null));
+  tile.title = speed > 0 ? fmtSpeed(speed) : "Fetching nothing now";
 }
 
 // --- the pages: Connections with the VPN, and Settings, each one list; the

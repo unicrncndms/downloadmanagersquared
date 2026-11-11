@@ -13,7 +13,8 @@ function makeLine(id) {
   const show = iconButton("folder", "Show in folder", () => act("showInFolder", { id }));
   const drop = iconButton("close", "Remove from list (files stay)", () => act("remove", { id, deleteFile: false }, "Removed from list"));
   const root = el("div", { class: "card line one", tabindex: "-1", "data-id": id },
-    el("span", { class: "n" }), name, el("div", { class: "nums" }, size), el("span", { class: "end" }, more, show, drop));
+    el("span", { class: "n st-tile done", role: "img", "aria-label": "Finished", title: "Finished" }, icon("check")), name,
+    el("div", { class: "nums" }, size), el("span", { class: "end" }, more, show, drop));
   let sig = "";
   function update(d) {
     root.classList.toggle("sel", selected.has(id));
@@ -112,6 +113,20 @@ function extractBar() {
   };
 }
 
+// paintTile shows a status tile (lib/list.js tileOf): its tone and icon, or a
+// queued download's place in the queue. label is what it says to a screen
+// reader and on hover.
+function paintTile(tile, t, place, label) {
+  const cls = "n st-tile " + t.kind;
+  const sig = [cls, t.icon, place, label].join("|");
+  if (tile.dataset.sig === sig) return;
+  tile.dataset.sig = sig;
+  tile.className = cls;
+  tile.title = label;
+  tile.setAttribute("aria-label", label);
+  tile.replaceChildren(t.icon ? icon(t.icon) : String(place || ""));
+}
+
 // chunkGrid is the file as squares, from the engine's map of it: "." missing,
 // a letter on disk and written by connection mapBy[a=0, b=1…], a digit being
 // fetched right now by mapBy[digit], each in that connection's colour; "#" on
@@ -153,7 +168,8 @@ function chunkGrid(rows) {
 function makeCard(id) {
   let d = null; // the download as last shown
 
-  const num = el("span", { class: "n num" }); // its place in the queue
+  const num = el("span", { class: "n st-tile", role: "img" }); // what it does now, or its place in the queue
+  let queuePlace = 0;
   const name = el("span", { class: "name", title: "" });
   const status = el("span", { class: "badge st" });
   const vpn = el("span", { class: "badge dim" });
@@ -222,7 +238,7 @@ function makeCard(id) {
   // Record recipe: the site has no recipe yet, so a link that expires later
   // would need someone at the browser. Recording now, while someone is here,
   // lets DMS² renew it alone. Only an offer: nothing records without the click.
-  const recordSection = el("section", {}, el("h3", {}, "Site"),
+  const recordSection = el("section", {}, el("h3", { class: "mk" }, "Site"),
     el("p", { class: "muted" }, "If this link expires, DMS² will need you to click through the site again. Recorded once, your clicks are repeated for you."),
     el("button", { class: "small", onclick: record }, "Record the site's clicks"));
 
@@ -235,12 +251,14 @@ function makeCard(id) {
   const chooser = (current, chosen) => folderChooser(() => id, current, chosen);
 
   // Details, in sections: Connections, Folder, File, Checks.
-  const section = (title, ...body) => el("section", {}, el("h3", {}, title), ...body);
+  const section = (title, ...body) => el("section", {}, el("h3", { class: "mk" }, title), ...body);
   // An HTTP download's own speed limit, on top of the connections' and the global one.
   const limitIn = el("input", { type: "number", min: 0, step: "any", placeholder: "none", id: "limit-" + id,
     onchange: () => act("setLimit", { id, limit: Math.round((Number(limitIn.value) || 0) * 1e6) }, "Saved") });
   const limitRow = el("div", { class: "row" }, el("label", { for: "limit-" + id, class: "muted" }, "Speed limit (MB/s)"), limitIn);
-  const connSection = section("Connections", allConns, limitRow);
+  // Each connection's share of the speed, as a bar of its colour.
+  const share = el("div", { class: "share", "aria-hidden": "true" });
+  const connSection = section("Connections", share, allConns, limitRow);
 
   const foldExtracting = el("div", {}, "Extracting as a folder");
   // Extract into, while unfinished: Change… moves what is extracted (the
@@ -303,8 +321,10 @@ function makeCard(id) {
 
   // Details: shown in the pane beside the list, or the sheet over it, while
   // this download is the one opened (popup.js detail). A bigger map on top.
-  const bigGrid = chunkGrid(4);
-  const bigNums = el("div", { class: "muted num" });
+  const bigGrid = chunkGrid(3);
+  const bigSpeed = el("b");
+  const bigLeft = el("span", { class: "muted" });
+  const bigNums = el("div", { class: "read num" }, bigSpeed, bigLeft);
   const details = el("details", { ontoggle: () => { activityAt = 0; if (d) update(d); } },
     el("summary", {}, "Details"), bigGrid.root, bigNums, connSection, recordSection, mirrorSection, foldSection, fileSection, checkSection, activitySection);
   function syncDetail() {
@@ -388,6 +408,7 @@ function makeCard(id) {
     status.hidden = slim || (["Downloading", "Seeding", "Paused", "Queued"].includes(d.label) && !["warn", "bad"].includes(d.tone));
     dropDone.hidden = !done;
     showDone.hidden = !done || !(d.actions || {}).showInFolder;
+    paintTile(num, tileOf(d), queuePlace, d.label);
     const nm = rowNums(d);
     numsMain.textContent = nm.main;
     numsSub.textContent = nm.sub;
@@ -402,7 +423,8 @@ function makeCard(id) {
     root.classList.toggle("idle", d.status !== "running");
     fill.style.width = percent(d) + "%";
     bigGrid.update(details.open && !done ? d : null);
-    bigNums.textContent = details.open ? s.left : "";
+    bigSpeed.textContent = details.open ? nm.main : "";
+    bigLeft.textContent = details.open ? [s.left, d.status === "running" ? `${fmtETA(d.eta)} left` : ""].filter(Boolean).join(" · ") : "";
     const up = seedLine(d, latest.settings);
     left.textContent = s.error ? s.error : choosing && nFiles ? `${plural(nFiles, "file")} · ${fmtBytes(d.filesSize || 0)}` : seeding ? up : "";
     left.classList.toggle("bad", !!s.error);
@@ -417,17 +439,19 @@ function makeCard(id) {
     // A connection held back (the server busy, backing off) says "busy" in words; why on hover and in Details.
     const held = (ifc) => (d.links[ifc].tone === "warn" ? d.links[ifc].label : "");
     const viaSig = used.map((ifc) => [nameOf(ifc), count(ifc), held(ifc), ifaceHue(ifc, latest.state)]);
+    const says = (ifc) => [`${nameOf(ifc)}: ${count(ifc)}`, held(ifc)].filter(Boolean).join(" · ");
     const entry = (ifc, text) => {
       const dot = el("i", { class: "dot" });
       dot.style.color = ifaceHue(ifc, latest.state);
-      return el("span", { class: held(ifc) ? "held" : "", title: [`${nameOf(ifc)}: ${count(ifc)}`, held(ifc)].filter(Boolean).join(" · ") },
-        dot, text, held(ifc) ? el("b", {}, " · busy") : null);
+      return el("span", { class: held(ifc) ? "held" : "", title: says(ifc) }, dot, text, held(ifc) ? el("b", {}, " · busy") : null);
     };
     fresh(via, viaSig, () => used.map((ifc) => entry(ifc, `${nameOf(ifc)} ${count(ifc)}`)));
-    // Narrow: short names while two fit beside the file's name; more, the colours and counts.
-    const short = used.length <= 2;
-    fresh(mini, [viaSig, short], () => used.map((ifc) => entry(ifc,
-      (short ? shortName(nameOf(ifc)) + " " : "") + (torrent ? String(d.links[ifc].conns) : count(ifc)))));
+    // By the name: each connection's tile with how many it has open; its name on hover and to a screen reader.
+    fresh(mini, viaSig, () => used.map((ifc) => {
+      const tile = el("span", { class: "ctile", role: "img", "aria-label": says(ifc), title: says(ifc) }, el("span", {}, String(d.links[ifc].conns)));
+      tile.style.color = ifaceHue(ifc, latest.state);
+      return el("span", { class: held(ifc) ? "held" : "" }, tile, held(ifc) ? el("b", {}, "busy") : null);
+    }));
     line.hidden = done || (slim && left.hidden && vpn.hidden);
     extract.update(extractView([d]));
 
@@ -510,6 +534,14 @@ function makeCard(id) {
       if (!details.open) return; // the rest is only drawn while Details is open
     }
     renderLinks(allConns, allRows, ids);
+    const fast = ids.filter((ifc) => d.links[ifc].speed > 0);
+    fresh(share, fast.map((ifc) => [ifc, Math.round(d.links[ifc].speed / 1e5), ifaceHue(ifc, latest.state)]), () => fast.map((ifc) => {
+      const part = el("i");
+      part.style.flexGrow = d.links[ifc].speed;
+      part.style.color = ifaceHue(ifc, latest.state);
+      return part;
+    }));
+    share.hidden = fast.length < 2; // one connection has all of it: nothing to compare
 
     const facts = torrent ? [
       ["Save folder", d.dir],
@@ -621,7 +653,7 @@ function makeCard(id) {
         el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, "Cancelled") }, "Cancel")));
   }
 
-  return { root, update, number(n) { num.textContent = n || ""; } };
+  return { root, update, number(n) { if (n !== queuePlace) { queuePlace = n; if (d) paintTile(num, tileOf(d), queuePlace, d.label); } } };
 }
 
 // A Metalink's files, or a split archive's parts, as one card: their progress added up, pause, resume
@@ -636,7 +668,8 @@ function makeGroupCard(gid) {
     if (okText) toast(okText);
   };
 
-  const num = el("span", { class: "n num" });
+  const num = el("span", { class: "n st-tile", role: "img" });
+  let queuePlace = 0;
   const title = el("span");
   const count = el("span", { class: "badge dim" });
   const name = el("span", { class: "name" }, title, " ", count);
@@ -693,6 +726,7 @@ function makeGroupCard(gid) {
     menuAsFile.hidden = !fold.declinable(fv);
     status.textContent = v.label;
     status.className = "badge st " + v.tone;
+    paintTile(num, v.speed > 0 ? { kind: "run", icon: "down" } : queuePlace ? { kind: "", icon: "" } : { kind: "", icon: "pause" }, queuePlace, v.label);
     fill.style.width = v.percent + "%";
     left.textContent = v.left;
     numsMain.textContent = v.speed > 0 ? fmtSpeed(v.speed) : "";
@@ -708,7 +742,7 @@ function makeGroupCard(gid) {
     while (files.children.length > i) files.lastChild.remove();
   }
 
-  return { root, update, ids, number(n) { num.textContent = n || ""; } };
+  return { root, update, ids, number(n) { if (n !== queuePlace) { queuePlace = n; if (g) update(g); } } };
 }
 
 function cardFor(id) {
