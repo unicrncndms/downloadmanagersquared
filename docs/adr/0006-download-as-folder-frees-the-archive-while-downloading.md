@@ -25,5 +25,5 @@ After a crash, an unfinished Entry is extracted again from its start, and any of
 
 - A Download as folder can't be turned back into a normal download once anything has been freed. The toggle locks at that point.
 - A crash or a move to another drive can cost re-downloading up to one large Entry.
-- The scheduler gets an Entry-aware mode so large Entries arrive front-first. Normal downloads keep the speed-based split.
+- The scheduler fetches a Download as folder front to back: every connection works within a few seconds' fetching of the first missing byte, so what waits on disk for the extraction stays small whatever the archive's size. The parts of a split archive that can only be read front to back (RAR volumes, a solid 7z) download one at a time for the same reason, after the end of the last part where that holds the list of files; a setting lets them download at once, at the cost of the space the parts fetched ahead take until they are extracted. Normal downloads keep the speed-based split.
 - Anything that later wants the finished archive (a whole-file hash, seeding it, keeping a copy) doesn't work with this mode.

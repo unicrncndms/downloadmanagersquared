@@ -26,7 +26,7 @@ Messages go over `runtime.connectNative("downloadmanagersquared")` to `dms-host.
 - `add`: a download's URL, file name, the page it was started on, its Referer, the User-Agent, the `cookieStoreId` it came from (sent back with each resolve, to copy that container's cookies for the landing page), and the `Cookie` header Firefox sent for it. With no request to read (context menu, `downloads.onCreated`), the cookies Firefox would send for that URL in that container, filtered to the download's own site.
 - `resolved` / `resolveFailed` / `setPageUrl` / `learnEnded`: a link fetched for one connection (URL, the temporary container's cookies, Referer), or why it failed, the landing page the add-on found, and the end of a recording.
 - `recipeHosts`: the host names the add-on has recorded clicks for, so the engine knows when to offer **Record recipe**. The clicks themselves stay in the add-on.
-- Calls from the popup and settings page: pause, resume, remove, reorder, settings changes and the like, including a VPN login or WireGuard config the user enters there. The add-on doesn't store those.
+- Calls from the popup and settings page: pause, resume, remove, reorder, settings changes and the like, including a VPN login, a WireGuard config or an archive's password the user enters there. The add-on doesn't store those.
 
 The engine keeps a download's cookies only until it completes, and sends them only to that site. See `PRIVACY.md`.
 

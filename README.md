@@ -1,26 +1,40 @@
 # downloadmanagersquared (DMS²)
 
-**Download one file over all your internet connections at once.** Plug in a phone hotspot or a second line next to your home connection, and DMS² splits each download across them so their speeds add up. A 300 Mbit/s line plus a 100 Mbit/s hotspot downloads at close to 400 Mbit/s.
+**Download one file over all your internet connections at once, and their speeds add up.**
 
-For Windows 10/11 with Firefox, LibreWolf, Waterfox or Floorp. Free and open source (MIT).
+Plug a phone hotspot or a second line in next to your home connection. DMS² splits every download across them: a 300 Mbit/s line plus a 100 Mbit/s hotspot downloads at close to 400 Mbit/s.
 
-## What it does
+For Windows 10/11 with Firefox, LibreWolf, Waterfox or Floorp. Free and open source (MIT). No account, no server, no telemetry.
 
-- **Adds up your connections.** Each file is split into pieces fetched over every connection in parallel. A faster connection takes over more of the work, nothing is downloaded twice, and a download survives crashes, sleep and restarts.
+## What makes it different
+
+**1. It adds up connections, per file.**
+Other download managers open many requests over one connection. DMS² fetches the pieces of one file over every connection you have, at the same time. A faster connection takes over more of the work, nothing is downloaded twice, and a download survives crashes, sleep and restarts.
+
+**2. It works with file hosts that give each IP address its own link.**
+Most managers fail here, because a link fetched over one connection doesn't work over another. DMS² opens the site once per connection, repeats the clicks you made the first time, and takes each connection's own link.
+
+**3. It extracts archives while they download, and needs far less disk space.**
+With *Download as folder*, a `.zip`, `.7z` or `.rar` is unpacked as its bytes arrive, and each extracted part of the archive is deleted at once. You get the folder, never the archive. A 100 GB archive that extracts to 140 GB needs about 140 GB of free space instead of 240 GB. Split archives (`.part1.rar`, `.7z.001`, `.z01` …) extract as one, part after part.
+
+**4. A VPN per connection, without admin rights.**
+Each connection can get its own WireGuard tunnel. The tunnels run inside DMS², so no driver is installed and your other programs aren't affected.
+
+## Everything else it does
+
 - **Takes over your browser's downloads.** Download as usual: files over 100 MB, magnet links, `.torrent` and Metalink (`.meta4`) files go to DMS² by themselves.
-- **Handles file hosts that hand out a link per IP address.** DMS² opens the site once per connection, repeats the clicks you made the first time, and takes each connection's link.
-- **Downloads torrents** over all connections too.
-- **Uses mirrors.** A Metalink, or a server that names mirrors with a checksum, lets each connection fetch from its own mirror, so one slow mirror doesn't hold back the rest. A mirror serving another file is dropped, and the finished file is checked against the checksum.
-- **Unpacks ZIPs while they download.** With *Download as folder*, each file in the archive is extracted and checked as soon as its part has arrived, and that part of the archive is freed. You end up with the folder, never the `.zip`, and need only about the extracted size in free space instead of archive plus extracted size.
-- **A VPN per connection, if you want one.** Each connection can get its own WireGuard tunnel (Private Internet Access, or a `.conf` from your provider). The tunnels run inside DMS²: no admin rights, and other programs aren't affected.
-- **Checks files.** Paste a SHA-256 or MD5 and DMS² checks the file when it finishes.
-- **IPv6 (experimental, off by default).** With *Enable IPv6* on, a connection with only IPv6, such as some phone tethers, is added up too, and the others reach servers that have only IPv6. Not checked on a real carrier network: NAT64/DNS64 and 464XLAT have never been tried live.
-
-No account, no server, no telemetry: see [PRIVACY.md](PRIVACY.md).
+- **Torrents** over all connections too.
+- **Mirrors.** A Metalink, or a server that names mirrors with a checksum, lets each connection fetch from its own mirror, so one slow mirror doesn't hold back the rest. A mirror serving another file is dropped.
+- **Checksums.** Paste a SHA-256 or MD5, and the file is checked when it finishes.
+- **A queue you control.** Drag downloads into order or use the arrows. Drop a waiting download on a running one to take its place.
+- **IPv6 (experimental, off by default).** A connection with only IPv6, such as some phone tethers, is added up too. Never tried on a real carrier network with NAT64/DNS64 or 464XLAT.
 
 ## Will it make my downloads faster?
 
-Only if your connections are really separate lines: your home connection plus a phone hotspot, two internet providers, or a second router on another line. Wi‑Fi and Ethernet to the same router share one line, so together they are no faster than either. And a download can't go faster than the server sends: a server that limits each download to a slow speed limits each connection to it too, though DMS² opens several requests per connection.
+Only if your connections are really separate lines: your home connection plus a phone hotspot, two internet providers, or a second router on another line.
+
+- Wi‑Fi and Ethernet to the same router share one line. Together they are no faster than either.
+- A download can't go faster than the server sends. A server that limits each download to a slow speed limits each connection to it too, though DMS² opens several requests per connection.
 
 ## Install
 
@@ -33,23 +47,39 @@ DMS² then runs in the tray. The extension asks to enable containers, which it u
 
 ## Using it
 
-Download a file of 100 MB or more as usual, or use *Download with DMS²* on a link's menu. The toolbar icon lists your downloads; a left click on the tray icon opens the same list in its own window. Each download shows its progress, speed and the connections it uses; **Details** has the rest. **Connections & settings** is at the bottom of the list.
+Download a file of 100 MB or more as usual, or use *Download with DMS²* on a link's menu.
 
-**Sites with a link per IP:** the first time, a window opens with a blue bar. Click through the site until the download starts. DMS² remembers those clicks and repeats them by itself for each connection from then on. These windows start without cookies, so sites that need you logged in can't be clicked through. Many file hosts limit free downloads per IP address, and their terms may not allow getting around that. Following each host's terms is up to you.
+- The toolbar icon lists your downloads. A left click on the tray icon opens the same list in its own window.
+- Each download shows its progress, speed and the connections it uses. **Details** has the rest.
+- **Connections & settings** is at the bottom of the list.
+- Unfinished files end in `.dms.part`. Progress is saved every few seconds.
 
-**Download as folder:** tick it when adding a `.zip` link, switch it on in a download's Details, or make it the default in the settings. DMS² fetches the archive's list of files first, then extracts each file once its part is downloaded (files over 1 GB as their bytes arrive), checks it against the archive's CRC, and frees that part of the download. A 100 GB ZIP that extracts to 140 GB needs about 140 GB of space, plus what's still waiting for its file to complete, instead of 240 GB. You can change the folder it extracts into while it runs, on the same drive or another.
+### Sites with a link per IP
 
-- It needs a server that allows split downloads, and ZIPs compressed with Stored, Deflate, Deflate64 or Zstandard. Anything else (encrypted, split archives, other methods) is downloaded as a normal `.zip`, with the reason in Details.
-- Each file is checked, but there's no whole archive to check, so a checksum you entered turns the mode off.
+The first time, a window opens with a blue bar. Click through the site until the download starts. DMS² remembers those clicks and repeats them by itself for each connection from then on.
 
-**Checksums:** a download's **Details → Checks → Edit** takes a SHA-256 or MD5. DMS² checks the file when it finishes (or right away if it already has), and a download that doesn't match is kept as `.dms.part` instead of finishing. Files from Google Cloud Storage (and sites served from it) carry their MD5, which is checked the same way when you haven't entered one.
+These windows start without cookies, so sites that need you logged in can't be clicked through. Many file hosts limit free downloads per IP address, and their terms may not allow getting around that. Following each host's terms is up to you.
 
-Unfinished files end in `.dms.part`. Progress is saved every few seconds.
+### Download as folder
+
+Switch it on with the box when adding an archive link, with the switch on a download's card, or for every new archive in the settings.
+
+- DMS² fetches the archive's list of files first, then downloads front to back and extracts each file as soon as its bytes are there. A second bar on the card shows the extraction, what it waits for, and the time left.
+- Every file is checked against the archive's own checksum. One that comes out wrong is downloaded again.
+- You can change the folder it extracts into while it runs, on the same drive or another.
+- **Split archives:** add all the parts. They show as one card with one switch, download in the order that keeps the least on disk, and extract as one archive. A part that isn't added stops extraction there: "Part 2 missing". *Download a split archive's parts at once* in the settings trades disk space for speed.
+- **Passwords:** an encrypted 7z or RAR asks for its password on the card and keeps downloading meanwhile. An encrypted ZIP is downloaded as a normal file.
+- It needs a server that allows split downloads. A ZIP must be compressed with Stored, Deflate, Deflate64 or Zstandard. Anything it can't extract is downloaded as a normal file, with the reason in Details.
+- There is no whole archive to check at the end, so a checksum you entered turns the mode off.
+
+### Checksums
+
+A download's **Details → Checks → Edit** takes a SHA-256 or MD5. DMS² checks the file when it finishes (or right away if it already has), and a download that doesn't match is kept as `.dms.part` instead of finishing. Files from Google Cloud Storage (and sites served from it) carry their MD5, which is checked the same way when you haven't entered one.
 
 ## Settings
 
 - **Connections:** turn each on or off, set its parallel requests (4) and speed limit, and choose the main connection, used alone for servers that can't split a file. VPN adapters start off. *Enable IPv6 (experimental)* (off) uses IPv6 too; each connection shows a badge with what it has: IPv4, IPv6 or IPv4 + IPv6.
-- **Downloads:** takeover size (100 MB), save folder, downloads at once (1), Download as folder for new ZIPs (off).
+- **Downloads:** takeover size (100 MB), save folder, downloads at once (1), Download as folder for new archives (off), a split archive's parts at once (off).
 - **Torrents:** seed ratio (1).
 - **Startup:** start with Windows.
 - **Learned sites:** the clicks remembered per site. *Forget* makes DMS² ask again.
@@ -113,7 +143,7 @@ browser extension ──native messaging──> dms-host.exe ──named pipe─
   per-IP links in containers ───────── container traffic ──────>     one SOCKS5 proxy per connection
 ```
 
-- **Engine** (`engine/`, Go): pins sockets to each connection and splits files into chunks. A connection that finishes takes over the far end of the slowest chunk, so faster connections carry more and nothing is fetched twice. For a Download as folder it fetches the ZIP's central directory first and schedules by file (`engine/internal/archive`, [ADR 0006](docs/adr/0006-download-as-folder-frees-the-archive-while-downloading.md)).
+- **Engine** (`engine/`, Go): pins sockets to each connection and splits files into chunks. A connection that finishes takes over the far end of the slowest chunk, so faster connections carry more and nothing is fetched twice. A Download as folder reads the archive's list of files first and fetches front to back (`engine/internal/archive`, [ADR 0006](docs/adr/0006-download-as-folder-frees-the-archive-while-downloading.md)).
 - **Extension** (`extension/`, plain JavaScript, no build step): takes over downloads, holds the UI, and opens sites in a temporary container per connection, routed through that connection's proxy. The engine's Downloads window shows the same pages in WebView2.
 
 Building needs Go (`winget install GoLang.Go`), and Node.js for the extension's tests:
