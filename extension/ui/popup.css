@@ -305,5 +305,8 @@ kbd { font: inherit; font-size: 11px; padding: 0 var(--s1); border: 1px solid va
 .group-files .card .chunks { --sq: 8px; }
 @container (max-width: 430px) { .group-files .card .chunks { --sq: 6px; } }
 @container (min-width: 651px) { .group-files .card .chunks { --sq: 12px; } }
-/* A fetched part says its name and size: a tight line. */
-.group-files .card.line { padding-block: 2px; }
+/* A fetched part: as tall as a queued one, its name and size, and under them
+   its full bar in the padding, so it reads as done at a glance. */
+.group-files .card.line { position: relative; }
+.group-files .card.line::after { content: ""; position: absolute; left: var(--s1); bottom: 2px; width: min(318px, 100% - 120px);
+  height: 4px; border-radius: 2px; background: var(--accent); }
