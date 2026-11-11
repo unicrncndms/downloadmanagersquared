@@ -283,3 +283,19 @@ kbd { font: inherit; font-size: 11px; padding: 0 var(--s1); border: 1px solid va
 /* A connection's state in Details: the word in its tone, no box. */
 .conns .badge { padding: 0; background: transparent; font-weight: 500; white-space: normal; }
 .conns .badge.dim { border: 0; }
+
+/* A group's parts: no status tile (the group's row has it), so the name and
+   squares take its column; the squares size to the group's own width. */
+.group-files { container-type: inline-size; }
+.group-files .card { grid-template-columns: minmax(0, 1fr) auto auto; }
+.group-files .card > .n { display: none; }
+.group-files .card > .name { grid-area: 1 / 1; }
+.group-files .card > .title { grid-area: 1 / 1 / 2 / 3; }
+.group-files .card > .end { grid-area: 1 / 3; }
+.group-files .card > .prog { grid-area: 2 / 1 / 3 / 3; }
+.group-files .card > .nums { grid-area: 2 / 3; }
+.group-files .card > .what { grid-area: 3 / 1 / 4 / -1; }
+.group-files .card > :not(.n, .name, .title, .end, .prog, .nums, .what) { grid-column: 1 / -1; }
+.group-files .card.one > .name { grid-area: 1 / 1; }
+.group-files .card.one > .nums { grid-area: 1 / 2; }
+.group-files .card.one > .title { grid-area: 1 / 1; }
