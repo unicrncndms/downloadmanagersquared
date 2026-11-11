@@ -21,8 +21,9 @@ header .sections a[aria-current] { color: var(--accent); background: var(--accen
 .recipes td:first-child { padding-left: 0; }
 .recipes td:last-child { padding-right: 0; text-align: right; }
 .recipes .when { white-space: nowrap; }
-main { max-width: 980px; margin: 0 auto; padding: 8px 24px 60px; }
-section { scroll-margin-top: 70px; }
+/* Room at the end, so a link can bring even the last section to the top. */
+main { max-width: 980px; margin: 0 auto; padding: 8px 24px calc(100vh - 140px); }
+section { scroll-margin-top: 100px; }
 /* A section as in the downloads list: its name, then a line to the edge. No boxes. */
 h2 { display: flex; align-items: center; gap: 8px; margin: 22px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
   text-transform: uppercase; color: var(--muted); }

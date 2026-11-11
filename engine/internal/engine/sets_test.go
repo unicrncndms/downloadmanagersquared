@@ -132,7 +132,10 @@ func TestASetFetchesItsPartsInTheOrderThatKeepsTheLeastOnDisk(t *testing.T) {
 
 		e := loopbackEngine(t)
 		into := t.TempDir()
-		e.applySettings(func(s *Settings) { s.MaxParallel, s.FolderDefault, s.FolderDir = 3, true, into })
+		e.applySettings(func(s *Settings) {
+			s.MaxParallel, s.FolderDefault, s.FolderDir = 3, true, into
+			s.PartsParallel = false // this test is the one-part-at-a-time order; parallel parts are on by default
+		})
 		var ds []*download.Download
 		for _, n := range []string{names[1], names[2], names[0]} { // added in no order
 			id, err := e.Add(AddRequest{URL: srv.URL + "/" + n})

@@ -133,6 +133,7 @@ func defaultSettings() Settings {
 		MaxParallel:        1,
 		ETAWindowSec:       60,
 		DefaultConnections: 4,
+		PartsParallel:      true,
 		SeedRatio:          1,
 		VPNHTTP:            paths.Off,
 		VPNTorrent:         paths.Off, // each new torrent asks first

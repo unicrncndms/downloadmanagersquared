@@ -1,7 +1,7 @@
 "use strict";
 
-// Two pages in one: Connections (with the VPN), and Settings, one section at
-// a time, chosen by the address's #. Every change is saved as soon as it's made.
+// Two pages in one: Connections (with the VPN), and Settings, chosen by the
+// address's #. Every change is saved as soon as it's made.
 
 const GB = 1e9;
 const MB = 1e6;
@@ -294,7 +294,8 @@ function colorOf(id) {
   return sq;
 }
 
-// --- the pages: Connections with the VPN, or Settings one section at a time ---
+// --- the pages: Connections with the VPN, and Settings, each one list; the
+// links under the tabs jump to a section and mark the one being read ---
 
 const CONNECTIONS_PAGE = ["connections", "vpn", "pia"]; // #pia: the VPN's sign-in, from a torrent's card
 const sections = [...document.querySelectorAll("main > section")];
@@ -316,32 +317,46 @@ function found(section, q) {
   return any || [...section.querySelectorAll("label, h3, .conn-row.head > span")].some((n) => n.textContent.toLowerCase().includes(q));
 }
 
+let page = ""; // "connections" or "settings", as last shown
 function showPage() {
   const at = location.hash.slice(1);
   const q = $("find").value.trim().toLowerCase();
-  const connections = !at || CONNECTIONS_PAGE.includes(at);
-  const current = connections ? "" : sectionLinks.some((a) => a.hash === "#" + at) ? at : "downloads";
+  const was = page;
+  page = !at || CONNECTIONS_PAGE.includes(at) ? "connections" : "settings";
+  const mine = (id) => CONNECTIONS_PAGE.includes(id) === (page === "connections");
   let shown = 0;
   for (const s of sections) {
-    const on = q ? found(s, q) : connections ? CONNECTIONS_PAGE.includes(s.id) : s.id === current;
+    const on = q ? found(s, q) : mine(s.id);
     if (!q) found(s, "");
     s.hidden = !on;
     shown += on;
   }
   for (const a of $("pages").querySelectorAll("a")) {
-    if (!q && (a.hash === "#connections") === connections) a.setAttribute("aria-current", "page");
+    if (!q && (a.hash === "#connections") === (page === "connections")) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
-  for (const a of sectionLinks) {
-    if (!q && a.hash === "#" + current) a.setAttribute("aria-current", "page");
-    else a.removeAttribute("aria-current");
-  }
-  $("sections").hidden = connections && !q;
+  for (const a of sectionLinks) a.hidden = !!q || a.dataset.page !== page;
   $("notFound").hidden = shown > 0;
   $("notFound").textContent = `No setting matches “${$("find").value.trim()}”.`;
-  if (at === "pia" || at === "vpn") $("vpn").scrollIntoView();
-  else scrollTo(0, 0);
+  // Jump to the section asked for; a page's first section is its top.
+  const target = $(at === "pia" ? "vpn" : at);
+  if (q) scrollTo(0, 0);
+  else if (target && target.previousElementSibling && !target.previousElementSibling.hidden) target.scrollIntoView();
+  else if (page !== was || !target) scrollTo(0, 0);
+  markSection();
 }
+
+// The section being read: the last whose top has passed under the header.
+function markSection() {
+  const mine = sections.filter((s) => !s.hidden);
+  let cur = mine[0];
+  for (const s of mine) if (s.getBoundingClientRect().top <= 120) cur = s;
+  for (const a of sectionLinks) {
+    if (cur && a.hash === "#" + cur.id) a.setAttribute("aria-current", "location");
+    else a.removeAttribute("aria-current");
+  }
+}
+addEventListener("scroll", markSection, { passive: true });
 addEventListener("hashchange", showPage);
 $("find").addEventListener("input", showPage);
 // A section or page picked while searching shows it, not the search.
