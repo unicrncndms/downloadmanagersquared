@@ -299,6 +299,9 @@ kbd { font: inherit; font-size: 11px; padding: 0 var(--s1); border: 1px solid va
 .group-files .card.one > .name { grid-area: 1 / 1; }
 .group-files .card.one > .nums { grid-area: 1 / 2; }
 .group-files .card.one > .title { grid-area: 1 / 1; }
-/* As big as the room beside the part's numbers allows, 6 to 12px, whole pixels (62px: the 31 gaps). */
-.group-files .card > .prog { container-type: inline-size; }
-.group-files .card .chunks { --sq: clamp(6px, round(down, calc((100cqw - 62px) / 32), 1px), 12px); }
+/* The same square sizes as every other row, whatever a part's numbers say or
+   whether it runs: the parts' box is 29px narrower than the list, and has no
+   tile column, so the list's steps (460, 680) move down by that. */
+.group-files .card .chunks { --sq: 8px; }
+@container (max-width: 430px) { .group-files .card .chunks { --sq: 6px; } }
+@container (min-width: 651px) { .group-files .card .chunks { --sq: 12px; } }
