@@ -736,7 +736,7 @@ function makeGroupCard(gid) {
     let i = 0;
     for (const d of g.items) {
       const c = cardFor(d.id);
-      c.update(d);
+      c.update(d, d.status === "completed");
       place(files, c.root, i++);
     }
     while (files.children.length > i) files.lastChild.remove();
@@ -761,9 +761,16 @@ function cardFor(id) {
       get root() { return (full || line).root; },
       whole,
       number(n) { if (full) full.number(n); },
-      update(next) {
+      // fetched: a group's part that is fetched, waiting only for its archive's
+      // extraction (the group's row says how that goes): its line, not its card.
+      update(next, fetched = false) {
         d = next;
-        if (!full && !finished(d)) whole(); // back at work (a checksum being checked), or never finished
+        if (fetched && full && detail.id !== id) {
+          line = makeLine(id);
+          full.root.replaceWith(line.root);
+          full = null;
+        }
+        if (!full && !fetched && !finished(d)) whole(); // back at work (a checksum being checked), or never finished
         else if (!full && !line) line = makeLine(id);
         (full || line).update(d);
       },
