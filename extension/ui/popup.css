@@ -27,6 +27,8 @@ body:not(.windowed) #conn.ok { width: 7px; overflow: hidden; white-space: nowrap
 .strip .nm.short, body:not(.windowed) .strip.many .nm { display: none; }
 body:not(.windowed) .strip.many .nm.short { display: inline; }
 .strip .chip.idle .dot { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+.strip .chip { color: var(--text); }
+.strip .chip .busy { color: var(--warn); font-weight: 500; }
 .tools { position: relative; display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .tools .spacer { flex: 1; min-width: 0; }
 #search { border: 1px solid var(--line); background: var(--panel); border-radius: var(--r); padding: 2px 8px; font-size: 12px; }
@@ -74,21 +76,24 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 2px 10px 12px; containe
 .card[draggable="true"] { cursor: grab; }
 .card [hidden] { display: none !important; }
 .card > .n { grid-area: 1 / 1; text-align: right; color: var(--muted); font-size: 12px; }
-.card > .name { grid-area: 1 / 2; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 24px; line-height: 24px; }
+.card > .title { grid-area: 1 / 2 / 2 / 4; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.card.one > .title { grid-area: 1 / 2; }
+.title > .name { flex: 1 1 auto; }
+.card > .name, .title > .name { grid-area: 1 / 2; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 24px; line-height: 24px; }
 .card > .end { grid-area: 1 / 4; display: flex; align-items: center; white-space: nowrap; }
 /* Narrow: the connections as colours and counts beside the name, not a line of their own. */
-.card > .mini { grid-area: 1 / 3; display: flex; gap: 8px; justify-content: flex-end; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.card .mini { flex: none; display: flex; gap: 8px; justify-content: flex-end; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .mini > span, .via > span { display: inline-flex; align-items: center; gap: 4px; }
-.mini .held, .via .held { color: var(--warn); }
+.mini .held b, .via .held b { font-weight: 500; color: var(--warn); }
 .card > .what .via { display: none; }
 .card > .what:not(:has(> :not([hidden], .via))) { display: none; }
 .card > .prog { grid-area: 2 / 2; min-width: 0; }
 .card > .nums { grid-area: 2 / 3 / 3 / 5; text-align: right; line-height: 1.3; white-space: nowrap; padding-right: 4px; }
 .card > .what { grid-area: 3 / 2 / 4 / -1; }
-.card > :not(.n, .name, .mini, .end, .prog, .nums, .what) { grid-column: 2 / -1; }
+.card > :not(.n, .name, .title, .end, .prog, .nums, .what) { grid-column: 2 / -1; }
 .card.one > .name { grid-area: 1 / 2; }
 .card.one > .nums { grid-area: 1 / 3; }
-.card.one > .nums b, .card.line > .name { font-weight: 400; }
+.card.one > .nums b, .card.line .name { font-weight: 400; }
 .card.one > .nums b { color: var(--muted); font-size: 12px; }
 .nums b, .nums small { display: block; }
 .nums b { font-weight: 500; } /* Rubik is sturdy: 500 does what 600 did in Segoe */
@@ -102,9 +107,9 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 2px 10px 12px; containe
   /* A wide list: the name has its own line, the squares get the room under it
      in two longer rows, and the connections are named on the line below. */
   .card { grid-template-columns: 24px minmax(0, 1fr) auto auto; column-gap: 16px; padding: 8px 6px; }
-  .card > .name { grid-area: 1 / 2 / 2 / 4; }
-  .card.one > .name { grid-area: 1 / 2; }
-  .card > .mini { display: none; }
+  .card > .name, .card > .title { grid-area: 1 / 2 / 2 / 4; }
+  .card.one > .name, .card.one > .title { grid-area: 1 / 2; }
+  .card .mini { display: none; }
   .card .chunks { grid-template: repeat(2, auto) / repeat(48, 1fr) !important; max-width: 720px; gap: 3px; }
   .card .chunks i { border-radius: 2.5px; }
   .card .prog > .bar { max-width: 720px; height: 8px; }
@@ -119,11 +124,13 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 2px 10px 12px; containe
 .chunks { display: grid; grid-template: repeat(var(--rows), auto) / repeat(var(--cols), 1fr); grid-auto-flow: column; gap: 2px; margin: 2px 0; max-width: 300px; }
 .chunks i { aspect-ratio: 1; border-radius: 2px; background: var(--bar); transition: background .3s; }
 .chunks i.on { background: var(--accent); }
+.chunks i.got { background: currentColor; }
 .chunks i.now { background: currentColor; animation: fetching .9s ease-in-out infinite alternate; }
 .chunks i.now:nth-child(3n) { animation-delay: -.3s; }
 .chunks i.now:nth-child(3n+1) { animation-delay: -.6s; }
 @keyframes fetching { to { opacity: .3; } }
 .idle .chunks i.on { background: var(--muted); }
+.idle .chunks i.got { opacity: .45; }
 .idle .chunks i.now { background: var(--bar); animation: none; }
 
 button.icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0;
@@ -214,4 +221,9 @@ button.icon[aria-expanded] svg { transition: transform .15s; }
 #updateNote > span { flex: 1; }
 #addBox .check { display: flex; gap: 6px; align-items: center; font-size: 12px; }
 #addBox .check[hidden] { display: none; }
-.offline { margin-top: 10px; padding: 12px; border-radius: var(--r); background: var(--accent-soft); font-size: 13px; }
+/* The engine out of reach: said in the error's tone, with what to do. */
+.offline { margin-top: 10px; padding: 12px 14px; border-radius: var(--r); font-size: 13px; display: grid; gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent); background: color-mix(in srgb, var(--bad) 8%, transparent); }
+.offline.calm { border-color: var(--line); background: var(--panel); }
+.offline .actions { display: flex; gap: 6px; }
+.offline details summary { font-size: 12px; }

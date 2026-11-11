@@ -112,9 +112,10 @@ function extractBar() {
   };
 }
 
-// chunkGrid is the file as squares, from the engine's map of it: "#" on
-// disk, "." missing, a digit being fetched right now by connection
-// mapBy[digit], which shows in that connection's colour.
+// chunkGrid is the file as squares, from the engine's map of it: "." missing,
+// a letter on disk and written by connection mapBy[a=0, b=1…], a digit being
+// fetched right now by mapBy[digit], each in that connection's colour; "#" on
+// disk from before this run, in the accent. The file shows the sum.
 function chunkGrid(rows) {
   const root = el("div", { class: "chunks", role: "img", hidden: true });
   root.style.setProperty("--rows", rows);
@@ -135,9 +136,10 @@ function chunkGrid(rows) {
       while (root.children.length > map.length) root.lastChild.remove();
       let cell = root.firstElementChild;
       for (const c of map) {
-        const cls = c === "#" ? "on" : c === "." ? "" : "now";
+        const got = c >= "a" && c <= "j";
+        const cls = c === "#" ? "on" : c === "." ? "" : got ? "got" : "now";
         if (cell.className !== cls) cell.className = cls;
-        cell.style.color = cls === "now" ? by[+c] || "" : "";
+        cell.style.color = cls === "now" ? by[+c] || "" : got ? by[c.charCodeAt(0) - 97] || "" : "";
         cell = cell.nextElementSibling;
       }
     },
@@ -321,7 +323,8 @@ function makeCard(id) {
   }
 
   const extras = [extract.bar, extract.line, cardConns, pick, fold.row, fold.pass, fold.ask, ask];
-  const root = el("div", { class: "card", tabindex: "-1", "data-id": id }, num, name, mini, tools, prog, nums, line, ...extras);
+  // The name and its connections share the first line: the connections never squeeze the squares.
+  const root = el("div", { class: "card", tabindex: "-1", "data-id": id }, num, el("span", { class: "title" }, name, mini), tools, prog, nums, line, ...extras);
   const queued = () => d && d.status === "queued";
   const takes = () => d && (d.status === "queued" || d.status === "running"); // a drop: its place, or its slot
   root.addEventListener("dragstart", (e) => {
@@ -411,16 +414,20 @@ function makeCard(id) {
     via.hidden = mini.hidden = !used.length;
     const count = (ifc) => (torrent ? plural(d.links[ifc].conns, "peer") : d.links[ifc].conns + "×");
     const nameOf = (ifc) => ifaceName(ifc, latest.state, latest.settings);
-    // A connection held back (the server busy, backing off) says so in its tone; why on hover and in Details.
+    // A connection held back (the server busy, backing off) says "busy" in words; why on hover and in Details.
     const held = (ifc) => (d.links[ifc].tone === "warn" ? d.links[ifc].label : "");
     const viaSig = used.map((ifc) => [nameOf(ifc), count(ifc), held(ifc), ifaceHue(ifc, latest.state)]);
     const entry = (ifc, text) => {
       const dot = el("i", { class: "dot" });
       dot.style.color = ifaceHue(ifc, latest.state);
-      return el("span", { class: held(ifc) ? "held" : "", title: [`${nameOf(ifc)}: ${count(ifc)}`, held(ifc)].filter(Boolean).join(" · ") }, dot, text);
+      return el("span", { class: held(ifc) ? "held" : "", title: [`${nameOf(ifc)}: ${count(ifc)}`, held(ifc)].filter(Boolean).join(" · ") },
+        dot, text, held(ifc) ? el("b", {}, " · busy") : null);
     };
     fresh(via, viaSig, () => used.map((ifc) => entry(ifc, `${nameOf(ifc)} ${count(ifc)}`)));
-    fresh(mini, viaSig, () => used.map((ifc) => entry(ifc, torrent ? String(d.links[ifc].conns) : count(ifc))));
+    // Narrow: short names while two fit beside the file's name; more, the colours and counts.
+    const short = used.length <= 2;
+    fresh(mini, [viaSig, short], () => used.map((ifc) => entry(ifc,
+      (short ? shortName(nameOf(ifc)) + " " : "") + (torrent ? String(d.links[ifc].conns) : count(ifc)))));
     line.hidden = done || (slim && left.hidden && vpn.hidden);
     extract.update(extractView([d]));
 

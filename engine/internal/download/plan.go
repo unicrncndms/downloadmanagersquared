@@ -35,6 +35,12 @@ type plan struct {
 	// With them, an ordered plan cuts on a boundary when one is near.
 	bounds []int64
 
+	// landed is which interface wrote each square of the file's map
+	// (fileMap), as 1 + its place in writers; 0 where none is known (bytes on
+	// disk before this run). Only memory: a resumed file starts without.
+	landed  []uint8
+	writers []string
+
 	// ordered: a Download as folder, or a part of one. Its bytes are extracted
 	// and freed front to back, so they are fetched that way too: a connection
 	// takes only a stride's worth off the front of what is missing, so all of
@@ -211,8 +217,31 @@ func (p *plan) take(s *segment, n int64) (off, k int64) {
 	return off, k
 }
 
-// wrote records the k bytes take reserved at off as on disk.
-func (p *plan) wrote(s *segment, off, k int64) { s.written = off + k }
+// wrote records the k bytes take reserved at off as on disk, and which
+// interface wrote them.
+func (p *plan) wrote(s *segment, off, k int64) {
+	s.written = off + k
+	if p.size > 0 && k > 0 && s.owner != nil {
+		p.mark(off, off+k, s.owner.iface)
+	}
+}
+
+// mark notes iface as the writer of the squares bytes from to to fall in.
+func (p *plan) mark(from, to int64, iface string) {
+	w := slices.Index(p.writers, iface)
+	if w < 0 {
+		if len(p.writers) == 255 {
+			return
+		}
+		p.writers, w = append(p.writers, iface), len(p.writers)
+	}
+	if p.landed == nil {
+		p.landed = make([]uint8, mapCells)
+	}
+	for c := from * mapCells / p.size; c <= (to-1)*mapCells/p.size && c < mapCells; c++ {
+		p.landed[c] = uint8(w + 1)
+	}
+}
 
 // endHere settles a chunk of unknown length: the response has ended, so the file has.
 func (p *plan) endHere(s *segment) {
@@ -279,10 +308,12 @@ func (p *plan) fetching() []fetch {
 }
 
 // fileMap draws a file of size bytes as mapCells characters, for the pages'
-// grid of squares: '#' all on disk, '.' some of it missing, and a digit where
-// a connection is writing right now, the interface at that place in by. ""
-// for a file of unknown size.
-func fileMap(size int64, missing []Range, now []fetch) (cells string, by []string) {
+// grid of squares: '#' all on disk, '.' some of it missing, a letter where
+// all of it is on disk and an interface wrote it (a for by[0], b for by[1]…),
+// and a digit where a connection is writing right now (0 for by[0]…). landed
+// and writers are the plan's record of who wrote what, nil when there is
+// none. "" for a file of unknown size.
+func fileMap(size int64, missing []Range, now []fetch, landed []uint8, writers []string) (cells string, by []string) {
 	if size <= 0 {
 		return "", nil
 	}
@@ -296,15 +327,25 @@ func fileMap(size int64, missing []Range, now []fetch) (cells string, by []strin
 			m[i] = '.'
 		}
 	}
-	for _, f := range now {
-		k := slices.Index(by, f.iface)
-		if k < 0 {
-			if len(by) == 10 {
-				continue // a digit each: an eleventh interface shows as missing
-			}
-			by, k = append(by, f.iface), len(by)
+	// by's place for iface, or -1 once ten are taken (a digit each).
+	place := func(iface string) int {
+		k := slices.Index(by, iface)
+		if k < 0 && len(by) < 10 {
+			by, k = append(by, iface), len(by)
 		}
-		m[cell(f.pos)] = byte('0' + k)
+		return k
+	}
+	for i, w := range landed {
+		if m[i] == '#' && w > 0 && int(w) <= len(writers) {
+			if k := place(writers[w-1]); k >= 0 {
+				m[i] = byte('a' + k)
+			}
+		}
+	}
+	for _, f := range now {
+		if k := place(f.iface); k >= 0 {
+			m[cell(f.pos)] = byte('0' + k)
+		}
 	}
 	return string(m), by
 }

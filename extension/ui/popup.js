@@ -170,15 +170,18 @@ function shortName(name) {
 function renderStrip(s) {
   const ifs = (s.interfaces || []).filter((i) => i.present !== false && i.enabled);
   const idle = (i) => !!s.active && !(i.speed > 0);
+  // Held back on some download right now: the server busy, or backing off.
+  const busy = new Set((s.downloads || []).flatMap((d) => Object.keys(d.links || {}).filter((id) => d.links[id].tone === "warn")));
   $("strip").classList.toggle("many", ifs.length > 2);
-  fresh($("strip"), ifs.map((i) => [i.id, i.name, Math.round((i.speed || 0) / 1e5), idle(i)]), () => ifs.map((i) => {
+  fresh($("strip"), ifs.map((i) => [i.id, i.name, Math.round((i.speed || 0) / 1e5), idle(i), busy.has(i.id)]), () => ifs.map((i) => {
     const sq = el("i", { class: "dot" });
     sq.style.color = ifaceHue(i.id, s);
-    const said = idle(i) ? "idle" : fmtSpeed(i.speed || 0);
+    const said = idle(i) ? "idle" : fmtSpeed(i.speed || 0) + (busy.has(i.id) ? ", server busy" : "");
     return el("button", { class: "chip" + (idle(i) ? " idle" : ""), title: `${i.name}: ${said}`, "aria-label": `${i.name}, ${said}. Open Connections`,
       onclick: () => { Host.openSettings("#connections"); if (!document.body.classList.contains("windowed")) window.close(); } },
       sq, el("span", { class: "nm" }, i.name), el("span", { class: "nm short" }, shortName(i.name)),
-      el("span", { class: "muted num" }, idle(i) ? "idle" : ((i.speed || 0) / 1e6).toFixed(1)));
+      el("span", { class: "muted num" }, idle(i) ? "idle" : ((i.speed || 0) / 1e6).toFixed(1)),
+      busy.has(i.id) ? el("span", { class: "busy" }, "busy") : null);
   }));
 }
 
@@ -478,12 +481,16 @@ function render(m) {
         link(RELEASES_URL, "release page"),
         ", extract it and run dms-engine.exe.")
       : m.quit && Host.startEngine
-      ? el("div", { class: "offline" },
-        "DMS² was quit from its tray icon, so Firefox handles downloads itself. ",
-        el("button", { onclick: () => Host.startEngine() }, "Start DMS²"))
-      : el("div", { class: "offline" },
-        "The download engine isn't reachable. Make sure it's running in the tray, or run dms-engine.exe from the release zip again.",
-        m.error ? el("div", { class: "muted mono" }, m.error) : null));
+      ? el("div", { class: "offline calm" },
+        el("div", {}, "DMS² was quit from its tray icon, so Firefox handles downloads itself."),
+        el("div", { class: "actions" }, el("button", { class: "primary", onclick: () => Host.startEngine() }, "Start DMS²")))
+      : el("div", { class: "offline", role: "alert" },
+        el("div", {}, el("b", {}, "The download engine isn't reachable. "),
+          "Make sure DMS² is running in the tray, or run dms-engine.exe from the release zip again."),
+        el("div", { class: "actions" },
+          Host.startEngine ? el("button", { class: "primary", onclick: () => Host.startEngine() }, "Start DMS²") : null,
+          el("button", { onclick: () => location.reload() }, "Check again")),
+        m.error ? el("details", {}, el("summary", {}, "Details"), el("div", { class: "muted mono" }, m.error)) : null));
     cards.clear();
     groupCards.clear();
     arranged = [];

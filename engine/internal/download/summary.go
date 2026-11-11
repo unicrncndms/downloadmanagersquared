@@ -125,9 +125,9 @@ func (d *Download) Summary() Summary {
 	switch {
 	case s.Status == StatusCompleted || !d.st.Allocated:
 	case d.plan != nil && d.plan.splittable:
-		s.Map, s.MapBy = fileMap(s.Size, d.plan.ranges(), d.plan.fetching())
+		s.Map, s.MapBy = fileMap(s.Size, d.plan.ranges(), d.plan.fetching(), d.plan.landed, d.plan.writers)
 	case d.plan == nil && s.RangeOK:
-		s.Map, s.MapBy = fileMap(s.Size, d.st.Remaining, nil)
+		s.Map, s.MapBy = fileMap(s.Size, d.st.Remaining, nil, nil, nil)
 	}
 	now := time.Now()
 	for id, l := range d.st.Links {

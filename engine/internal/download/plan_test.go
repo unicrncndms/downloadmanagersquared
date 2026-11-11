@@ -199,18 +199,42 @@ func TestAFileIsDrawnAsSquares(t *testing.T) {
 	w := &worker{iface: "eth"}
 	p := newPlan(size, true, []Range{{250, 1000}, {4800, size}})
 	p.segs[0].owner = w
-	m, by := fileMap(size, p.ranges(), p.fetching())
+	m, by := fileMap(size, p.ranges(), p.fetching(), nil, nil)
 	want := "##0" + strings.Repeat(".", 7) + strings.Repeat("#", 38) + strings.Repeat(".", 48)
 	if m != want || !slices.Equal(by, []string{"eth"}) {
 		t.Fatalf("map %q by %v, want %q", m, by, want)
 	}
-	if m, _ := fileMap(-1, nil, nil); m != "" {
+	if m, _ := fileMap(-1, nil, nil, nil, nil); m != "" {
 		t.Fatalf("a file of unknown size has no map, got %q", m)
 	}
 	// Sizes that don't divide into the squares, and a tiny file, stay in range.
 	for _, size := range []int64{1, 95, 97, 1e12 + 7} {
-		if m, _ := fileMap(size, []Range{{0, size}}, []fetch{{size - 1, "a"}}); len(m) != mapCells {
+		if m, _ := fileMap(size, []Range{{0, size}}, []fetch{{size - 1, "a"}}, nil, nil); len(m) != mapCells {
 			t.Fatalf("size %d: %d squares", size, len(m))
 		}
+	}
+}
+
+func TestTheSquaresOnDiskShowWhichConnectionWroteThem(t *testing.T) {
+	size := int64(mapCells * 100)
+	eth, wifi := &worker{iface: "eth"}, &worker{iface: "wifi"}
+	p := newPlan(size, true, []Range{{0, size}})
+	front, back := p.segs[0], p.split(p.segs[0], size/2)
+	front.owner, back.owner = eth, wifi
+	p.wrote(front, 0, 300)     // squares 0-2, all on disk
+	p.wrote(back, size/2, 250) // squares 48-49 on disk, 50 half
+	m, by := fileMap(size, p.ranges(), p.fetching(), p.landed, p.writers)
+	if !slices.Equal(by, []string{"eth", "wifi"}) {
+		t.Fatalf("by %v", by)
+	}
+	if got := m[:4]; got != "aaa0" {
+		t.Fatalf("front %q, want aaa0: three squares by eth, then eth writing", got)
+	}
+	if got := m[48:52]; got != "bb1." {
+		t.Fatalf("back %q, want bb1.: two by wifi, wifi writing, then missing", got)
+	}
+	// Bytes on disk from before this run: on disk, nobody known.
+	if m, _ := fileMap(size, []Range{{100, size}}, nil, nil, nil); m[0] != '#' {
+		t.Fatalf("resumed square %q, want #", m[0])
 	}
 }

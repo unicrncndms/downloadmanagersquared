@@ -40,7 +40,7 @@ function renderConn(m) {
   const conn = $("conn");
   conn.textContent = m.connected ? "Engine connected" : m.notInstalled ? "Engine not installed" : m.quit ? "Engine quit" : "Engine offline";
   conn.className = "badge st " + (m.connected ? "ok" : "bad");
-  conn.title = m.error || "";
+  conn.title = m.error || conn.textContent; // in the popup the square alone shows; its words on hover
 }
 
 // In the Downloads window both pages share one header: the logo, the engine
