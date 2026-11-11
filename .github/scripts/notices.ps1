@@ -6,11 +6,13 @@ $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $out = Join-Path $root 'dist\THIRD-PARTY-NOTICES'
 New-Item -ItemType Directory -Force (Split-Path $out) | Out-Null
 
-go install github.com/google/go-licenses@v1.6.0
-if ($LASTEXITCODE) { throw 'installing go-licenses failed' }
 $tpl = Join-Path $root '.github\third-party-notices.tpl'
 Push-Location (Join-Path $root 'engine')
 try {
+    # Built here, with the Go that engine/go.mod asks for: built by an older
+    # installed Go, it takes the standard library for modules without info.
+    go install github.com/google/go-licenses@v1.6.0
+    if ($LASTEXITCODE) { throw 'installing go-licenses failed' }
     $report = go-licenses report ./... --ignore downloadmanagersquared/engine --template $tpl
     if ($LASTEXITCODE) { throw 'go-licenses report failed' }
 } finally {
