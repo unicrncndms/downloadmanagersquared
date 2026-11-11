@@ -33,105 +33,122 @@
       <div id="ifaces"></div>
       <div id="uplinkWarn" class="uplink" hidden></div>
       <div id="ipv6Hint" class="uplink" hidden></div>
-      <label class="follow"><input type="checkbox" id="followWindows"> Let Windows pick the main connection</label>
-      <label class="follow"><input type="checkbox" id="sIPv6"> Enable IPv6 (experimental)<span class="info" tabindex="0" data-tip="Off by default. On: a connection with only IPv6 (some phone tethers) is used too, and the others may use IPv6 to reach servers that have only IPv6. Not yet tested on a real mobile network with NAT64."></span></label>
-
-      <div class="row-actions"><button id="refreshIfaces">Look for connections again</button>
-        <button id="checkLines">Check lines</button><span class="info" tabindex="0" data-tip="Asks a public STUN server (stun.cloudflare.com) through each connection which public IP it comes from. Two with the same IP share one line to the internet. Only sent when you click."></span></div>
-      <div id="lineResult" class="uplink" hidden></div>
+      <div class="group">
+        <h3>Options</h3>
+        <div class="fields">
+          <div class="setting"><label for="followWindows">Let Windows pick the main connection</label>
+            <span><input type="checkbox" id="followWindows"></span></div>
+          <div class="setting"><label for="sIPv6">Enable IPv6 (experimental)
+            <span class="info" tabindex="0" data-tip="Off by default. On: a connection with only IPv6 (some phone tethers) is used too, and the others may use IPv6 to reach servers that have only IPv6. Not yet tested on a real mobile network with NAT64."></span></label>
+            <span><input type="checkbox" id="sIPv6"></span></div>
+          <div class="setting"><span>Connections
+            <span class="info" tabindex="0" data-tip="Check lines asks a public STUN server (stun.cloudflare.com) through each connection which public IP it comes from. Two with the same IP share one line to the internet. Only sent when you click."></span></span>
+            <span class="buttons"><button id="refreshIfaces">Look for connections again</button><button id="checkLines">Check lines</button></span></div>
+        </div>
+        <div id="lineResult" class="uplink" hidden></div>
+      </div>
       <input type="file" id="confFile" accept=".conf,text/plain" hidden>
     </section>
 
     <section id="vpn" class="panel">
       <h2 class="mk">VPN</h2>
-      <div class="fields">
-        <label for="vpnProvider">VPN provider
-          <span class="info" tabindex="0" data-tip="Signing in to a provider gives every connection without its own .conf a tunnel. For other VPNs, import a .conf per connection above."></span></label>
-        <select id="vpnProvider">
-          <option value="">None</option>
-          <option value="pia">Private Internet Access</option>
-        </select>
+      <div class="group">
+        <h3>Provider</h3>
+        <div class="fields">
+          <div class="setting"><label for="vpnProvider">VPN provider
+            <span class="info" tabindex="0" data-tip="Signing in to a provider gives every connection without its own .conf a tunnel. For other VPNs, import a .conf per connection above."></span></label>
+            <select id="vpnProvider">
+              <option value="">None</option>
+              <option value="pia">Private Internet Access</option>
+            </select></div>
+        </div>
+        <div id="piaOut" class="row-actions" role="alert" hidden>
+          <span>Sign out of Private Internet Access? Its tunnels will close.</span>
+          <button class="primary" id="piaOutYes">Sign out</button>
+          <button id="piaOutNo">Cancel</button>
+        </div>
       </div>
 
-      <div id="piaOut" class="row-actions" role="alert" hidden>
-        <span>Sign out of Private Internet Access? Its tunnels will close.</span>
-        <button class="primary" id="piaOutYes">Sign out</button>
-        <button id="piaOutNo">Cancel</button>
+      <div class="group" id="piaBox" hidden>
+        <h3>Private Internet Access
+          <span class="info" tabindex="0" data-tip="Your login is stored encrypted and never shown again."></span></h3>
+        <div class="fields">
+          <div class="setting"><span class="muted">Status</span>
+            <span><span id="piaState" class="badge dim">Not set up</span> <span id="piaError" class="muted"></span></span></div>
+          <div class="setting"><label for="piaUser">Username</label>
+            <input type="text" id="piaUser" placeholder="p1234567" autocomplete="off"></div>
+          <div class="setting"><label for="piaPass">Password</label>
+            <input type="password" id="piaPass" autocomplete="off"></div>
+          <div class="setting"><label for="piaRegion">Region</label>
+            <select id="piaRegion"><option value="">Lowest latency</option></select></div>
+        </div>
+        <div class="row-actions">
+          <button class="primary" id="piaSave">Sign in</button>
+          <button id="piaClear">Sign out</button>
+        </div>
       </div>
 
-      <div id="piaBox" hidden>
-      <h3>Private Internet Access
-        <span class="info" tabindex="0" data-tip="Your login is stored encrypted and never shown again."></span>
-      </h3>
-      <div class="fields">
-        <span class="muted">Status</span>
-        <span><span id="piaState" class="badge dim">Not set up</span> <span id="piaError" class="muted"></span></span>
-        <label for="piaUser">Username</label>
-        <input type="text" id="piaUser" placeholder="p1234567" autocomplete="off">
-        <label for="piaPass">Password</label>
-        <input type="password" id="piaPass" autocomplete="off">
-        <label for="piaRegion">Region</label>
-        <select id="piaRegion"><option value="">Lowest latency</option></select>
-      </div>
-      <div class="row-actions">
-        <button class="primary" id="piaSave">Sign in</button>
-        <button id="piaClear">Sign out</button>
-      </div>
-      </div>
-
-      <h3>What goes through the tunnels</h3>
-      <div class="fields">
-        <label for="sVpnHttp">VPN for downloads
-          <span class="info" tabindex="0" data-tip="Firefox already contacted the server once from your own address before handing a download over. To avoid that, right-click the link and choose “Download with DMS²”."></span></label>
-        <select id="sVpnHttp" data-setting></select>
-
-        <label for="sVpnTorrent">VPN for torrents</label>
-        <select id="sVpnTorrent" data-setting></select>
+      <div class="group">
+        <h3>What goes through the tunnels</h3>
+        <div class="fields">
+          <div class="setting"><label for="sVpnHttp">VPN for downloads
+            <span class="info" tabindex="0" data-tip="Firefox already contacted the server once from your own address before handing a download over. To avoid that, right-click the link and choose “Download with DMS²”."></span></label>
+            <select id="sVpnHttp" data-setting></select></div>
+          <div class="setting"><label for="sVpnTorrent">VPN for torrents</label>
+            <select id="sVpnTorrent" data-setting></select></div>
+        </div>
       </div>
     </section>
 
     <section id="downloads" class="panel">
       <h2 class="mk">Downloads</h2>
-      <div class="fields">
-        <label for="sDir">Download folder</label>
-        <input type="text" id="sDir" data-setting>
+      <div class="group">
+        <h3>Where and when</h3>
+        <div class="fields">
+          <div class="setting"><label for="sDir">Download folder</label>
+            <input type="text" id="sDir" data-setting></div>
+          <div class="setting"><label for="sThreshold">Take over Firefox downloads above (GB)</label>
+            <input type="number" id="sThreshold" min="0.001" step="any" data-setting></div>
+          <div class="setting"><label for="sParallel">Downloads at once</label>
+            <input type="number" id="sParallel" min="1" max="16" data-setting></div>
+        </div>
+      </div>
 
-        <label for="sThreshold">Take over Firefox downloads above (GB)</label>
-        <input type="number" id="sThreshold" min="0.001" step="any" data-setting>
+      <div class="group">
+        <h3>Speed</h3>
+        <div class="fields">
+          <div class="setting"><label for="sDownLimit">Download limit, all connections (MB/s)
+            <span class="info" tabindex="0" data-tip="Caps everything DMS² receives, on top of each connection's own limit. Empty: none."></span></label>
+            <input type="number" id="sDownLimit" min="0" step="any" placeholder="none" data-setting></div>
+          <div class="setting"><label for="sUpLimit">Upload limit, all connections (MB/s)</label>
+            <input type="number" id="sUpLimit" min="0" step="any" placeholder="none" data-setting></div>
+          <div class="setting"><label for="sConns">Default requests per connection</label>
+            <input type="number" id="sConns" min="1" max="32" data-setting></div>
+          <div class="setting"><label for="sEta">Time-left averaging (seconds)
+            <span class="info" tabindex="0" data-tip="Longer gives a steadier estimate; shorter reacts faster to speed changes."></span></label>
+            <input type="number" id="sEta" min="5" max="3600" data-setting></div>
+        </div>
+      </div>
 
-        <label for="sParallel">Downloads at once</label>
-        <input type="number" id="sParallel" min="1" max="16" data-setting>
-
-        <label for="sDownLimit">Download limit, all connections (MB/s)
-          <span class="info" tabindex="0" data-tip="Caps everything DMS² receives, on top of each connection's own limit. Empty: none."></span></label>
-        <input type="number" id="sDownLimit" min="0" step="any" placeholder="none" data-setting>
-
-        <label for="sUpLimit">Upload limit, all connections (MB/s)</label>
-        <input type="number" id="sUpLimit" min="0" step="any" placeholder="none" data-setting>
-
-        <label for="sConns">Default requests per connection</label>
-        <input type="number" id="sConns" min="1" max="32" data-setting>
-
-        <label for="sEta">Time-left averaging (seconds)
-          <span class="info" tabindex="0" data-tip="Longer gives a steadier estimate; shorter reacts faster to speed changes."></span></label>
-        <input type="number" id="sEta" min="5" max="3600" data-setting>
-
-        <label for="sFolder">Download archives as folders
-          <span class="info" tabindex="0" data-tip="A .zip, .7z or .rar is extracted while it downloads, into the folder you last extracted into, and its space is freed as each file is done: you get the folder, never the archive. Each download can still be switched on its card."></span></label>
-        <span><input type="checkbox" id="sFolder" data-setting></span>
-
-        <label for="sParts">Download a split archive's parts at once
-          <span class="info" tabindex="0" data-tip="For a split archive downloaded as a folder. Off, the parts of one that can only be read front to back (RAR volumes, a solid 7z) download one at a time, so none waits on disk for the extraction to reach it. On, they download side by side: faster where a server limits each connection, but the parts fetched ahead take up space until they are extracted. Archives whose files can be extracted in any order always download their parts at once."></span></label>
-        <span><input type="checkbox" id="sParts" data-setting></span>
+      <div class="group">
+        <h3>Archives</h3>
+        <div class="fields">
+          <div class="setting"><label for="sFolder">Download archives as folders
+            <span class="info" tabindex="0" data-tip="A .zip, .7z or .rar is extracted while it downloads, into the folder you last extracted into, and its space is freed as each file is done: you get the folder, never the archive. Each download can still be switched on its card."></span></label>
+            <span><input type="checkbox" id="sFolder" data-setting></span></div>
+          <div class="setting"><label for="sParts">Download a split archive's parts at once
+            <span class="info" tabindex="0" data-tip="For a split archive downloaded as a folder. Off, the parts of one that can only be read front to back (RAR volumes, a solid 7z) download one at a time, so none waits on disk for the extraction to reach it. On, they download side by side: faster where a server limits each connection, but the parts fetched ahead take up space until they are extracted. Archives whose files can be extracted in any order always download their parts at once."></span></label>
+            <span><input type="checkbox" id="sParts" data-setting></span></div>
+        </div>
       </div>
     </section>
 
     <section id="torrents" class="panel">
       <h2 class="mk">Torrents</h2>
       <div class="fields">
-        <label for="sRatio">Seed until ratio
+        <div class="setting"><label for="sRatio">Seed until ratio
           <span class="info" tabindex="0" data-tip="A finished torrent keeps uploading until it has sent this many times its size. 0 stops as soon as it's done."></span></label>
-        <input type="number" id="sRatio" min="0" max="100" step="0.1" data-setting>
+          <input type="number" id="sRatio" min="0" max="100" step="0.1" data-setting></div>
       </div>
     </section>
 
@@ -139,24 +156,26 @@
       <h2 class="mk">Sites that need a link per connection
         <span class="info" tabindex="0" data-tip="Some sites give a download link that only works for the address that opened the page. DMS² then opens the page once through each connection to get each its own link."></span>
       </h2>
-      <h3>Learned sites</h3>
-      <div id="recipes"></div>
+      <div class="group">
+        <h3>Learned sites</h3>
+        <div id="recipes" class="box"></div>
+      </div>
     </section>
 
     <section id="appearance" class="panel">
       <h2 class="mk">Appearance</h2>
       <div class="fields">
-        <span>Accent color
+        <div class="setting"><span>Accent color
           <span class="info" tabindex="0" data-tip="Follow Firefox takes the color of your Firefox theme; the default themes have none, so the pages stay blue."></span></span>
-        <div class="swatches" id="accents" role="radiogroup" aria-label="Accent color"></div>
+          <div class="swatches" id="accents" role="radiogroup" aria-label="Accent color"></div></div>
       </div>
     </section>
 
     <section id="startup" class="panel">
       <h2 class="mk">Startup</h2>
       <div class="fields">
-        <label for="sAuto">Start with Windows</label>
-        <span><input type="checkbox" id="sAuto"></span>
+        <div class="setting"><label for="sAuto">Start with Windows</label>
+          <span><input type="checkbox" id="sAuto"></span></div>
       </div>
     </section>
     <p class="empty" id="notFound" role="status" hidden></p>

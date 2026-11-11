@@ -336,19 +336,29 @@ const sections = [...document.querySelectorAll("main > section")];
 const sectionLinks = [...$("sections").querySelectorAll("a")];
 
 // found marks what a search finds in a section: the whole section when its
-// title matches, else each setting whose label does. Whether it found any.
+// title matches, else each group whose title does, else each setting whose
+// label does; a group with nothing found goes too. Whether it found any.
 function found(section, q) {
-  const all = !q || section.querySelector("h2").textContent.toLowerCase().includes(q);
+  const has = (node) => !!node && node.textContent.toLowerCase().includes(q);
+  const all = !q || has(section.querySelector("h2"));
   let any = all;
-  for (const f of section.querySelectorAll(".fields")) {
-    const kids = [...f.children]; // label, control, label, control…
-    for (let i = 0; i < kids.length; i += 2) {
-      const hit = all || kids[i].textContent.toLowerCase().includes(q);
-      for (const k of kids.slice(i, i + 2)) k.classList.toggle("unfound", !hit);
-      any = any || hit;
+  for (const g of section.querySelectorAll(".group")) {
+    const whole = all || has(g.querySelector("h3"));
+    let hits = whole;
+    for (const row of g.querySelectorAll(".setting")) {
+      const hit = whole || has(row.firstElementChild);
+      row.classList.toggle("unfound", !hit);
+      hits = hits || hit;
     }
+    g.classList.toggle("unfound", !hits);
+    any = any || hits;
   }
-  return any || [...section.querySelectorAll("label, h3")].some((n) => n.textContent.toLowerCase().includes(q));
+  for (const row of section.querySelectorAll(":scope > .fields > .setting")) {
+    const hit = all || has(row.firstElementChild);
+    row.classList.toggle("unfound", !hit);
+    any = any || hit;
+  }
+  return any;
 }
 
 let page = ""; // "connections" or "settings", as last shown
