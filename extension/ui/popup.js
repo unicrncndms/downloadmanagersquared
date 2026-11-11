@@ -7,10 +7,174 @@
 let latest = {};
 const cards = new Map(); // download id -> card controller
 
+// Details shows one download beside the list (a wide window) or in a sheet
+// over its lower half (the popup): a row never grows, so the list keeps its
+// shape. The opened download's row puts its Details into body (card.js).
+const detail = { id: "", body: $("detailBody"), title: $("detailTitle") };
+// quiet: from inside a draw, which goes on to show it itself.
+function showDetail(id, quiet) {
+  detail.id = id;
+  $("detail").hidden = false;
+  document.body.classList.add("detailing");
+  if (quiet) return;
+  const c = cards.get(id);
+  if (c) c.whole(); // a finished line has no Details of its own
+  if (latest.state) renderDownloads(latest.state);
+  // Under the sheet the row would be covered: it goes to the top of what is left of the list.
+  const row = $("list").querySelector(".card.detailed");
+  if (row && matchMedia("(max-width: 759px)").matches) row.scrollIntoView({ block: "start" });
+}
+function closeDetail() {
+  const row = $("list").querySelector(".card.detailed");
+  detail.id = "";
+  $("detail").hidden = true;
+  document.body.classList.remove("detailing");
+  if (latest.state) renderDownloads(latest.state);
+  if (row) row.focus();
+}
+$("detailClose").append(icon("close"));
+$("detailClose").onclick = closeDetail;
+
+// The downloads selected, by id: a click selects a row, Ctrl and Shift add to
+// it, and with several the bar over the tools acts on all of them.
+const selected = new Set();
+let anchor = ""; // where a Shift click's range starts
+let shown = []; // the ids of each row in the list, in order
+let removing = false; // the bar asks whether unfinished files go too
+
+function rowIds(row) {
+  if (row.dataset.id) return [row.dataset.id];
+  const g = groupCards.get(row.dataset.group);
+  return g ? g.ids() : [];
+}
+const picked = () => ((latest.state && latest.state.downloads) || []).filter((d) => selected.has(d.id));
+
+function select(ids, e) {
+  if (e.shiftKey && anchor) {
+    const flat = shown.flat();
+    const [a, b] = [flat.indexOf(anchor), flat.indexOf(ids[0])].sort((x, y) => x - y);
+    if (a >= 0) for (const id of flat.slice(a, b + 1)) selected.add(id);
+    for (const id of ids) selected.add(id);
+  } else if (e.ctrlKey || e.metaKey) {
+    const on = ids.every((id) => selected.has(id));
+    for (const id of ids) on ? selected.delete(id) : selected.add(id);
+    anchor = ids[0];
+  } else {
+    const only = selected.size === ids.length && ids.every((id) => selected.has(id));
+    selected.clear();
+    if (!only) for (const id of ids) selected.add(id);
+    anchor = ids[0];
+  }
+  removing = false;
+  // Details follows the row selected, once it is open.
+  if (detail.id && selected.size === 1 && !selected.has(detail.id)) return showDetail([...selected][0]);
+  if (latest.state) renderDownloads(latest.state);
+}
+
+$("list").addEventListener("mousedown", (e) => { if (e.shiftKey && e.target.closest(".card")) e.preventDefault(); }); // no text selected by a range
+$("list").addEventListener("click", (e) => {
+  if (e.target.closest("button, a, input, select, textarea, label, .menu, .extract, .pick, .ask")) return;
+  const row = e.target.closest(".card");
+  if (row) select(rowIds(row), e);
+});
+$("list").addEventListener("dblclick", (e) => {
+  const row = e.target.closest(".card");
+  if (row && row.dataset.id && !e.target.closest("button, a, input, label")) showDetail(row.dataset.id);
+});
+// On a row: the arrows go from row to row, Space selects, Enter opens Details, Delete removes.
+$("list").addEventListener("keydown", (e) => {
+  const row = e.target;
+  if (!row.classList || !row.classList.contains("card")) return;
+  const step = { ArrowDown: "nextElementSibling", ArrowUp: "previousElementSibling" }[e.key];
+  if (step) {
+    let to = row[step];
+    while (to && !to.classList.contains("card")) to = to[step];
+    if (to) to.focus();
+  } else if (e.key === " ") select(rowIds(row), { ctrlKey: true });
+  else if (e.key === "Enter" && row.dataset.id) showDetail(row.dataset.id);
+  else if (e.key === "Delete") {
+    if (!rowIds(row).every((id) => selected.has(id))) select(rowIds(row), {});
+    removeSelected();
+  } else return;
+  e.preventDefault();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.defaultPrevented || openMenu) return;
+  if (detail.id) closeDetail();
+  else if (selected.size) { selected.clear(); removing = false; renderDownloads(latest.state); }
+});
+
+// each sends one request for every selected download that pick takes, at once.
+async function each(method, params, pick, okText) {
+  const ds = picked().filter(pick || (() => true));
+  await Promise.all(ds.map((d) => call(method, { id: d.id, ...params }).catch((err) => toast(err.message))));
+  if (okText && ds.length) toast(okText);
+}
+function removeSelected() {
+  const ds = picked();
+  if (!ds.length) return;
+  if (ds.some((d) => d.partialFile) && !removing) { removing = true; return renderSelBar(); }
+  removing = false;
+  each("remove", { deleteFile: false }, null, `${plural(ds.length, "download")} removed from the list (files kept)`);
+}
+// The selected queued downloads start next, in the order they are listed.
+function startNext() {
+  for (const d of picked().filter((x) => x.status === "queued").reverse()) moveDownload(d.id, "first");
+}
+
+function renderSelBar() {
+  const bar = $("selBar");
+  const ds = picked();
+  bar.hidden = ds.length < 2 && !removing;
+  if (bar.hidden) return;
+  const can = (k) => ds.some((d) => d.actions && d.actions[k]);
+  const button = (label, go, cls) => el("button", { class: "small " + (cls || ""), onclick: go }, label);
+  const clear = iconButton("close", "Clear the selection", () => { selected.clear(); removing = false; renderDownloads(latest.state); });
+  fresh(bar, [ds.length, removing, can("pause"), can("resume"), ds.some((d) => d.status === "queued")], () => (removing ? [
+    el("span", { class: "grow" }, `Remove ${plural(ds.length, "download")}?`),
+    button("Delete unfinished files", () => { removing = false; each("remove", { deleteFile: true }, null, "Removed, unfinished files deleted"); }, "primary"),
+    button("Keep files", () => { removing = false; each("remove", { deleteFile: false }, null, "Removed from the list (files kept)"); }),
+    button("Cancel", () => { removing = false; renderSelBar(); }),
+  ] : [
+    el("span", { class: "grow" }, `${ds.length} selected`),
+    can("pause") ? button("Pause", () => each("pause", {}, (d) => d.actions && d.actions.pause)) : null,
+    can("resume") ? button("Resume", () => each("resume", {}, (d) => d.actions && d.actions.resume)) : null,
+    ds.some((d) => d.status === "queued") ? button("Start next", startNext) : null,
+    button("Remove…", removeSelected),
+    clear,
+  ].filter(Boolean)));
+}
+
+// dropOn: queued download from is dropped on target. Dragged from a
+// selection, the selected queued downloads go together, in their order.
+function dropOn(from, target) {
+  const all = latest.state.downloads || [];
+  const group = selected.has(from) ? all.filter((d) => selected.has(d.id) && d.status === "queued").map((d) => d.id) : [];
+  const running = all.some((d) => d.id === target && d.status === "running");
+  if (group.length < 2 || running || group.includes(target)) return moveDownload(from, target);
+  const before = moveBefore(all, group[0], target);
+  if (before === null) return;
+  for (const id of group) if (id !== before) act("move", { id, before });
+}
+
+// The connections in the header: each one's colour, name and speed now.
+function renderStrip(s) {
+  const ifs = (s.interfaces || []).filter((i) => i.present !== false && i.enabled);
+  $("strip").classList.toggle("many", ifs.length > 2);
+  fresh($("strip"), ifs.map((i) => [i.id, i.name, Math.round((i.speed || 0) / 1e5)]), () => ifs.map((i) => {
+    const sq = el("i", { class: "dot" });
+    sq.style.color = ifaceHue(i.id, s);
+    return el("button", { class: "chip", title: `${i.name}: ${fmtSpeed(i.speed || 0)}`, "aria-label": `${i.name}, ${fmtSpeed(i.speed || 0)}. Open Connections`,
+      onclick: () => { Host.openSettings("#connections"); if (!document.body.classList.contains("windowed")) window.close(); } },
+      sq, el("span", { class: "nm" }, i.name), el("span", { class: "muted num" }, ((i.speed || 0) / 1e6).toFixed(1)));
+  }));
+}
+
 if (new URLSearchParams(location.search).has("window")) document.body.classList.add("windowed");
 
 // In the Downloads window the header matches the settings page's.
-if (windowHeader("downloads")) document.querySelector("footer").hidden = true;
+if (windowHeader()) $("openSettings").hidden = true; // its tabs lead there
+$("openSettings").append(icon("gear"));
 
 $("openSettings").onclick = () => {
   Host.openSettings("");
@@ -18,13 +182,40 @@ $("openSettings").onclick = () => {
 };
 $("pauseAll").onclick = () => act("pauseAll");
 $("resumeAll").onclick = () => act("resumeAll");
-$("toggleAdd").onclick = () => {
-  $("addBox").hidden = !$("addBox").hidden;
-  if (!$("addBox").hidden) $("addUrl").focus();
-};
+// The Add box: closed again by + Add or Escape.
+function openAdd(on) {
+  $("addBox").hidden = !on;
+  $("toggleAdd").setAttribute("aria-expanded", String(on));
+  if (on) $("addUrl").focus();
+  else $("toggleAdd").focus();
+}
+$("toggleAdd").onclick = () => openAdd($("addBox").hidden);
+$("addBox").addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  e.preventDefault();
+  openAdd(false);
+});
+// Links pasted anywhere but a field open the box with them in it.
+document.addEventListener("paste", (e) => {
+  if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  const text = e.clipboardData.getData("text");
+  if (!addView(text).count) return;
+  e.preventDefault();
+  const box = $("addUrl");
+  box.value = [box.value.trim(), text.trim()].filter(Boolean).join("\n");
+  openAdd(true);
+  box.dispatchEvent(new Event("input"));
+});
 // A .zip, .7z or .rar link offers Download as folder, ticked as the settings default.
 const zipLine = (url) => addFolderChoice(url, latest.settings).show;
 $("addUrl").addEventListener("input", () => {
+  // The landing page and the VPN once a link they apply to is in the box.
+  const v = addView($("addUrl").value);
+  $("addPage").hidden = !v.page;
+  $("addVpn").hidden = !v.vpn;
+  $("addGo").textContent = v.label;
+  $("addUrl").rows = Math.min(5, Math.max(2, $("addUrl").value.split(/\n/).length)); // grows with the links, to five lines
+  $("addHint").textContent = v.bad ? `${plural(v.bad, "line")} that isn't a link will stay in the box.` : v.count ? "" : "Paste links here, or anywhere on the list with Ctrl+V.";
   const c = addFolderChoice("", latest.settings);
   const show = addLines($("addUrl").value).urls.some((u) => zipLine(u.url));
   if (show === !$("addFolderRow").hidden) return; // leave a box the user ticked alone
@@ -60,14 +251,56 @@ $("addBox").addEventListener("submit", async (e) => {
   toast(added === 1 ? "Added" : `${added} downloads added`);
   $("addUrl").value = "";
   $("addPage").value = "";
-  $("addFolderRow").hidden = true;
-  $("addBox").hidden = true;
+  $("addUrl").dispatchEvent(new Event("input"));
+  openAdd(false);
 });
 
-// The heading over the finished lines, with Clear finished.
-const finishedHead = el("div", { class: "group-head" },
-  el("span", { class: "muted" }, "Finished"),
-  el("a", { href: "#", onclick: (e) => { e.preventDefault(); clearFinished(); } }, "Clear finished"));
+// The list's sections (lib/list.js sectionName): a heading with how many it
+// holds, which folds its rows away. Folded ones are remembered in this browser.
+const FOLDED = "dms.foldedSections";
+const folded = new Set((() => { try { return JSON.parse(localStorage.getItem(FOLDED)) || []; } catch { return []; } })());
+const heads = new Map(); // section name -> { root, count, button }
+function sectionHead(name) {
+  let h = heads.get(name);
+  if (!h) {
+    const button = el("button", { onclick: () => {
+      folded.has(name) ? folded.delete(name) : folded.add(name);
+      try { localStorage.setItem(FOLDED, JSON.stringify([...folded])); } catch { /* until the page closes */ }
+      renderDownloads(latest.state);
+    } }, icon("chevron"), name);
+    h = { button, count: el("span", { class: "count num" }) };
+    h.root = el("h2", { class: "sec" }, button, h.count,
+      name === "Finished" ? el("a", { href: "#", onclick: (e) => { e.preventDefault(); clearFinished(); } }, "Clear finished") : null);
+    heads.set(name, h);
+  }
+  h.button.setAttribute("aria-expanded", String(!folded.has(name)));
+  return h;
+}
+
+// arrange puts the nodes wanted into the list in order and takes out the
+// rest. A row that changes place slides there, so the eye can follow it.
+const calm = matchMedia("(prefers-reduced-motion: reduce)");
+let arranged = [];
+function arrange(list, want) {
+  if (want.length === arranged.length && want.every((n, i) => n === arranged[i] && n.parentNode === list)) return;
+  const was = new Map();
+  if (!calm.matches && arranged.length && want.length < 400) for (const n of list.children) was.set(n, n.offsetTop);
+  let at = list.firstElementChild;
+  for (const node of want) {
+    if (at === node) at = at.nextElementSibling;
+    else list.insertBefore(node, at);
+  }
+  while (at) {
+    const next = at.nextElementSibling;
+    at.remove();
+    at = next;
+  }
+  arranged = want;
+  for (const [n, top] of was) {
+    const dy = n.parentNode === list ? top - n.offsetTop : 0;
+    if (dy) n.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 180, easing: "cubic-bezier(.2, .8, .2, 1)" });
+  }
+}
 
 async function clearFinished() {
   const done = (latest.state.downloads || []).filter(finished);
@@ -92,57 +325,59 @@ function renderDownloads(state) {
   const downloads = sortDownloads(all.filter((d) => matchesSearch(d, query)));
   const seen = new Set();
   const seenGroups = new Set();
-  // Like place, by walking along: list.children[i] counts from the start
-  // each time the list changed, which made a first draw of thousands take seconds.
-  let at = list.firstElementChild;
-  const put = (node) => {
-    if (at === node) at = at.nextElementSibling;
-    else list.insertBefore(node, at);
-  };
-  let headed = false;
+  const ids = new Set(all.map((d) => d.id));
+  for (const id of selected) if (!ids.has(id)) selected.delete(id);
+  if (detail.id && !ids.has(detail.id)) { // the download opened is gone
+    detail.id = "";
+    $("detail").hidden = true;
+    document.body.classList.remove("detailing");
+  }
+  const want = []; // the list's nodes, in order
+  shown = [];
+  let head = null, section = "", n = 0, place = 0;
   for (const e of listEntries(downloads)) {
-    const done = e.d ? finished(e.d) : e.items.every(finished);
-    if (done && !headed) {
-      put(finishedHead);
-      headed = true;
+    const name = sectionName(e.d || e.items[0]);
+    if (name !== section) {
+      if (head) head.count.textContent = n;
+      [head, section, n, place] = [sectionHead(name), name, 0, 0];
+      want.push(head.root);
     }
+    n++;
+    let c;
     if (e.d) {
       seen.add(e.d.id);
-      const c = cardFor(e.d.id);
+      c = cardFor(e.d.id);
       c.update(e.d);
-      put(c.root);
-      continue;
+    } else {
+      seenGroups.add(e.group);
+      for (const d of e.items) seen.add(d.id);
+      c = groupCards.get(e.group);
+      if (!c) groupCards.set(e.group, c = makeGroupCard(e.group));
+      c.update(e);
     }
-    seenGroups.add(e.group);
-    for (const d of e.items) seen.add(d.id);
-    let g = groupCards.get(e.group);
-    if (!g) {
-      g = makeGroupCard(e.group);
-      groupCards.set(e.group, g);
-    }
-    g.update(e);
-    put(g.root);
+    c.number(name === "Queue" ? ++place : 0);
+    if (folded.has(name)) continue;
+    want.push(c.root);
+    shown.push(e.d ? [e.d.id] : e.items.map((d) => d.id));
   }
-  if (!headed) finishedHead.remove();
-  for (const [id, c] of cards) {
-    if (!seen.has(id)) {
-      c.root.remove();
-      cards.delete(id);
-    }
-  }
-  for (const [id, g] of groupCards) {
-    if (!seenGroups.has(id)) {
-      g.root.remove();
-      groupCards.delete(id);
-    }
-  }
+  if (head) head.count.textContent = n;
+  for (const id of cards.keys()) if (!seen.has(id)) cards.delete(id);
+  for (const id of groupCards.keys()) if (!seenGroups.has(id)) groupCards.delete(id);
+  renderSelBar();
   const emptyText = !all.length ? "No downloads yet. Big downloads in Firefox are picked up automatically, or paste a link under + Add."
     : `No downloads match “${query.trim()}”.`;
-  let empty = $("emptyList");
-  if (!downloads.length && !empty) list.append(empty = el("div", { class: "empty", id: "emptyList", role: "status" }));
-  if (!downloads.length && empty.textContent !== emptyText) empty.textContent = emptyText;
-  if (downloads.length && empty) empty.remove();
+  if (!downloads.length) {
+    if (emptyNote.textContent !== emptyText) emptyNote.textContent = emptyText;
+    want.push(emptyNote);
+  }
+  arrange(list, want);
+  // One row takes the Tab key; the arrows go on from it.
+  if (!list.querySelector('.card[tabindex="0"]')) {
+    const first = list.querySelector(".card");
+    if (first) first.tabIndex = 0;
+  }
 }
+const emptyNote = el("div", { class: "empty", role: "status" });
 
 // place puts node at index in parent, moving it only if it isn't there:
 // moving an element takes the focus out of a field in it and closes a
@@ -237,6 +472,8 @@ function render(m) {
         m.error ? el("div", { class: "muted mono" }, m.error) : null));
     cards.clear();
     groupCards.clear();
+    arranged = [];
+    fresh($("strip"), [], () => []);
     return;
   }
   if ($("list").querySelector(".offline")) $("list").replaceChildren();
@@ -245,5 +482,6 @@ function render(m) {
   const bulk = bulkActions(s.downloads || []);
   $("pauseAll").hidden = !bulk.pauseAll;
   $("resumeAll").hidden = !bulk.resumeAll;
+  renderStrip(s);
   renderDownloads(s);
 }

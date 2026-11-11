@@ -3,6 +3,7 @@ package download
 import (
 	"math"
 	"slices"
+	"strings"
 )
 
 // unknownEnd is the end of a file whose size the server didn't say; the chunk
@@ -255,4 +256,55 @@ func (p *plan) prune() {
 		}
 	}
 	p.segs = kept
+}
+
+// mapCells is how many squares the pages draw a file as.
+const mapCells = 96
+
+// fetch is a byte being written right now, and the interface writing it.
+type fetch struct {
+	pos   int64
+	iface string
+}
+
+// fetching is where each chunk with a connection is being written.
+func (p *plan) fetching() []fetch {
+	var now []fetch
+	for _, s := range p.segs {
+		if s.owner != nil && s.written < s.end {
+			now = append(now, fetch{s.written, s.owner.iface})
+		}
+	}
+	return now
+}
+
+// fileMap draws a file of size bytes as mapCells characters, for the pages'
+// grid of squares: '#' all on disk, '.' some of it missing, and a digit where
+// a connection is writing right now, the interface at that place in by. ""
+// for a file of unknown size.
+func fileMap(size int64, missing []Range, now []fetch) (cells string, by []string) {
+	if size <= 0 {
+		return "", nil
+	}
+	cell := func(b int64) int { return int(min(b*mapCells/size, mapCells-1)) }
+	m := []byte(strings.Repeat("#", mapCells))
+	for _, r := range missing {
+		if r.Start >= r.End {
+			continue
+		}
+		for i := cell(r.Start); i <= cell(r.End-1); i++ {
+			m[i] = '.'
+		}
+	}
+	for _, f := range now {
+		k := slices.Index(by, f.iface)
+		if k < 0 {
+			if len(by) == 10 {
+				continue // a digit each: an eleventh interface shows as missing
+			}
+			by, k = append(by, f.iface), len(by)
+		}
+		m[cell(f.pos)] = byte('0' + k)
+	}
+	return string(m), by
 }

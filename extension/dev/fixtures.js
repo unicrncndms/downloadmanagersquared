@@ -21,15 +21,18 @@ const SETTINGS = {
   etaWindowSec: 60, defaultConnections: 4, seedRatio: 1, torrentPort: 41234, vpnHttp: "off", vpnTorrent: "off", piaRegion: "", vpnProvider: "",
 };
 
+// A file's map as the engine sends it: runs of [on disk, being fetched by, missing].
+const chunkMap = (...runs) => runs.map(([on, by, off]) => "#".repeat(on) + by + ".".repeat(off)).join("");
+
 const DOWNLOADS = [
-  { kind: "http", id: "a", url: "https://files.example.com/dl/abc", pageUrl: "https://example.com/file/abc", filename: "ubuntu-24.04.iso",
+  { map: chunkMap([9, 0, 6], [7, 0, 8], [8, 1, 7], [5, 0, 10], [6, 1, 9], [2, 0, 13]), mapBy: ["eth", "wifi"], kind: "http", id: "a", url: "https://files.example.com/dl/abc", pageUrl: "https://example.com/file/abc", filename: "ubuntu-24.04.iso",
     dir: "C:\\Users\\you\\Downloads", size: 6.1e9, done: 2.4e9, status: "running", speed: 11.5e6, eta: 322, probed: true, rangeOk: true,
     label: "Downloading", actions: { pause: true, showInFolder: true, remove: true }, partialFile: true,
     links: { eth: { status: "ready", conns: 4, speed: 7.1e6, resolved: false, label: "Downloading", tone: "ok" },
       wifi: { status: "ready", conns: 2, speed: 4.4e6, resolved: true, label: "Server busy · 2 of 4 connections", tone: "warn" } },
     added: "2026-11-03T20:00:00Z" },
   // One interface, a site with no recipe yet: the Record recipe button.
-  { kind: "http", id: "r", url: "https://dl.filehost.example/k/77", pageUrl: "https://filehost.example/f/77", filename: "dataset-2026.tar",
+  { map: chunkMap([11, "0000", 81]), mapBy: ["eth"], kind: "http", id: "r", url: "https://dl.filehost.example/k/77", pageUrl: "https://filehost.example/f/77", filename: "dataset-2026.tar",
     dir: "C:\\Users\\you\\Downloads", size: 1.8e10, done: 2.1e9, status: "running", speed: 5.3e6, eta: 3000, probed: true, rangeOk: true,
     label: "Downloading", actions: { pause: true, showInFolder: true, remove: true, recordRecipe: true }, partialFile: true,
     links: { eth: { status: "ready", conns: 4, speed: 5.3e6, resolved: false, label: "Downloading", tone: "ok" } },
@@ -45,7 +48,7 @@ const DOWNLOADS = [
 
 // Download as folder: waiting for a folder, extracting (locked), and unavailable.
 const zipDownload = (id, filename, folder, extra) => ({
-  kind: "http", id, url: `https://cdn.example.org/${filename}`, filename, dir: "C:\\Users\\you\\Downloads", size: 4.2e10, done: 1.3e10,
+  map: chunkMap([29, "0000", 63]), mapBy: ["eth"], kind: "http", id, url: `https://cdn.example.org/${filename}`, filename, dir: "C:\\Users\\you\\Downloads", size: 4.2e10, done: 1.3e10,
   status: "running", speed: 9.2e6, eta: 3150, probed: true, rangeOk: true, label: "Downloading",
   actions: { pause: true, showInFolder: true, remove: true }, partialFile: true,
   links: { eth: { status: "ready", conns: 4, speed: 9.2e6, label: "Downloading", tone: "ok" } }, added: "2026-11-06T10:00:00Z", folder, ...extra,
@@ -129,7 +132,7 @@ const FIXTURES = {
   // Three queued behind one downloading: the up and down arrows, and dragging.
   queue: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
     state: { ...STATE, downloads: [DOWNLOADS[0], ...["one.iso", "two.iso", "three.iso"].map((n) => ({ ...DOWNLOADS[0], id: n, filename: n, url: "https://example.com/" + n,
-      status: "queued", done: 0, speed: 0, eta: -1, label: "Queued", tone: "dim", links: {}, partialFile: false, actions: { remove: true, pause: true } }))] } },
+      status: "queued", done: 0, map: "", note: "Waiting in the queue", speed: 0, eta: -1, label: "Queued", tone: "dim", links: {}, partialFile: false, actions: { remove: true, pause: true } }))] } },
   // An encrypted split archive, every part fetched: the group card asks for the password.
   splitPassword: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
     state: { ...STATE, downloads: [1, 2].map((n) => part(n, { status: "completed", done: 1e9, speed: 0, eta: -1, label: "Completed", tone: "ok", partialFile: false,

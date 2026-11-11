@@ -1,18 +1,20 @@
+/* Two lines: the logo, the engine and the pages; then a page's sections and
+   the search. In the window as tall as the downloads page's (--win-* in ui.css). */
 header {
-  position: sticky; top: 0; z-index: 30;
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
-  padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 30; display: grid; grid-template-columns: auto auto 1fr;
+  grid-template-rows: 30px 26px; gap: 8px 16px; padding: 12px 24px 10px; white-space: nowrap;
+  background: var(--panel); border-bottom: 1px solid var(--line);
 }
-/* In the window: two lines, as on the downloads page (see --win-* in ui.css). */
-.engine-window header { flex-wrap: nowrap; display: grid; grid-template-columns: auto auto 1fr;
-  grid-template-rows: var(--win-row1) var(--win-row2); gap: var(--win-gap) 16px; padding: var(--win-pad); white-space: nowrap; }
-.engine-window header > * { align-self: center; justify-self: start; }
-.engine-window header nav { grid-column: 1 / -1; margin-left: -10px; flex-wrap: nowrap; overflow: hidden; }
+.engine-window header { grid-template-rows: var(--win-row1) var(--win-row2); gap: var(--win-gap) 16px; padding: var(--win-pad); }
+header > * { align-self: center; justify-self: start; }
 header h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 8px; }
 header h1 img { width: 22px; height: 22px; }
-header nav { margin-left: auto; display: flex; flex-wrap: wrap; gap: 4px; }
-header nav a { padding: 4px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; }
-header nav a:hover, header nav a[aria-current] { color: var(--accent); background: var(--accent-soft); }
+header .sections { grid-area: 2 / 1 / 3 / -1; margin-left: -10px; display: flex; gap: 2px; overflow: hidden; }
+header .sections a { padding: 3px 10px; border-radius: 3px; color: var(--muted); text-decoration: none; font-size: 13px; }
+header .sections a:hover { color: var(--text); }
+header .sections a[aria-current] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+#find { grid-area: 2 / 3; justify-self: end; width: 220px; padding: 2px 8px; font-size: 12px; border: 1px solid var(--line);
+  border-radius: var(--r); background: var(--panel); }
 .recipes { width: 100%; border-collapse: collapse; font-size: 13px; }
 .recipes tr { border-top: 1px solid var(--line); }
 .recipes td { padding: 6px 8px; }
@@ -43,7 +45,7 @@ h3 { font-size: 13px; margin: 18px 0 10px; color: var(--muted); font-weight: 600
 .conn-row.head > span { display: flex; align-items: center; }
 .conn-row.absent { opacity: .5; }
 .conn-row .center { justify-self: center; }
-.conn-row .who b { font-weight: 600; }
+.conn-row .who b { font-weight: 600; display: inline-flex; align-items: center; gap: 7px; }
 .conn-row .sub { color: var(--muted); font-size: 12px; margin-top: 1px; }
 .conn-row .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .conn-row input[type=number] { width: 56px; }
@@ -67,6 +69,6 @@ h3 { font-size: 13px; margin: 18px 0 10px; color: var(--muted); font-weight: 600
 .toast { bottom: 16px; }
 @media (max-width: 700px) {
   header, main { padding-left: 16px; padding-right: 16px; }
-  header nav { margin-left: 0; }
+  #find { width: 140px; }
   .fields { grid-template-columns: 1fr; }
 }

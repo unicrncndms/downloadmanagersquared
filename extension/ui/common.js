@@ -39,24 +39,36 @@ const RELEASES_URL = "https://github.com/unicrncndms/downloadmanagersquared/rele
 function renderConn(m) {
   const conn = $("conn");
   conn.textContent = m.connected ? "Engine connected" : m.notInstalled ? "Engine not installed" : m.quit ? "Engine quit" : "Engine offline";
-  conn.className = "badge " + (m.connected ? "ok" : "bad");
+  conn.className = "badge st " + (m.connected ? "ok" : "bad");
   conn.title = m.error || "";
 }
 
 // In the Downloads window both pages share one header: the logo, the engine
-// badge, then tabs between the downloads and the settings. Returns whether
-// the page is in the window.
-function windowHeader(current) {
+// badge, then tabs for Downloads, Connections and Settings. The settings page
+// has its own two (settings.js), and gets Downloads put in front. Returns
+// whether the page is in the window.
+function windowHeader() {
   if (!Host.openDownloads) return false;
   document.body.classList.add("windowed", "engine-window");
-  const tab = (name, label, go) => name === current
-    ? el("button", { class: "tab on", "aria-current": "page" }, label)
-    : el("button", { class: "tab", onclick: go }, label);
-  document.querySelector("h1").lastChild.textContent = "DMS²";
-  $("conn").after(el("div", { class: "tabs" },
-    tab("downloads", "Downloads", () => Host.openDownloads()),
-    tab("settings", "Connections & settings", () => Host.openSettings(""))));
+  const tab = (label, go) => el("button", { class: "tab", onclick: go }, label);
+  const downloads = tab("Downloads", () => Host.openDownloads());
+  if ($("pages")) {
+    $("pages").prepend(downloads);
+    return true;
+  }
+  downloads.setAttribute("aria-current", "page");
+  downloads.onclick = null;
+  $("conn").after(el("nav", { class: "tabs", "aria-label": "Pages" }, downloads,
+    tab("Connections", () => Host.openSettings("#connections")),
+    tab("Settings", () => Host.openSettings("#downloads"))));
   return true;
+}
+
+// ifaceHue is a connection's colour on the pages (ui.css --c0 …): its place
+// among the engine's connections, so it is the same on every page.
+function ifaceHue(id, state) {
+  const i = ((state && state.interfaces) || []).findIndex((x) => x.id === id);
+  return `var(--c${Math.max(i, 0) % 6})`;
 }
 
 // fmtBytes, fmtSpeed, fmtETA and percent are in lib/list.js.

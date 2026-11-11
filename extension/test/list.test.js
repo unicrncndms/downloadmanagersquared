@@ -314,3 +314,25 @@ test("a click shows at once: what a request will leave of the engine's state", (
     assert.equal(predict(state, m, p), state, m);
   }
 });
+
+test("a row's section and its two numbers", () => {
+  const { sectionName, rowNums } = require("../lib/list.js");
+  const names = [dl("a", "running"), dl("b", "queued"), dl("c", "paused"), dl("d", "paused", { error: "no connection" }),
+    dl("e", "completed"), dl("f", "seeding"), dl("g", "failed")].map(sectionName);
+  assert.deepEqual(names, ["Downloading", "Queue", "Paused", "Needs you", "Finished", "Seeding", "Needs you"]);
+  // A part of a split archive still being extracted is fetched, not finished.
+  assert.notEqual(sectionName(dl("p", "completed", { folder: { on: true, set: { finished: false } } })), "Finished");
+
+  assert.deepEqual(rowNums(dl("a", "running", { size: 1000, done: 390, speed: 2e6, eta: 65 })), { main: "2.0 MB/s", sub: "39% · 1m 05s left" });
+  assert.deepEqual(rowNums(dl("c", "paused", { size: 2e9, done: 1e9 })), { main: "50%", sub: "1.0 GB / 2.0 GB" });
+  assert.deepEqual(rowNums(dl("b", "queued", { size: 2e9, done: 0 })), { main: "2.0 GB", sub: "" });
+  assert.deepEqual(rowNums(dl("e", "completed", { size: 2e9, done: 2e9 })), { main: "2.0 GB", sub: "" });
+  assert.deepEqual(rowNums(dl("u", "paused", { size: -1, done: 5e6 })), { main: "5.0 MB", sub: "" });
+});
+
+test("the Add box offers what applies to the links in it", () => {
+  const { addView } = require("../lib/list.js");
+  assert.deepEqual(addView(""), { count: 0, bad: 0, page: false, vpn: false, label: "Add" });
+  assert.deepEqual(addView("magnet:?xt=urn:btih:2da0"), { count: 1, bad: 0, page: false, vpn: true, label: "Add" });
+  assert.deepEqual(addView("https://a.example/x.iso\nnot a link\n\nmagnet:?xt=urn:btih:1"), { count: 2, bad: 1, page: true, vpn: true, label: "Add 2 downloads" });
+});

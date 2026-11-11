@@ -1,7 +1,7 @@
 "use strict";
 
-// Connections, settings, VPN and learned sites, on one page. Every change
-// is saved as soon as it's made.
+// Two pages in one: Connections (with the VPN), and Settings, one section at
+// a time, chosen by the address's #. Every change is saved as soon as it's made.
 
 const GB = 1e9;
 const MB = 1e6;
@@ -11,7 +11,7 @@ let recipesSig = "";
 let latestSettings = null;
 let latestState = {};
 
-windowHeader("settings");
+windowHeader();
 
 // --- connections ---
 
@@ -101,7 +101,7 @@ function ifaceRow(i, tun, settings) {
   ].filter(Boolean);
   return el("div", { class: "conn-row" + (i.present ? "" : " absent") },
     el("div", { class: "who" },
-      el("b", {}, i.name),
+      el("b", {}, colorOf(i.id), i.name),
       el("div", { class: "sub" }, i.present ? el("span", { class: "mono" }, i.ip) : "not connected", " · ", i.description),
       badges.length ? el("div", { class: "badges" }, badges) : null),
     el("span", { class: "center" }, check(i.enabled, "enabled", "Use")),
@@ -287,21 +287,68 @@ function renderRecipes(recipes) {
       el("td", {}, el("button", { class: "small", onclick: () => Host.forgetRecipe(h).then(() => toast("Forgotten")) }, "Forget"))))))));
 }
 
-// --- the header's links: the section being read is marked ---
+// A connection's colour, as on its downloads.
+function colorOf(id) {
+  const sq = el("i", { class: "dot" });
+  sq.style.color = ifaceHue(id, latestState);
+  return sq;
+}
 
-const navLinks = [...document.querySelectorAll("header nav a")];
-function markSection() {
-  let cur = navLinks[0];
-  for (const a of navLinks) if ($(a.hash.slice(1)).getBoundingClientRect().top <= 90) cur = a;
-  // The last sections are too short to reach the top.
-  if (scrollY > 0 && innerHeight + scrollY >=document.documentElement.scrollHeight - 2) cur = navLinks[navLinks.length - 1];
-  for (const a of navLinks) {
-    if (a === cur) a.setAttribute("aria-current", "location");
+// --- the pages: Connections with the VPN, or Settings one section at a time ---
+
+const CONNECTIONS_PAGE = ["connections", "vpn", "pia"]; // #pia: the VPN's sign-in, from a torrent's card
+const sections = [...document.querySelectorAll("main > section")];
+const sectionLinks = [...$("sections").querySelectorAll("a")];
+
+// found marks what a search finds in a section: the whole section when its
+// title matches, else each setting whose label does. Whether it found any.
+function found(section, q) {
+  const all = !q || section.querySelector("h2").textContent.toLowerCase().includes(q);
+  let any = all;
+  for (const f of section.querySelectorAll(".fields")) {
+    const kids = [...f.children]; // label, control, label, control…
+    for (let i = 0; i < kids.length; i += 2) {
+      const hit = all || kids[i].textContent.toLowerCase().includes(q);
+      for (const k of kids.slice(i, i + 2)) k.classList.toggle("unfound", !hit);
+      any = any || hit;
+    }
+  }
+  return any || [...section.querySelectorAll("label, h3, .conn-row.head > span")].some((n) => n.textContent.toLowerCase().includes(q));
+}
+
+function showPage() {
+  const at = location.hash.slice(1);
+  const q = $("find").value.trim().toLowerCase();
+  const connections = !at || CONNECTIONS_PAGE.includes(at);
+  const current = connections ? "" : sectionLinks.some((a) => a.hash === "#" + at) ? at : "downloads";
+  let shown = 0;
+  for (const s of sections) {
+    const on = q ? found(s, q) : connections ? CONNECTIONS_PAGE.includes(s.id) : s.id === current;
+    if (!q) found(s, "");
+    s.hidden = !on;
+    shown += on;
+  }
+  for (const a of $("pages").querySelectorAll("a")) {
+    if (!q && (a.hash === "#connections") === connections) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
+  for (const a of sectionLinks) {
+    if (!q && a.hash === "#" + current) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  }
+  $("sections").hidden = connections && !q;
+  $("notFound").hidden = shown > 0;
+  $("notFound").textContent = `No setting matches “${$("find").value.trim()}”.`;
+  if (at === "pia" || at === "vpn") $("vpn").scrollIntoView();
+  else scrollTo(0, 0);
 }
-addEventListener("scroll", markSection, { passive: true });
-markSection();
+addEventListener("hashchange", showPage);
+$("find").addEventListener("input", showPage);
+// A section or page picked while searching shows it, not the search.
+for (const a of [...sectionLinks, ...$("pages").querySelectorAll("a")]) {
+  a.addEventListener("click", () => { if ($("find").value) { $("find").value = ""; if (a.hash === location.hash) showPage(); } });
+}
+showPage();
 
 // --- wiring ---
 

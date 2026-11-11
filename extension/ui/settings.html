@@ -10,16 +10,20 @@
 </head>
 <body>
   <header>
-    <h1><img src="../icons/icon.svg" alt="">DMS² settings</h1>
-    <span id="conn" class="badge dim">…</span>
-    <nav>
-      <a href="#connections">Connections</a>
+    <h1><img src="../icons/icon.svg" alt="">DMS²</h1>
+    <span id="conn" class="badge st dim">…</span>
+    <nav class="tabs" id="pages" aria-label="Pages">
+      <a class="tab" href="#connections">Connections</a>
+      <a class="tab" href="#downloads">Settings</a>
+    </nav>
+    <nav class="sections" id="sections" aria-label="Settings">
       <a href="#downloads">Downloads</a>
       <a href="#torrents">Torrents</a>
-      <a href="#vpn">VPN</a>
       <a href="#sites">Sites</a>
       <a href="#appearance">Appearance</a>
+      <a href="#startup">Startup</a>
     </nav>
+    <input type="search" id="find" placeholder="Find a setting" aria-label="Find a setting">
   </header>
   <main>
     <section id="connections" class="panel">
@@ -48,6 +52,54 @@
         <button id="checkLines">Check lines</button><span class="info" tabindex="0" data-tip="Asks a public STUN server (stun.cloudflare.com) through each connection which public IP it comes from. Two with the same IP share one line to the internet. Only sent when you click."></span></div>
       <div id="lineResult" class="uplink" hidden></div>
       <input type="file" id="confFile" accept=".conf,text/plain" hidden>
+    </section>
+
+    <section id="vpn" class="panel">
+      <h2>VPN</h2>
+      <div class="fields">
+        <label for="vpnProvider">VPN provider
+          <span class="info" tabindex="0" data-tip="Signing in to a provider gives every connection without its own .conf a tunnel. For other VPNs, import a .conf per connection above."></span></label>
+        <select id="vpnProvider">
+          <option value="">None</option>
+          <option value="pia">Private Internet Access</option>
+        </select>
+      </div>
+
+      <div id="piaOut" class="row-actions" role="alert" hidden>
+        <span>Sign out of Private Internet Access? Its tunnels will close.</span>
+        <button class="primary" id="piaOutYes">Sign out</button>
+        <button id="piaOutNo">Cancel</button>
+      </div>
+
+      <div id="piaBox" hidden>
+      <h3>Private Internet Access
+        <span class="info" tabindex="0" data-tip="Your login is stored encrypted and never shown again."></span>
+      </h3>
+      <div class="fields">
+        <span class="muted">Status</span>
+        <span><span id="piaState" class="badge dim">Not set up</span> <span id="piaError" class="muted"></span></span>
+        <label for="piaUser">Username</label>
+        <input type="text" id="piaUser" placeholder="p1234567" autocomplete="off">
+        <label for="piaPass">Password</label>
+        <input type="password" id="piaPass" autocomplete="off">
+        <label for="piaRegion">Region</label>
+        <select id="piaRegion"><option value="">Lowest latency</option></select>
+      </div>
+      <div class="row-actions">
+        <button class="primary" id="piaSave">Sign in</button>
+        <button id="piaClear">Sign out</button>
+      </div>
+      </div>
+
+      <h3>What goes through the tunnels</h3>
+      <div class="fields">
+        <label for="sVpnHttp">VPN for downloads
+          <span class="info" tabindex="0" data-tip="Firefox already contacted the server once from your own address before handing a download over. To avoid that, right-click the link and choose “Download with DMS²”."></span></label>
+        <select id="sVpnHttp" data-setting></select>
+
+        <label for="sVpnTorrent">VPN for torrents</label>
+        <select id="sVpnTorrent" data-setting></select>
+      </div>
     </section>
 
     <section id="downloads" class="panel">
@@ -95,51 +147,6 @@
       </div>
     </section>
 
-    <section id="vpn" class="panel">
-      <h2>VPN</h2>
-      <div class="fields">
-        <label for="sVpnHttp">VPN for downloads
-          <span class="info" tabindex="0" data-tip="Firefox already contacted the server once from your own address before handing a download over. To avoid that, right-click the link and choose “Download with DMS²”."></span></label>
-        <select id="sVpnHttp" data-setting></select>
-
-        <label for="sVpnTorrent">VPN for torrents</label>
-        <select id="sVpnTorrent" data-setting></select>
-
-        <label for="vpnProvider">VPN provider
-          <span class="info" tabindex="0" data-tip="Signing in to a provider gives every connection without its own .conf a tunnel. For other VPNs, import a .conf per connection above."></span></label>
-        <select id="vpnProvider">
-          <option value="">None</option>
-          <option value="pia">Private Internet Access</option>
-        </select>
-      </div>
-
-      <div id="piaOut" class="row-actions" role="alert" hidden>
-        <span>Sign out of Private Internet Access? Its tunnels will close.</span>
-        <button class="primary" id="piaOutYes">Sign out</button>
-        <button id="piaOutNo">Cancel</button>
-      </div>
-
-      <div id="piaBox" hidden>
-      <h3>Private Internet Access
-        <span class="info" tabindex="0" data-tip="Your login is stored encrypted and never shown again."></span>
-      </h3>
-      <div class="fields">
-        <span class="muted">Status</span>
-        <span><span id="piaState" class="badge dim">Not set up</span> <span id="piaError" class="muted"></span></span>
-        <label for="piaUser">Username</label>
-        <input type="text" id="piaUser" placeholder="p1234567" autocomplete="off">
-        <label for="piaPass">Password</label>
-        <input type="password" id="piaPass" autocomplete="off">
-        <label for="piaRegion">Region</label>
-        <select id="piaRegion"><option value="">Lowest latency</option></select>
-      </div>
-      <div class="row-actions">
-        <button class="primary" id="piaSave">Sign in</button>
-        <button id="piaClear">Sign out</button>
-      </div>
-      </div>
-    </section>
-
     <section id="sites" class="panel">
       <h2>Sites that need a link per connection
         <span class="info" tabindex="0" data-tip="Some sites give a download link that only works for the address that opened the page. DMS² then opens the page once through each connection to get each its own link."></span>
@@ -164,6 +171,7 @@
         <span><input type="checkbox" id="sAuto"></span>
       </div>
     </section>
+    <p class="empty" id="notFound" role="status" hidden></p>
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="../lib/list.js"></script>

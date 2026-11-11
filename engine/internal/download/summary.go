@@ -49,6 +49,8 @@ type Summary struct {
 	SHA256   string                 `json:"sha256,omitempty"`
 	MD5      string                 `json:"md5,omitempty"`
 	Links    map[string]LinkSummary `json:"links"`
+	Map      string                 `json:"map,omitempty"`   // HTTP, unfinished: the file as squares (fileMap)
+	MapBy    []string               `json:"mapBy,omitempty"` // the interfaces Map's digits stand for
 	Added    time.Time              `json:"added"`
 	Finished time.Time              `json:"finished,omitzero"`
 
@@ -119,6 +121,13 @@ func (d *Download) Summary() Summary {
 	}
 	if d.running {
 		s.ETA = d.eta.Seconds()
+	}
+	switch {
+	case s.Status == StatusCompleted || !d.st.Allocated:
+	case d.plan != nil && d.plan.splittable:
+		s.Map, s.MapBy = fileMap(s.Size, d.plan.ranges(), d.plan.fetching())
+	case d.plan == nil && s.RangeOK:
+		s.Map, s.MapBy = fileMap(s.Size, d.st.Remaining, nil)
 	}
 	now := time.Now()
 	for id, l := range d.st.Links {

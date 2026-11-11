@@ -6,20 +6,22 @@
 // makeLine is a finished download before it is ever opened: only its line.
 // Its card (makeCard, about a hundred elements) is built when open is called:
 // building one for each of thousands of finished downloads took seconds.
-function makeLine(id, open) {
-  const name = el("span", { class: "name", title: "Open this download", onclick: open });
-  pressable(name, true, false);
-  const size = el("span", { class: "muted num size" });
+function makeLine(id) {
+  const name = el("span", { class: "name" });
+  const size = el("b", { class: "num" });
+  const more = iconButton("chevron", "Details", () => showDetail(id));
   const show = iconButton("folder", "Show in folder", () => act("showInFolder", { id }));
   const drop = iconButton("close", "Remove from list (files stay)", () => act("remove", { id, deleteFile: false }, "Removed from list"));
-  const root = el("div", { class: "card line" }, el("div", { class: "top" }, name, size, show, drop));
+  const root = el("div", { class: "card line one", tabindex: "-1", "data-id": id },
+    el("span", { class: "n" }), name, el("div", { class: "nums" }, size), el("span", { class: "end" }, more, show, drop));
   let sig = "";
   function update(d) {
+    root.classList.toggle("sel", selected.has(id));
     const can = !!(d.actions || {}).showInFolder;
     const s = JSON.stringify([d.filename, d.url, d.size, can]);
     if (s === sig) return;
     sig = s;
-    name.textContent = d.filename || d.url;
+    name.textContent = name.title = d.filename || d.url;
     size.textContent = d.size > 0 ? fmtBytes(d.size) : "";
     show.hidden = !can;
   }
@@ -111,26 +113,60 @@ function extractBar() {
   };
 }
 
-// expanded: a finished download opened back into its card.
-function makeCard(id, expanded = false) {
+// chunkGrid is the file as squares, from the engine's map of it: "#" on
+// disk, "." missing, a digit being fetched right now by connection
+// mapBy[digit], which shows in that connection's colour.
+function chunkGrid(rows) {
+  const root = el("div", { class: "chunks", role: "img", hidden: true });
+  root.style.setProperty("--rows", rows);
+  let shown = "";
+  return {
+    root,
+    update(d) {
+      const map = (d && d.map) || "";
+      root.hidden = !map;
+      if (!map) return;
+      const by = (d.mapBy || []).map((ifc) => ifaceHue(ifc, latest.state));
+      const sig = map + by.join();
+      if (sig === shown) return;
+      shown = sig;
+      root.setAttribute("aria-label", `${Math.round(percent(d))}% downloaded`);
+      root.style.setProperty("--cols", Math.ceil(map.length / rows));
+      while (root.children.length < map.length) root.append(el("i"));
+      while (root.children.length > map.length) root.lastChild.remove();
+      let cell = root.firstElementChild;
+      for (const c of map) {
+        const cls = c === "#" ? "on" : c === "." ? "" : "now";
+        if (cell.className !== cls) cell.className = cls;
+        cell.style.color = cls === "now" ? by[+c] || "" : "";
+        cell = cell.nextElementSibling;
+      }
+    },
+  };
+}
+
+// A download's row: its name, its file as squares, its two numbers and its
+// buttons at a fixed height, then a line saying what it does and through
+// which connections. What asks for an answer (a password, a folder, a failed
+// link) follows under it. Its Details show beside the list (popup.js detail).
+function makeCard(id) {
   let d = null; // the download as last shown
 
+  const num = el("span", { class: "n num" }); // its place in the queue
   const name = el("span", { class: "name", title: "" });
-  const status = el("span", { class: "badge" });
+  const status = el("span", { class: "badge st" });
   const vpn = el("span", { class: "badge dim" });
-  const size = el("span", { class: "muted num size" }); // a finished line's size
   const showDone = iconButton("folder", "Show in folder", () => act("showInFolder", { id }));
   const dropDone = iconButton("close", "Remove from list (files stay)", () => act("remove", { id, deleteFile: false }, "Removed from list"));
-  name.addEventListener("click", () => {
-    if (!d || !finished(d)) return;
-    expanded = !expanded;
-    update(d);
-  });
 
+  const grid = chunkGrid(3);
   const fill = el("div");
-  const bar = el("div", { class: "bar" }, fill);
-  const left = el("span", { class: "muted num left" });
-  const right = el("span", { class: "num" });
+  const bar = el("div", { class: "bar" }, fill); // where the engine sends no map of the file
+  const prog = el("div", { class: "prog" }, grid.root, bar);
+  const numsMain = el("b", { class: "num" });
+  const numsSub = el("small", { class: "muted num" });
+  const nums = el("div", { class: "nums" }, numsMain, numsSub);
+  const left = el("span", { class: "num left" }); // an error, or what a torrent uploads or offers
   const pause = iconButton("pause", "Pause", () => act("pause", { id }));
   const resume = iconButton("play", "Resume", () => act("resume", { id }));
   // A queued download moves one place with these, or by dragging it onto another queued one.
@@ -150,9 +186,11 @@ function makeCard(id, expanded = false) {
     closeMenu();
     if (!was) showMenu(menu, e.currentTarget);
   });
-  const meta = el("div", { class: "meta" }, left, el("span", { class: "end" }, right, moveUp, moveDown, pause, resume, el("span", { class: "more" }, more, menu)));
-  const sub = el("div", { class: "sub muted num" });
-  const via = el("div", { class: "sub muted num" }); // which interfaces, how many connections each
+  const openDetails = iconButton("chevron", "Details", () => (detail.id === id ? closeDetail() : showDetail(id)));
+  const tools = el("span", { class: "end" }, openDetails, moveUp, moveDown, pause, resume, showDone, dropDone, el("span", { class: "more" }, more, menu));
+  const sub = el("span", { class: "muted num" });
+  const via = el("span", { class: "via muted num" }); // which interfaces, how many connections each
+  const line = el("div", { class: "what" }, status, vpn, left, via, sub);
   const extract = extractBar();
 
   // Popups can't show confirm dialogs, so removing an unfinished download asks
@@ -254,14 +292,29 @@ function makeCard(id, expanded = false) {
     activitySection.hidden = !activity.length;
   }
 
+  // Details: shown in the pane beside the list, or the sheet over it, while
+  // this download is the one opened (popup.js detail). A bigger map on top.
+  const bigGrid = chunkGrid(4);
+  const bigNums = el("div", { class: "muted num" });
   const details = el("details", { ontoggle: () => { activityAt = 0; if (d) update(d); } },
-    el("summary", {}, "Details"), connSection, mirrorSection, foldSection, fileSection, checkSection, activitySection);
+    el("summary", {}, "Details"), bigGrid.root, bigNums, connSection, mirrorSection, foldSection, fileSection, checkSection, activitySection);
+  function syncDetail() {
+    const on = detail.id === id;
+    if (on && details.parentNode !== detail.body) {
+      detail.body.replaceChildren(details);
+      details.open = true;
+    }
+    if (!on && details.open) {
+      details.open = false;
+      details.remove();
+    }
+    if (on) detail.title.textContent = d.filename || d.url;
+    root.classList.toggle("detailed", on);
+    openDetails.setAttribute("aria-expanded", String(on));
+  }
 
-  const root = el("div", { class: "card" },
-    el("div", { class: "top" }, name, vpn, status, size, showDone, dropDone),
-    bar, meta, sub, via, extract.bar, extract.line,
-    cardConns, recordRow, pick, fold.row, fold.pass, fold.ask, ask,
-    details);
+  const extras = [extract.bar, extract.line, cardConns, recordRow, pick, fold.row, fold.pass, fold.ask, ask];
+  const root = el("div", { class: "card", tabindex: "-1", "data-id": id }, num, name, tools, prog, nums, line, ...extras);
   const queued = () => d && d.status === "queued";
   const takes = () => d && (d.status === "queued" || d.status === "running"); // a drop: its place, or its slot
   root.addEventListener("dragstart", (e) => {
@@ -279,7 +332,7 @@ function makeCard(id, expanded = false) {
     const from = e.dataTransfer.getData(DRAG_TYPE);
     if (!from || !takes()) return;
     e.preventDefault();
-    moveDownload(from, id);
+    dropOn(from, id);
   });
 
   let shownPageHint = false;
@@ -305,47 +358,56 @@ function makeCard(id, expanded = false) {
     d = next;
     const torrent = d.kind === "torrent";
     const done = finished(d);
-    const line = done && !expanded;
+    syncDetail();
+    root.classList.toggle("sel", selected.has(id));
     // A finished line never changes: with thousands listed, redrawing each every second adds up.
-    const sig = line ? JSON.stringify(d) : "";
-    if (line && sig === lineSig) return;
+    const sig = done ? JSON.stringify(d) + details.open : "";
+    if (done && sig === lineSig) return;
     lineSig = sig;
-    root.classList.toggle("line", line);
-    name.textContent = d.filename || d.url;
-    name.title = done ? (expanded ? "Fold back into a line" : "Open this download") : d.filename || d.url;
-    pressable(name, done, expanded);
+    const s = statusLine(d);
+    // One line: finished, or waiting in the queue with nothing fetched yet.
+    const slim = done || (d.status === "queued" && !d.done && !s.error);
+    root.classList.toggle("line", done);
+    root.classList.toggle("one", slim);
+    name.textContent = name.title = d.filename || d.url;
     vpn.textContent = VPN_TEXT[d.vpn] || "";
-    vpn.hidden = line || !VPN_TEXT[d.vpn];
+    vpn.hidden = done || !VPN_TEXT[d.vpn];
     status.textContent = d.label;
-    status.className = "badge " + (d.tone || "");
-    status.hidden = line;
-    size.hidden = showDone.hidden = dropDone.hidden = !line;
-    size.textContent = d.size > 0 ? fmtBytes(d.size) : "";
-    showDone.hidden = !line || !(d.actions || {}).showInFolder;
-    if (line) {
-      for (const n of [bar, meta, sub, via, extract.bar, extract.line, cardConns, recordRow, pick, fold.row, fold.pass, fold.ask, ask, details]) n.hidden = true;
-      return;
-    }
+    status.className = "badge st " + (d.tone || "");
+    status.hidden = slim; // its section's heading says it
+    dropDone.hidden = !done;
+    showDone.hidden = !done || !(d.actions || {}).showInFolder;
+    const nm = rowNums(d);
+    numsMain.textContent = nm.main;
+    numsSub.textContent = nm.sub;
+    numsSub.hidden = !nm.sub;
 
     const choosing = d.status === "choosing";
     const seeding = d.status === "seeding";
     const nFiles = d.fileCount || 0; // the list itself comes with the picker
-    bar.hidden = seeding;
+    grid.update(seeding || slim ? null : d);
+    bar.hidden = seeding || slim || !grid.root.hidden;
+    prog.hidden = grid.root.hidden && bar.hidden;
+    root.classList.toggle("idle", d.status !== "running");
     fill.style.width = percent(d) + "%";
-    const s = statusLine(d);
-    meta.hidden = false;
-    left.classList.toggle("bad", !!s.error);
-    left.classList.toggle("muted", !s.error);
-    if (s.error) left.textContent = s.error;
-    else if (choosing && nFiles) left.textContent = `${plural(nFiles, "file")} · ${fmtBytes(d.filesSize || 0)}`;
+    bigGrid.update(details.open && !done ? d : null);
+    bigNums.textContent = details.open ? s.left : "";
     const up = seedLine(d, latest.settings);
-    if (!s.error && seeding) left.textContent = up; // the badge already says Seeding
-    else if (!s.error && !(choosing && nFiles)) left.textContent = s.left;
-    right.textContent = seeding ? "" : s.right;
-    sub.textContent = s.error ? "" : [!seeding && torrent ? up : "", s.sub].filter(Boolean).join(" · ");
+    left.textContent = s.error ? s.error : choosing && nFiles ? `${plural(nFiles, "file")} · ${fmtBytes(d.filesSize || 0)}` : seeding ? up : "";
+    left.classList.toggle("bad", !!s.error);
+    left.hidden = !left.textContent;
+    // Queued on one line: its number and its section say that it waits.
+    sub.textContent = s.error || slim ? "" : [!seeding && torrent ? up : "", s.sub].filter(Boolean).join(" · ");
     sub.hidden = !sub.textContent;
-    via.textContent = s.error ? "" : viaLine(d, (ifc) => ifaceName(ifc, latest.state, latest.settings));
-    via.hidden = !via.textContent;
+    const used = s.error ? [] : viaLinks(d);
+    via.hidden = !used.length;
+    const viaText = (ifc) => `${ifaceName(ifc, latest.state, latest.settings)} ${torrent ? plural(d.links[ifc].conns, "peer") : d.links[ifc].conns + "×"}`;
+    fresh(via, used.map((ifc) => [viaText(ifc), ifaceHue(ifc, latest.state)]), () => used.map((ifc) => {
+      const dot = el("i", { class: "dot" });
+      dot.style.color = ifaceHue(ifc, latest.state);
+      return el("span", {}, dot, viaText(ifc));
+    }));
+    line.hidden = done || (slim && left.hidden && vpn.hidden);
     extract.update(extractView([d]));
 
     const can = d.actions || {};
@@ -362,7 +424,8 @@ function makeCard(id, expanded = false) {
     limitRow.hidden = torrent;
     if (document.activeElement !== limitIn) limitIn.value = d.limit ? +(d.limit / 1e6).toFixed(3) : "";
     root.draggable = queued();
-    more.parentElement.hidden = choosing;
+    more.parentElement.hidden = choosing || done;
+    openDetails.hidden = choosing;
 
     pick.hidden = !choosing;
     const step = choosing ? `${d.askVpn}|${nFiles}|${hasVpn()}` : "";
@@ -400,16 +463,17 @@ function makeCard(id, expanded = false) {
       ifaceName(a, latest.state, latest.settings).localeCompare(ifaceName(b, latest.state, latest.settings)));
     const problems = new Set(problemLinks(d));
     const shown = ids.filter((ifc) => problems.has(ifc));
-    cardConns.hidden = !shown.length || details.open; // open, Details lists them under Connections
+    cardConns.hidden = !shown.length;
     renderLinks(cardConns, cardRows, shown);
     connSection.hidden = done || !ids.length;
 
-    details.hidden = choosing;
+    if (done) for (const n of extras) n.hidden = true;
     if (!details.open) {
-      // Point straight at the field that fixes it.
+      // Point straight at the field that fixes it, unless Details shows another download.
       const needsPage = ids.some((ifc) => d.links[ifc].status === "needs-page");
-      if (needsPage && !shownPageHint && !torrent) {
-        details.open = true;
+      if (needsPage && !shownPageHint && !torrent && !detail.id) {
+        showDetail(id, true);
+        syncDetail();
         editChecks(true);
         // A fresh link to the file works here too: the browser fetches it like a page.
         page.placeholder = "The page you started from, or a fresh link to the file";
@@ -417,7 +481,7 @@ function makeCard(id, expanded = false) {
         shownPageHint = true;
       }
       if (!needsPage) shownPageHint = false;
-      return; // the rest is only drawn while Details is open
+      if (!details.open) return; // the rest is only drawn while Details is open
     }
     renderLinks(allConns, allRows, ids);
 
@@ -527,7 +591,7 @@ function makeCard(id, expanded = false) {
         el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, "Cancelled") }, "Cancel")));
   }
 
-  return { root, update, name };
+  return { root, update, number(n) { num.textContent = n || ""; } };
 }
 
 // A Metalink's files, or a split archive's parts, as one card: their progress added up, pause, resume
@@ -542,13 +606,15 @@ function makeGroupCard(gid) {
     if (okText) toast(okText);
   };
 
-  const name = el("span", { class: "name expandable" });
+  const num = el("span", { class: "n num" });
+  const title = el("span");
   const count = el("span", { class: "badge dim" });
-  const status = el("span", { class: "badge" });
+  const name = el("span", { class: "name" }, title, " ", count);
+  const status = el("span", { class: "badge st" });
   const fill = el("div");
   const bar = el("div", { class: "bar" }, fill);
   const left = el("span", { class: "muted num left" });
-  const right = el("span", { class: "num" });
+  const numsMain = el("b", { class: "num" });
   const pause = iconButton("pause", "Pause all files", () => each("pause", {}, "", (d) => d.actions && d.actions.pause));
   const resume = iconButton("play", "Resume all files", () => each("resume", {}, "", (d) => d.actions && d.actions.resume));
   const ask = el("div", { class: "actions ask", hidden: true },
@@ -572,20 +638,19 @@ function makeGroupCard(gid) {
   let foldId = "", passId = "";
   const fold = folderSwitch(() => foldId, () => passId);
   const extract = extractBar();
-  const toggle = el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); open = !open; update(g); } });
+  const toggle = iconButton("chevron", "Show its files", () => { open = !open; update(g); });
   const files = el("div", { class: "group-files" });
-  const root = el("div", { class: "card group" },
-    el("div", { class: "top" }, name, count, status),
-    bar, el("div", { class: "meta" }, left, el("span", { class: "end" }, right, pause, resume, el("span", { class: "more" }, more, menu))),
-    extract.bar, extract.line, fold.row, fold.pass, fold.ask, ask, toggle, files);
-  name.addEventListener("click", () => { open = !open; update(g); });
+  const root = el("div", { class: "card group", tabindex: "-1", "data-group": gid },
+    num, name, el("span", { class: "end" }, toggle, pause, resume, el("span", { class: "more" }, more, menu)),
+    el("div", { class: "prog" }, bar), el("div", { class: "nums" }, numsMain), el("div", { class: "what" }, status, left),
+    extract.bar, extract.line, fold.row, fold.pass, fold.ask, ask, files);
 
   function update(next) {
     g = next;
     const v = groupView(g.items);
-    name.textContent = g.name;
-    name.title = open ? "Hide the files" : "Show the files";
-    pressable(name, true, open);
+    title.textContent = name.title = g.name;
+    toggle.setAttribute("aria-expanded", String(open));
+    root.classList.toggle("sel", g.items.every((d) => selected.has(d.id)));
     const parts = String(g.group).startsWith("parts:");
     count.textContent = `${g.items.length} ${parts ? "parts" : "files"}`;
     root.classList.toggle("parts", parts);
@@ -595,13 +660,12 @@ function makeGroupCard(gid) {
     extract.update(parts ? extractView(g.items) : null);
     fold.update(fv);
     status.textContent = v.label;
-    status.className = "badge " + v.tone;
+    status.className = "badge st " + v.tone;
     fill.style.width = v.percent + "%";
     left.textContent = v.left;
-    right.textContent = v.right;
+    numsMain.textContent = v.speed > 0 ? fmtSpeed(v.speed) : "";
     pause.hidden = !v.pause;
     resume.hidden = !v.resume;
-    toggle.textContent = open ? "Hide files" : "Show files";
     files.hidden = !open;
     let i = 0;
     for (const d of g.items) {
@@ -612,30 +676,29 @@ function makeGroupCard(gid) {
     while (files.children.length > i) files.lastChild.remove();
   }
 
-  return { root, update, ids };
+  return { root, update, ids, number(n) { num.textContent = n || ""; } };
 }
 
 function cardFor(id) {
   let c = cards.get(id);
   if (!c) {
     let line = null, full = null, d = null;
-    const open = () => {
-      full = makeCard(id, true);
-      line.root.replaceWith(full.root);
+    // The whole row in place of the finished line: it has the Details.
+    const whole = () => {
+      if (full) return;
+      full = makeCard(id);
+      if (line) line.root.replaceWith(full.root);
       line = null;
-      full.update(d);
-      full.name.focus(); // the name pressed is gone: the keyboard stays on its successor
+      if (d) full.update(d);
     };
     c = {
       get root() { return (full || line).root; },
+      whole,
+      number(n) { if (full) full.number(n); },
       update(next) {
         d = next;
-        if (!full && !finished(d)) { // back at work (a checksum being checked), or never finished
-          full = makeCard(id);
-          if (line) line.root.replaceWith(full.root);
-          line = null;
-        }
-        if (!full && !line) line = makeLine(id, open);
+        if (!full && !finished(d)) whole(); // back at work (a checksum being checked), or never finished
+        else if (!full && !line) line = makeLine(id);
         (full || line).update(d);
       },
     };

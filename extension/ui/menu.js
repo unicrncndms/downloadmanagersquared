@@ -59,6 +59,8 @@ const ICONS = {
   close: "M4 4l8 8M12 4l-8 8",
   up: "M8 13V3M4 7l4-4 4 4",
   down: "M8 3v10M4 9l4 4 4-4",
+  chevron: "M4 6l4 4 4-4",
+  gear: "M8 4a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM8 6.9a1.1 1.1 0 1 0 0 2.2a1.1 1.1 0 1 0 0-2.2zM8 1.7V4M8 12v2.3M1.7 8H4M12 8h2.3M3.5 3.5l1.7 1.7M10.8 10.8l1.7 1.7M3.5 12.5l1.7-1.7M10.8 5.2l1.7-1.7",
 };
 function icon(name) {
   const ns = "http://www.w3.org/2000/svg";

@@ -14,6 +14,8 @@
       <h1><img src="../icons/icon.svg" alt="">DMS²</h1>
       <span id="conn" class="badge dim">…</span>
       <span class="total num" id="total"></span>
+      <span class="strip" id="strip"></span>
+      <button class="icon" id="openSettings" title="Connections and settings" aria-label="Connections and settings"></button>
     </div>
     <div class="version-warn" id="versionWarn" hidden></div>
     <div class="version-warn" id="updateNote" role="status" hidden></div>
@@ -24,22 +26,28 @@
 
       <button class="small" id="pauseAll">Pause all</button>
       <button class="small" id="resumeAll">Resume all</button>
+      <div id="selBar" role="toolbar" aria-label="Selected downloads" hidden></div>
     </div>
     <form id="addBox" hidden>
       <textarea id="addUrl" rows="2" aria-label="Links to add, one per line" placeholder="File link, landing page, magnet or .torrent link (one per line)" required spellcheck="false"></textarea>
-      <input type="url" id="addPage" aria-label="Landing page" placeholder="Landing page (optional, for every link)">
-      <select id="addVpn" title="Whether this download goes through the VPN">
+      <input type="url" id="addPage" aria-label="Landing page" placeholder="Landing page (optional, for every link)" hidden>
+      <select id="addVpn" title="Whether this download goes through the VPN" hidden>
         <option value="">VPN as in settings</option>
         <option value="off">No VPN</option>
         <option value="alongside">VPN and direct</option>
         <option value="vpn">VPN only</option>
       </select>
       <label id="addFolderRow" class="check" hidden><input type="checkbox" id="addFolder"> Download as folder: extract it while it downloads</label>
-      <button class="primary">Add</button>
+      <div class="add-end"><span class="muted" id="addHint">Paste links here, or anywhere on the list with Ctrl+V.</span><button class="primary" id="addGo">Add</button></div>
     </form>
   </header>
-  <main id="list"></main>
-  <footer><button id="openSettings">Connections &amp; settings</button></footer>
+  <div class="body">
+    <main id="list"></main>
+    <aside id="detail" aria-label="Details" hidden>
+      <div class="detail-head"><b id="detailTitle"></b><button class="icon" id="detailClose" title="Close details" aria-label="Close details"></button></div>
+      <div id="detailBody"></div>
+    </aside>
+  </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <div class="sr-only" id="announce" role="status" aria-live="polite"></div>
   <script src="../lib/version.js"></script>

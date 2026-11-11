@@ -53,6 +53,23 @@ function group(d) {
   return 1;
 }
 
+// The list's sections, by group: each has a heading over its downloads.
+const SECTIONS = ["Needs you", "Downloading", "Seeding", "Queue", "Paused", "Finished"];
+function sectionName(d) {
+  return SECTIONS[finished(d) ? 5 : Math.min(group(d), 4)];
+}
+
+// rowNums are the two numbers at the end of a download's row: what matters
+// most now, and under it what places it. Running: the speed, then how far and
+// how long. At rest: how far, then the bytes. Not begun or finished: its size.
+function rowNums(d) {
+  const pct = d.size > 0 ? `${Math.round(percent(d))}%` : "";
+  if (finished(d) || (d.status === "queued" && !d.done)) return { main: d.size > 0 ? fmtBytes(d.size) : "", sub: "" };
+  if (d.status === "seeding") return { main: "", sub: "" }; // its line says what it uploads
+  if (d.status === "running") return { main: fmtSpeed(d.speed), sub: [pct, `${fmtETA(d.eta)} left`].filter(Boolean).join(" · ") };
+  return { main: pct || (d.done > 0 ? fmtBytes(d.done) : ""), sub: d.size > 0 ? `${fmtBytes(d.done)} / ${fmtBytes(d.size)}` : "" };
+}
+
 // sortDownloads orders the engine's list (in queue order) by group, newest
 // first within each, except the queued: those in the order they will start.
 function sortDownloads(downloads) {
@@ -105,7 +122,7 @@ function groupView(items) {
   let label = all ? "Completed" : items[0].label, tone = all ? "ok" : items[0].tone || "";
   if (waiting && nDone === n) [label, tone] = set.note ? ["Waiting", "warn"] : ["Extracting", ""];
   return {
-    left, right: speed > 0 ? `↓ ${fmtSpeed(speed)}` : "",
+    left, right: speed > 0 ? `↓ ${fmtSpeed(speed)}` : "", speed,
     percent: size > 0 ? Math.min(100, (done / size) * 100) : 0,
     label, tone,
     pause: can("pause"), resume: can("resume"), finished: all,
@@ -238,15 +255,21 @@ function problemLinks(d) {
 // · Wi-Fi 2×". "" when it isn't running or nothing is connected. nameOf gives
 // an interface's name.
 function viaLine(d, nameOf) {
-  if (d.status !== "running" && d.status !== "seeding" && d.status !== "metadata") return "";
   const torrent = d.kind === "torrent";
-  const used = Object.keys(d.links || {}).filter((id) => d.links[id].conns > 0)
-    .sort((a, b) => d.links[b].conns - d.links[a].conns || (d.links[b].speed || 0) - (d.links[a].speed || 0));
+  const used = viaLinks(d);
   if (!used.length) return "";
   return "via " + used.map((id) => {
     const n = d.links[id].conns;
     return `${nameOf(id)} ${torrent ? `${n} peer${n === 1 ? "" : "s"}` : `${n}×`}`;
   }).join(" · ");
+}
+
+// viaLinks are the interfaces a running download uses, busiest first; none
+// when it isn't running or nothing is connected.
+function viaLinks(d) {
+  if (d.status !== "running" && d.status !== "seeding" && d.status !== "metadata") return [];
+  return Object.keys(d.links || {}).filter((id) => d.links[id].conns > 0)
+    .sort((a, b) => d.links[b].conns - d.links[a].conns || (d.links[b].speed || 0) - (d.links[a].speed || 0));
 }
 
 // seedLine is a torrent's upload and ratio, against the seed ratio target
@@ -370,6 +393,16 @@ function addLines(text) {
   return { urls, bad };
 }
 
+// addView is what the Add box shows for the text in it: how many links, and
+// which choices apply to them. A landing page only to links to web pages or
+// files (not a magnet), the VPN to any link.
+function addView(text) {
+  const { urls, bad } = addLines(text);
+  const web = urls.some((u) => /^https?:/i.test(u.url));
+  const n = urls.length;
+  return { count: n, bad: bad.length, page: web, vpn: n > 0, label: n > 1 ? `Add ${n} downloads` : "Add" };
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { addLines, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, extractView, predict, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
+  module.exports = { addLines, addView, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, extractView, predict, viaLinks, sectionName, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
 }

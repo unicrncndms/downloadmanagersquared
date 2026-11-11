@@ -2,6 +2,8 @@ package download
 
 import (
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -189,5 +191,26 @@ func TestOrderedPlanCutsOnANearbyEntryBoundary(t *testing.T) {
 	p.bounds = []int64{0, near}
 	if got := p.claim(1 << 20); got == nil || got.end != near {
 		t.Fatalf("chunk %+v, want it to end on the boundary %d", got, near)
+	}
+}
+
+func TestAFileIsDrawnAsSquares(t *testing.T) {
+	size := int64(mapCells * 100)
+	w := &worker{iface: "eth"}
+	p := newPlan(size, true, []Range{{250, 1000}, {4800, size}})
+	p.segs[0].owner = w
+	m, by := fileMap(size, p.ranges(), p.fetching())
+	want := "##0" + strings.Repeat(".", 7) + strings.Repeat("#", 38) + strings.Repeat(".", 48)
+	if m != want || !slices.Equal(by, []string{"eth"}) {
+		t.Fatalf("map %q by %v, want %q", m, by, want)
+	}
+	if m, _ := fileMap(-1, nil, nil); m != "" {
+		t.Fatalf("a file of unknown size has no map, got %q", m)
+	}
+	// Sizes that don't divide into the squares, and a tiny file, stay in range.
+	for _, size := range []int64{1, 95, 97, 1e12 + 7} {
+		if m, _ := fileMap(size, []Range{{0, size}}, []fetch{{size - 1, "a"}}); len(m) != mapCells {
+			t.Fatalf("size %d: %d squares", size, len(m))
+		}
 	}
 }
