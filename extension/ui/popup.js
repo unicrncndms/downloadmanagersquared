@@ -132,8 +132,8 @@ function renderSelBar() {
   const clear = iconButton("close", "Clear the selection", () => { selected.clear(); removing = false; renderDownloads(latest.state); });
   fresh(bar, [ds.length, removing, can("pause"), can("resume"), ds.some((d) => d.status === "queued")], () => (removing ? [
     el("span", { class: "grow" }, `Remove ${plural(ds.length, "download")}?`),
-    button("Delete unfinished files", () => { removing = false; each("remove", { deleteFile: true }, null, "Removed, unfinished files deleted"); }, "primary"),
-    button("Keep files", () => { removing = false; each("remove", { deleteFile: false }, null, "Removed from the list (files kept)"); }),
+    button("Keep files", () => { removing = false; each("remove", { deleteFile: false }, null, "Removed from the list (files kept)"); }, "primary"),
+    button("Delete unfinished files", () => { removing = false; each("remove", { deleteFile: true }, null, "Removed, unfinished files deleted"); }, "danger"),
     button("Cancel", () => { removing = false; renderSelBar(); }),
   ] : [
     el("span", { class: "grow" }, `${ds.length} selected`),
@@ -157,16 +157,28 @@ function dropOn(from, target) {
   for (const id of group) if (id !== before) act("move", { id, before });
 }
 
-// The connections in the header: each one's colour, name and speed now.
+// shortName fits a connection's name into the popup's strip: its first word,
+// cut to three letters when long ("Ethernet" Eth, "Wi-Fi" stays).
+function shortName(name) {
+  const w = String(name).split(/\s+/)[0];
+  return w.length > 6 ? w.slice(0, 3) : w;
+}
+
+// The connections in the header: each one's colour, name and speed now. One
+// that carries nothing while downloads run shows a hollow square and "idle":
+// a dead line is seen without its colour.
 function renderStrip(s) {
   const ifs = (s.interfaces || []).filter((i) => i.present !== false && i.enabled);
+  const idle = (i) => !!s.active && !(i.speed > 0);
   $("strip").classList.toggle("many", ifs.length > 2);
-  fresh($("strip"), ifs.map((i) => [i.id, i.name, Math.round((i.speed || 0) / 1e5)]), () => ifs.map((i) => {
+  fresh($("strip"), ifs.map((i) => [i.id, i.name, Math.round((i.speed || 0) / 1e5), idle(i)]), () => ifs.map((i) => {
     const sq = el("i", { class: "dot" });
     sq.style.color = ifaceHue(i.id, s);
-    return el("button", { class: "chip", title: `${i.name}: ${fmtSpeed(i.speed || 0)}`, "aria-label": `${i.name}, ${fmtSpeed(i.speed || 0)}. Open Connections`,
+    const said = idle(i) ? "idle" : fmtSpeed(i.speed || 0);
+    return el("button", { class: "chip" + (idle(i) ? " idle" : ""), title: `${i.name}: ${said}`, "aria-label": `${i.name}, ${said}. Open Connections`,
       onclick: () => { Host.openSettings("#connections"); if (!document.body.classList.contains("windowed")) window.close(); } },
-      sq, el("span", { class: "nm" }, i.name), el("span", { class: "muted num" }, ((i.speed || 0) / 1e6).toFixed(1)));
+      sq, el("span", { class: "nm" }, i.name), el("span", { class: "nm short" }, shortName(i.name)),
+      el("span", { class: "muted num" }, idle(i) ? "idle" : ((i.speed || 0) / 1e6).toFixed(1)));
   }));
 }
 
@@ -456,6 +468,8 @@ function render(m) {
   // Connected, yet with an error: what is shown is out of date (see TOO_LONG in background/engine.js).
   $("staleWarn").hidden = !(m.connected && m.error);
   $("staleWarn").textContent = (m.connected && m.error) || "";
+  document.querySelector(".tools").hidden = !m.connected || !m.state;
+  if (!m.connected || !m.state) $("addBox").hidden = true;
   if (!m.connected || !m.state) {
     $("list").replaceChildren(m.notInstalled
       ? el("div", { class: "offline" },

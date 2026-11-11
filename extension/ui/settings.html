@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -30,21 +30,7 @@
   <main>
     <section id="connections" class="panel">
       <h2>Network connections</h2>
-      <div class="conn-scroll">
-        <div class="conn-grid">
-          <div class="conn-row head">
-            <span>Connection</span>
-            <span class="center">Use</span>
-            <span class="center">Main<span class="info" tabindex="0" data-tip="Used alone for servers that can't split a file, and it decides which file the other connections must match."></span></span>
-            <span>Requests<span class="info" tabindex="0" data-tip="How many parts of a download this connection fetches at the same time."></span></span>
-            <span class="center">Upload</span>
-            <span>Limit (MB/s)</span>
-            <span>VPN</span>
-            <span class="speed">Speed</span>
-          </div>
-          <div id="ifaces"></div>
-        </div>
-      </div>
+      <div id="ifaces"></div>
       <div id="uplinkWarn" class="uplink" hidden></div>
       <div id="ipv6Hint" class="uplink" hidden></div>
       <label class="follow"><input type="checkbox" id="followWindows"> Let Windows pick the main connection</label>

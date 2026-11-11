@@ -336,3 +336,14 @@ test("the Add box offers what applies to the links in it", () => {
   assert.deepEqual(addView("magnet:?xt=urn:btih:2da0"), { count: 1, bad: 0, page: false, vpn: true, label: "Add" });
   assert.deepEqual(addView("https://a.example/x.iso\nnot a link\n\nmagnet:?xt=urn:btih:1"), { count: 2, bad: 1, page: true, vpn: true, label: "Add 2 downloads" });
 });
+
+test("what waits for the user is in Needs you, however the download itself is doing", () => {
+  const { sectionName } = require("../lib/list.js");
+  const folder = (extra) => ({ on: true, into: "E:\\x", files: 0, of: 0, ...extra });
+  assert.equal(sectionName(dl("p", "running", { folder: folder({ ask: "password" }) })), "Needs you");
+  assert.equal(sectionName(dl("w", "completed", { folder: folder({ ask: "wrong", set: { finished: false } }) })), "Needs you");
+  assert.equal(sectionName(dl("m", "running", { folder: folder({ set: { missing: [2], finished: false } }) })), "Needs you");
+  assert.equal(sectionName(dl("r", "running", { links: { eth: { canRetry: true } } })), "Needs you");
+  // A part fetched while the rest of its archive downloads and extracts is at work, not paused.
+  assert.equal(sectionName(dl("x", "completed", { folder: folder({ set: { finished: false } }) })), "Downloading");
+});

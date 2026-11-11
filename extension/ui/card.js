@@ -62,25 +62,24 @@ function folderSwitch(getId, getPassId) {
       el("span", { class: "grow" }, "Extract into ", into),
       change.button,
       el("button", { class: "small primary", onclick: () => set({ into: into.textContent }, "Extracting into " + into.textContent) }, "Start")),
-    change.box,
-    el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); set({ on: false }, "Downloading it as a file"); } }, "Download as a file instead"));
+    change.box);
+  // Declining the folder or the password: in the ⋯ menu, where it doesn't crowd the answer.
+  const asFile = () => set({ on: false }, "Downloading it as a file");
   const passWhy = el("span", { class: "grow" });
-  const passIn = el("input", { type: "password", class: "grow", "aria-label": "Archive password", placeholder: "Password", autocomplete: "off" });
-  const pass = el("form", { class: "extract fold", hidden: true, onsubmit: (e) => {
+  const passIn = el("input", { type: "password", class: "grow", "aria-label": "Archive password", placeholder: "", autocomplete: "off" });
+  const pass = el("form", { class: "extract fold pass", hidden: true, onsubmit: (e) => {
     e.preventDefault();
     const password = passIn.value;
     if (!password) return;
     passIn.value = "";
     act("setArchivePassword", { id: getPassId(), password }, "Trying the password");
   } },
-    el("div", { class: "row" }, passWhy),
-    el("div", { class: "row" }, passIn, el("button", { class: "small primary" }, "Unlock")),
-    el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); set({ on: false }, "Downloading it as a file"); } }, "Download as a file instead"));
+    el("div", { class: "row" }, passWhy, passIn, el("button", { class: "small primary" }, "Unlock")));
   // v: a folderView or setFolderView, or null for neither.
   function update(v) {
     pass.hidden = !(v && v.password);
     if (v && v.password) {
-      passWhy.textContent = v.password.wrong ? "That password didn't open it. Try another:" : "It's protected with a password:";
+      passWhy.textContent = v.password.wrong ? "Wrong password. Try another:" : "Password:";
       passWhy.classList.toggle("bad", v.password.wrong);
     }
     row.hidden = !(v && v.toggle);
@@ -93,7 +92,7 @@ function folderSwitch(getId, getPassId) {
     ask.hidden = !(v && v.ask);
     if (v && v.ask) into.textContent = v.ask.prefill;
   }
-  return { row, pass, ask, update };
+  return { row, pass, ask, update, asFile, declinable: (v) => !!(v && (v.password || v.ask)) };
 }
 
 // extractBar is a Download as folder's extraction under the download's own
@@ -185,7 +184,8 @@ function makeCard(id) {
   // without the click. In the menu, and explained in Details.
   const record = () => act("recordRecipe", { id }, "Click through the page in the window that opens");
   const menuRecord = el("button", { onclick: () => { closeMenu(); record(); } }, "Record the site's clicks…");
-  const menu = el("div", { class: "menu", hidden: true }, menuNext, menuLast, menuFolder, menuCopy, menuRecord, menuRemove);
+  const menuAsFile = el("button", { onclick: () => { closeMenu(); fold.asFile(); } }, "Download as a file instead");
+  const menu = el("div", { class: "menu", hidden: true }, menuNext, menuLast, menuFolder, menuCopy, menuRecord, menuAsFile, menuRemove);
   const more = iconButton("more", "More", (e) => {
     e.stopPropagation();
     const was = !menu.hidden;
@@ -203,11 +203,12 @@ function makeCard(id) {
   // Popups can't show confirm dialogs, so removing an unfinished download asks
   // inline; a Download as folder deletes or keeps its folder too.
   let wording = removeWording(null);
-  const delButton = el("button", { class: "small primary", onclick: () => act("remove", { id, deleteFile: true }, wording.deleted) });
-  const keepButton = el("button", { class: "small", onclick: () => act("remove", { id, deleteFile: false }, wording.kept) });
+  const delButton = el("button", { class: "small danger", onclick: () => act("remove", { id, deleteFile: true }, wording.deleted) });
+  const keepButton = el("button", { class: "small primary", "data-keep": "", onclick: () => act("remove", { id, deleteFile: false }, wording.kept) });
+  const askText = el("span", { class: "muted" }, "Remove this download?");
   const ask = el("div", { class: "actions ask", hidden: true },
-    el("span", { class: "muted" }, "Remove this download?"),
-    delButton, keepButton,
+    askText,
+    keepButton, delButton,
     el("button", { class: "small", onclick: () => { ask.hidden = true; } }, "Cancel"));
 
   // Interfaces that failed, on the card; all of them in Details.
@@ -432,8 +433,10 @@ function makeCard(id) {
     menuRecord.hidden = recordSection.hidden = !can.recordRecipe;
     menuNext.hidden = menuLast.hidden = !queued();
     const all = (latest.state && latest.state.downloads) || [];
-    moveUp.hidden = !queued() || moveBefore(all, id, "up") === null;
-    moveDown.hidden = !queued() || moveBefore(all, id, "down") === null;
+    // At an end of the queue an arrow keeps its place, unseen, so pause and ⋯ line up from row to row.
+    moveUp.hidden = moveDown.hidden = !queued();
+    moveUp.style.visibility = queued() && moveBefore(all, id, "up") === null ? "hidden" : "";
+    moveDown.style.visibility = queued() && moveBefore(all, id, "down") === null ? "hidden" : "";
     limitRow.hidden = torrent;
     if (document.activeElement !== limitIn) limitIn.value = d.limit ? +(d.limit / 1e6).toFixed(3) : "";
     root.draggable = queued();
@@ -450,6 +453,7 @@ function makeCard(id) {
     // folder on the card, the rest in its section in Details.
     const fv = folderView(d, latest.settings);
     fold.update(fv);
+    menuAsFile.hidden = !fold.declinable(fv);
     if (fv && fv.ask) sub.hidden = true; // the engine's "choose a folder" says what the step shows
     if (fv && fv.password) sub.hidden = true; // the engine's "needs the archive's password" says what the form asks
     foldSection.hidden = !fv || !(fv.extracting || fv.move || fv.facts.length);
@@ -468,6 +472,7 @@ function makeCard(id) {
         [el("dt", {}, k), el("dd", { class: k === "Renamed" ? "lines" : "" }, v)]));
     }
     wording = removeWording(d);
+    askText.textContent = d.done > 0 ? `Remove this download? ${fmtBytes(d.done)} is downloaded.` : "Remove this download?";
     delButton.textContent = wording.del;
     keepButton.textContent = wording.keep;
 
@@ -544,7 +549,7 @@ function makeCard(id) {
       let r = rows.get(ifc);
       if (!r) {
         r = {
-          name: el("span"), state: el("span"), info: el("span", { class: "muted" }), speed: el("span"),
+          name: el("span", { class: "who" }), state: el("span"), info: el("span", { class: "muted" }), speed: el("span"),
           whyText: el("span"),
           retry: el("button", { class: "small", onclick: () => act("retryLink", { id, iface: ifc }) }, "Retry"),
         };
@@ -552,7 +557,11 @@ function makeCard(id) {
         rows.set(ifc, r);
       }
       for (const n of [r.name, r.state, r.info, r.speed, r.why]) place(grid, n, k++);
-      r.name.textContent = ifaceName(ifc, latest.state, latest.settings);
+      fresh(r.name, [ifc, ifaceName(ifc, latest.state, latest.settings), ifaceHue(ifc, latest.state)], () => {
+        const dot = el("i", { class: "dot" });
+        dot.style.color = ifaceHue(ifc, latest.state);
+        return [dot, ifaceName(ifc, latest.state, latest.settings)];
+      });
       fresh(r.state, [l.tone, l.label, l.resolved, l.family], () => [
         el("span", { class: "badge " + (l.tone || "dim") }, l.label),
         l.resolved ? el("span", { class: "muted" }, " own link") : null,
@@ -633,15 +642,16 @@ function makeGroupCard(gid) {
   const resume = iconButton("play", "Resume all files", () => each("resume", {}, "", (d) => d.actions && d.actions.resume));
   const ask = el("div", { class: "actions ask", hidden: true },
     el("span", { class: "muted" }, "Remove all these files' downloads?"),
-    el("button", { class: "small primary", onclick: () => each("remove", { deleteFile: true }, "Removed, unfinished files deleted") }, "Remove and delete unfinished files"),
-    el("button", { class: "small", onclick: () => each("remove", { deleteFile: false }, "Removed from list (files kept)") }, "Remove, keep files"),
+    el("button", { class: "small primary", "data-keep": "", onclick: () => each("remove", { deleteFile: false }, "Removed from list (files kept)") }, "Remove, keep files"),
+    el("button", { class: "small danger", onclick: () => each("remove", { deleteFile: true }, "Removed, unfinished files deleted") }, "Remove and delete unfinished files"),
     el("button", { class: "small", onclick: () => { ask.hidden = true; } }, "Cancel"));
   const menuRemove = el("button", { onclick: () => {
     closeMenu();
-    if (groupView(g.items).partialFile) ask.hidden = false;
+    if (groupView(g.items).partialFile) { ask.hidden = false; ask.querySelector("[data-keep]").focus(); }
     else each("remove", { deleteFile: false }, "Removed from list (files kept)");
   } }, "Remove all…");
-  const menu = el("div", { class: "menu", hidden: true }, menuRemove);
+  const menuAsFile = el("button", { onclick: () => { closeMenu(); fold.asFile(); } }, "Download as a file instead");
+  const menu = el("div", { class: "menu", hidden: true }, menuAsFile, menuRemove);
   const more = iconButton("more", "More", (e) => {
     e.stopPropagation();
     const was = !menu.hidden;
@@ -673,6 +683,7 @@ function makeGroupCard(gid) {
     passId = fv && fv.password ? fv.password.id : "";
     extract.update(parts ? extractView(g.items) : null);
     fold.update(fv);
+    menuAsFile.hidden = !fold.declinable(fv);
     status.textContent = v.label;
     status.className = "badge st " + v.tone;
     fill.style.width = v.percent + "%";
@@ -740,6 +751,7 @@ function removeDownload(id, ask) {
   if (!d) return;
   if (!d.partialFile) return act("remove", { id, deleteFile: false }, "Removed from list (files kept)");
   ask.hidden = false;
+  ask.querySelector("[data-keep]").focus(); // keeping is the default; deleting takes a deliberate click
 }
 
 async function copyLink(url) {

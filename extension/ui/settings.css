@@ -39,27 +39,32 @@ h3 { font-size: 13px; margin: 22px 0 6px; font-weight: 600; display: flex; align
 .fields input[type=text], .fields input[type=password], .fields select { width: 100%; }
 .fields input[type=number] { width: 110px; }
 
-/* Connections: one aligned grid, header and rows alike. */
-.conn-grid { min-width: 720px; }
+/* Connections: what each is and does now, in one line; its settings fold under it. */
 .conn-row {
-  display: grid; align-items: center; gap: 8px 10px; padding: 9px 0;
-  grid-template-columns: minmax(140px, 1.5fr) 40px 46px 72px 58px 128px minmax(110px, 1fr) 64px;
+  display: grid; align-items: center; gap: 6px 16px; padding: 12px 0;
+  grid-template-columns: minmax(0, 1fr) 120px 90px auto auto;
   border-top: 1px solid var(--line); font-size: 13px;
 }
-.conn-row.head { border-top: 0; padding-top: 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
-.conn-row.head > span { display: flex; align-items: center; }
-.conn-row.absent { opacity: .5; }
-.conn-row .center { justify-self: center; }
-.conn-row .who b { font-weight: 600; display: inline-flex; align-items: center; gap: 7px; }
-.conn-row .sub { color: var(--muted); font-size: 12px; margin-top: 1px; }
-.conn-row .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-.conn-row input[type=number] { width: 56px; }
-.conn-row .limits { display: flex; align-items: center; gap: 3px; white-space: nowrap; color: var(--muted); }
-.conn-row .limits input { width: 54px; }
-.conn-row .vpn { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.conn-row .vpn input.port { width: 72px; }
-.conn-row .speed { text-align: right; }
-@media (max-width: 760px) { .conn-scroll { overflow-x: auto; } } /* tooltips clip in a scroll box: only when needed */
+.conn-row:first-child { border-top: 0; }
+.conn-row.absent { opacity: .55; }
+.conn-row .who b { font-weight: 500; font-size: 14px; display: inline-flex; align-items: center; gap: 7px; }
+.conn-row .who b .badge { font-weight: 500; }
+.conn-row .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.conn-row .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.conn-row .speed { text-align: right; font-weight: 500; }
+.conn-row .use { display: inline-flex; align-items: center; gap: 6px; }
+.conn-row button[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.conn-more { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; padding: 10px 12px;
+  border-radius: var(--r); background: var(--bg); }
+.conn-more label, .conn-more > span { display: inline-flex; align-items: center; gap: 6px; }
+.conn-more input[type=number] { width: 60px; }
+.conn-more .limits { color: var(--muted); }
+.conn-more .vpn { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.conn-more .vpn input.port { width: 72px; }
+@media (max-width: 700px) {
+  .conn-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .conn-row .speed { grid-column: 2; }
+}
 .uplink { margin-top: 10px; font-size: 13px; display: grid; gap: 4px; }
 .uplink .warn { color: var(--warn); }
 .follow { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--muted); }
@@ -77,3 +82,5 @@ h3 { font-size: 13px; margin: 22px 0 6px; font-weight: 600; display: flex; align
   #find { width: 140px; }
   .fields { grid-template-columns: 1fr; }
 }
+/* The learned sites' table scrolls sideways where it must. */
+.conn-scroll { overflow-x: auto; }

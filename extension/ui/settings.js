@@ -73,6 +73,17 @@ function vpnCell(i, tun) {
     pia ? null : el("button", { class: "small", onclick: () => act("removeTunnel", { iface: i.id }, "VPN tunnel removed") }, "Remove"));
 }
 
+// A connection's state now, in a word: what the row leads with.
+function connState(i, tun) {
+  if (!i.present) return ["Not connected", "dim"];
+  if (!i.enabled) return ["Off", "dim"];
+  if (tun && tun.tunnelState === "down") return ["VPN retrying", "warn"];
+  const speed = (i.speed || 0) + ((tun && tun.speed) || 0);
+  return speed > 0 ? ["Downloading", "ok"] : ["Ready", ""];
+}
+
+const openConns = new Set(); // the connections whose settings are shown
+
 function ifaceRow(i, tun, settings) {
   const set = (patch, ok) => act("setInterface", Object.assign({ id: i.id }, patch), ok);
   // Each control is named after its column, for screen readers.
@@ -99,18 +110,32 @@ function ifaceRow(i, tun, settings) {
     i.vpn ? badge("System VPN", "warn") : null,
     i.incoming ? badge(i.incoming === "reachable" ? "Reachable" : "Outgoing only", i.incoming === "reachable" ? "ok" : "dim", INCOMING_TITLE[i.incoming]) : null,
   ].filter(Boolean);
+  // First what it is and does now; its settings fold under it.
+  const [word, tone] = connState(i, tun);
+  const open = openConns.has(i.id);
+  const more = el("div", { class: "conn-more", hidden: !open },
+    el("label", {}, main, " Main connection",
+      el("span", { class: "info", tabindex: "0", "data-tip": "Used alone for servers that can't split a file, and it decides which file the other connections must match." })),
+    el("label", {}, "Requests at once ", conns,
+      el("span", { class: "info", tabindex: "0", "data-tip": "How many parts of a download this connection fetches at the same time." })),
+    el("label", {}, check(i.upload, "upload", "Upload"), " Upload"),
+    el("span", { class: "limits" }, "Limit (MB/s) ↓", limit(i.downloadLimit, "downloadLimit", "Download limit"), "↑", limit(i.uploadLimit, "uploadLimit", "Upload limit")),
+    el("span", { class: "vpnfield" }, "VPN ", vpnCell(i, tun)));
+  const toggle = el("button", { class: "small", "aria-expanded": String(open), onclick: () => {
+    const on = more.hidden;
+    more.hidden = !on;
+    toggle.setAttribute("aria-expanded", String(on));
+    on ? openConns.add(i.id) : openConns.delete(i.id);
+  } }, "Settings");
   return el("div", { class: "conn-row" + (i.present ? "" : " absent") },
     el("div", { class: "who" },
-      el("b", {}, colorOf(i.id), i.name),
+      el("b", {}, colorOf(i.id), i.name, i.isMain ? badge("Main") : null, tun ? badge("VPN", TUNNEL_CLASS[tun.tunnelState]) : null),
       el("div", { class: "sub" }, i.present ? el("span", { class: "mono" }, i.ip) : "not connected", " · ", i.description),
       badges.length ? el("div", { class: "badges" }, badges) : null),
-    el("span", { class: "center" }, check(i.enabled, "enabled", "Use")),
-    el("span", { class: "center" }, main),
-    conns,
-    el("span", { class: "center" }, check(i.upload, "upload", "Upload")),
-    el("span", { class: "limits" }, "↓", limit(i.downloadLimit, "downloadLimit", "Download limit"), "↑", limit(i.uploadLimit, "uploadLimit", "Upload limit")),
-    vpnCell(i, tun),
-    el("span", { class: "speed num", "data-speed": i.id }));
+    el("span", { class: "badge st " + tone, "data-state": i.id }, word),
+    el("span", { class: "speed num", "data-speed": i.id }),
+    el("label", { class: "use" }, check(i.enabled, "enabled", "Use"), " Use"),
+    toggle, more);
 }
 
 function renderIfaces(state, settings) {
@@ -136,6 +161,9 @@ function renderIfaces(state, settings) {
     const t = tunnels.get(i.id);
     const total = (i.speed || 0) + ((t && t.speed) || 0);
     if (c) c.textContent = total > 0 ? fmtSpeed(total) : "";
+    const w = body.querySelector(`[data-state="${i.id}"]`);
+    const [word, tone] = connState(i, t);
+    if (w && w.textContent !== word) { w.textContent = word; w.className = "badge st " + tone; }
   }
 }
 
@@ -314,7 +342,7 @@ function found(section, q) {
       any = any || hit;
     }
   }
-  return any || [...section.querySelectorAll("label, h3, .conn-row.head > span")].some((n) => n.textContent.toLowerCase().includes(q));
+  return any || [...section.querySelectorAll("label, h3")].some((n) => n.textContent.toLowerCase().includes(q));
 }
 
 let page = ""; // "connections" or "settings", as last shown

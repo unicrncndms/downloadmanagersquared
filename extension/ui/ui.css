@@ -15,7 +15,8 @@
   --bar: #dfe3ea;
   --r: 4px; /* corners: squared, not sharp */
   /* A connection's colour, by its place among the connections (card.js ifaceHue). */
-  --c0: #0f8a6c; --c1: #c2501e; --c2: #7c4ddb; --c3: #a16207; --c4: #c2377a; --c5: #2f7fd1;
+  /* Never a status hue (green, amber, red) nor the default accent blue. */
+  --c0: #7c4ddb; --c1: #0e7c90; --c2: #c2377a; --c3: #8a6b45; --c4: #5d7a1f; --c5: #64748b;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -32,7 +33,7 @@
     --warn: #fbbf24;
     --bad: #f87171;
     --bar: #2c3038;
-    --c0: #3fcfa4; --c1: #ff8a5c; --c2: #a78bfa; --c3: #f5b942; --c4: #f472b6; --c5: #60a5fa;
+    --c0: #b197fc; --c1: #4fc8dc; --c2: #f17ec0; --c3: #c9a37a; --c4: #a8c95a; --c5: #a3aec2;
     color-scheme: dark;
   }
 }
@@ -62,6 +63,11 @@ button:active { background: var(--accent-soft); }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 button.primary:active { background: var(--accent); filter: brightness(.9); }
 button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+/* What can't be undone: never the filled button. */
+button.danger { color: var(--bad); border-color: currentColor; background: transparent; }
+button.danger:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+/* Placeholders read like the muted text: 4.5:1 or more on the panel. */
+::placeholder { color: var(--muted); opacity: 1; }
 button.small { padding: 2px 8px; font-size: 12px; min-height: 24px; }
 input[type=checkbox], input[type=radio] { width: 16px; height: 16px; accent-color: var(--accent); }
 input[type=text], input[type=password], input[type=number], input[type=url], select, textarea {
@@ -92,8 +98,14 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .badge.bad { color: var(--bad); }
 .badge.dim { color: var(--muted); background: transparent; border: 1px solid var(--line); }
 /* A status: a square in its tone, then the word. */
-.badge.st, .badge.st.dim { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; }
+/* The word in neutral ink, unless it warns; the square carries the tone. */
+.badge.st, .badge.st.dim { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--muted); font-weight: 500; }
 .badge.st::before, .dot { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 2px; background: currentColor; flex: none; }
+.badge.st::before { background: var(--accent); }
+.badge.st.ok::before { background: var(--ok); }
+.badge.st.dim::before { background: var(--muted); }
+.badge.st.warn { color: var(--warn); } .badge.st.warn::before { background: var(--warn); }
+.badge.st.bad { color: var(--bad); } .badge.st.bad::before { background: var(--bad); }
 /* The Downloads window's header is the same two lines on both pages, at
    every width: neither line wraps, so it never changes height. */
 :root { --win-row1: 30px; --win-row2: 26px; --win-gap: 8px; --win-pad: 12px 24px 10px; }

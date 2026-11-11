@@ -38,17 +38,20 @@ function finished(d) {
 
 // The groups, in the order they are listed: what needs you (failed, a pause
 // with a reason, a torrent waiting for its files, a Download as folder
-// waiting for its folder), then downloading, seeding, queued, paused,
-// finished.
+// waiting for its folder or its archive's password or a part not added, a
+// connection to retry), then downloading, seeding, queued, paused, finished.
 function group(d) {
-  const asking = d.kind !== "torrent" && d.folder && d.folder.on && !d.folder.into && d.status !== "completed";
-  if (d.status === "failed" || d.status === "choosing" || asking || (d.status === "paused" && d.error)) return 0;
+  const f = d.kind !== "torrent" && d.folder && d.folder.on ? d.folder : null;
+  const asking = f && !f.into && d.status !== "completed";
+  const stuck = f && !finished(d) && (!!f.ask || !!(f.set && f.set.missing && f.set.missing.length));
+  const retry = Object.values(d.links || {}).some((l) => l.canRetry);
+  if (d.status === "failed" || d.status === "choosing" || asking || stuck || retry || (d.status === "paused" && d.error)) return 0;
   switch (d.status) {
     case "running": case "verifying": case "metadata": case "checking": return 1;
     case "seeding": return 2;
     case "queued": return 3;
     case "paused": return 4;
-    case "completed": return 5;
+    case "completed": return finished(d) ? 5 : 1; // a part fetched while its archive extracts
   }
   return 1;
 }
