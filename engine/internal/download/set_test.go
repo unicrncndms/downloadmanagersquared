@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -407,4 +408,78 @@ func TestASplit7zWantsItsLastPartsTailFirst(t *testing.T) {
 	waitUntil(t, "the set wants part 3's tail", func() bool { return s.Tail() == p[3] })
 	p[3].Start()
 	waitUntil(t, "the list of files is read: no part's tail is wanted", func() bool { return s.Tail() == nil })
+}
+
+// A block that comes out wrong is fetched again once; wrong a second time, the
+// parts it is in pause and say so, as one archive's download does. Resumed
+// with the right bytes, the set finishes.
+func TestASetsBlockWrongTwicePausesItsParts(t *testing.T) {
+	var good, wrong [][]byte
+	var whole []byte
+	var served []string
+	for i := 1; i <= 3; i++ {
+		b, err := os.ReadFile(filepath.Join("..", "archive", "testdata", fmt.Sprintf("split-nonsolid.7z.%03d", i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		good, wrong, whole = append(good, b), append(wrong, bytes.Clone(b)), append(whole, b...)
+		served = append(served, fmt.Sprintf("big.7z.%03d", i))
+	}
+	wrong[1][len(wrong[1])/2] ^= 0xff
+	var bad atomic.Bool
+	bad.Store(true)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var n int
+		fmt.Sscanf(r.URL.Path, "/%d", &n)
+		parts := good
+		if bad.Load() {
+			parts = wrong
+		}
+		w.Header().Set("Content-Disposition", `attachment; filename="`+served[n-1]+`"`)
+		w.Header().Set("ETag", fmt.Sprintf(`"p%d"`, n))
+		http.ServeContent(w, r, served[n-1], t0, bytes.NewReader(parts[n-1]))
+	}))
+	t.Cleanup(srv.Close)
+
+	into := t.TempDir()
+	env := &setEnv{testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+	p := map[int]*Download{1: part(env, srv, 1, into), 2: part(env, srv, 2, into), 3: part(env, srv, 3, into)}
+	s := NewSet("k", "big.7z")
+	s.SetMembers(p)
+	s.Start()
+	defer s.Stop()
+	// No queue here: a part put back to be fetched again is started by hand.
+	startQueued := func() {
+		for _, d := range p {
+			if d.Summary().Status == StatusQueued {
+				d.Start()
+			}
+		}
+	}
+	for _, d := range p {
+		d.Start()
+	}
+	waitUntil(t, "part 2 paused", func() bool {
+		startQueued()
+		return p[2].Summary().Status == StatusPaused
+	})
+	if e := p[2].Summary().Error; !strings.Contains(e, "came out wrong twice") {
+		t.Fatalf("part 2 paused with %q, want the Entry wrong twice", e)
+	}
+	if v := s.Summary(); v != nil && v.Finished {
+		t.Fatal("the set finished with a wrong block")
+	}
+
+	bad.Store(false)
+	for _, d := range p {
+		if d.Summary().Status == StatusPaused {
+			d.Start()
+		}
+	}
+	waitUntil(t, "set finished", func() bool {
+		startQueued()
+		v := s.Summary()
+		return v != nil && v.Finished
+	})
+	checkSet(t, whole, filepath.Join(into, "Game"))
 }

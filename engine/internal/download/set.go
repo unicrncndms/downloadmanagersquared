@@ -240,7 +240,7 @@ func (s *Set) empty(run *setRun, stop bool) {
 	if run.parts != nil {
 		run.close()
 	}
-	*run = setRun{failed: map[int64]bool{}}
+	*run = setRun{}
 	for _, p := range s.trash {
 		os.Remove(p)
 	}
@@ -274,7 +274,6 @@ type setRun struct {
 	out      string
 	files1   int // files extracted and in the archive, kept once the Extractor is closed
 	of       int
-	failed   map[int64]bool
 	finished bool
 	note     string
 	disks    int       // a split ZIP's parts, once its .zip says
@@ -300,7 +299,7 @@ func (r *setRun) close() {
 }
 
 func (s *Set) loop(ctx context.Context) {
-	run := &setRun{failed: map[int64]bool{}}
+	run := &setRun{}
 	defer func() {
 		if run.parts != nil {
 			run.close()
@@ -325,7 +324,7 @@ func (s *Set) loop(ctx context.Context) {
 			if run.parts != nil {
 				run.close()
 			}
-			run = &setRun{failed: map[int64]bool{}, note: run.note}
+			run = &setRun{note: run.note}
 		}
 		s.publish(run)
 		if !more {
@@ -445,7 +444,7 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 		// Set gets its own name back.
 		if run.parts != nil {
 			run.close()
-			*run = setRun{failed: map[int64]bool{}}
+			*run = setRun{}
 		}
 		for _, m := range members {
 			if m.completed && !m.on && len(m.freed) == 0 && exists(m.path) {
@@ -977,7 +976,8 @@ func (d *Download) refetch(r Range) {
 }
 
 // record saves what Extract did: the blocks done on part 1, the bytes freed
-// on the part they are in, and wrong blocks fetched again.
+// on the part they are in, and wrong blocks fetched again: a block wrong twice
+// pauses the parts it is in.
 func (s *Set) record(run *setRun, members map[int]partInfo, res archive.Result) {
 	p1 := members[1].d
 	files, of := run.x.Progress()
@@ -1006,13 +1006,41 @@ func (s *Set) record(run *setRun, members map[int]partInfo, res archive.Result) 
 		}
 	}
 	for _, fl := range res.Failed {
-		if run.failed[fl.Range.Start] {
-			run.note = fmt.Sprintf("%s came out wrong twice (%s)", fl.Entry.Name, fl.Reason)
+		// Part 1 remembers it, as it does the Entries done: a restart doesn't forget.
+		p1.mu.Lock()
+		i := slices.Index(f.Failed, fl.Range.Start)
+		if i >= 0 {
+			// Its next try after a resume gets another fetch first.
+			f.Failed = slices.Delete(f.Failed, i, i+1)
+		} else {
+			f.Failed = append(f.Failed, fl.Range.Start)
 		}
-		run.failed[fl.Range.Start] = true
+		p1.mu.Unlock()
+		p1.env.Changed(p1)
 		log.Printf("set %s: %s, fetching it again", s.set, fl)
 		s.refetch(run, members, fl.Range, false)
+		if i < 0 {
+			continue
+		}
+		msg := fmt.Sprintf("Paused: %s came out wrong twice (%s). Resume to download it again", fl.Entry.Name, fl.Reason)
+		parts, _ := run.parts.Cut(fl.Range)
+		for _, k := range parts {
+			if m, ok := members[k+1]; ok {
+				m.d.pauseWith(msg)
+			}
+		}
 	}
+}
+
+// pauseWith pauses the part and says why; the Set's loop holds no part's lock.
+func (d *Download) pauseWith(msg string) {
+	d.Stop(StatusPaused)
+	d.mu.Lock()
+	if d.st.Status == StatusPaused {
+		d.st.Error = msg
+	}
+	d.mu.Unlock()
+	d.env.Changed(d)
 }
 
 // release deletes the .part of every completed part that is all freed.
