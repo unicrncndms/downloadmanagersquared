@@ -332,6 +332,8 @@ func contentType(name string) string {
 		return "text/css; charset=utf-8"
 	case ".svg":
 		return "image/svg+xml"
+	case ".ttf":
+		return "font/ttf" // the pages' font (ui/fonts); Windows may not know the type
 	}
 	if t := mime.TypeByExtension(path.Ext(name)); t != "" {
 		return t

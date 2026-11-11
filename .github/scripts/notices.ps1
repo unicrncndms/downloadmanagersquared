@@ -21,10 +21,12 @@ try {
 $goVersion = (go env GOVERSION)
 $goLicense = Get-Content -Raw (Join-Path (go env GOROOT) 'LICENSE')
 $piaLicense = Get-Content -Raw (Join-Path $root 'engine\internal\pia\LICENSE.manual-connections')
+$fontLicense = Get-Content -Raw (Join-Path $root 'extension\ui\fonts\OFL.txt')
 $sep = "`n================================================================================`n"
 $text = ($report -join "`n") +
     $sep + "The Go standard library and runtime ($goVersion)`nLicense: BSD-3-Clause`n`n" + $goLicense +
-    $sep + "ca.rsa.4096.crt from github.com/pia-foss/manual-connections (embedded in the engine)`nLicense: MIT`n`n" + $piaLicense
+    $sep + "ca.rsa.4096.crt from github.com/pia-foss/manual-connections (embedded in the engine)`nLicense: MIT`n`n" + $piaLicense +
+    $sep + "Rubik, the pages' font (ui\fonts\Rubik.ttf, from github.com/google/fonts)`nLicense: OFL-1.1`n`n" + $fontLicense
 [IO.File]::WriteAllText($out, $text, (New-Object Text.UTF8Encoding $false))
 $mpl = ($report | Select-String '^License: MPL-2.0').Count
 Write-Host "Wrote $out ($mpl MPL-2.0 modules)"

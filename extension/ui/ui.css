@@ -1,3 +1,5 @@
+/* Rubik (SIL Open Font License 1.1, fonts/OFL.txt): one variable file for every weight, carried in the package. */
+@font-face { font-family: Rubik; src: url("fonts/Rubik.ttf") format("truetype"); font-weight: 300 900; font-display: block; }
 :root {
   --bg: #f6f7f9;
   --panel: #ffffff;
@@ -43,7 +45,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.45 system-ui, "Segoe UI", sans-serif;
+  font: 14px/1.45 Rubik, system-ui, "Segoe UI", sans-serif;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 button {
@@ -131,7 +133,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
   content: attr(data-tip); position: absolute; z-index: 20; left: -8px; top: calc(100% + 6px);
   width: max-content; max-width: 300px; padding: 8px 10px; border-radius: var(--r);
   background: var(--text); color: var(--bg); box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
-  font: normal 400 12px/1.45 system-ui, "Segoe UI", sans-serif; text-align: left; white-space: normal;
+  font: normal 400 12px/1.45 Rubik, system-ui, "Segoe UI", sans-serif; text-align: left; white-space: normal;
   opacity: 0; visibility: hidden; transition: opacity .12s; pointer-events: none;
 }
 .info:hover::after, .info:focus::after { opacity: 1; visibility: visible; }
