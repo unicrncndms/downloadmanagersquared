@@ -221,3 +221,28 @@ test("the window switches views by navigating, and opens links in the default br
   assert.deepEqual(f.opened, ["https://example.com/releases"]);
   assert.equal(host.forgetRecipe, undefined);
 });
+
+test("a subscriber that throws is reported to the engine's log, not lost in the closed DevTools", async () => {
+  const f = fakeWindow();
+  const logged = [];
+  f.win.dmsWindow.log = (m) => logged.push(m);
+  const host = pickHost(f.win);
+  host.subscribe(() => { throw new Error("accentCSS is not defined"); });
+  f.answer("getState", { downloads: [] });
+  f.answer("getSettings", {});
+  f.answer("getAutostart", false);
+  f.answer("version", "1");
+  await tick();
+  assert.match(logged[0], /accentCSS is not defined/);
+});
+
+// The window carries the extension's lib folder whole (build.ps1), and the
+// pages load ../lib/X: every script they name must exist there.
+test("every script a page loads exists", () => {
+  const ui = path.join(__dirname, "../ui");
+  for (const page of fs.readdirSync(ui).filter((n) => n.endsWith(".html"))) {
+    for (const [, src] of fs.readFileSync(path.join(ui, page), "utf8").matchAll(/<script src="([^"]+)"/g)) {
+      assert.ok(fs.existsSync(path.join(ui, src)), `${page} loads ${src}`);
+    }
+  }
+});

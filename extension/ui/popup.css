@@ -78,8 +78,13 @@ button.icon[title="More"] svg { stroke-width: 3; }
 details { margin-top: 6px; font-size: 12px; }
 details section { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 details h3 { margin: 0 0 3px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
-details .switch { display: flex; gap: 6px; align-items: center; }
-details .switch .badge { cursor: help; }
+.switch { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: 12px; }
+.switch .badge { cursor: help; }
+/* The extraction's bar, under the download's: thinner and paler. */
+.bar.xbar { height: 4px; margin-top: 8px; }
+.bar.xbar > div { opacity: .55; }
+/* A split archive's switch and extraction are on its group card, for all its parts. */
+.group.parts .group-files .fold { display: none !important; }
 details .row .path { font-weight: 400; }
 .facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; margin: 6px 0 0; }
 .facts dt { color: var(--muted); }

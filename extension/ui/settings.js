@@ -163,6 +163,7 @@ for (const [id, [key, , parse]] of Object.entries(FIELDS)) {
 }
 $("sAuto").addEventListener("change", () => act("setAutostart", { on: $("sAuto").checked }, "Saved"));
 $("sFolder").addEventListener("change", () => act("setSettings", { folderDefault: $("sFolder").checked }, "Saved"));
+$("sParts").addEventListener("change", () => act("setSettings", { partsParallel: $("sParts").checked }, "Saved"));
 $("sIPv6").addEventListener("change", () => act("setSettings", { ipv6: $("sIPv6").checked }, $("sIPv6").checked ? "IPv6 on" : "IPv6 off"));
 
 // The accent: Follow Firefox, a preset, or any color (lib/accent.js).
@@ -186,6 +187,7 @@ function fillSettings(s) {
     if (document.activeElement !== $(id)) $(id).value = show(s);
   }
   $("sFolder").checked = !!s.folderDefault;
+  $("sParts").checked = !!s.partsParallel;
   $("sIPv6").checked = !!s.ipv6;
 
 }

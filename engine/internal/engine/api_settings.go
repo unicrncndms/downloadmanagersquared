@@ -49,6 +49,9 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		if p.FolderDefault != nil {
 			s.FolderDefault = *p.FolderDefault
 		}
+		if p.PartsParallel != nil {
+			s.PartsParallel = *p.PartsParallel
+		}
 		if p.IPv6 != nil {
 			s.IPv6 = *p.IPv6
 		}
@@ -114,6 +117,7 @@ type settingsPatch struct {
 	VPNTorrent         *string  `json:"vpnTorrent"`
 	VPNProvider        *string  `json:"vpnProvider"`
 	FolderDefault      *bool    `json:"folderDefault"`
+	PartsParallel      *bool    `json:"partsParallel"`
 	IPv6               *bool    `json:"ipv6"`
 	Accent             *string  `json:"accent"`
 	ThemeAccent        *string  `json:"themeAccent"`

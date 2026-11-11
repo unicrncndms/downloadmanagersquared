@@ -3,8 +3,14 @@
 // Shared by the downloads popup and the settings page. They reach the engine
 // and their surroundings only through Host (host.js).
 
+// A page may set onCall(method, params, answer) to see its own requests go
+// out: the downloads page shows what they will do at once (popup.js).
+let onCall = null;
+
 function call(method, params) {
-  return Host.call(method, params);
+  const answer = Host.call(method, params);
+  if (onCall) onCall(method, params, answer);
+  return answer;
 }
 
 function connectUI(onUpdate) {

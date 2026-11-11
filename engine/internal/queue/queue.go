@@ -58,6 +58,7 @@ type Queue struct {
 	byID  map[string]Entry
 	order []string
 	dirty map[string]bool
+	held  map[string]bool // queued entries Schedule doesn't start (Hold); replaced whole, never changed
 }
 
 // New is a queue saving under dir, holding loaded in the order they were
@@ -128,6 +129,8 @@ func (q *Queue) Replace(old, e Entry) error {
 
 // Move puts the entry id just before the entry before, or last when before is
 // "". The order is what Schedule starts by, and is kept across restarts.
+// A queued entry moved before one that holds a slot takes that slot: the
+// other goes back to the queue, next after it.
 func (q *Queue) Move(id, before string) error {
 	q.saveMu.Lock()
 	defer q.saveMu.Unlock()
@@ -145,8 +148,47 @@ func (q *Queue) Move(id, before string) error {
 		q.order = slices.Insert(q.order, at, id)
 	}
 	order := slices.Clone(q.order)
+	me, b := q.byID[id], q.byID[before]
+	swap := b != nil && b != me && b.Running() && me.Status() == download.StatusQueued && !q.held[id]
 	q.mu.Unlock()
+	if swap {
+		b.Stop(download.StatusQueued)
+		me.Start()
+	}
 	return atomicfile.WriteJSON(q.orderPath(), order)
+}
+
+// Order puts the entries ids, wherever they are in the queue, in this order
+// among the places they hold: the entries between them stay where they are.
+func (q *Queue) Order(ids []string) {
+	q.saveMu.Lock()
+	defer q.saveMu.Unlock()
+	q.mu.Lock()
+	ids = slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return q.byID[id] == nil })
+	changed, k := false, 0
+	for i, id := range q.order {
+		if k < len(ids) && slices.Contains(ids, id) {
+			changed = changed || id != ids[k]
+			q.order[i] = ids[k]
+			k++
+		}
+	}
+	order := slices.Clone(q.order)
+	q.mu.Unlock()
+	if !changed {
+		return
+	}
+	if err := atomicfile.WriteJSON(q.orderPath(), order); err != nil {
+		log.Printf("saving the queue's order: %v", err)
+	}
+}
+
+// Hold keeps the queued entries ids from starting until a later Hold leaves
+// them out: the parts of a split archive that wait for the part before them.
+func (q *Queue) Hold(ids map[string]bool) {
+	q.mu.Lock()
+	q.held = ids
+	q.mu.Unlock()
 }
 
 func (q *Queue) orderPath() string { return filepath.Join(q.dir, "order.json") }
@@ -222,6 +264,9 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 	running := 0
 	var queued, yielding, downloading []Entry // downloading: yielding entries holding a slot
 	var holding []Entry                       // HTTP downloads holding a slot, oldest first
+	q.mu.Lock()
+	held := q.held
+	q.mu.Unlock()
 	for _, e := range q.List() {
 		if paths.For(e.VPN(), snap).Wait {
 			e.PauseForVPN() // never without a tunnel: under VPN only there is no other path
@@ -241,6 +286,7 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 			}
 		case e.Rejoins():
 			e.Start()
+		case held[e.ID()]:
 		case e.Status() == download.StatusQueued && e.Yields():
 			yielding = append(yielding, e)
 		case e.Status() == download.StatusQueued:

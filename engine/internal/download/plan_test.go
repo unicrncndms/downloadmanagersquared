@@ -156,70 +156,38 @@ func TestPlanAddGivesBytesBack(t *testing.T) {
 	}
 }
 
-// With Entry boundaries, a new connection goes to the front of the earliest
-// Entry not yet being fetched, not the far end of the slowest chunk.
-func TestPlanSendsANewConnectionToTheNextEntrysFront(t *testing.T) {
-	size := int64(100 * minSplit)
+// An ordered plan (a Download as folder) hands a connection a stride's worth
+// off the front of what is missing, and the next one what follows: not the
+// far half of the file. Each chunk ends where the next begins, so it is
+// fetched to its end and its connection kept.
+func TestOrderedPlanKeepsConnectionsNearTheFront(t *testing.T) {
+	size := int64(1000 * minSplit)
 	p := newPlan(size, true, []Range{{0, size}})
-	p.bounds = []int64{0, 10 * minSplit, 30 * minSplit, 90 * minSplit}
-	a := p.claim(0)
-	owned(a, 1<<20)
-	p.take(a, minSplit) // a is fetching the first Entry
-
-	b := p.claim(1 << 20)
-	if b == nil || b.pos != 10*minSplit || b.end != size || a.end != 10*minSplit {
-		t.Fatalf("new chunk %+v, first chunk ends %d; want the second Entry's front", b, a.end)
+	p.ordered = true
+	a := p.claim(1 << 20) // 1 MiB/s: 10 MiB within the stride
+	if a == nil || a.pos != 0 || a.end != stride<<20 {
+		t.Fatalf("first chunk %+v, want the first %d bytes", a, stride<<20)
 	}
-	owned(b, 1<<20)
-	if c := p.claim(1 << 20); c == nil || c.pos != 30*minSplit {
-		t.Fatalf("third connection got %+v, want the third Entry's front", c)
+	owned(a, 1<<20)
+	b := p.claim(2 << 20)
+	if b == nil || b.pos != a.end || b.end != 3*stride<<20 {
+		t.Fatalf("second chunk %+v, want %d-%d", b, a.end, 3*stride<<20)
+	}
+	owned(b, 2<<20)
+	// A speed not known yet: the smallest chunk.
+	if c := p.claim(0); c == nil || c.pos != b.end || c.end != b.end+minSplit {
+		t.Fatalf("third chunk %+v, want %d-%d", c, b.end, b.end+minSplit)
 	}
 }
 
-// A large Entry is fetched from its front: a connection starts at its first
-// byte, not in its middle.
-func TestPlanFetchesALargeEntryFrontFirst(t *testing.T) {
-	size := int64(100 * minSplit)
+// The cut lands on an Entry boundary when one is within minSplit of it.
+func TestOrderedPlanCutsOnANearbyEntryBoundary(t *testing.T) {
+	size := int64(1000 * minSplit)
 	p := newPlan(size, true, []Range{{0, size}})
-	p.bounds = []int64{0, 2 * minSplit, size - 2*minSplit} // a large Entry in the middle
-	a := p.claim(0)
-	owned(a, 1<<20)
-	p.take(a, minSplit/2)
-	if b := p.claim(1 << 20); b == nil || b.pos != 2*minSplit {
-		t.Fatalf("got %+v, want the large Entry's front at %d", b, 2*minSplit)
-	}
-}
-
-// When no Entry front can be split off, the cut is speed-weighted as today but
-// lands on an Entry boundary when one is within minSplit. An Entry front
-// past today's cut would give the new connection less than its share, so
-// the cut is today's, moved onto that boundary.
-func TestPlanMovesACutOntoANearbyEntryBoundary(t *testing.T) {
-	size := int64(100 * minSplit)
-	plain := newPlan(size, true, []Range{{0, size}})
-	owned(plain.claim(0), 1<<20)
-	today := plain.claim(3 << 20).pos // about size/4: the new connection is 3x as fast
-
-	p := newPlan(size, true, []Range{{0, size}})
-	near := today + minSplit/2
+	p.ordered = true
+	near := int64(stride<<20) + minSplit/2
 	p.bounds = []int64{0, near}
-	owned(p.claim(0), 1<<20)
-	if got := p.claim(3 << 20); got == nil || got.pos != near {
-		t.Fatalf("cut at %+v, want the boundary %d (today's cut %d)", got, near, today)
-	}
-}
-
-// Far from any boundary, the cut is exactly today's.
-func TestPlanKeepsTheCutWhenNoBoundaryIsNear(t *testing.T) {
-	size := int64(100 * minSplit)
-	plain := newPlan(size, true, []Range{{0, size}})
-	owned(plain.claim(0), 1<<20)
-	want := plain.claim(3 << 20)
-
-	p := newPlan(size, true, []Range{{0, size}})
-	p.bounds = []int64{0}
-	owned(p.claim(0), 1<<20)
-	if got := p.claim(3 << 20); got.pos != want.pos || got.end != want.end {
-		t.Fatalf("cut %d-%d, want today's %d-%d", got.pos, got.end, want.pos, want.end)
+	if got := p.claim(1 << 20); got == nil || got.end != near {
+		t.Fatalf("chunk %+v, want it to end on the boundary %d", got, near)
 	}
 }

@@ -35,6 +35,7 @@ var (
 	pSetThreadDpiAwareness = user32.NewProc("SetThreadDpiAwarenessContext")
 	pGetDpiForSystem       = user32.NewProc("GetDpiForSystem")
 	pGetCurrentThreadID    = kernel32.NewProc("GetCurrentThreadId")
+	pOleInitialize         = windows.NewLazySystemDLL("ole32.dll").NewProc("OleInitialize")
 )
 
 const (

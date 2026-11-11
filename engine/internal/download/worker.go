@@ -35,6 +35,7 @@ func (d *Download) claimLocked(ifaceID string) *segment {
 	if ir := d.ifs[ifaceID]; ir != nil && ir.active > 0 {
 		perConn = ir.ewma.Value() / float64(ir.active)
 	}
+	d.plan.ordered = d.folderOnLocked()
 	return d.plan.claim(perConn)
 }
 

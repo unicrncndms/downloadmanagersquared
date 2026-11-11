@@ -40,6 +40,23 @@ function folderView(d, settings) {
   return { toggle, extracting: !done && !!f.locked, ask, password, move, facts };
 }
 
+// setFolderView is folderView for a split archive's parts as one, for their
+// group card: the switch and the add step, and id, the part to ask the engine
+// with (it sets every part); password as folderView's, with the id of the
+// part that asks for it (part 1, which may be complete: a part is once it is
+// fetched). null when there is nothing to show; no switch once any part is locked.
+function setFolderView(items, settings) {
+  const lead = items.find((d) => d.folder && d.status !== "completed");
+  const asks = items.find((d) => d.folder && d.folder.on && d.folder.ask);
+  if (!lead && !asks) return null;
+  const v = lead ? folderView(lead, settings) : { toggle: null, ask: null };
+  const locked = items.some((d) => d.folder && d.folder.locked);
+  return {
+    id: (lead || asks).id, toggle: locked ? null : v.toggle, ask: v.ask,
+    password: asks ? { wrong: asks.folder.ask === "wrong", id: asks.id } : null,
+  };
+}
+
 // lastFolder is where a Download as folder extracts unless told otherwise:
 // the last folder used for one, else the Save folder (as the engine decides).
 function lastFolder(settings) {
@@ -97,4 +114,4 @@ function addFolderParam(shown, checked, settings) {
   return checked;
 }
 
-if (typeof module !== "undefined") module.exports = { folderView, folderChoices, removeWording, addFolderChoice, addFolderParam, lastFolder };
+if (typeof module !== "undefined") module.exports = { folderView, setFolderView, folderChoices, removeWording, addFolderChoice, addFolderParam, lastFolder };

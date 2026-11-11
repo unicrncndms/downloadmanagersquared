@@ -45,7 +45,8 @@ type Settings struct {
 	IPv6               bool                      `json:"ipv6"`        // Enable IPv6 (experimental); off: IPv4 only, no AAAA lookups, no IPv6 sockets
 
 	// Download as folder
-	FolderDefault bool     `json:"folderDefault"`        // new .zip downloads are one
+	FolderDefault bool     `json:"folderDefault"`        // new .zip, .7z and .rar downloads are one
+	PartsParallel bool     `json:"partsParallel"`        // a split archive's parts download at once even where that keeps more on disk
 	FolderDir     string   `json:"folderDir,omitempty"`  // the folder last extracted into; "" = SaveDir
 	FolderDirs    []string `json:"folderDirs,omitempty"` // the folders last extracted into, newest first: Change… offers them
 

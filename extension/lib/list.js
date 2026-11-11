@@ -85,14 +85,15 @@ function listEntries(sorted) {
 // what its buttons can do to the files.
 function groupView(items) {
   const n = items.length;
+  // A split archive's parts: its Set (engine) knows how many there are and
+  // extracts them once fetched. It also knows about how long they all are
+  // before each has started (its total).
+  const set = items.map((d) => d.folder && d.folder.set).find(Boolean);
   const known = items.every((d) => d.size > 0);
-  const size = known ? items.reduce((a, d) => a + d.size, 0) : -1;
+  const size = known ? items.reduce((a, d) => a + d.size, 0) : set && set.total > 0 ? set.total : -1;
   const done = items.reduce((a, d) => a + (d.done || 0), 0);
   const speed = items.reduce((a, d) => a + (d.status === "running" ? d.speed || 0 : 0), 0);
   const nDone = items.filter((d) => d.status === "completed").length;
-  // A split archive's parts: its Set (engine) knows how many there are and
-  // extracts them once fetched.
-  const set = items.map((d) => d.folder && d.folder.set).find(Boolean);
   const unit = String(items[0].group || "").startsWith("parts:") ? "parts" : "files";
   const count = set && set.parts ? set.parts : n;
   const waiting = set && !set.finished; // every part fetched isn't the end: extracting, or a part missing
@@ -100,7 +101,6 @@ function groupView(items) {
   const files = nDone === count ? `${count} ${unit}` : `${nDone} of ${count} ${unit} done`;
   let left = (size > 0 ? `${Math.round(Math.min(100, (done / size) * 100))}% · ${fmtBytes(done)} / ${fmtBytes(size)}` : fmtBytes(done)) + ` · ${files}`;
   if (waiting && set.of) left += ` · ${set.files} of ${set.of} files extracted`;
-  if (waiting && set.note) left += ` · ${set.note}`;
   const can = (k) => items.some((d) => d.actions && d.actions[k]);
   let label = all ? "Completed" : items[0].label, tone = all ? "ok" : items[0].tone || "";
   if (waiting && nDone === n) [label, tone] = set.note ? ["Waiting", "warn"] : ["Extracting", ""];
@@ -111,6 +111,28 @@ function groupView(items) {
     pause: can("pause"), resume: can("resume"), finished: all,
     partialFile: items.some((d) => d.partialFile),
   };
+}
+
+// extractView is a Download as folder's extraction, for its own bar under
+// the download's: how much of the archive is extracted, and a line saying
+// what it is doing or waiting for (the engine's words, ADR 0003) with the
+// time left. items: one download, or a split archive's parts. null when
+// nothing is being extracted.
+function extractView(items) {
+  const line = (bytes, total, what, eta) => ({
+    percent: total > 0 ? Math.min(100, ((bytes || 0) / total) * 100) : 0,
+    text: [what, eta > 0 ? `${fmtETA(eta)} left` : ""].filter(Boolean).join(" · "),
+  });
+  if (!items.some((d) => d.kind !== "torrent" && d.folder && d.folder.on && d.folder.into)) return null;
+  const set = items.map((d) => d.folder.set).find(Boolean);
+  if (set) {
+    if (set.finished || !(set.note || set.phase)) return null;
+    // A part missing or a password wanted: no time left to give.
+    return line(set.extracted, set.total, set.note || set.phase, set.note ? 0 : set.eta);
+  }
+  const d = items[0];
+  if (items.length !== 1 || !d.folder.phase) return null;
+  return line(d.folder.extracted, d.size, d.folder.phase, d.folder.extractEta);
 }
 
 // mirrorRows are a download's mirrors for Details: host, which interfaces
@@ -126,17 +148,62 @@ function mirrorRows(d, nameOf) {
 
 // moveBefore is the engine "move" a queued download id takes, as its
 // "before": dropped on target, it takes target's place (after it when
-// dragged down); target "first" or "last" is an end of the queue. null:
-// nothing to move.
+// dragged down); target "first" or "last" is an end of the queue, "up" or
+// "down" one place. Dropped on a download that is running, it takes its slot
+// (the engine queues that one behind it). null: nothing to move.
 function moveBefore(downloads, id, target) {
   const qs = downloads.filter((d) => d.status === "queued").map((d) => d.id);
   const from = qs.indexOf(id);
   if (from < 0) return null;
   if (target === "first") return from === 0 ? null : qs[0];
   if (target === "last") return from === qs.length - 1 ? null : "";
+  if (target === "up") return from === 0 ? null : qs[from - 1];
+  if (target === "down") return from === qs.length - 1 ? null : qs[from + 2] || "";
+  if (downloads.some((d) => d.id === target && d.status === "running")) return target;
   const to = qs.indexOf(target);
   if (to < 0 || to === from) return null;
   return to < from ? target : qs[to + 1] || "";
+}
+
+// predict is the engine's state as request method(p) will leave it, so the
+// page shows a click's result at once instead of when the engine answers (a
+// pause answers only once its connections have closed). Only what the page
+// can know: the engine's next state replaces it. The same state back when
+// there is nothing to show early.
+function predict(state, method, p) {
+  const ds = (state && state.downloads) || [];
+  p = p || {};
+  const me = ds.find((d) => d.id === p.id);
+  const map = (pick, f) => (ds.some(pick) ? { ...state, downloads: ds.map((d) => (pick(d) ? f(d) : d)) } : state);
+  const can = (a) => (d) => !!(d.actions && d.actions[a]);
+  const stopped = (status, label) => (d) => ({ ...d, status, label, tone: "dim", speed: 0, eta: -1, error: status === "queued" ? "" : d.error,
+    actions: { ...d.actions, pause: status === "queued", resume: status !== "queued" } });
+  const paused = stopped("paused", "Paused"), queued = stopped("queued", "Queued");
+  switch (method) {
+    case "pause": return map((d) => d === me && can("pause")(d), paused);
+    case "resume": return map((d) => d === me && can("resume")(d), queued);
+    case "pauseAll": return map(can("pause"), paused);
+    case "resumeAll": return map(can("resume"), queued);
+    case "remove": return me ? { ...state, downloads: ds.filter((d) => d !== me) } : state;
+    case "setLimit": return map((d) => d === me, (d) => ({ ...d, limit: p.limit }));
+    case "setFolder": {
+      // A split archive's parts have one switch and one folder.
+      const set = me && String(me.group || "").startsWith("parts:") ? me.group : null;
+      const patch = { ...("on" in p ? { on: !!p.on } : {}), ...("into" in p ? { into: p.into } : {}) };
+      return map((d) => !!d.folder && (d === me || (set && d.group === set)), (d) => ({ ...d, folder: { ...d.folder, ...patch } }));
+    }
+    case "move": {
+      const b = ds.find((d) => d.id === p.before);
+      if (!me || me === b || (p.before && !b)) return state;
+      // Before one that is downloading: it takes its slot, and that one queues behind it.
+      const swap = b && b.status === "running" && me.status === "queued";
+      const rest = ds.filter((d) => d !== me).map((d) => (swap && d === b ? queued(d) : d));
+      const at = b ? ds.filter((d) => d !== me).indexOf(b) : rest.length;
+      rest.splice(at, 0, swap ? { ...me, status: "running", label: "Downloading", tone: "" } : me);
+      return { ...state, downloads: rest };
+    }
+  }
+  return state;
 }
 
 // statusLine is the line under the progress bar: left "31% · 13.0 GB / 42.0
@@ -304,5 +371,5 @@ function addLines(text) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { addLines, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
+  module.exports = { addLines, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, extractView, predict, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
 }

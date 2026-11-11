@@ -114,7 +114,7 @@ func (d *Download) Summary() Summary {
 	if s.Group == "" && s.Filename != "" {
 		// The parts of a split archive show as one group, however they were added.
 		if set, _, ok := archive.PartOf(s.Filename); ok {
-			s.Group, s.GroupName = archive.SetKey(s.Dir, set), set
+			s.Group, s.GroupName = archive.SetKey(d.setDirLocked(), set), set
 		}
 	}
 	if d.running {

@@ -245,3 +245,22 @@ func TestAMovedEntryStartsFirstAndKeepsItsPlace(t *testing.T) {
 		t.Fatal("moving an unknown download succeeded")
 	}
 }
+
+func TestAQueuedEntryMovedBeforeARunningOneTakesItsSlot(t *testing.T) {
+	a, b, c := queued(false), queued(false), queued(false)
+	q := newQueue(t, a, b, c)
+	q.Schedule(1, lo)
+	if err := q.Move(c.id, a.id); err != nil {
+		t.Fatal(err)
+	}
+	q.Schedule(1, lo)
+	if !c.running || a.running || b.running || a.status != download.StatusQueued {
+		t.Fatalf("running: a %v b %v c %v", a.running, b.running, c.running)
+	}
+	// A held entry (a split archive's part waiting its turn) takes no slot.
+	q.Hold(map[string]bool{b.id: true})
+	q.Move(b.id, c.id)
+	if !c.running || b.running {
+		t.Fatal("a held entry took a slot")
+	}
+}

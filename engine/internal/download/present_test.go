@@ -18,7 +18,7 @@ func TestPresentLabelsDownloads(t *testing.T) {
 		{"running", Summary{Status: StatusRunning, Probed: true, RangeOK: true, Size: 10},
 			"Downloading", "", "", Actions{Pause: true, ShowInFolder: true, Remove: true}, true},
 		{"not probed yet", Summary{Status: StatusQueued},
-			"Queued", "dim", "Checking the link…", Actions{Pause: true, Remove: true}, true},
+			"Queued", "dim", "Waiting in the queue", Actions{Pause: true, Remove: true}, true},
 		{"no ranges", Summary{Status: StatusRunning, Probed: true, Size: 10},
 			"Downloading", "", "main connection only", Actions{Pause: true, ShowInFolder: true, Remove: true}, true},
 		{"paused", Summary{Status: StatusPaused, Probed: true, RangeOK: true},

@@ -165,7 +165,9 @@ type view struct {
 var views sync.Map // hwnd → *view, for wndProc
 
 func (w *Window) create(u string) (*view, error) {
-	windows.CoInitializeEx(0, windows.COINIT_APARTMENTTHREADED)
+	// OleInitialize, not only CoInitializeEx: without OLE, WebView2 can't
+	// drag anything inside the page (the queue is reordered by dragging).
+	pOleInitialize.Call(0)
 	if pSetThreadDpiAwareness.Find() == nil {
 		pSetThreadDpiAwareness.Call(^uintptr(1)) // DPI_AWARENESS_CONTEXT_SYSTEM_AWARE (-2)
 	}
@@ -243,6 +245,7 @@ const bridgeScript = `(() => {
   window.dmsWindow = {
     send: (line) => post({ engine: line }),
     openUrl: (url) => post({ openUrl: url }),
+    log: (text) => post({ log: String(text).slice(0, 2000) }),
     onLine: null,
     receive(line) { if (this.onLine) this.onLine(line); },
   };
@@ -257,6 +260,7 @@ func (v *view) fromPage(msg string) {
 	var m struct {
 		Engine  string `json:"engine"`
 		OpenURL string `json:"openUrl"`
+		Log     string `json:"log"`
 	}
 	if json.Unmarshal([]byte(msg), &m) != nil {
 		return
@@ -266,6 +270,9 @@ func (v *view) fromPage(msg string) {
 	}
 	if m.OpenURL != "" {
 		openOutside(m.OpenURL)
+	}
+	if m.Log != "" {
+		log.Printf("window page: %.2000s", m.Log)
 	}
 }
 

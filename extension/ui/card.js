@@ -26,6 +26,91 @@ function makeLine(id, open) {
   return { root, update };
 }
 
+// folderChooser is Change…: the recent folders, chosen here, and Other folder…
+// for Windows' picker, which the engine shows and applies itself (the toolbar
+// popup closes as soon as it opens). current is the folder not to offer;
+// chosen gets the folder picked from the list.
+function folderChooser(getId, current, chosen) {
+  const box = el("div", { class: "choices", hidden: true });
+  const toggle = () => {
+    if (!box.hidden) { box.hidden = true; return; }
+    box.replaceChildren(
+      ...folderChoices(latest.settings, current()).map((dir) =>
+        el("button", { class: "choice", title: dir, onclick: () => { box.hidden = true; chosen(dir); } }, dir)),
+      el("button", { class: "choice other", onclick: () => { box.hidden = true; act("pickFolder", { id: getId() }); } }, "Other folder…"));
+    box.hidden = false;
+  };
+  return { box, button: el("button", { class: "small", onclick: toggle }, "Change…") };
+}
+
+// folderSwitch is Download as folder on a card: the switch (row), once
+// switched on by hand the step asking where to extract (ask), and for an
+// encrypted archive the form asking its password (pass): it keeps
+// downloading meanwhile. A split archive's group card has one for all its
+// parts: the engine sets every part from any one of them.
+function folderSwitch(getId, getPassId) {
+  const set = (params, okText) => act("setFolder", { id: getId(), ...params }, okText);
+  const on = el("input", { type: "checkbox", onchange: () => set({ on: on.checked }) });
+  const tag = el("span", { class: "badge dim" }, "unavailable");
+  const row = el("label", { class: "switch fold", hidden: true }, on, "Download as folder: extract it while it downloads", tag);
+  const into = el("b", { class: "path" });
+  const change = folderChooser(getId, () => into.textContent, (dir) => set({ into: dir }, "Extracting into " + dir));
+  const ask = el("div", { class: "extract fold", hidden: true },
+    el("div", { class: "row" },
+      el("span", { class: "grow" }, "Extract into ", into),
+      change.button,
+      el("button", { class: "small primary", onclick: () => set({ into: into.textContent }, "Extracting into " + into.textContent) }, "Start")),
+    change.box,
+    el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); set({ on: false }, "Downloading it as a file"); } }, "Download as a file instead"));
+  const passWhy = el("span", { class: "grow" });
+  const passIn = el("input", { type: "password", class: "grow", "aria-label": "Archive password", placeholder: "Password", autocomplete: "off" });
+  const pass = el("form", { class: "extract fold", hidden: true, onsubmit: (e) => {
+    e.preventDefault();
+    const password = passIn.value;
+    if (!password) return;
+    passIn.value = "";
+    act("setArchivePassword", { id: getPassId(), password }, "Trying the password");
+  } },
+    el("div", { class: "row" }, passWhy),
+    el("div", { class: "row" }, passIn, el("button", { class: "small primary" }, "Unlock")),
+    el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); set({ on: false }, "Downloading it as a file"); } }, "Download as a file instead"));
+  // v: a folderView or setFolderView, or null for neither.
+  function update(v) {
+    pass.hidden = !(v && v.password);
+    if (v && v.password) {
+      passWhy.textContent = v.password.wrong ? "That password didn't open it. Try another:" : "It's protected with a password:";
+      passWhy.classList.toggle("bad", v.password.wrong);
+    }
+    row.hidden = !(v && v.toggle);
+    if (v && v.toggle) {
+      on.checked = v.toggle.on;
+      on.disabled = v.toggle.disabled;
+      tag.hidden = !v.toggle.disabled;
+      tag.title = v.toggle.reason;
+    }
+    ask.hidden = !(v && v.ask);
+    if (v && v.ask) into.textContent = v.ask.prefill;
+  }
+  return { row, pass, ask, update };
+}
+
+// extractBar is a Download as folder's extraction under the download's own
+// bar: how far it is, and what it is doing or waiting for (extractView).
+function extractBar() {
+  const fill = el("div");
+  const bar = el("div", { class: "bar xbar fold", hidden: true }, fill);
+  const line = el("div", { class: "sub muted num fold", hidden: true });
+  return {
+    bar, line,
+    update(v) {
+      bar.hidden = line.hidden = !v;
+      if (!v) return;
+      fill.style.width = v.percent + "%";
+      line.textContent = v.text;
+    },
+  };
+}
+
 // expanded: a finished download opened back into its card.
 function makeCard(id, expanded = false) {
   let d = null; // the download as last shown
@@ -48,6 +133,9 @@ function makeCard(id, expanded = false) {
   const right = el("span", { class: "num" });
   const pause = iconButton("pause", "Pause", () => act("pause", { id }));
   const resume = iconButton("play", "Resume", () => act("resume", { id }));
+  // A queued download moves one place with these, or by dragging it onto another queued one.
+  const moveUp = iconButton("up", "Start earlier", () => moveDownload(id, "up"));
+  const moveDown = iconButton("down", "Start later", () => moveDownload(id, "down"));
   // The "⋯" menu: Show in folder, Copy link, Remove….
   const menuFolder = el("button", { onclick: () => { closeMenu(); act("showInFolder", { id }); } }, "Show in folder");
   const menuCopy = el("button", { onclick: () => { closeMenu(); copyLink(d && d.url); } }, "Copy link");
@@ -62,9 +150,10 @@ function makeCard(id, expanded = false) {
     closeMenu();
     if (!was) showMenu(menu, e.currentTarget);
   });
-  const meta = el("div", { class: "meta" }, left, el("span", { class: "end" }, right, pause, resume, el("span", { class: "more" }, more, menu)));
+  const meta = el("div", { class: "meta" }, left, el("span", { class: "end" }, right, moveUp, moveDown, pause, resume, el("span", { class: "more" }, more, menu)));
   const sub = el("div", { class: "sub muted num" });
   const via = el("div", { class: "sub muted num" }); // which interfaces, how many connections each
+  const extract = extractBar();
 
   // Popups can't show confirm dialogs, so removing an unfinished download asks
   // inline; a Download as folder deletes or keeps its folder too.
@@ -94,48 +183,9 @@ function makeCard(id, expanded = false) {
   const pick = el("div", { class: "pick", hidden: true });
   let picking = ""; // what the add step shows: the VPN question and/or the files
 
-  // Change…: the recent folders, chosen here, and Other folder… for Windows'
-  // picker, which the engine shows and applies itself (the toolbar popup
-  // closes as soon as it opens). current is the folder not to offer; chosen
-  // gets the folder picked from the list.
-  function chooser(current, chosen) {
-    const box = el("div", { class: "choices", hidden: true });
-    const toggle = () => {
-      if (!box.hidden) { box.hidden = true; return; }
-      box.replaceChildren(
-        ...folderChoices(latest.settings, current()).map((dir) =>
-          el("button", { class: "choice", title: dir, onclick: () => { box.hidden = true; chosen(dir); } }, dir)),
-        el("button", { class: "choice other", onclick: () => { box.hidden = true; act("pickFolder", { id }); } }, "Other folder…"));
-      box.hidden = false;
-    };
-    return { box, button: el("button", { class: "small", onclick: toggle }, "Change…") };
-  }
-
-  // Download as folder switched on by hand: it keeps downloading while this
-  // asks where to extract.
-  const askInto = el("b", { class: "path" });
-  const askChange = chooser(() => askInto.textContent, (dir) => act("setFolder", { id, into: dir }, "Extracting into " + dir));
-  const foldAsk = el("div", { class: "extract", hidden: true },
-    el("div", { class: "row" },
-      el("span", { class: "grow" }, "Extract into ", askInto),
-      askChange.button,
-      el("button", { class: "small primary", onclick: () => act("setFolder", { id, into: askInto.textContent }, "Extracting into " + askInto.textContent) }, "Start")),
-    askChange.box,
-    el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); act("setFolder", { id, on: false }, "Downloading it as a file"); } }, "Download as a file instead"));
-
-  // An encrypted archive: it keeps downloading while this asks for the password.
-  const passWhy = el("span", { class: "grow" });
-  const passIn = el("input", { type: "password", class: "grow", "aria-label": "Archive password", placeholder: "Password", autocomplete: "off" });
-  const foldPass = el("form", { class: "extract", hidden: true, onsubmit: (e) => {
-    e.preventDefault();
-    const password = passIn.value;
-    if (!password) return;
-    passIn.value = "";
-    act("setArchivePassword", { id, password }, "Trying the password");
-  } },
-    el("div", { class: "row" }, passWhy),
-    el("div", { class: "row" }, passIn, el("button", { class: "small primary" }, "Unlock")),
-    el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); act("setFolder", { id, on: false }, "Downloading it as a file"); } }, "Download as a file instead"));
+  // Download as folder: its switch, and where to extract once switched on by hand.
+  const fold = folderSwitch(() => id, () => id);
+  const chooser = (current, chosen) => folderChooser(() => id, current, chosen);
 
   // Details, in sections: Connections, Folder, File, Checks.
   const section = (title, ...body) => el("section", {}, el("h3", {}, title), ...body);
@@ -145,9 +195,6 @@ function makeCard(id, expanded = false) {
   const limitRow = el("div", { class: "row" }, el("label", { for: "limit-" + id, class: "muted" }, "Speed limit (MB/s)"), limitIn);
   const connSection = section("Connections", allConns, limitRow);
 
-  const foldOn = el("input", { type: "checkbox", onchange: () => act("setFolder", { id, on: foldOn.checked }) });
-  const foldTag = el("span", { class: "badge dim" }, "unavailable");
-  const foldSwitch = el("label", { class: "switch" }, foldOn, "Download as folder: extract it while it downloads", foldTag);
   const foldExtracting = el("div", {}, "Extracting as a folder");
   // Extract into, while unfinished: Change… moves what is extracted (the
   // engine does the move; the state shows how it went).
@@ -159,7 +206,7 @@ function makeCard(id, expanded = false) {
     el("div", { class: "row" }, el("span", { class: "muted" }, "Extract into"), moveInto, moveChange.button),
     moveChange.box, moveWarn, moveErr);
   const foldFacts = el("dl", { class: "facts" });
-  const foldSection = section("Folder", foldSwitch, foldExtracting, foldMove, foldFacts);
+  const foldSection = section("Folder", foldExtracting, foldMove, foldFacts);
 
   const fileFacts = el("dl", { class: "facts" });
   const fileSection = section("File", fileFacts);
@@ -212,16 +259,17 @@ function makeCard(id, expanded = false) {
 
   const root = el("div", { class: "card" },
     el("div", { class: "top" }, name, vpn, status, size, showDone, dropDone),
-    bar, meta, sub, via,
-    cardConns, recordRow, pick, foldPass, foldAsk, ask,
+    bar, meta, sub, via, extract.bar, extract.line,
+    cardConns, recordRow, pick, fold.row, fold.pass, fold.ask, ask,
     details);
   const queued = () => d && d.status === "queued";
+  const takes = () => d && (d.status === "queued" || d.status === "running"); // a drop: its place, or its slot
   root.addEventListener("dragstart", (e) => {
     e.dataTransfer.setData(DRAG_TYPE, id);
     e.dataTransfer.effectAllowed = "move";
   });
   root.addEventListener("dragover", (e) => {
-    if (!queued() || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+    if (!takes() || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
     e.preventDefault();
     root.classList.add("drop");
   });
@@ -229,7 +277,7 @@ function makeCard(id, expanded = false) {
   root.addEventListener("drop", (e) => {
     root.classList.remove("drop");
     const from = e.dataTransfer.getData(DRAG_TYPE);
-    if (!from || !queued()) return;
+    if (!from || !takes()) return;
     e.preventDefault();
     moveDownload(from, id);
   });
@@ -275,7 +323,7 @@ function makeCard(id, expanded = false) {
     size.textContent = d.size > 0 ? fmtBytes(d.size) : "";
     showDone.hidden = !line || !(d.actions || {}).showInFolder;
     if (line) {
-      for (const n of [bar, meta, sub, via, cardConns, recordRow, pick, foldPass, foldAsk, ask, details]) n.hidden = true;
+      for (const n of [bar, meta, sub, via, extract.bar, extract.line, cardConns, recordRow, pick, fold.row, fold.pass, fold.ask, ask, details]) n.hidden = true;
       return;
     }
 
@@ -298,6 +346,7 @@ function makeCard(id, expanded = false) {
     sub.hidden = !sub.textContent;
     via.textContent = s.error ? "" : viaLine(d, (ifc) => ifaceName(ifc, latest.state, latest.settings));
     via.hidden = !via.textContent;
+    extract.update(extractView([d]));
 
     const can = d.actions || {};
     pause.hidden = !can.pause;
@@ -307,6 +356,9 @@ function makeCard(id, expanded = false) {
     menuCopy.hidden = !d.url;
     recordRow.hidden = !can.recordRecipe;
     menuNext.hidden = menuLast.hidden = !queued();
+    const all = (latest.state && latest.state.downloads) || [];
+    moveUp.hidden = !queued() || moveBefore(all, id, "up") === null;
+    moveDown.hidden = !queued() || moveBefore(all, id, "down") === null;
     limitRow.hidden = torrent;
     if (document.activeElement !== limitIn) limitIn.value = d.limit ? +(d.limit / 1e6).toFixed(3) : "";
     root.draggable = queued();
@@ -318,27 +370,14 @@ function makeCard(id, expanded = false) {
     picking = step;
     if (newStep) renderPick(d);
 
-    // Download as folder: the step while it waits for a folder, and its
-    // section in Details.
+    // Download as folder: its switch and the step while it waits for a
+    // folder on the card, the rest in its section in Details.
     const fv = folderView(d, latest.settings);
-    foldAsk.hidden = !(fv && fv.ask);
+    fold.update(fv);
     if (fv && fv.ask) sub.hidden = true; // the engine's "choose a folder" says what the step shows
-    if (fv && fv.ask) askInto.textContent = fv.ask.prefill;
-    foldPass.hidden = !(fv && fv.password);
-    if (fv && fv.password) {
-      sub.hidden = true; // the engine's "needs the archive's password" says what the form asks
-      passWhy.textContent = fv.password.wrong ? "That password didn't open it. Try another:" : "It's protected with a password:";
-      passWhy.classList.toggle("bad", fv.password.wrong);
-    }
-    foldSection.hidden = !fv;
+    if (fv && fv.password) sub.hidden = true; // the engine's "needs the archive's password" says what the form asks
+    foldSection.hidden = !fv || !(fv.extracting || fv.move || fv.facts.length);
     if (fv) {
-      foldSwitch.hidden = !fv.toggle;
-      if (fv.toggle) {
-        foldOn.checked = fv.toggle.on;
-        foldOn.disabled = fv.toggle.disabled;
-        foldTag.hidden = !fv.toggle.disabled;
-        foldTag.title = fv.toggle.reason;
-      }
       foldExtracting.hidden = !fv.extracting;
       foldMove.hidden = !fv.move;
       if (fv.move) {
@@ -498,7 +537,8 @@ function makeGroupCard(gid) {
   let open = false;
   const ids = () => (g ? g.items.map((d) => d.id) : []);
   const each = async (method, params, okText, pick) => {
-    for (const d of g.items) if (!pick || pick(d)) await call(method, { id: d.id, ...params }).catch((e) => toast(e.message));
+    // All at once: a pause answers only once its connections have closed.
+    await Promise.all(g.items.filter((d) => !pick || pick(d)).map((d) => call(method, { id: d.id, ...params }).catch((e) => toast(e.message))));
     if (okText) toast(okText);
   };
 
@@ -528,12 +568,16 @@ function makeGroupCard(gid) {
     closeMenu();
     if (!was) showMenu(menu, e.currentTarget);
   });
+  // A split archive is one Download as folder: its switch is here, not on its parts' cards.
+  let foldId = "", passId = "";
+  const fold = folderSwitch(() => foldId, () => passId);
+  const extract = extractBar();
   const toggle = el("a", { href: "#", class: "muted", onclick: (e) => { e.preventDefault(); open = !open; update(g); } });
   const files = el("div", { class: "group-files" });
   const root = el("div", { class: "card group" },
     el("div", { class: "top" }, name, count, status),
     bar, el("div", { class: "meta" }, left, el("span", { class: "end" }, right, pause, resume, el("span", { class: "more" }, more, menu))),
-    ask, toggle, files);
+    extract.bar, extract.line, fold.row, fold.pass, fold.ask, ask, toggle, files);
   name.addEventListener("click", () => { open = !open; update(g); });
 
   function update(next) {
@@ -542,7 +586,14 @@ function makeGroupCard(gid) {
     name.textContent = g.name;
     name.title = open ? "Hide the files" : "Show the files";
     pressable(name, true, open);
-    count.textContent = `${g.items.length} ${String(g.group).startsWith("parts:") ? "parts" : "files"}`;
+    const parts = String(g.group).startsWith("parts:");
+    count.textContent = `${g.items.length} ${parts ? "parts" : "files"}`;
+    root.classList.toggle("parts", parts);
+    const fv = parts ? setFolderView(g.items, latest.settings) : null;
+    foldId = fv ? fv.id : "";
+    passId = fv && fv.password ? fv.password.id : "";
+    extract.update(parts ? extractView(g.items) : null);
+    fold.update(fv);
     status.textContent = v.label;
     status.className = "badge " + v.tone;
     fill.style.width = v.percent + "%";

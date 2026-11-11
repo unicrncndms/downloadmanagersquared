@@ -51,9 +51,15 @@ function windowHost(win, bridge) {
   let connecting = null;
   const emit = () => {
     for (const fn of subscribers) {
-      try { fn({ ...latest }); } catch (e) { console.error(e); }
+      try { fn({ ...latest }); } catch (e) { report(e); }
     }
   };
+  // DevTools is off in the window: a page error goes to engine.log instead.
+  const report = (e) => {
+    console.error(e);
+    if (bridge.log) bridge.log(String((e && e.stack) || e));
+  };
+  if (win.addEventListener) win.addEventListener("error", (ev) => report(ev.error || ev.message));
 
   bridge.onLine = (line) => {
     let msg;

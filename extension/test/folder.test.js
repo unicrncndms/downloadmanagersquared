@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
-const { folderView, removeWording, addFolderChoice } = require("../lib/folder.js");
+const { folderView, setFolderView, removeWording, addFolderChoice } = require("../lib/folder.js");
 
 const SETTINGS = { saveDir: "C:\\Users\\you\\Downloads", folderDefault: false };
 const zip = (folder, extra) => ({ kind: "http", id: "z", filename: "big.zip", status: "running", folder, ...extra });
@@ -106,4 +106,17 @@ test("an encrypted archive asks for its password until it's done, and says when 
   assert.deepEqual(folderView(zip({ on: true, into: "E:\\x", ask: "wrong" }), SETTINGS).password, { wrong: true });
   assert.equal(folderView(zip({ on: true, into: "E:\\x" }), SETTINGS).password, null);
   assert.equal(folderView(zip({ on: true, into: "E:\\x", ask: "password" }, { status: "completed" }), SETTINGS).password, null);
+});
+
+test("a split archive's group card has one switch for its parts, asked of an unfinished part", () => {
+  const part = (id, folder, status = "running") => ({ kind: "http", id, filename: `a.part${id}.rar`, status, folder });
+  const off = setFolderView([part(1, { on: false }, "completed"), part(2, { on: false })], SETTINGS);
+  assert.deepEqual(off, { id: 2, toggle: { on: false, disabled: false, reason: "" }, ask: null, password: null });
+  assert.deepEqual(setFolderView([part(1, { on: true }), part(2, { on: true })], SETTINGS).ask, { prefill: SETTINGS.saveDir });
+  // Part 1 is being freed: the set can't change any more, whatever part 2 could still do.
+  assert.equal(setFolderView([part(1, { on: true, into: "D:\\x", locked: true }), part(2, { on: true, into: "D:\\x" })], SETTINGS).toggle, null);
+  assert.equal(setFolderView([part(1, { on: true }, "completed")], SETTINGS), null);
+  // The password is asked on part 1, even once every part is fetched.
+  const asks = setFolderView([part(1, { on: true, into: "D:\\x", ask: "wrong" }, "completed"), part(2, { on: true, into: "D:\\x" }, "completed")], SETTINGS);
+  assert.deepEqual(asks.password, { wrong: true, id: 1 });
 });

@@ -47,7 +47,8 @@ type Engine struct {
 	sessions map[paths.Mode]*torrent.Session
 	queue    *queue.Queue
 	setsMu   sync.Mutex
-	sets     map[string]*download.Set // split archives, by key
+	sets     map[string]*download.Set      // split archives, by key
+	tails    map[string]*download.Download // the part each set had start first last tick, for its end (syncSets)
 
 	mu        sync.Mutex
 	settings  Settings
@@ -494,6 +495,7 @@ func (e *Engine) PickFolder(id string) error {
 
 // SetFolder sets a download's folder to extract into, which becomes the last
 // one used, and switches Download as folder on or off; either may be nil.
+// A part of a split archive sets them for its whole Set.
 func (e *Engine) SetFolder(id string, on *bool, into *string) error {
 	d, err := e.get(id)
 	if err != nil {
@@ -505,12 +507,23 @@ func (e *Engine) SetFolder(id string, on *bool, into *string) error {
 			return err
 		}
 	}
+	dir := ""
 	if into != nil {
-		dir := strings.TrimSpace(*into)
+		dir = strings.TrimSpace(*into)
 		if err := d.SetFolderInto(dir); err != nil {
 			return err
 		}
 		e.applySettings(func(s *Settings) { s.useFolder(filepath.Clean(dir)) })
+	}
+	// The other parts of a split archive take the same: with another folder
+	// they would no longer be one Set. One that can't (it is complete) stays.
+	for _, m := range d.Mates()[1:] {
+		if on != nil {
+			m.SetFolder(*on)
+		}
+		if into != nil {
+			m.SetFolderInto(dir)
+		}
 	}
 	return nil
 }

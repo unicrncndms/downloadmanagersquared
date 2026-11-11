@@ -150,6 +150,7 @@ type Download struct {
 	file    *os.File
 	plan    *plan      // nil unless running with the file open
 	fold    *folderRun // extracting, in Download as folder
+	pace    meter      // how fast it extracts, for the time left
 	parked  *folderRun // extraction kept with its .part open while stopped, to go on where it was
 	set     *Set       // the split archive it is a part of, which extracts it
 	moving  bool       // copying the folder and the .part to another drive
@@ -393,8 +394,8 @@ func (d *Download) run(ctx context.Context) {
 	d.plan = nil
 	var pe *pauseError
 	finished := false
-	if d.stopAs == stopRestart && err == nil {
-		d.stopAs = "" // it finished meanwhile
+	if err == nil {
+		d.stopAs = "" // it finished meanwhile: complete, whatever it was stopped for
 	}
 	switch {
 	case d.stopAs == stopRestart:

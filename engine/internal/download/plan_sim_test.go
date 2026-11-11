@@ -41,14 +41,24 @@ func heldBack(p *plan, starts []int64, size int64) int64 {
 	return held
 }
 
+// ahead is how many bytes are on disk past the first one missing: what an
+// archive read front to back (a solid one, or one big Entry) can't use yet.
+func ahead(p *plan, size int64) int64 {
+	first := size
+	for _, r := range p.ranges() {
+		first = min(first, r.Start)
+	}
+	return p.done() - first
+}
+
 // simulate runs connections on three interfaces at different speeds through
 // the plan, claiming and fetching as the download loop does, and returns the
 // bytes held back once half the archive is on disk and on average over the
-// whole download.
-func simulate(bounds, starts []int64, size int64) (half, avg int64) {
+// whole download, and the most that was ever on disk ahead of the front.
+func simulate(ordered bool, bounds, starts []int64, size int64) (half, avg, most int64) {
 	speeds := []float64{12 << 20, 12 << 20, 4 << 20, 4 << 20, 1 << 20, 1 << 20}
 	p := newPlan(size, true, []Range{{0, size}})
-	p.bounds = bounds
+	p.bounds, p.ordered = bounds, ordered
 	ws := make([]*worker, len(speeds))
 	segs := make([]*segment, len(speeds))
 	for i, sp := range speeds {
@@ -80,34 +90,34 @@ func simulate(bounds, starts []int64, size int64) (half, avg int64) {
 		p.prune()
 		h := heldBack(p, starts, size)
 		sum, steps = sum+h, steps+1
+		most = max(most, ahead(p, size))
 		if half < 0 && p.done() >= size/2 {
 			half = h
 		}
 	}
-	return half, sum / steps
+	return half, sum / steps, most
 }
 
-// On several interfaces at different speeds, sending connections to Entry
-// fronts and cutting on boundaries holds back less than today's scheduler:
-// at the halfway point over several archives, and on average through each
-// download. (One snapshot of one archive with a few huge Entries can go
-// either way: it depends on which huge Entry is part-way through then.)
-func TestEntryAwareSchedulingHoldsBackLess(t *testing.T) {
+// On several interfaces at different speeds, an ordered plan holds back less
+// than the speed-based split: in Entries not yet all there, on average
+// through each download, and above all ahead of the front, which is what an
+// archive read front to back has to keep on disk. That stays within a few
+// strides of the download's speed, whatever the archive's size.
+func TestOrderedPlanHoldsBackLess(t *testing.T) {
+	const speed = 34 << 20 // of all six connections
 	for _, big := range []int64{20 << 20, 300 << 20} {
-		var todayHalf, awareHalf int64
 		for seed := int64(1); seed <= 6; seed++ {
 			starts, size := simEntries(seed, big)
-			th, ta := simulate(nil, starts, size)
-			ah, aa := simulate(append(starts[:len(starts):len(starts)], size), starts, size)
-			todayHalf, awareHalf = todayHalf+th, awareHalf+ah
-			t.Logf("big Entries %d MiB, archive %d: halfway today %d MiB, Entry-aware %d MiB; average %d, %d MiB",
-				big>>20, seed, th>>20, ah>>20, ta>>20, aa>>20)
-			if aa >= ta {
-				t.Errorf("archive %d with %d MiB Entries: Entry-aware held back %d on average, today's %d", seed, big>>20, aa, ta)
+			_, ta, tm := simulate(false, nil, starts, size)
+			_, oa, om := simulate(true, append(starts[:len(starts):len(starts)], size), starts, size)
+			t.Logf("big Entries %d MiB, archive %d (%d MiB): held back on average %d MiB split by speed, %d ordered; most ahead of the front %d, %d MiB",
+				big>>20, seed, size>>20, ta>>20, oa>>20, tm>>20, om>>20)
+			if oa >= ta {
+				t.Errorf("archive %d with %d MiB Entries: ordered held back %d on average, split by speed %d", seed, big>>20, oa, ta)
 			}
-		}
-		if awareHalf >= todayHalf {
-			t.Errorf("with %d MiB Entries: Entry-aware held back %d halfway in all, today's %d", big>>20, awareHalf, todayHalf)
+			if om > 2*stride*speed {
+				t.Errorf("archive %d with %d MiB Entries: ordered had %d MiB ahead of the front, more than two strides (%d MiB)", seed, big>>20, om>>20, 2*stride*speed>>20)
+			}
 		}
 	}
 }

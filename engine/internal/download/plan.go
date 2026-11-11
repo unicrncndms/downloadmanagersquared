@@ -31,10 +31,22 @@ type plan struct {
 
 	// bounds are a Download as folder's Entry boundaries in byte order (each
 	// Entry's start, and the central directory's), nil for any other download.
-	// With them, claim sends a new connection to an Entry's front and cuts on
-	// boundaries.
+	// With them, an ordered plan cuts on a boundary when one is near.
 	bounds []int64
+
+	// ordered: a Download as folder, or a part of one. Its bytes are extracted
+	// and freed front to back, so they are fetched that way too: a connection
+	// takes only a stride's worth off the front of what is missing, so all of
+	// them work close to the front and little waits on disk for the
+	// extraction to reach it. A chunk is asked for exactly, to its end, so its
+	// connection is kept for the next one: ordering costs no speed.
+	ordered bool
 }
+
+// stride is how many seconds of fetching a connection's chunk is in an
+// ordered plan: what is on disk ahead of the front stays within about this
+// much of the whole download's speed.
+const stride = 10
 
 func newPlan(size int64, rangeOK bool, remaining []Range) *plan {
 	p := &plan{size: size, splittable: rangeOK, prefer: -1}
@@ -64,6 +76,15 @@ func (p *plan) claim(newSpeed float64) *segment {
 	}
 	if free != nil {
 		free.pos = free.written
+		if p.ordered && p.splittable {
+			// Only its front: the rest stays free, for the next connection.
+			at := free.pos + max(int64(newSpeed*stride), minSplit)
+			if at <= free.end-minSplit {
+				at = p.nearBound(free, at)
+				p.segs = append(p.segs, &segment{pos: at, written: at, end: free.end})
+				free.end = at
+			}
+		}
 		return free
 	}
 	if !p.splittable {
@@ -83,10 +104,7 @@ func (p *plan) claim(newSpeed float64) *segment {
 	if victim == nil || worst < 3 {
 		return nil
 	}
-	if s, at := p.entryFront(newSpeed); s != nil {
-		return p.split(s, at)
-	}
-	return p.split(victim, p.nearBound(victim, balancedCut(victim, newSpeed)))
+	return p.split(victim, balancedCut(victim, newSpeed))
 }
 
 // canSplit: a chunk is being fetched and big enough to split in two.
@@ -113,28 +131,6 @@ func (p *plan) split(s *segment, at int64) *segment {
 	s.end = at
 	p.segs = append(p.segs, ns)
 	return ns
-}
-
-// entryFront finds the earliest Entry front that can be split off a chunk
-// being fetched, for a Download as folder: at least minSplit on each side,
-// a chunk with 3 s or more left, and no further in than the balanced cut, so
-// the new connection gets at least its share. None without Entry boundaries.
-func (p *plan) entryFront(newSpeed float64) (*segment, int64) {
-	var into *segment
-	var at int64
-	for _, s := range p.segs {
-		if !canSplit(s) || timeLeft(s) < 3 {
-			continue
-		}
-		i, _ := slices.BinarySearch(p.bounds, s.pos+minSplit)
-		if i == len(p.bounds) {
-			continue
-		}
-		if b := p.bounds[i]; b <= balancedCut(s, newSpeed) && (into == nil || b < at) {
-			into, at = s, b
-		}
-	}
-	return into, at
 }
 
 // nearBound moves a cut in chunk s onto the closest Entry boundary within

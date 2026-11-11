@@ -54,6 +54,7 @@ const FOLDER_DOWNLOADS = [
   zipDownload("f3", "photos.zip", { on: false, files: 0, of: 0, why: "A checksum is entered, and only a whole file can be checked against it: clear it first" },
     { sha256: "a".repeat(64) }),
   zipDownload("f2", "dataset.zip", { on: true, into: "E:\\Data", out: "E:\\Data\\dataset", locked: true, why: "Some files are already extracted and their space freed, so this can't change any more", files: 412, of: 1280,
+    extracted: 9e9, phase: "Waiting for the download", extractEta: 3150,
     refetch: 3435973837, moveWarning: "Moving now re-downloads about 3.2 GiB",
     renamed: ["CON.txt → _CON.txt", "notes:v2.md → notes_v2.md"], note: "The server's checksum wasn't checked: the archive was extracted as it downloaded, so there was no whole file to check" },
     { note: "412 of 1,280 files extracted" }),
@@ -79,11 +80,11 @@ const METALINK_DOWNLOADS = [
 
 // A RAR split into parts: the engine groups them by name and folder.
 const part = (n, extra) => metaFile("p" + n, `holiday-video.part${n}.rar`, { mirrors: undefined, sha256: "", size: 1e9,
-  group: "parts:holiday-video.rar", groupName: "holiday-video.rar", ...extra });
+  group: "parts:holiday-video.rar", groupName: "holiday-video.rar", folder: { on: false, files: 0, of: 0 }, ...extra });
 const SPLIT_DOWNLOADS = [
   part(1, { status: "completed", done: 1e9, speed: 0, eta: -1, label: "Completed", tone: "ok", partialFile: false }),
   part(2, { done: 4e8 }),
-  part(3, { status: "queued", done: 0, speed: 0, eta: -1, label: "Queued", tone: "dim", partialFile: false }),
+  part(3, { status: "queued", size: -1, done: 0, speed: 0, eta: -1, label: "Queued", tone: "dim", partialFile: false }),
   DOWNLOADS[0],
 ];
 
@@ -125,6 +126,14 @@ const FIXTURES = {
         connections: 4, socksPort: 50005, speed: 1.3e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" }] } },
   // IPv6 off, with an adapter that has only IPv6: the hint.
   ipv6hint: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", state: { ...STATE, ipv6Only: ["Phone"] } },
+  // Three queued behind one downloading: the up and down arrows, and dragging.
+  queue: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
+    state: { ...STATE, downloads: [DOWNLOADS[0], ...["one.iso", "two.iso", "three.iso"].map((n) => ({ ...DOWNLOADS[0], id: n, filename: n, url: "https://example.com/" + n,
+      status: "queued", done: 0, speed: 0, eta: -1, label: "Queued", tone: "dim", links: {}, partialFile: false, actions: { remove: true, pause: true } }))] } },
+  // An encrypted split archive, every part fetched: the group card asks for the password.
+  splitPassword: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
+    state: { ...STATE, downloads: [1, 2].map((n) => part(n, { status: "completed", done: 1e9, speed: 0, eta: -1, label: "Completed", tone: "ok", partialFile: false,
+      folder: { on: true, into: "E:\\Data", files: 0, of: 0, ask: n === 1 ? "password" : "", set: { parts: 2, note: "Needs the archive's password", files: 0, of: 0 } } })) } },
   split: { connected: true, state: { ...STATE, downloads: SPLIT_DOWNLOADS }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   metalink: { connected: true,
  state: { ...STATE, downloads: METALINK_DOWNLOADS }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
@@ -132,7 +141,7 @@ const FIXTURES = {
   splitGap: { connected: true, state: { ...STATE, downloads: [1, 3].map((n) => metaFile("s" + n, `holiday-video.7z.00${n}`, {
     mirrors: undefined, sha256: "", size: n === 3 ? 3e8 : 1e9, done: n === 3 ? 3e8 : 1e9, status: "completed", speed: 0, eta: -1,
     label: "Completed", tone: "ok", partialFile: false, note: "Part 2 missing", group: "parts:holiday-video.7z", groupName: "holiday-video.7z",
-    folder: { on: true, into: "E:\\Data", files: 0, of: 0, set: { parts: 3, missing: [2], note: "Part 2 missing", files: 12, of: 40 } } })) },
+    folder: { on: true, into: "E:\\Data", files: 0, of: 0, set: { parts: 3, missing: [2], note: "Part 2 missing", files: 12, of: 40, extracted: 9e8, total: 2.3e9 } } })) },
     settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   // The accent: a dark Firefox theme's color, a pale one, and a preset chosen over the theme's.
   themeDark: { connected: true, state: STATE, settings: { ...SETTINGS, themeAccent: "#0b3d2e" }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },

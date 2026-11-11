@@ -1,6 +1,5 @@
 // Package ui is the extension's pages that dms-engine.exe carries for its
-// Downloads window: ui/..., lib/version.js, lib/folder.js and lib/list.js, the layout the
-// pages expect.
+// Downloads window: ui/... and lib/..., the layout the pages expect.
 // build.ps1 copies them into files\ before it builds the engine and empties it
 // again after; a plain `go build` or `go test` carries none, and Present says so.
 package ui

@@ -57,6 +57,8 @@ const ICONS = {
   more: "M3 8h.01M8 8h.01M13 8h.01",
   folder: "M2 4.5h4l1.5 1.5H14v6.5H2z",
   close: "M4 4l8 8M12 4l-8 8",
+  up: "M8 13V3M4 7l4-4 4 4",
+  down: "M8 3v10M4 9l4 4 4-4",
 };
 function icon(name) {
   const ns = "http://www.w3.org/2000/svg";

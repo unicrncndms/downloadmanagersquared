@@ -45,6 +45,12 @@ func serveFiles(t *testing.T, src, served []string) (whole []byte, srv *httptest
 		parts = append(parts, b)
 		whole = append(whole, b...)
 	}
+	return whole, serveBytes(t, parts, served)
+}
+
+// serveBytes serves parts under the names served, the n-th at /<n> from 1.
+func serveBytes(t *testing.T, parts [][]byte, served []string) (srv *httptest.Server) {
+	t.Helper()
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var n int
 		fmt.Sscanf(r.URL.Path, "/%d", &n)
@@ -57,7 +63,7 @@ func serveFiles(t *testing.T, src, served []string) (whole []byte, srv *httptest
 		http.ServeContent(w, r, served[n-1], t0, bytes.NewReader(parts[n-1]))
 	}))
 	t.Cleanup(srv.Close)
-	return whole, srv
+	return srv
 }
 
 // setEnv is a testEnv for several downloads: Finished doesn't close anything.
@@ -142,6 +148,15 @@ func TestASplit7zExtractsAcrossItsPartsDownloads(t *testing.T) {
 		}
 		if f := p[2].Summary().Folder; f == nil || f.Set == nil || !f.Set.Finished {
 			t.Fatalf("%s: part 2's folder %+v", name, f)
+		}
+		// Its progress ends at all of the archive; nothing is left to wait for.
+		if v := s.Summary(); v.Extracted != int64(len(whole)) || v.Total != int64(len(whole)) || v.Phase != "" || v.ETA != 0 {
+			t.Fatalf("%s: progress %d of %d, phase %q, %v s left; want all %d and done", name, v.Extracted, v.Total, v.Phase, v.ETA, len(whole))
+		}
+		// Both are read front to back only: the solid one is one stream, and
+		// the other's largest file is longer than a part.
+		if !s.Sequential() {
+			t.Fatalf("%s: not sequential", name)
 		}
 	}
 }
@@ -325,4 +340,71 @@ func TestASplitZipExtractsAcrossItsPartsDownloads(t *testing.T) {
 			t.Fatalf("%s: set %+v", c.served[0], v)
 		}
 	}
+}
+
+// An encrypted archive in parts asks for its password on part 1, as one
+// download does: a wrong one asks again, the right one extracts the set.
+func TestAnEncryptedSplit7zAsksForItsPassword(t *testing.T) {
+	for _, name := range []string{"password.7z", "password-header.7z"} {
+		whole, err := os.ReadFile(filepath.Join("..", "archive", "testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A 7z cut in three, as 7-Zip splits one.
+		size := (len(whole) + 2) / 3
+		parts := [][]byte{whole[:size], whole[size : 2*size], whole[2*size:]}
+		srv := serveBytes(t, parts, []string{"big.7z.001", "big.7z.002", "big.7z.003"})
+		into := t.TempDir()
+		env := &setEnv{testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+		p := map[int]*Download{}
+		for n := 1; n <= 3; n++ {
+			p[n] = part(env, srv, n, into)
+		}
+		s := NewSet("k", "big.7z")
+		s.SetMembers(p)
+		s.Start()
+		for n := 1; n <= 3; n++ {
+			p[n].Start()
+		}
+		asks := func(want string) {
+			t.Helper()
+			waitUntil(t, name+": asks "+want, func() bool { return p[1].Summary().Folder.Ask == want })
+		}
+		asks(AskPassword)
+		if err := p[1].SetArchivePassword("wrong"); err != nil {
+			t.Fatal(err)
+		}
+		asks(AskWrong)
+		if err := p[1].SetArchivePassword("secret"); err != nil {
+			t.Fatal(err)
+		}
+		waitUntil(t, name+": set finished", func() bool { v := s.Summary(); return v != nil && v.Finished })
+		s.Stop()
+		if v := s.Summary(); v.Files != 1 || p[1].State().Folder.Password != "" {
+			t.Fatalf("%s: set %+v, password kept: %v", name, v, p[1].State().Folder.Password != "")
+		}
+	}
+}
+
+// A 7z's list of files is at the end of its last part: once part 1 has said
+// how the parts lie, the Set wants that part first, until it has read the list.
+func TestASplit7zWantsItsLastPartsTailFirst(t *testing.T) {
+	_, srv := serveParts(t, "split-nonsolid.7z")
+	into := t.TempDir()
+	env := &setEnv{testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+	p := map[int]*Download{}
+	for n := 1; n <= 3; n++ {
+		p[n] = part(env, srv, n, into)
+	}
+	s := NewSet("k", "big.7z")
+	s.SetMembers(p)
+	s.Start()
+	defer s.Stop()
+	if s.Tail() != nil {
+		t.Fatal("a tail wanted before part 1 has said how the parts lie")
+	}
+	p[1].Start()
+	waitUntil(t, "the set wants part 3's tail", func() bool { return s.Tail() == p[3] })
+	p[3].Start()
+	waitUntil(t, "the list of files is read: no part's tail is wanted", func() bool { return s.Tail() == nil })
 }

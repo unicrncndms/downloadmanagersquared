@@ -105,8 +105,12 @@ func Present(s Summary) Summary {
 		}
 	case !known && torrent:
 		s.Note = "Asking peers for the torrent's files…"
-	case !known:
+	case !known && s.Status == StatusQueued:
+		s.Note = "Waiting in the queue" // the link is checked when it starts
+	case !known && s.Status == StatusRunning:
 		s.Note = "Checking the link…"
+	case !known:
+		s.Note = ""
 	case !torrent && !s.RangeOK:
 		s.Note = "main connection only"
 	}

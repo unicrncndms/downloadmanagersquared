@@ -17,7 +17,11 @@ func (d *Download) Discard(deleteFile bool) {
 	finished := d.Status() == StatusCompleted
 	d.Stop(StatusPaused)
 	d.dropParked()
-	if !deleteFile || finished {
+	d.mu.Lock()
+	set, inSet := d.set, d.inSetLocked()
+	d.mu.Unlock()
+	// A fetched part of a split archive still has its .part, for its Set.
+	if !deleteFile || finished && !inSet {
 		return
 	}
 	d.mu.Lock()
@@ -27,7 +31,14 @@ func (d *Download) Discard(deleteFile bool) {
 		out, moveOut, movePart = f.Out, f.MoveOut, f.MovePart
 	}
 	d.mu.Unlock()
-	os.Remove(part)
+	if set != nil {
+		set.discard(part)
+	} else {
+		os.Remove(part)
+	}
+	if finished {
+		return // what is extracted stays, as a finished download's file does
+	}
 	for _, dir := range []string{out, moveOut} {
 		if dir != "" {
 			os.RemoveAll(dir)

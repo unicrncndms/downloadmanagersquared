@@ -71,7 +71,7 @@ const finishedHead = el("div", { class: "group-head" },
 
 async function clearFinished() {
   const done = (latest.state.downloads || []).filter(finished);
-  for (const d of done) await call("remove", { id: d.id, deleteFile: false }).catch(() => {});
+  await Promise.all(done.map((d) => call("remove", { id: d.id, deleteFile: false }).catch(() => {})));
   toast(done.length === 1 ? "1 finished download cleared (files kept)" : `${done.length} finished downloads cleared (files kept)`);
 }
 
@@ -184,7 +184,36 @@ function renderUpdate(u) {
     }));
 }
 
+// A click shows at once: the requests still on their way are laid over the
+// engine's state as what they will do (predict), until a state that came
+// after the engine's answer has it. One the engine refuses is taken back.
+const pending = []; // { method, params, answered }
+let engine = null; // what the engine last said, with nothing laid over it
+
+onCall = (method, params, answer) => {
+  if (!engine || !engine.connected || !latest.state || predict(latest.state, method, params) === latest.state) return;
+  const e = { method, params, answered: false };
+  pending.push(e);
+  answer.then(() => { e.answered = true; }, () => { pending.splice(pending.indexOf(e), 1); draw(); });
+  setTimeout(() => { e.answered = true; }, 10000); // an answer that never comes isn't believed for ever
+  draw();
+};
+
+function draw() {
+  const m = engine;
+  render(pending.length && m.connected && m.state
+    ? { ...m, state: pending.reduce((s, e) => predict(s, e.method, e.params), m.state) } : m);
+}
+
 connectUI((m) => {
+  if (!engine || m.state !== engine.state) {
+    for (let i = pending.length - 1; i >= 0; i--) if (pending[i].answered) pending.splice(i, 1);
+  }
+  engine = m;
+  draw();
+});
+
+function render(m) {
   latest = m;
   renderConn(m);
   renderVersion(m);
@@ -217,4 +246,4 @@ connectUI((m) => {
   $("pauseAll").hidden = !bulk.pauseAll;
   $("resumeAll").hidden = !bulk.resumeAll;
   renderDownloads(s);
-});
+}

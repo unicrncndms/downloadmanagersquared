@@ -78,13 +78,24 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		CookieStore: r.CookieStore, Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(),
 	}
+	if st.Filename == "" {
+		// A link that names a part of a split archive: known as one before it
+		// starts, so its set can order its parts while they are still queued.
+		if u, err := url.Parse(r.URL); err == nil {
+			if name := download.SanitizeFilename(path.Base(u.Path)); name != "" {
+				if _, _, ok := download.Splittable(name); ok {
+					st.Filename = name
+				}
+			}
+		}
+	}
 	switch {
 	case r.Folder != nil && *r.Folder:
 		// Switched on by hand: it asks where to extract (settled once the name
-		// is known: only a .zip stays one).
+		// is known: only a .zip, .7z or .rar stays one).
 		st.Folder = &download.Folder{On: true}
 	case r.Folder == nil && e.settings.FolderDefault:
-		// Settled once the name is known: only a .zip becomes one.
+		// Settled once the name is known: only a .zip, .7z or .rar becomes one.
 		st.Folder = &download.Folder{Auto: true, Into: e.settings.folderDir()}
 	}
 	e.mu.Unlock()

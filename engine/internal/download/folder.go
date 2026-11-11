@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -76,6 +77,13 @@ type FolderSummary struct {
 	MoveError   string `json:"moveError,omitempty"`   // why the last move didn't happen
 	Refetch     int64  `json:"refetch,omitempty"`     // bytes a move now would download again
 	MoveWarning string `json:"moveWarning,omitempty"` // what Details says of that before a move
+
+	// The extraction's progress (a part of a split archive has its Set's
+	// instead): bytes of the archive extracted and freed, what it is doing or
+	// waiting for, and the seconds left, 0 while unknown.
+	Extracted  int64   `json:"extracted,omitempty"`
+	Phase      string  `json:"phase,omitempty"`
+	ExtractETA float64 `json:"extractEta,omitempty"`
 }
 
 func (f *Folder) summary() *FolderSummary {
@@ -148,6 +156,20 @@ func (d *Download) folderSummaryLocked() *FolderSummary {
 	if s.On && s.Out != "" {
 		s.Refetch = d.moveRefetchLocked()
 	}
+	if fr := d.fold; fr != nil && s.On && s.Into != "" && d.set == nil && !fr.finished {
+		s.Extracted = sumRanges(d.st.Folder.Freed)
+		d.pace.add(time.Now(), s.Extracted)
+		switch {
+		case fr.arc == nil:
+			s.Phase = "Waiting for the archive's list of files"
+		case fr.idle:
+			s.Phase = "Waiting for the download"
+		default:
+			s.Phase = "Extracting"
+		}
+		// It can't end before the download does.
+		s.ExtractETA = math.Round(max(d.pace.left(d.st.Size), d.eta.Seconds()))
+	}
 	return s
 }
 
@@ -166,6 +188,15 @@ func (d *Download) folderWhyNotLocked() string {
 		return noRangesNote
 	}
 	return ""
+}
+
+// FolderOn: the download is a Download as folder, or will be one by the
+// default once it starts (as folderProbedLocked settles it).
+func (d *Download) FolderOn() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	f := d.st.Folder
+	return f != nil && (f.On || f.Auto && archive.Extractable(d.st.Filename) && d.st.SHA256 == "" && d.st.MD5 == "")
 }
 
 // folderOnLocked: the download is a Download as folder.
@@ -204,6 +235,8 @@ func (d *Download) SetFolder(on bool) error {
 func (d *Download) setFolderLocked(on bool) error {
 	f := d.st.Folder
 	switch {
+	case d.st.Status == StatusCompleted && d.inSetLocked():
+		return d.partFolderLocked(on)
 	case d.st.Status == StatusCompleted:
 		return errors.New("the download is complete")
 	case f.locked():
@@ -223,6 +256,33 @@ func (d *Download) setFolderLocked(on bool) error {
 	if !on {
 		d.folderOffLocked()
 	}
+	return nil
+}
+
+// partFolderLocked switches Download as folder for a part of a split archive
+// that is already fetched, with the rest of its Set: its file becomes the
+// .part the Set reads and deletes. Off, the Set gives the .part its name
+// back (Set.step), as it may have it open. Not once any of it is freed.
+func (d *Download) partFolderLocked(on bool) error {
+	f := d.st.Folder
+	switch {
+	case f.locked():
+		//lint:ignore ST1005 shown to the user as is, like the pause messages
+		return errors.New(lockedNote)
+	case on == d.folderOnLocked():
+		return nil
+	case !on:
+		f.On = false
+		return nil
+	}
+	if err := os.Rename(filepath.Join(d.st.Dir, d.st.Filename), d.partPath()); err != nil {
+		return err
+	}
+	if f == nil {
+		f = &Folder{}
+		d.st.Folder = f
+	}
+	f.On, f.Auto, f.Note = true, false, ""
 	return nil
 }
 
@@ -261,8 +321,22 @@ func (d *Download) SetFolderInto(dir string) error {
 	dir = filepath.Clean(dir)
 	d.mu.Lock()
 	if d.st.Status == StatusCompleted {
+		f := d.st.Folder
+		if !d.inSetLocked() || !d.folderOnLocked() || f.locked() {
+			d.mu.Unlock()
+			return errors.New("the download is complete")
+		}
+		// A part already fetched takes its Set's folder. Its .part goes there
+		// too if it can (not to another drive, not while the Set reads it):
+		// the Set finds it either way, and deletes it once extracted.
+		f.Into = dir
+		if !strings.EqualFold(d.st.Dir, dir) && os.MkdirAll(dir, 0o755) == nil &&
+			os.Rename(d.partPath(), filepath.Join(dir, d.st.Filename+partSuffix)) == nil {
+			d.st.Dir = dir
+		}
 		d.mu.Unlock()
-		return errors.New("the download is complete")
+		d.env.Changed(d)
+		return nil
 	}
 	f := d.st.Folder
 	if f == nil {
@@ -351,6 +425,7 @@ type folderRun struct {
 	x        *archive.Extractor
 	finished bool     // every Entry done (guarded by d.mu)
 	again    bool     // a large Entry has more bytes on disk to extract now (folderLoop only)
+	idle     bool     // the last look found nothing to extract: it waits for the download (guarded by d.mu)
 	keep     bool     // stopping parks it instead of closing it (guarded by d.mu)
 	file     *os.File // the .part, open while parked
 
@@ -684,6 +759,7 @@ func (d *Download) folderRecord(fr *folderRun, res archive.Result) error {
 	onDisk := d.st.Size - d.plan.remaining()
 	file := d.file
 	changed := len(res.Done) > 0 || len(res.Freed) > 0 || len(res.Failed) > 0
+	fr.idle = !changed && !res.More
 	d.mu.Unlock()
 	if changed {
 		if afterExtract != nil && len(res.Freed) > 0 {

@@ -76,9 +76,13 @@
           <span class="info" tabindex="0" data-tip="Longer gives a steadier estimate; shorter reacts faster to speed changes."></span></label>
         <input type="number" id="sEta" min="5" max="3600" data-setting>
 
-        <label for="sFolder">Download ZIPs as folders
-          <span class="info" tabindex="0" data-tip="A .zip is extracted while it downloads, into the folder you last extracted into, and its space is freed as each file is done: you get the folder, never the .zip. Each download can still be switched in its Details."></span></label>
+        <label for="sFolder">Download archives as folders
+          <span class="info" tabindex="0" data-tip="A .zip, .7z or .rar is extracted while it downloads, into the folder you last extracted into, and its space is freed as each file is done: you get the folder, never the archive. Each download can still be switched on its card."></span></label>
         <span><input type="checkbox" id="sFolder" data-setting></span>
+
+        <label for="sParts">Download a split archive's parts at once
+          <span class="info" tabindex="0" data-tip="For a split archive downloaded as a folder. Off, the parts of one that can only be read front to back (RAR volumes, a solid 7z) download one at a time, so none waits on disk for the extraction to reach it. On, they download side by side: faster where a server limits each connection, but the parts fetched ahead take up space until they are extracted. Archives whose files can be extracted in any order always download their parts at once."></span></label>
+        <span><input type="checkbox" id="sParts" data-setting></span>
       </div>
     </section>
 
