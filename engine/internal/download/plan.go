@@ -55,6 +55,15 @@ type plan struct {
 // much of the whole download's speed.
 const stride = 10
 
+// A connection that has run out of work takes over part of a chunk another is
+// fetching only when that connection needs more than minSteal seconds for it,
+// and leaves each side at least minTake bytes: a few MiB on a slow connection
+// are seconds the end of the download would wait.
+const (
+	minSteal = 1.5
+	minTake  = 1 << 20
+)
+
 func newPlan(size int64, rangeOK bool, remaining []Range) *plan {
 	p := &plan{size: size, splittable: rangeOK, prefer: -1}
 	if !rangeOK {
@@ -108,14 +117,14 @@ func (p *plan) claim(newSpeed float64) *segment {
 			worst, victim = t, s
 		}
 	}
-	if victim == nil || worst < 3 {
+	if victim == nil || worst < minSteal {
 		return nil
 	}
 	return p.split(victim, balancedCut(victim, newSpeed))
 }
 
 // canSplit: a chunk is being fetched and big enough to split in two.
-func canSplit(s *segment) bool { return s.owner != nil && s.end-s.pos >= 2*minSplit }
+func canSplit(s *segment) bool { return s.owner != nil && s.end-s.pos >= 2*minTake }
 
 // timeLeft is how long a chunk's connection needs for the rest of it, in seconds.
 func timeLeft(s *segment) float64 { return float64(s.end-s.pos) / math.Max(s.owner.speed, 1) }
@@ -129,7 +138,7 @@ func balancedCut(s *segment, newSpeed float64) int64 {
 		vn = newSpeed
 	}
 	cut := s.pos + int64(float64(s.end-s.pos)*vs/(vs+vn))
-	return min(max(cut, s.pos+minSplit), s.end-minSplit)
+	return min(max(cut, s.pos+minTake), s.end-minTake)
 }
 
 // split hands out the bytes of a chunk from at on, as a new chunk.

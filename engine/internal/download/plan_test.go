@@ -36,10 +36,10 @@ func TestPlanSplitsSoBothHalvesFinishTogether(t *testing.T) {
 }
 
 func TestPlanDoesNotSplitSmallOrQuickChunks(t *testing.T) {
-	p := newPlan(2*minSplit-1, true, []Range{{0, 2*minSplit - 1}})
+	p := newPlan(2*minTake-1, true, []Range{{0, 2*minTake - 1}})
 	owned(p.claim(0), 1)
 	if p.claim(0) != nil {
-		t.Fatal("split a chunk smaller than 2*minSplit")
+		t.Fatal("split a chunk smaller than 2*minTake")
 	}
 
 	p = newPlan(100*minSplit, true, []Range{{0, 100 * minSplit}})
