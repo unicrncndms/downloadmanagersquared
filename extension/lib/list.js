@@ -214,9 +214,9 @@ function problemLinks(d) {
 // first, with each one's connections (peers for a torrent): "via Ethernet 4×
 // · Wi-Fi 2×". "" when it isn't running or nothing is connected. nameOf gives
 // an interface's name.
-function viaLine(d, nameOf) {
+function viaLine(d, nameOf, order) {
   const torrent = d.kind === "torrent";
-  const used = viaLinks(d);
+  const used = viaLinks(d, order);
   if (!used.length) return "";
   return "via " + used.map((id) => {
     const n = d.links[id].conns;
@@ -224,12 +224,15 @@ function viaLine(d, nameOf) {
   }).join(" · ");
 }
 
-// viaLinks are the interfaces a running download uses, busiest first; none
-// when it isn't running or nothing is connected.
-function viaLinks(d) {
+// viaLinks are the interfaces a running download uses, in the order of
+// `order` (the engine's interface list; unlisted ones after, by ID) so the
+// tiles keep their places as the counts change; none when it isn't running or
+// nothing is connected.
+function viaLinks(d, order = []) {
   if (d.status !== "running" && d.status !== "seeding" && d.status !== "metadata") return [];
+  const place = (id) => { const i = order.indexOf(id); return i < 0 ? order.length : i; };
   return Object.keys(d.links || {}).filter((id) => d.links[id].conns > 0)
-    .sort((a, b) => d.links[b].conns - d.links[a].conns || (d.links[b].speed || 0) - (d.links[a].speed || 0));
+    .sort((a, b) => place(a) - place(b) || (a < b ? -1 : a > b ? 1 : 0));
 }
 
 // seedLine is a torrent's upload and ratio, against the seed ratio target

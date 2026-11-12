@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, finished } = require("../lib/list.js");
+const { moveBefore, statusLine, problemLinks, viaLinks, viaLine, seedLine, bulkActions, finished } = require("../lib/list.js");
 
 // The engine's section for a status; a test of what needs the user says "needs".
 const SECTION = { running: "active", verifying: "active", metadata: "active", checking: "active", seeding: "seeding", queued: "queued",
@@ -326,4 +326,11 @@ test("time left counts days past two days", () => {
   assert.equal(fmtETA(3 * 3600 + 5 * 60), "3h 05m");
   assert.equal(fmtETA(47 * 3600), "47h 00m");
   assert.equal(fmtETA(987654), "11d 10h");
+});
+
+test("the tiles of a download's connections keep their places as the counts change", () => {
+  const order = ["wifi", "eth", "wifi~vpn"];
+  const at = (a, b) => dl("x", "running", { links: { eth: { conns: a }, wifi: { conns: b }, "wifi~vpn": { conns: 2 } } });
+  assert.deepEqual(viaLinks(at(4, 1), order), ["wifi", "eth", "wifi~vpn"]);
+  assert.deepEqual(viaLinks(at(1, 4), order), ["wifi", "eth", "wifi~vpn"]);
 });

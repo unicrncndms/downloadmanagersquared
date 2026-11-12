@@ -453,7 +453,7 @@ function makeCard(id) {
     // Queued on one line: its number and its section say that it waits.
     sub.textContent = s.error || slim ? "" : [!seeding && torrent ? up : "", s.sub].filter(Boolean).join(" · ");
     sub.hidden = !sub.textContent;
-    const used = s.error ? [] : viaLinks(d);
+    const used = s.error ? [] : viaLinks(d, ((latest.state && latest.state.interfaces) || []).map((x) => x.id));
     via.hidden = mini.hidden = !used.length;
     const count = (ifc) => (torrent ? plural(d.links[ifc].conns, "peer") : d.links[ifc].conns + "×");
     const nameOf = (ifc) => ifaceName(ifc, latest.state, latest.settings);
