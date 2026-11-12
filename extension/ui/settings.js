@@ -103,6 +103,17 @@ function ifaceRow(i, tun, settings) {
   const main = el("input", { type: "radio", name: "main", checked: i.isMain, "aria-label": `Main connection: ${i.name}` });
   main.addEventListener("change", () => act("setSettings", { mainInterface: i.id }, `${i.name} is now the main connection`));
 
+  // The colour it is shown in everywhere: native radios, so the arrow keys move
+  // between the swatches and the browser says which one is checked.
+  const shown = Number.isInteger(i.color) ? i.color : 0;
+  const colours = el("span", { class: "colours", role: "radiogroup", "aria-label": `Colour: ${i.name}` },
+    IFACE_COLORS.map((name, n) => {
+      const r = el("input", { type: "radio", name: `colour-${i.id}`, checked: n === shown, title: name, "aria-label": `${name}: ${i.name}` });
+      r.style.color = `var(--c${n})`;
+      r.addEventListener("change", () => set({ color: n }, `${i.name} is now ${name}`));
+      return r;
+    }));
+
   // What the connection is, then the few facts worth a badge.
   const badges = [
     familyText(i) ? badge(familyText(i), "dim", i.ip6 && i.ip6 !== i.ip ? i.ip6 : undefined) : null,
@@ -118,6 +129,7 @@ function ifaceRow(i, tun, settings) {
       el("span", { class: "info", tabindex: "0", "data-tip": "Used alone for servers that can't split a file, and it decides which file the other connections must match." })),
     el("label", {}, "Requests at once ", conns,
       el("span", { class: "info", tabindex: "0", "data-tip": "How many parts of a download this connection fetches at the same time." })),
+    el("span", { class: "colourfield" }, "Colour ", colours),
     el("label", {}, check(i.upload, "upload", "Upload"), " Upload"),
     el("span", { class: "limits" }, "Limit (MB/s) ↓", limit(i.downloadLimit, "downloadLimit", "Download limit"), "↑", limit(i.uploadLimit, "uploadLimit", "Upload limit")),
     el("span", { class: "vpnfield" }, "VPN ", vpnCell(i, tun)));
@@ -144,7 +156,7 @@ function renderIfaces(state, settings) {
   const all = state.interfaces || [];
   const ifaces = all.filter((i) => !i.tunnel);
   const tunnels = new Map(all.filter((i) => i.tunnel).map((t) => [t.of, t]));
-  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort, i.ip6, i.families]), settings.mainInterface]);
+  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.color, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort, i.ip6, i.families]), settings.mainInterface]);
   const warnings = routerWarnings(all);
   const hints = ipv6Hints(state);
   $("ipv6Hint").hidden = !hints.length;
@@ -174,6 +186,7 @@ function renderIfaces(state, settings) {
 for (const id of ["sVpnHttp", "sVpnTorrent"]) {
   $(id).replaceChildren(...VPN_MODES.map(([v, text]) => el("option", { value: v }, text)));
 }
+$("sKeep").replaceChildren(...KEEP_CHOICES.map(([v, text]) => el("option", { value: v }, text)));
 
 const FIELDS = {
   sDir: ["saveDir", (s) => s.saveDir, (v) => v.trim()],
@@ -186,6 +199,7 @@ const FIELDS = {
   sRatio: ["seedRatio", (s) => s.seedRatio, Number],
   sVpnHttp: ["vpnHttp", (s) => s.vpnHttp, String],
   sVpnTorrent: ["vpnTorrent", (s) => s.vpnTorrent, String],
+  sKeep: ["archiveKeeping", (s) => s.archiveKeeping || "auto", String],
 };
 
 for (const [id, [key, , parse]] of Object.entries(FIELDS)) {

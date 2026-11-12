@@ -145,7 +145,13 @@ func (d *Download) relocate(ctx context.Context) error {
 	d.mu.Unlock()
 	d.env.Changed(d)
 	if err == nil {
-		m.removeOld()
+		// The new place on disk first: a crash after the delete would leave
+		// a saved state pointing at what is gone.
+		if serr := d.save(); serr != nil {
+			log.Printf("download %s: leaving the old copy, as the move can't be saved: %v", d.ID(), serr)
+		} else {
+			m.removeOld()
+		}
 	}
 	return err
 }
@@ -428,6 +434,10 @@ func copyFile(ctx context.Context, src, dst string, fi fs.FileInfo) error {
 		return err
 	}
 	_, err = io.Copy(out, ctxReader{ctx, in})
+	if err == nil {
+		// On disk before removeOld deletes the original.
+		err = out.Sync()
+	}
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}

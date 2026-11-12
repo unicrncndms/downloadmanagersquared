@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	atorrent "github.com/anacrolix/torrent"
@@ -67,6 +68,8 @@ type Torrent struct {
 	info    *metainfo.Info // st.Info parsed, once needed
 	hash    string
 
+	verified atomic.Bool // its data was hashed since the engine started
+
 	// What the swarm looks like, as of the last poll.
 	paths               map[string]*pathRate
 	peers, seeds, swarm int
@@ -118,7 +121,7 @@ func (t *Torrent) Summary() download.Summary {
 		Kind: download.KindTorrent, ID: t.st.ID, URL: t.st.Magnet, Filename: t.st.Name, Dir: t.st.Dir,
 		Size: t.st.Size, Status: t.st.Status, Error: t.st.Error, Speed: t.speed.Value(), ETA: -1,
 		Links: map[string]download.LinkSummary{}, Added: t.st.Added, Finished: t.st.Finished,
-		Uploaded: t.st.Uploaded, VPN: t.st.VPN, AskVPN: t.st.AskVPN, InfoHash: t.hash,
+		Uploaded: t.st.Uploaded, VPN: t.st.VPN, AskVPN: t.st.AskVPN, InfoHash: t.hash, WaitVPN: t.st.WaitVPN,
 	}
 	if t.st.Status == StatusChoosing {
 		s.Files = t.filesLocked()
@@ -234,7 +237,7 @@ func (t *Torrent) join(ctx context.Context) (*atorrent.Torrent, error) {
 	t.held = true
 	spec.InfoBytes = t.st.Info
 	t.stor = storage.NewFileOpts(storage.NewFileClientOpts{
-		ClientBaseDir: t.st.Dir, PieceCompletion: storage.NewMapPieceCompletion(),
+		ClientBaseDir: t.st.Dir, PieceCompletion: t.s.completion(),
 		Logger: slog.New(slog.DiscardHandler),
 	})
 	spec.Storage = t.stor
@@ -285,8 +288,10 @@ func (t *Torrent) run(ctx context.Context) {
 		return
 	}
 	// The file storage trusts a full-size file and distrusts a .part one without
-	// reading either, so hash whatever is on disk.
-	if t.hasData(at) {
+	// reading either, so hash whatever is on disk unless the pieces kept as
+	// complete can be trusted.
+	if t.hasData(at) && t.mustVerify(at) {
+		t.verified.Store(true)
 		go at.VerifyDataContext(ctx)
 		time.Sleep(50 * time.Millisecond) // let it queue the first pieces
 	}
@@ -528,6 +533,19 @@ func (t *Torrent) filesLocked() []download.FileSummary {
 }
 
 // hasData is whether any of the torrent's files, finished or partial, is on disk.
+// mustVerify: the pieces' completion as kept can't be trusted for what is on
+// disk. It isn't kept between runs (no Completion), the engine last stopped
+// uncleanly and this torrent wasn't hashed since (a piece is marked complete
+// before its bytes are flushed), or nothing is kept of this torrent.
+func (t *Torrent) mustVerify(at *atorrent.Torrent) bool {
+	pc := t.s.cfg.Completion
+	if pc == nil || t.s.cfg.Unclean && !t.verified.Load() {
+		return true
+	}
+	c, err := pc.Get(metainfo.PieceKey{InfoHash: at.InfoHash(), Index: 0})
+	return err != nil || !c.Ok
+}
+
 func (t *Torrent) hasData(at *atorrent.Torrent) bool {
 	t.mu.Lock()
 	dir := t.st.Dir

@@ -52,6 +52,9 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		if p.PartsParallel != nil {
 			s.PartsParallel = *p.PartsParallel
 		}
+		if p.ArchiveKeeping != nil {
+			s.ArchiveKeeping = *p.ArchiveKeeping // normalize puts back one that isn't a choice
+		}
 		if p.IPv6 != nil {
 			s.IPv6 = *p.IPv6
 		}
@@ -100,6 +103,10 @@ func (e *Engine) setInterface(p ifacePatch) Settings {
 		if p.DownloadLimit != nil {
 			is.DownloadLimit = *p.DownloadLimit
 		}
+		if p.Color != nil && *p.Color >= 0 && *p.Color < colorCount {
+			v := *p.Color
+			is.Color = &v
+		}
 	})
 }
 
@@ -118,6 +125,7 @@ type settingsPatch struct {
 	VPNProvider        *string  `json:"vpnProvider"`
 	FolderDefault      *bool    `json:"folderDefault"`
 	PartsParallel      *bool    `json:"partsParallel"`
+	ArchiveKeeping     *string  `json:"archiveKeeping"`
 	IPv6               *bool    `json:"ipv6"`
 	Accent             *string  `json:"accent"`
 	ThemeAccent        *string  `json:"themeAccent"`
@@ -130,12 +138,14 @@ type ifacePatch struct {
 	Upload        *bool  `json:"upload"`
 	UploadLimit   *int64 `json:"uploadLimit"`
 	DownloadLimit *int64 `json:"downloadLimit"`
+	Color         *int   `json:"color"` // 0..5; anything else is ignored
 }
 
 func (e *Engine) applySettings(f func(*Settings)) Settings {
 	e.mu.Lock()
 	f(&e.settings)
 	e.settings.normalize()
+	e.keepingNow()
 	e.saveSettingsLocked()
 	e.applyLimitsLocked()
 	s := e.settings.clone()

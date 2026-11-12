@@ -47,7 +47,30 @@ type Config struct {
 	Ratio        func() float64 // optional: seed until uploaded/size reaches this; nil or 0 = don't seed
 	DHTBootstrap []string       // optional: host:port of the DHT's first nodes; nil = the usual public ones
 	Port         int            // optional: where peers connect in, TCP and uTP, on each interface that listens
+
+	// Completion, if set, keeps which pieces are complete between runs, for
+	// every torrent of the session; the caller closes it after the session.
+	// Without it, a torrent's data is hashed at every start.
+	Completion storage.PieceCompletion
+	// Unclean: the engine last stopped without saving everything, so the
+	// pieces Completion has as complete are hashed again at each torrent's
+	// first start.
+	Unclean bool
 }
+
+// completion is a torrent storage's piece completion: the session's kept
+// one, which a torrent's storage closing mustn't close, or one of its own.
+func (s *Session) completion() storage.PieceCompletion {
+	if s.cfg.Completion == nil {
+		return storage.NewMapPieceCompletion()
+	}
+	return keptCompletion{s.cfg.Completion}
+}
+
+// keptCompletion is a shared piece completion that Close leaves open.
+type keptCompletion struct{ storage.PieceCompletion }
+
+func (keptCompletion) Close() error { return nil }
 
 // ifaceSockets is one interface as the session uses it.
 type ifaceSockets struct {

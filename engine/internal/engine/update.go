@@ -2,11 +2,14 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/install"
 	"downloadmanagersquared/engine/internal/update"
 )
@@ -61,4 +64,47 @@ func (e *Engine) updateViewLocked() *UpdateView {
 		return nil
 	}
 	return &UpdateView{Version: v, URL: url}
+}
+
+// RestartCost is what stopping the engine now would download again: the bytes
+// freed of the large Entries being extracted as they download, whose
+// decompressors live only in memory (a restart extracts each again from its
+// front), and the names of their archives.
+type RestartCost struct {
+	Bytes int64    `json:"bytes"`
+	Names []string `json:"names,omitempty"`
+}
+
+// restartWarn is the cost from which an update or Quit asks first.
+const restartWarn = 1 << 30
+
+func (e *Engine) RestartCost() RestartCost {
+	var c RestartCost
+	add := func(n int64, name string) {
+		if n > 0 {
+			c.Bytes += n
+			c.Names = append(c.Names, name)
+		}
+	}
+	for _, j := range e.queue.List() {
+		if d, ok := j.(*download.Download); ok {
+			add(d.RestartCost(), d.Summary().Filename)
+		}
+	}
+	e.setsMu.Lock()
+	for _, s := range e.sets {
+		add(s.RestartCost(), s.Name())
+	}
+	e.setsMu.Unlock()
+	return c
+}
+
+// Warning says what doing ("Updating now") would cost, or is "" when that is
+// too little to ask about.
+func (c RestartCost) Warning(doing string) string {
+	if c.Bytes < restartWarn {
+		return ""
+	}
+	return fmt.Sprintf("%s means downloading %s again (%s), because their extraction can't continue after a restart.",
+		doing, download.Human(c.Bytes), strings.Join(c.Names, ", "))
 }

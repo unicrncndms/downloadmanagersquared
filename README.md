@@ -70,6 +70,7 @@ Switch it on with the box when adding an archive link, with the switch on a down
 - **Split archives:** add all the parts. They show as one card with one switch, download in the order that keeps the least on disk, and extract as one archive. A part that isn't added stops extraction there: "Part 2 missing". *Download a split archive's parts at once* in the settings trades disk space for speed.
 - **Passwords:** an encrypted 7z or RAR asks for its password on the card and keeps downloading meanwhile. An encrypted ZIP is downloaded as a normal file.
 - It needs a server that allows split downloads. A ZIP must be compressed with Stored, Deflate, Deflate64 or Zstandard. Anything it can't extract is downloaded as a normal file, with the reason in Details.
+- **Keeping the archive:** by default (*Automatic*) the archive is kept until it is extracted when the drive has room for it, so an update, reboot or crash while extracting downloads nothing again; on a nearly full drive its space is freed as it extracts. Details can set it per download: *Free while extracting*, *Keep until extracted*, or *Keep the archive* to have the archive file too ([ADR 0007](docs/adr/0007-keeping-the-archive-for-interruption-recovery.md)).
 - There is no whole archive to check at the end, so a checksum you entered turns the mode off.
 
 ### Checksums
@@ -79,7 +80,7 @@ A download's **Details → Checks → Edit** takes a SHA-256 or MD5. DMS² check
 ## Settings
 
 - **Connections:** turn each on or off, set its parallel requests (4) and speed limit, and choose the main connection, used alone for servers that can't split a file. VPN adapters start off. *Enable IPv6 (experimental)* (off) uses IPv6 too; each connection shows a badge with what it has: IPv4, IPv6 or IPv4 + IPv6.
-- **Downloads:** takeover size (100 MB), save folder, downloads at once (1), Download as folder for new archives (off), a split archive's parts at once (off).
+- **Downloads:** takeover size (100 MB), save folder, downloads at once (1), Download as folder for new archives (off), a split archive's parts at once (off), keep the archive (Automatic).
 - **Torrents:** seed ratio (1).
 - **Startup:** start with Windows.
 - **Learned sites:** the clicks remembered per site. *Forget* makes DMS² ask again.

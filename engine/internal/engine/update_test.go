@@ -89,3 +89,15 @@ func TestUpdateDevBuildNeverAsks(t *testing.T) {
 		t.Fatal("a dev build started a check")
 	}
 }
+
+// An update or Quit asks first only from 1 GiB to download again, and says
+// how much and of what.
+func TestARestartCostWarnsFrom1GiB(t *testing.T) {
+	if w := (RestartCost{Bytes: 1<<30 - 1, Names: []string{"a.zip"}}).Warning("Updating now"); w != "" {
+		t.Fatalf("under 1 GiB: %q", w)
+	}
+	w := RestartCost{Bytes: 3 << 30, Names: []string{"a.zip", "b.7z"}}.Warning("Updating now")
+	if want := "Updating now means downloading 3.0 GiB again (a.zip, b.7z), because their extraction can't continue after a restart."; w != want {
+		t.Fatalf("got %q, want %q", w, want)
+	}
+}

@@ -115,8 +115,15 @@ func (ifc Iface) clientFor(l Link) *http.Client {
 type Env interface {
 	Paths(paths.Mode) []Iface // the main path first
 	ETAWindow() time.Duration
+	// ArchiveKeeping is the archiveKeeping setting: what a Download as folder
+	// does with its archive when none is chosen for it. Called under the
+	// download's lock, so it takes none the engine holds while calling in.
+	ArchiveKeeping() string
 	RequestResolve(id, ifaceID, pageURL, browser string)
 	Changed(d *Download)
+	// Save writes d's state to disk at once, for what must be saved before
+	// it happens: bytes recorded as freed before they are, say.
+	Save(d *Download) error
 	Finished(d *Download)
 }
 
@@ -548,7 +555,8 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 	}
 	if now.Sub(d.lastDisk) >= 30*time.Second {
 		d.lastDisk = now
-		if free, err := winutil.FreeSpace(d.st.Dir); err == nil && free < diskReserve && d.remainingLocked() > 0 {
+		// Automatic keeping the archive frees it instead (Extraction.mayFree).
+		if free, err := freeSpace(d.st.Dir); err == nil && free < diskReserve && d.remainingLocked() > 0 && !d.keptByAutoLocked() {
 			return false, &pauseError{msg: fmt.Sprintf("Paused: disk almost full (%s free)", human(free))}
 		}
 	}
@@ -664,8 +672,17 @@ func (d *Download) openFileLocked() error {
 	return nil
 }
 
+// freeSpace is winutil.FreeSpace; tests set it to say how much room there is.
+var freeSpace = winutil.FreeSpace
+
+// freeSpaceBelow: dir's drive has less than n bytes free, as far as is known.
+func freeSpaceBelow(dir string, n int64) bool {
+	free, err := freeSpace(dir)
+	return err == nil && free < n
+}
+
 func checkSpace(dir string, need int64) error {
-	free, err := winutil.FreeSpace(dir)
+	free, err := freeSpace(dir)
 	if err != nil {
 		return nil
 	}

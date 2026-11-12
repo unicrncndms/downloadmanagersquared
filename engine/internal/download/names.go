@@ -49,6 +49,9 @@ func shortErr(err error) string {
 	return s
 }
 
+// Human is n bytes as the UI shows a size: "1.5 GiB".
+func Human(n int64) string { return human(n) }
+
 func human(n int64) string {
 	const unit = 1024
 	if n < unit {

@@ -17,6 +17,7 @@
 //           (wrong: the last one given didn't open it), else null
 //   move:   { into, moving, warning, error } once it has one, while unfinished:
 //           "Extract into" with Browse… to move it, else null
+//   keep:   keepView's archive keeping select while on and unfinished, else null
 //   facts:  [label, value] pairs
 function folderView(d, settings) {
   const f = d && d.kind !== "torrent" ? d.folder : null;
@@ -37,7 +38,31 @@ function folderView(d, settings) {
   if (f.note) facts.push(["Note", f.note]);
   if (f.renamed && f.renamed.length) facts.push(["Renamed", f.renamed.join("\n")]);
   const password = f.on && f.ask && !done ? { wrong: f.ask === "wrong" } : null;
-  return { toggle, extracting: !done && !!f.locked, ask, password, move, facts };
+  const keep = f.on && !done ? keepView(f, !!(f.locked || f.keepFixed)) : null;
+  return { toggle, extracting: !done && !!f.locked, ask, password, move, keep, facts };
+}
+
+// The ways to keep a Download as folder's archive, as the engine names them
+// (ADR 0007), with what the select says of each.
+const KEEP_CHOICES = [
+  ["auto", "Automatic"],
+  ["free", "Free while extracting"],
+  ["untilExtracted", "Keep until extracted (interruption recovery)"],
+  ["keep", "Keep the archive"],
+];
+const KEEP_HELP = "Interruption recovery: an update, reboot or crash while it extracts downloads nothing again, at the cost of room for the archive until it is extracted.";
+
+// keepView is the archive keeping select: value, the choice (the setting's
+// when none is made); disabled once bytes are freed (fixed), with why;
+// help, the line under it; decided, what Automatic chose, "" until it has.
+function keepView(f, fixed) {
+  const value = f.keep || "auto";
+  const label = (k) => (KEEP_CHOICES.find(([v]) => v === k) || [k, ""])[1];
+  const decided = value === "auto" && f.keeping ? "Automatic chose: " + label(f.keeping).replace(/ \(.*\)$/, "").toLowerCase() : "";
+  return {
+    value, options: KEEP_CHOICES, disabled: fixed, help: KEEP_HELP, decided,
+    reason: fixed ? "Some of it is already freed, so this can't change any more" : "",
+  };
 }
 
 // setFolderView is folderView for a split archive's parts as one, for their
@@ -49,10 +74,13 @@ function setFolderView(items, settings) {
   const lead = items.find((d) => d.folder && d.status !== "completed");
   const asks = items.find((d) => d.folder && d.folder.on && d.folder.ask);
   if (!lead && !asks) return null;
-  const v = lead ? folderView(lead, settings) : { toggle: null, ask: null };
+  const v = lead ? folderView(lead, settings) : { toggle: null, ask: null, keep: null };
   const locked = items.some((d) => d.folder && d.folder.locked);
+  // Every part takes the Set's choice; it is fixed once any part is freed.
+  const fixed = locked || items.some((d) => d.folder && d.folder.keepFixed);
+  const keep = v.keep ? keepView(lead.folder, fixed) : null;
   return {
-    id: (lead || asks).id, toggle: locked ? null : v.toggle, ask: v.ask,
+    id: (lead || asks).id, toggle: locked ? null : v.toggle, ask: v.ask, keep,
     password: asks ? { wrong: asks.folder.ask === "wrong", id: asks.id } : null,
   };
 }
@@ -114,4 +142,4 @@ function addFolderParam(shown, checked, settings) {
   return checked;
 }
 
-if (typeof module !== "undefined") module.exports = { folderView, setFolderView, folderChoices, removeWording, addFolderChoice, addFolderParam, lastFolder };
+if (typeof module !== "undefined") module.exports = { folderView, setFolderView, keepView, folderChoices, removeWording, addFolderChoice, addFolderParam, lastFolder };

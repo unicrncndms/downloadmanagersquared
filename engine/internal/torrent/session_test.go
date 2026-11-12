@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	atorrent "github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
@@ -373,6 +374,51 @@ func TestHalfDoneTorrentChecksItsDataAndKeepsIt(t *testing.T) {
 	})
 	if !tor.Running() {
 		t.Fatal("a downloading torrent holds no queue slot")
+	}
+}
+
+// After a clean stop the pieces kept as complete (and not) are trusted and
+// nothing is hashed; after an unclean one what is on disk is hashed again.
+func TestKeptPiecesAreTrustedOnlyAfterACleanStop(t *testing.T) {
+	sw := newSwarm(t, 0, 1<<20) // no peers: whatever is done came from the disk
+	for _, unclean := range []bool{false, true} {
+		func() {
+			pc, err := storage.NewBoltPieceCompletion(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pc.Close()
+			// The whole file is on disk, but no piece is kept as complete.
+			for i := range sw.info.NumPieces() {
+				pc.Set(metainfo.PieceKey{InfoHash: sw.hash, Index: i}, g.Some(false))
+			}
+			s, err := NewSession(Config{Completion: pc, Unclean: unclean})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, sw.info.Name+".part"), sw.data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Info: sw.infoBytes(t), Dir: dir, Status: download.StatusQueued})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tor.Start()
+			defer tor.Stop(download.StatusPaused)
+			if unclean {
+				waitFor(t, "the check to find it all", 10*time.Second, func() bool {
+					return tor.Summary().Done == int64(len(sw.data))
+				})
+				return
+			}
+			waitFor(t, "it to download", 10*time.Second, func() bool { return tor.Status() == download.StatusRunning })
+			time.Sleep(500 * time.Millisecond)
+			if d := tor.Summary().Done; d != 0 {
+				t.Fatalf("after a clean stop %d bytes were found by hashing, want none", d)
+			}
+		}()
 	}
 }
 

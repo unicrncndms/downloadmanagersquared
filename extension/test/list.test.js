@@ -2,21 +2,12 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { sortDownloads, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, finished } = require("../lib/list.js");
+const { moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, finished } = require("../lib/list.js");
 
-const dl = (id, status, extra) => ({ kind: "http", id, status, size: 0, done: 0, links: {}, actions: {}, ...extra });
-
-test("failed and waiting-for-you first, then downloading, seeding, queued, paused, finished; newest first in each", () => {
-  // The engine lists oldest first.
-  const list = [
-    dl("done1", "completed"), dl("run1", "running"), dl("q", "queued"), dl("seed", "seeding", { kind: "torrent" }),
-    dl("p", "paused"), dl("fail", "failed"), dl("run2", "running"), dl("done2", "completed"),
-    dl("choose", "choosing", { kind: "torrent" }), dl("perr", "paused", { error: "Paused: the folder was removed" }),
-    dl("ask", "running", { folder: { on: true } }), dl("check", "checking", { kind: "torrent" }),
-  ];
-  assert.deepEqual(sortDownloads(list).map((d) => d.id),
-    ["ask", "perr", "choose", "fail", "check", "run2", "run1", "seed", "q", "p", "done2", "done1"]);
-});
+// The engine's section for a status; a test of what needs the user says "needs".
+const SECTION = { running: "active", verifying: "active", metadata: "active", checking: "active", seeding: "seeding", queued: "queued",
+  paused: "paused", completed: "done", failed: "needs", choosing: "needs" };
+const dl = (id, status, extra) => ({ kind: "http", id, status, section: SECTION[status], size: 0, done: 0, links: {}, actions: {}, ...extra });
 
 test("the status line is short: percent and sizes, with speed and time left while running", () => {
   const d = dl("a", "running", { size: 42e9, done: 13e9, speed: 9.2e6, eta: 3150, note: "412 of 1,280 files extracted" });
@@ -84,15 +75,15 @@ test("Pause all and Resume all show only when two or more downloads can use them
   assert.deepEqual(bulkActions([r("a"), r("b")]), { pauseAll: false, resumeAll: true });
 });
 
-test("finished is complete and not seeding", () => {
+test("finished is the engine's done section: complete and not seeding", () => {
   assert.equal(finished(dl("a", "completed")), true);
+  assert.equal(finished(dl("p", "completed", { section: "active" })), false); // a part whose archive isn't extracted
   assert.equal(finished(dl("b", "seeding")), false);
   assert.equal(finished(dl("c", "running")), false);
 });
 
-test("queued downloads list in the order they will start, and move by drop or to an end", () => {
+test("queued downloads move by drop or to an end", () => {
   const list = [dl("run", "running"), dl("q1", "queued"), dl("q2", "queued"), dl("q3", "queued")];
-  assert.deepEqual(sortDownloads(list).map((d) => d.id), ["run", "q1", "q2", "q3"]);
   assert.equal(moveBefore(list, "q3", "q1"), "q1"); // dragged up: takes q1's place
   assert.equal(moveBefore(list, "q1", "q2"), "q3"); // dragged down: goes after q2
   assert.equal(moveBefore(list, "q1", "q3"), ""); // after the last one
@@ -133,40 +124,35 @@ test("Check lines lists each public IP and warns about a shared one", () => {
   assert.deepEqual(r.warnings, ["Ethernet and Mesh reach the internet from the same public IP (203.0.113.7): they share one uplink, so together they are no faster than one."]);
 });
 
-test("a Metalink's files are drawn as one group where its first file sorts", () => {
-  const { listEntries } = require("../lib/list.js");
-  const sorted = [dl("a", "running", { group: "g", groupName: "discs" }), dl("x", "running"), dl("b", "queued", { group: "g" }), dl("c", "queued", { group: "h" })];
-  const e = listEntries(sorted);
-  assert.deepEqual(e.map((x) => x.d ? x.d.id : `${x.name}:${x.items.map((d) => d.id).join(",")}`), ["discs:a,b", "x", "c"]);
-});
+// A group summary as the engine sends it.
+const summary = (extra) => ({ id: "g", name: "discs", parts: false, count: 2, items: 2, done: 0, size: 200e6, got: 0, speed: 0, finished: false,
+  label: "Downloading", tone: "", pause: false, resume: false, partialFile: false, order: [], ...extra });
 
-test("a group card adds its files up and offers what any file can do", () => {
+test("a group card words the engine's summary", () => {
   const { groupView } = require("../lib/list.js");
-  const v = groupView([
-    dl("a", "running", { size: 100e6, done: 50e6, speed: 2e6, label: "Downloading", actions: { pause: true }, partialFile: true }),
-    dl("b", "completed", { size: 100e6, done: 100e6, label: "Completed" }),
-  ]);
+  const v = groupView(summary({ done: 1, got: 150e6, speed: 2e6, eta: -1, pause: true, partialFile: true }));
   assert.equal(v.left, "75% · 150 MB / 200 MB · 1 of 2 files done");
+  // With the engine's time left for all of it, the line ends with that.
+  assert.match(groupView(summary({ got: 150e6, speed: 2e6, eta: 25 })).left, / · .+ left$/);
   assert.equal(v.right, "↓ 2.0 MB/s");
   assert.equal(v.label, "Downloading");
   assert.ok(v.pause && !v.resume && v.partialFile && !v.finished);
-  const done = groupView([dl("a", "completed", { size: 1, done: 1 }), dl("b", "completed", { size: 1, done: 1 })]);
-  assert.ok(done.finished && done.label === "Completed" && done.left.endsWith("· 2 files"));
+  const done = groupView(summary({ done: 2, got: 200e6, finished: true, label: "Completed", tone: "ok" }));
+  assert.ok(done.finished && done.label === "Completed" && done.tone === "ok" && done.left.endsWith("· 2 files") && done.right === "");
 });
 
-test("a split archive's card counts its parts, says which is missing, and is done once extracted", () => {
-  const { groupView } = require("../lib/list.js");
-  const p = (id, status, set) => dl(id, status, { size: 100, done: status === "completed" ? 100 : 0, group: "parts:x.7z", label: "Completed",
-    folder: { on: true, set } });
-  const gap = { parts: 3, missing: [2], note: "Part 2 missing", files: 1, of: 4 };
-  const v = groupView([p("a", "completed", gap), p("c", "completed", gap)]);
-  assert.equal(v.left, "100% · 200 B / 200 B · 2 of 3 parts done · 1 of 4 files extracted");
+test("a split archive's card counts its parts, and its extraction has a line of its own", () => {
+  const { groupView, extractView } = require("../lib/list.js");
+  const v = groupView(summary({ parts: true, count: 3, items: 2, done: 2, size: 200, got: 200, label: "Waiting", tone: "warn", files: 1, of: 4 }));
+  assert.equal(v.left, "100% · 200 B / 200 B · 2 of 3 parts done");
+  const part = (set) => ({ kind: "", folder: { on: true, into: "E:/x", set } });
+  const x = extractView([part({ phase: "Extracting", extracted: 50, total: 200, eta: 0, files: 1, of: 4 })]);
+  assert.equal(x.text, "Extraction · 25% · 1 of 4 files");
+  assert.equal(extractView([part({ phase: "Waiting for part 3", extracted: 50, total: 200, eta: 0 })]).text, "Extraction · Waiting for part 3");
   assert.ok(!v.finished && v.label === "Waiting" && v.tone === "warn");
-  const busy = { parts: 2, files: 1, of: 4 };
-  assert.equal(groupView([p("a", "completed", busy), p("b", "completed", busy)]).label, "Extracting");
-  const fin = { parts: 2, files: 4, of: 4, finished: true };
-  const done = groupView([p("a", "completed", fin), p("b", "completed", fin)]);
-  assert.ok(done.finished && done.label === "Completed" && done.left.endsWith("· 2 parts"));
+  // The size isn't known before every part has started: only what is fetched.
+  assert.equal(groupView(summary({ parts: true, count: 3, size: -1, got: 60 })).percent, 0);
+  assert.equal(groupView(summary({ parts: true, count: 3, size: 300, got: 60 })).percent, 20);
 });
 
 test("mirrors show who uses them and why one was dropped", () => {
@@ -255,24 +241,18 @@ test("the extraction has its own bar: how far, what it does or waits for, the ti
   const { extractView } = require("../lib/list.js");
   const zip = (folder) => dl("z", "running", { size: 1000, done: 600, folder: { on: true, into: "E:\\x", ...folder } });
   assert.deepEqual(extractView([zip({ extracted: 250, phase: "Waiting for the download", extractEta: 90 })]),
-    { percent: 25, text: "Waiting for the download · 1m 30s left" });
+    { percent: 25, text: "Extraction · Waiting for the download · 1m 30s left" });
   assert.equal(extractView([zip({})]), null); // not extracting (paused, say)
   assert.equal(extractView([dl("a", "running", { size: 1, done: 0 })]), null); // not a folder
   // A split archive: its Set's, once for all its parts.
   const part = (id, set) => dl(id, "completed", { size: 100, done: 100, folder: { on: true, into: "E:\\x", set } });
   const set = { parts: 3, extracted: 150, total: 300, phase: "Waiting for part 3", eta: 45 };
-  assert.deepEqual(extractView([part("a", set), part("b", set)]), { percent: 50, text: "Waiting for part 3 · 45s left" });
+  assert.deepEqual(extractView([part("a", set), part("b", set)]), { percent: 50, text: "Extraction · Waiting for part 3 · 45s left" });
+  // The group's time left counts the download too: the later one wins.
+  assert.equal(extractView([part("a", set)], 90).text, "Extraction · Waiting for part 3 · 1m 30s left");
   // A part missing says so, with no time left: it waits for you.
-  assert.deepEqual(extractView([part("a", { ...set, note: "Part 2 missing" })]), { percent: 50, text: "Part 2 missing" });
+  assert.deepEqual(extractView([part("a", { ...set, note: "Part 2 missing" })]), { percent: 50, text: "Extraction · Part 2 missing" });
   assert.equal(extractView([part("a", { ...set, finished: true })]), null);
-});
-
-test("a split archive's size is known before every part has started", () => {
-  const { groupView } = require("../lib/list.js");
-  const set = { parts: 3, total: 300, files: 0, of: 0 };
-  const p = (id, st, size, done) => dl(id, st, { size, done, group: "parts:x.rar", folder: { on: true, into: "E:\\x", set } });
-  const v = groupView([p("a", "running", 100, 60), p("b", "queued", -1, 0), p("c", "queued", -1, 0)]);
-  assert.equal(v.percent, 20);
 });
 
 test("a click shows at once: what a request will leave of the engine's state", () => {
@@ -287,6 +267,7 @@ test("a click shows at once: what a request will leave of the engine's state", (
   let s = predict(state, "pause", { id: "run" });
   assert.equal(of(s), "run:paused q1:queued q2:queued p:paused done:completed");
   assert.deepEqual([s.downloads[0].label, s.downloads[0].speed, s.downloads[0].actions], ["Paused", 0, { pause: false, resume: true }]);
+  assert.equal(s.downloads[0].section, "paused"); // the list sorts by section
   assert.equal(s.active, 1); // the rest of the state as it was
   assert.equal(run.status, "running"); // the engine's state itself is not touched
 
@@ -300,7 +281,9 @@ test("a click shows at once: what a request will leave of the engine's state", (
   // The queue's order, and a slot taken from a download that is running.
   assert.equal(of(predict(state, "move", { id: "q2", before: "q1" })), "run:running q2:queued q1:queued p:paused done:completed");
   assert.equal(of(predict(state, "move", { id: "q1", before: "" })), "run:running q2:queued p:paused done:completed q1:queued");
-  assert.equal(of(predict(state, "move", { id: "q2", before: "run" })), "q2:running run:queued q1:queued p:paused done:completed");
+  const swapped = predict(state, "move", { id: "q2", before: "run" });
+  assert.equal(of(swapped), "q2:running run:queued q1:queued p:paused done:completed");
+  assert.deepEqual(swapped.downloads.slice(0, 2).map((d) => d.section), ["active", "queued"]);
 
   // Download as folder: one download, or every part of a split archive.
   const part = (id) => dl(id, "queued", { group: "parts:x.rar", folder: { on: false } });
@@ -315,14 +298,8 @@ test("a click shows at once: what a request will leave of the engine's state", (
   }
 });
 
-test("a row's section and its two numbers", () => {
-  const { sectionName, rowNums } = require("../lib/list.js");
-  const names = [dl("a", "running"), dl("b", "queued"), dl("c", "paused"), dl("d", "paused", { error: "no connection" }),
-    dl("e", "completed"), dl("f", "seeding"), dl("g", "failed")].map(sectionName);
-  assert.deepEqual(names, ["Downloading", "Queue", "Paused", "Needs you", "Finished", "Seeding", "Needs you"]);
-  // A part of a split archive still being extracted is fetched, not finished.
-  assert.notEqual(sectionName(dl("p", "completed", { folder: { on: true, set: { finished: false } } })), "Finished");
-
+test("a row's two numbers", () => {
+  const { rowNums } = require("../lib/list.js");
   assert.deepEqual(rowNums(dl("a", "running", { size: 1000, done: 390, speed: 2e6, eta: 65 })), { main: "2.0 MB/s", sub: "39% · 1m 05s left" });
   assert.deepEqual(rowNums(dl("c", "paused", { size: 2e9, done: 1e9 })), { main: "50%", sub: "1.0 GB / 2.0 GB" });
   assert.deepEqual(rowNums(dl("b", "queued", { size: 2e9, done: 0 })), { main: "2.0 GB", sub: "" });
@@ -337,17 +314,6 @@ test("the Add box offers what applies to the links in it", () => {
   assert.deepEqual(addView("https://a.example/x.iso\nnot a link\n\nmagnet:?xt=urn:btih:1"), { count: 2, bad: 1, page: true, vpn: true, label: "Add 2 downloads" });
 });
 
-test("what waits for the user is in Needs you, however the download itself is doing", () => {
-  const { sectionName } = require("../lib/list.js");
-  const folder = (extra) => ({ on: true, into: "E:\\x", files: 0, of: 0, ...extra });
-  assert.equal(sectionName(dl("p", "running", { folder: folder({ ask: "password" }) })), "Needs you");
-  assert.equal(sectionName(dl("w", "completed", { folder: folder({ ask: "wrong", set: { finished: false } }) })), "Needs you");
-  assert.equal(sectionName(dl("m", "running", { folder: folder({ set: { missing: [2], finished: false } }) })), "Needs you");
-  assert.equal(sectionName(dl("r", "running", { links: { eth: { canRetry: true } } })), "Needs you");
-  // A part fetched while the rest of its archive downloads and extracts is at work, not paused.
-  assert.equal(sectionName(dl("x", "completed", { folder: folder({ set: { finished: false } }) })), "Downloading");
-});
-
 test("a row's status tile says its section: what needs you, at work, seeding, queued by number, resting, finished", () => {
   const { tileOf } = require("../lib/list.js");
   const kinds = [dl("a", "failed"), dl("b", "running"), dl("c", "seeding"), dl("d", "queued"), dl("e", "paused"), dl("f", "completed")]
@@ -360,13 +326,4 @@ test("time left counts days past two days", () => {
   assert.equal(fmtETA(3 * 3600 + 5 * 60), "3h 05m");
   assert.equal(fmtETA(47 * 3600), "47h 00m");
   assert.equal(fmtETA(987654), "11d 10h");
-});
-
-test("a group's parts: needs you, downloading, queued, paused, then fetched; by name within each", () => {
-  const { listEntries } = require("../lib/list.js");
-  const p = (n, status, extra) => ({ id: "p" + n, filename: `x.part${n}.rar`, group: "g", status, links: {}, ...extra });
-  const items = [p(1, "completed", { folder: { on: true, into: "E:\\", set: {} } }), p(10, "running"), p(3, "queued"), p(2, "running"),
-    p(4, "paused"), p(5, "failed"), p(6, "completed")];
-  const [g] = listEntries(items);
-  assert.deepEqual(g.items.map((d) => d.id), ["p5", "p2", "p10", "p3", "p4", "p1", "p6"]);
 });

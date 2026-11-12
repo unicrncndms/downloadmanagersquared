@@ -21,6 +21,8 @@ func TestPresentWithThePages(t *testing.T) {
 		"lib/version.js":   {Data: []byte("")},
 		"lib/folder.js":    {Data: []byte("")},
 		"lib/list.js":      {Data: []byte("")},
+		"lib/rows.js":      {Data: []byte("")},
+		"lib/iface.js":     {Data: []byte("")},
 	}
 	if !present(pages) {
 		t.Fatal("not present with the pages")

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -68,9 +69,30 @@ func serveBytes(t *testing.T, parts [][]byte, served []string) (srv *httptest.Se
 }
 
 // setEnv is a testEnv for several downloads: Finished doesn't close anything.
-type setEnv struct{ testEnv }
+// It notes the most Entries part 1 was saved with as done while some .part
+// was still there.
+type setEnv struct {
+	testEnv
+	saveMu        sync.Mutex
+	doneWithAPart int
+}
 
 func (e *setEnv) Finished(*Download) {}
+
+func (e *setEnv) Save(d *Download) error {
+	d.mu.Lock()
+	dir, done := d.st.Dir, 0
+	if f := d.st.Folder; f != nil {
+		done = len(f.Done)
+	}
+	d.mu.Unlock()
+	if parts, _ := filepath.Glob(filepath.Join(dir, "*"+partSuffix)); d.ID() == "p1" && len(parts) > 0 {
+		e.saveMu.Lock()
+		e.doneWithAPart = max(e.doneWithAPart, done)
+		e.saveMu.Unlock()
+	}
+	return nil
+}
 
 // part is a download of part n, as folder into `into`.
 func part(env Env, srv *httptest.Server, n int, into string) *Download {
@@ -125,7 +147,7 @@ func TestASplit7zExtractsAcrossItsPartsDownloads(t *testing.T) {
 	for _, name := range []string{"split-solid.7z", "split-nonsolid.7z"} {
 		whole, srv := serveParts(t, name)
 		into := t.TempDir()
-		env := &setEnv{testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+		env := &setEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
 		p := map[int]*Download{}
 		for _, n := range []int{3, 1, 2} {
 			p[n] = part(env, srv, n, into)
@@ -144,6 +166,14 @@ func TestASplit7zExtractsAcrossItsPartsDownloads(t *testing.T) {
 		if got := names(t, into); len(got) != 1 || got[0] != "Game" {
 			t.Fatalf("%s: left in the folder: %v", name, got)
 		}
+		// Part 1's record of the Entries done was on disk before the last .part went.
+		p[1].mu.Lock()
+		done := len(p[1].st.Folder.Done)
+		p[1].mu.Unlock()
+		if env.saveMu.Lock(); env.doneWithAPart != done {
+			t.Fatalf("%s: part 1 saved with %d of its %d Entries done before the parts went", name, env.doneWithAPart, done)
+		}
+		env.saveMu.Unlock()
 		if v := s.Summary(); v.Files != 4 || v.Of != 4 || v.Parts != 3 || len(v.Missing) > 0 {
 			t.Fatalf("%s: set %+v", name, v)
 		}
@@ -156,7 +186,7 @@ func TestASplit7zExtractsAcrossItsPartsDownloads(t *testing.T) {
 		}
 		// Both are read front to back only: the solid one is one stream, and
 		// the other's largest file is longer than a part.
-		if !s.Sequential() {
+		if !s.inOrder.Load() {
 			t.Fatalf("%s: not sequential", name)
 		}
 	}
@@ -165,7 +195,7 @@ func TestASplit7zExtractsAcrossItsPartsDownloads(t *testing.T) {
 func TestASplit7zWaitsForAMissingPartAndSaysWhich(t *testing.T) {
 	whole, srv := serveParts(t, "split-nonsolid.7z")
 	into := t.TempDir()
-	env := &setEnv{testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+	env := &setEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
 	p1, p2, p3 := part(env, srv, 1, into), part(env, srv, 2, into), part(env, srv, 3, into)
 	s := NewSet("k", "big.7z")
 	s.SetMembers(map[int]*Download{1: p1, 3: p3})
@@ -204,7 +234,7 @@ func TestAStoppedSetFetchesTheFreedBytesOfItsBlockAgain(t *testing.T) {
 
 	whole, srv := serveParts(t, "split-solid.7z") // one block across all three parts
 	into := t.TempDir()
-	env := &setEnv{testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+	env := &setEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
 	p := map[int]*Download{1: part(env, srv, 1, into), 2: part(env, srv, 2, into), 3: part(env, srv, 3, into)}
 	p[3].Start()
 	p[1].Start()
@@ -257,7 +287,7 @@ func TestARarSetExtractsAcrossItsVolumesDownloads(t *testing.T) {
 		}
 		_, srv := serveFiles(t, src, served)
 		into := t.TempDir()
-		env := &setEnv{testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+		env := &setEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
 		p := map[int]*Download{1: part(env, srv, 1, into), 2: part(env, srv, 2, into), 3: part(env, srv, 3, into)}
 		s := NewSet("k", "big.rar")
 		s.SetMembers(map[int]*Download{1: p[1]})
@@ -291,11 +321,11 @@ func TestWhichNamesAreSetParts(t *testing.T) {
 		}
 	}
 	d := New(&testEnv{}, State{ID: "a", Filename: "x.rar", Dir: `C:\D`})
-	if key, set, part, lone := SetOf(d); key == "" || set != "x.rar" || part != 1 || !lone {
+	if key, set, part, lone := setOf(d); key == "" || set != "x.rar" || part != 1 || !lone {
 		t.Fatalf("x.rar: %q %q %d %v", key, set, part, lone)
 	}
 	r00 := New(&testEnv{}, State{ID: "b", Filename: "x.r00", Dir: `C:\D`})
-	if key, _, part, lone := SetOf(r00); part != 2 || lone || key != func() string { k, _, _, _ := SetOf(d); return k }() {
+	if key, _, part, lone := setOf(r00); part != 2 || lone || key != func() string { k, _, _, _ := setOf(d); return k }() {
 		t.Fatalf("x.r00: %q %d %v", key, part, lone)
 	}
 }
@@ -317,7 +347,7 @@ func TestASplitZipExtractsAcrossItsPartsDownloads(t *testing.T) {
 	} {
 		_, srv := serveFiles(t, c.src, c.served)
 		into := t.TempDir()
-		env := &setEnv{testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+		env := &setEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
 		p := map[int]*Download{}
 		for i, k := range c.keys {
 			p[k] = part(env, srv, i+1, into)
@@ -356,7 +386,7 @@ func TestAnEncryptedSplit7zAsksForItsPassword(t *testing.T) {
 		parts := [][]byte{whole[:size], whole[size : 2*size], whole[2*size:]}
 		srv := serveBytes(t, parts, []string{"big.7z.001", "big.7z.002", "big.7z.003"})
 		into := t.TempDir()
-		env := &setEnv{testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+		env := &setEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
 		p := map[int]*Download{}
 		for n := 1; n <= 3; n++ {
 			p[n] = part(env, srv, n, into)
@@ -392,7 +422,7 @@ func TestAnEncryptedSplit7zAsksForItsPassword(t *testing.T) {
 func TestASplit7zWantsItsLastPartsTailFirst(t *testing.T) {
 	_, srv := serveParts(t, "split-nonsolid.7z")
 	into := t.TempDir()
-	env := &setEnv{testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+	env := &setEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
 	p := map[int]*Download{}
 	for n := 1; n <= 3; n++ {
 		p[n] = part(env, srv, n, into)
@@ -401,13 +431,13 @@ func TestASplit7zWantsItsLastPartsTailFirst(t *testing.T) {
 	s.SetMembers(p)
 	s.Start()
 	defer s.Stop()
-	if s.Tail() != nil {
+	if s.tail.Load() != nil {
 		t.Fatal("a tail wanted before part 1 has said how the parts lie")
 	}
 	p[1].Start()
-	waitUntil(t, "the set wants part 3's tail", func() bool { return s.Tail() == p[3] })
+	waitUntil(t, "the set wants part 3's tail", func() bool { return s.tail.Load() == p[3] })
 	p[3].Start()
-	waitUntil(t, "the list of files is read: no part's tail is wanted", func() bool { return s.Tail() == nil })
+	waitUntil(t, "the list of files is read: no part's tail is wanted", func() bool { return s.tail.Load() == nil })
 }
 
 // A block that comes out wrong is fetched again once; wrong a second time, the
@@ -442,7 +472,7 @@ func TestASetsBlockWrongTwicePausesItsParts(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	into := t.TempDir()
-	env := &setEnv{testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+	env := &setEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
 	p := map[int]*Download{1: part(env, srv, 1, into), 2: part(env, srv, 2, into), 3: part(env, srv, 3, into)}
 	s := NewSet("k", "big.7z")
 	s.SetMembers(p)
@@ -461,7 +491,9 @@ func TestASetsBlockWrongTwicePausesItsParts(t *testing.T) {
 	}
 	waitUntil(t, "part 2 paused", func() bool {
 		startQueued()
-		return p[2].Summary().Status == StatusPaused
+		// pauseWith says why just after it stops the part.
+		s := p[2].Summary()
+		return s.Status == StatusPaused && s.Error != ""
 	})
 	if e := p[2].Summary().Error; !strings.Contains(e, "came out wrong twice") {
 		t.Fatalf("part 2 paused with %q, want the Entry wrong twice", e)
@@ -482,4 +514,58 @@ func TestASetsBlockWrongTwicePausesItsParts(t *testing.T) {
 		return v != nil && v.Finished
 	})
 	checkSet(t, whole, filepath.Join(into, "Game"))
+}
+
+// A RAR in volumes stopped partway through (an engine restart) has its front
+// freed, where its headers are: the next run fetches the freed bytes again and
+// extracts it from the start, instead of taking it for something else.
+func TestARarSetStoppedAfterFreeingItsFrontStartsOver(t *testing.T) {
+	was, wasStep := archive.LargeEntry, archive.FreeStep
+	archive.LargeEntry, archive.FreeStep = 1<<10, 4<<10
+	t.Cleanup(func() { archive.LargeEntry, archive.FreeStep = was, wasStep })
+
+	seven, err := os.ReadFile(filepath.Join("..", "archive", "testdata", "solid.7z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var src, served []string
+	for i := 1; i <= 3; i++ {
+		src, served = append(src, fmt.Sprintf("volume.part%d.rar", i)), append(served, fmt.Sprintf("big.part%d.rar", i))
+	}
+	_, srv := serveFiles(t, src, served)
+	into := t.TempDir()
+	env := &setEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+	p := map[int]*Download{1: part(env, srv, 1, into), 2: part(env, srv, 2, into), 3: part(env, srv, 3, into)}
+	p[1].Start()
+	waitUntil(t, "part 1 completed", completed(p[1]))
+	s := NewSet("k", "big.rar")
+	s.SetMembers(p)
+	s.Start()
+	waitUntil(t, "part 1's front freed behind the decoder", func() bool {
+		f := p[1].State().Folder
+		return f != nil && len(f.Freed) > 0 && f.Freed[0].Start == 0
+	})
+	s.Stop()
+	s.SetMembers(nil)
+	if v := s.Summary(); v != nil && v.Finished {
+		t.Skip("extracted before it could be stopped")
+	}
+
+	s = NewSet("k", "big.rar")
+	s.SetMembers(p)
+	s.Start()
+	defer s.Stop()
+	waitUntil(t, "set finished", func() bool {
+		for _, d := range p {
+			if st := d.Summary().Status; st == "" || st == StatusQueued || st == StatusPaused {
+				d.Start()
+			}
+		}
+		v := s.Summary()
+		return v != nil && v.Finished
+	})
+	if f := p[1].State().Folder; f == nil || !f.On {
+		t.Fatalf("part 1's folder turned off: %+v", f)
+	}
+	checkSet(t, seven, filepath.Join(into, "big", "Game"))
 }

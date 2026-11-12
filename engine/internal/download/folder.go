@@ -40,6 +40,12 @@ type Folder struct {
 	Password Secret `json:"password,omitempty"` // until extraction is finished
 	Ask      string `json:"ask,omitempty"`
 
+	// Archive keeping (ADR 0007): the choice, "" for the archiveKeeping
+	// setting's, and what Automatic decided when extraction started
+	// (KeepUntil or KeepFree, "" until then), so a restart keeps to it.
+	Keep    string `json:"keep,omitempty"`
+	Keeping string `json:"keeping,omitempty"`
+
 	Moving    string `json:"moving,omitempty"`    // the folder it is moving to, until it has
 	MoveError string `json:"moveError,omitempty"` // why the last move didn't happen
 	MoveOut   string `json:"moveOut,omitempty"`   // where a move between drives copies the folder to, for a retry after a crash
@@ -47,6 +53,37 @@ type Folder struct {
 }
 
 func (f *Folder) locked() bool { return f != nil && len(f.Freed) > 0 }
+
+// The values of archive keeping: Folder.Keep and the archiveKeeping setting.
+const (
+	KeepAuto  = "auto"           // keep it until extracted when the drives have room, else free it
+	KeepFree  = "free"           // free its bytes as they are extracted (ADR 0006)
+	KeepUntil = "untilExtracted" // free nothing until every Entry is extracted, then delete it
+	KeepAfter = "keep"           // free nothing, and keep it under its own name afterwards
+)
+
+// KeepChoice reports whether k is one of the values of archive keeping.
+func KeepChoice(k string) bool {
+	return k == KeepAuto || k == KeepFree || k == KeepUntil || k == KeepAfter
+}
+
+// keepChoice is the archive keeping chosen, def (the setting's) when none
+// is. An old state file has none, and so takes the setting's too.
+func (f *Folder) keepChoice(def string) string { return cmp.Or(f.Keep, def, KeepAuto) }
+
+// keepNow is the archive keeping in force: KeepFree once anything is freed,
+// as those bytes are gone whatever was chosen; for Automatic, what it
+// decided, "" until it has.
+func (f *Folder) keepNow(def string) string {
+	switch k := f.keepChoice(def); {
+	case f.locked():
+		return KeepFree
+	case k == KeepAuto:
+		return f.Keeping
+	default:
+		return k
+	}
+}
 
 func (f *Folder) clone() *Folder {
 	if f == nil {
@@ -71,6 +108,13 @@ type FolderSummary struct {
 	Ask     string      `json:"ask,omitempty"` // AskPassword, AskWrong: the card asks for the archive's password
 	Set     *SetSummary `json:"set,omitempty"` // a part of a split archive: what its Set has done
 	Why     string      `json:"why,omitempty"` // why the switch can't change: locked, not a .zip, .7z or .rar, a checksum typed, no ranges
+
+	// Archive keeping: the choice (the setting's when none is made), what it
+	// does now (for Automatic what it decided, "" until then; KeepFree once
+	// anything is freed), and that it can't change any more, as bytes are freed.
+	Keep      string `json:"keep,omitempty"`
+	Keeping   string `json:"keeping,omitempty"`
+	KeepFixed bool   `json:"keepFixed,omitempty"`
 
 	Moving      string `json:"moving,omitempty"`      // the folder it is moving to, until it has
 	MovingNow   bool   `json:"movingNow,omitempty"`   // copying to another drive right now
@@ -119,25 +163,6 @@ func (d *Download) SetArchivePassword(password string) error {
 	return nil
 }
 
-// askPassword has extraction wait for a password, the first one or after a
-// wrong one: the download goes on, as nothing is freed until it opens.
-func (d *Download) askPassword(fr *folderRun, wrong bool) (bool, error) {
-	if fr.x != nil {
-		fr.x.Close()
-		fr.x = nil
-	}
-	fr.arc = nil
-	d.mu.Lock()
-	f := d.st.Folder
-	f.Password, f.Ask = "", AskPassword
-	if wrong {
-		f.Ask = AskWrong
-	}
-	d.mu.Unlock()
-	d.env.Changed(d)
-	return true, nil
-}
-
 // folderSummaryLocked is the toggle Details shows: for a download whose name
 // ends in .zip, .7z or .rar, or once the mode was asked for, with why it can't change.
 func (d *Download) folderSummaryLocked() *FolderSummary {
@@ -153,11 +178,15 @@ func (d *Download) folderSummaryLocked() *FolderSummary {
 	if d.set != nil {
 		s.Set = d.set.Summary()
 	}
+	def := d.keepDefault()
+	f := cmp.Or(d.st.Folder, &Folder{})
+	s.Keep, s.Keeping, s.KeepFixed = f.keepChoice(def), f.keepNow(def), d.keepFixedLocked()
 	if s.On && s.Out != "" {
 		s.Refetch = d.moveRefetchLocked()
 	}
 	if fr := d.fold; fr != nil && s.On && s.Into != "" && d.set == nil && !fr.finished {
-		s.Extracted = sumRanges(d.st.Folder.Freed)
+		// A kept archive frees nothing: what is extracted is counted instead.
+		s.Extracted = max(sumRanges(d.st.Folder.Freed), fr.passed)
 		d.pace.add(time.Now(), s.Extracted)
 		switch {
 		case fr.arc == nil:
@@ -295,7 +324,7 @@ func (d *Download) folderOffLocked() {
 		// Nothing starts it again with the mode off: close it, so its
 		// decompressor and its files in the output folder are let go.
 		d.parked = nil
-		p.x.Close()
+		p.ex.close()
 		if p.file != nil {
 			p.file.Close()
 		}
@@ -309,6 +338,60 @@ func (d *Download) folderOffLocked() {
 	if d.plan != nil {
 		d.plan.prefer, d.plan.bounds = -1, nil
 	}
+}
+
+// keepFixedLocked: bytes of the archive are freed, in this download or (a
+// part of a split archive) in another part of its Set, so archive keeping
+// can't change any more.
+func (d *Download) keepFixedLocked() bool {
+	return d.st.Folder.locked() || d.set != nil && d.set.Summary() != nil && d.set.Summary().Locked
+}
+
+// SetArchiveKeeping sets what a Download as folder does with its archive's
+// bytes (KeepAuto, KeepFree, KeepUntil or KeepAfter), until anything is freed.
+func (d *Download) SetArchiveKeeping(k string) error {
+	if !KeepChoice(k) {
+		return fmt.Errorf("not a way to keep the archive: %q", k)
+	}
+	// Not while Entries are being freed: once one is, it can't change.
+	d.xmu.Lock()
+	d.mu.Lock()
+	if d.st.Status == StatusCompleted && !d.inSetLocked() {
+		d.mu.Unlock()
+		d.xmu.Unlock()
+		return errors.New("the download is complete")
+	}
+	fixed := d.keepFixedLocked()
+	if !fixed {
+		if d.st.Folder == nil {
+			d.st.Folder = &Folder{}
+		}
+		d.st.Folder.Keep, d.st.Folder.Keeping = k, ""
+	}
+	d.mu.Unlock()
+	d.xmu.Unlock()
+	if fixed {
+		//lint:ignore ST1005 shown to the user as is, like the pause messages
+		return errors.New(lockedNote)
+	}
+	d.env.Changed(d)
+	return nil
+}
+
+// keepDefault is the archiveKeeping setting, KeepAuto for a download with no
+// engine (a test's).
+func (d *Download) keepDefault() string {
+	if d.env == nil {
+		return KeepAuto
+	}
+	return d.env.ArchiveKeeping()
+}
+
+// keptByAutoLocked: Automatic keeps the archive for now, so falling short of
+// room makes it free the archive instead (Extraction.mayFree), not pause.
+func (d *Download) keptByAutoLocked() bool {
+	f, def := d.st.Folder, d.keepDefault()
+	return d.folderOnLocked() && f.keepChoice(def) == KeepAuto && f.keepNow(def) == KeepUntil
 }
 
 // SetFolderInto sets the folder to extract into (the output folder goes
@@ -418,23 +501,26 @@ func (d *Download) folderSettledLocked() bool {
 	return !d.folderOnLocked() || d.fold != nil && d.fold.finished
 }
 
-// folderRun extracts while the download runs, on its own goroutine.
+// folderRun is a download's own Extraction while the download runs, on its
+// own goroutine. What Details shows of it is copied out under d.mu after
+// each step, as the Extraction takes no lock.
 type folderRun struct {
-	need     int64 // bytes of the archive's tail the central directory needs
-	arc      *archive.Archive
-	x        *archive.Extractor
-	finished bool     // every Entry done (guarded by d.mu)
-	again    bool     // a large Entry has more bytes on disk to extract now (folderLoop only)
-	idle     bool     // the last look found nothing to extract: it waits for the download (guarded by d.mu)
-	keep     bool     // stopping parks it instead of closing it (guarded by d.mu)
-	file     *os.File // the .part, open while parked
+	ex       *Extraction
+	arc      *archive.Archive // ex's list of files, once read (guarded by d.mu)
+	finished bool             // every Entry done (guarded by d.mu)
+	idle     bool             // the last look found nothing to extract: it waits for the download (guarded by d.mu)
+	again    bool             // a large Entry has more bytes on disk to extract now (folderLoop only)
+	keep     bool             // stopping parks it instead of closing it (guarded by d.mu)
+	paused   error            // why the step pauses the download: an Entry came out wrong twice (guarded by d.mu)
+	passed   int64            // bytes of the archive extracted, freed or kept (guarded by d.mu)
+	file     *os.File         // the .part, open while parked
 
 	cancel context.CancelFunc
 	done   chan struct{}
 }
 
-// afterExtract is called after each extraction that finished Entries, with
-// the .part and how many of its bytes have been downloaded; tests set it.
+// afterExtract is called after each extraction that freed bytes, with the
+// .part and how many of its bytes have been downloaded; tests set it.
 var afterExtract func(f *os.File, onDisk int64)
 
 // startFolderLocked starts extracting, with the file open and the mode on.
@@ -453,14 +539,29 @@ func (d *Download) startFolderLocked() {
 		p.cancel, p.done, p.keep, p.again = cancel, make(chan struct{}), false, false
 		d.fold = p
 		d.plan.bounds = entryBounds(p.arc)
-		d.wantTailLocked(p)
+		d.wantTailLocked(p.ex.need)
 		go d.folderLoop(fctx, p)
 		return
 	}
-	fr := &folderRun{need: min(archive.TailGuess, d.st.Size), cancel: cancel, done: make(chan struct{})}
+	ex := &Extraction{name: d.st.Filename, who: "download " + d.st.ID, file: archive.Sparse(d.file),
+		parts: archive.NewParts([]int64{d.st.Size}), head: archive.HeadLen, mark: d.markLocked(),
+		need: min(archive.TailGuess, d.st.Size), tail: -1}
+	fr := &folderRun{ex: ex, cancel: cancel, done: make(chan struct{})}
 	d.fold = fr
-	d.wantTailLocked(fr)
+	d.wantTailLocked(ex.need)
 	go d.folderLoop(fctx, fr)
+}
+
+// RestartCost is the bytes an engine restart now would download again: those
+// freed of a large Entry under way, whose decompressor lives only in memory,
+// also while parked. 0 for a part of a Set (see Set.RestartCost).
+func (d *Download) RestartCost() int64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if fr := cmp.Or(d.fold, d.parked); fr != nil {
+		return fr.ex.streaming.Load()
+	}
+	return 0
 }
 
 // stopFolder stops extracting and waits until it has, so the file can close.
@@ -490,30 +591,26 @@ func (d *Download) dropParked() {
 	if p == nil {
 		return
 	}
-	p.x.Close()
+	p.ex.close()
 	if p.file != nil {
 		p.file.Close()
 	}
 }
 
-// wantTailLocked has the tail fetched before anything else when it isn't on
-// disk yet, and reports whether it is, and the head (archive.HeadLen) too.
-// The head comes with the front, as the download fetches it anyway.
-func (d *Download) wantTailLocked(fr *folderRun) bool {
-	start := d.st.Size - fr.need
-	if onDisk(d.plan.ranges(), start, d.st.Size) {
-		d.plan.prefer = -1
-		return onDisk(d.plan.ranges(), 0, min(archive.HeadLen, d.st.Size))
+// wantTailLocked has the archive's last need bytes fetched before anything
+// else when they aren't on disk yet. The Extraction asks for them too, but
+// only once it runs: the first claims come before that.
+func (d *Download) wantTailLocked(need int64) {
+	if start := d.st.Size - need; !onDisk(d.plan.ranges(), start, d.st.Size) {
+		d.plan.cut(start)
+		d.plan.prefer = start
 	}
-	d.plan.cut(start)
-	d.plan.prefer = start
-	return false
 }
 
 func (d *Download) folderLoop(ctx context.Context, fr *folderRun) {
 	defer func() {
 		d.mu.Lock()
-		park := fr.keep && fr.x != nil && !fr.finished
+		park := fr.keep && fr.ex.x != nil && !fr.finished
 		if park {
 			d.parked = fr
 		}
@@ -521,10 +618,10 @@ func (d *Download) folderLoop(ctx context.Context, fr *folderRun) {
 			d.fold = nil
 		}
 		d.mu.Unlock()
-		if fr.x != nil && !park {
+		if !park {
 			// A large Entry under way is dropped: the next run puts its
 			// freed bytes back in the plan and extracts it from its front.
-			fr.x.Close()
+			fr.ex.close()
 		}
 		close(fr.done)
 	}()
@@ -552,102 +649,14 @@ func (d *Download) folderLoop(ctx context.Context, fr *folderRun) {
 	}
 }
 
-// folderStep does what can be done now: read the central directory once its
-// bytes are there, then extract the Entries whose bytes are. more is false
+// folderStep steps the Extraction with what is on disk now. more is false
 // once the mode is off.
 func (d *Download) folderStep(ctx context.Context, fr *folderRun) (more bool, err error) {
-	d.mu.Lock()
-	if !d.folderOnLocked() || d.set != nil {
-		d.mu.Unlock()
-		return false, nil // off, or it turned out a part of a Set, which extracts it
-	}
-	f := d.st.Folder
-	file, size, name := d.file, d.st.Size, d.st.Filename
-	into, out := f.Into, f.Out
-	password, asking := string(f.Password), f.Ask != ""
-	tail := fr.arc != nil || d.wantTailLocked(fr)
-	d.mu.Unlock()
-
-	if fr.arc == nil {
-		if !tail || asking {
-			return true, nil
-		}
-		n, err := archive.NeedWith(file, size, fr.need, password)
-		if err == nil && n > fr.need {
-			fr.need = n
-			d.mu.Lock()
-			d.wantTailLocked(fr)
-			d.mu.Unlock()
-			return true, nil
-		}
-		var a *archive.Archive
-		if err == nil {
-			a, err = archive.ReadWith(file, size, password)
-		}
-		switch {
-		case errors.Is(err, archive.ErrWrongPassword):
-			return d.askPassword(fr, true)
-		case errors.Is(err, archive.ErrPassword):
-			return d.askPassword(fr, false)
-		case err != nil:
-			return d.folderFallback(err)
-		}
-		d.mu.Lock()
-		fr.arc = a // under the lock: Details reads it for the move warning
-		if d.folderOnLocked() {
-			d.plan.bounds = entryBounds(a)
-		}
-		d.reclaimLocked(a)
-		f.Renamed = nil
-		for _, r := range a.Renamed {
-			f.Renamed = append(f.Renamed, r.From+" → "+r.To)
-		}
-		d.mu.Unlock()
-		d.env.Changed(d)
-	}
-	if into == "" {
-		return true, nil // extraction waits for the folder
-	}
-
-	if fr.x == nil {
-		if out == "" {
-			if out, err = d.nameOut(fr.arc, into, name); err != nil {
-				return false, err
-			}
-		} else if !exists(out) {
-			return false, errFolderRemoved
-		}
-		d.mu.Lock()
-		done := slices.Clone(f.Done)
-		d.mu.Unlock()
-		if err := checkSpace(into, spaceNeeded(fr.arc, done)); err != nil {
-			return false, err
-		}
-		x, err := archive.NewExtractor(fr.arc, file, out, done)
-		if errors.Is(err, archive.ErrWrongPassword) {
-			return d.askPassword(fr, true)
-		}
-		if err != nil {
-			return d.folderFallback(err)
-		}
-		x.Mark = d.markFunc()
-		fr.x = x
-		d.mu.Lock()
-		f.Files, f.Of = x.Progress()
-		d.mu.Unlock()
-		d.env.Changed(d)
-	}
-	if fr.finished {
-		return true, nil
-	}
-	if !exists(out) {
-		return false, errFolderRemoved
-	}
-
+	// Not while SetFolder or SetHashes change what may be freed.
 	d.xmu.Lock()
 	defer d.xmu.Unlock()
 	d.mu.Lock()
-	on := d.folderOnLocked() // it may have gone off since
+	on := d.folderOnLocked() && d.set == nil // it may have turned out a part of a Set, which extracts it
 	missing := d.plan.ranges()
 	d.mu.Unlock()
 	if !on {
@@ -657,27 +666,41 @@ func (d *Download) folderStep(ctx context.Context, fr *folderRun) (more bool, er
 	for i, r := range missing {
 		am[i] = archive.Range{Start: r.Start, End: r.End}
 	}
-	res, xerr := fr.x.Extract(ctx, am)
-	fr.again = res.More
-	perr := d.folderRecord(fr, res)
-	if errors.Is(xerr, archive.ErrWrongPassword) && perr == nil {
-		return d.askPassword(fr, true)
+	again, err := fr.ex.step(ctx, []archivePart{d}, am)
+
+	d.mu.Lock()
+	read := fr.arc == nil && fr.ex.arc != nil
+	fr.arc, fr.finished, fr.idle, fr.again = fr.ex.arc, fr.ex.finished, fr.ex.idle, again
+	fr.passed = fr.ex.passed
+	if read && d.folderOnLocked() {
+		d.plan.bounds = entryBounds(fr.arc)
 	}
-	if xerr != nil && !exists(out) {
-		xerr = errFolderRemoved
+	onDisk := d.st.Size - d.plan.remaining()
+	file := d.file
+	paused := fr.paused
+	fr.paused = nil
+	d.mu.Unlock()
+	if fr.ex.freed && afterExtract != nil {
+		afterExtract(file, onDisk)
 	}
-	return true, cmp.Or(perr, xerr)
+
+	var u *archive.Unsupported
+	switch {
+	case errors.As(err, &u):
+		return d.folderFallback(u)
+	case err != nil && fr.arc == nil:
+		return false, fmt.Errorf("reading the archive's list of files: %w", err)
+	case paused != nil:
+		return true, paused
+	}
+	return true, err
 }
 
 var errFolderRemoved = &pauseError{msg: "Paused: the folder was removed"}
 
 // folderFallback turns the mode off for an archive it can't handle: nothing
 // has been freed, so the download goes on as a normal one.
-func (d *Download) folderFallback(err error) (bool, error) {
-	var u *archive.Unsupported
-	if !errors.As(err, &u) {
-		return false, fmt.Errorf("reading the archive's list of files: %w", err)
-	}
+func (d *Download) folderFallback(u *archive.Unsupported) (bool, error) {
 	d.mu.Lock()
 	d.folderOffLocked()
 	d.st.Folder.On, d.st.Folder.Note = false, u.Reason+", so it is downloaded as a "+strings.ToLower(filepath.Ext(d.st.Filename))
@@ -687,89 +710,6 @@ func (d *Download) folderFallback(err error) (bool, error) {
 	return false, nil
 }
 
-// nameOut picks and makes the output folder: the archive's Root, or else the
-// archive's name without its extension, numbered if taken.
-func (d *Download) nameOut(a *archive.Archive, into, zipName string) (string, error) {
-	base := a.Root
-	if base == "" {
-		base = zipName[:len(zipName)-len(filepath.Ext(zipName))]
-	}
-	if strings.TrimSpace(base) == "" {
-		base = "download" // an archive named only ".zip"
-	}
-	if err := os.MkdirAll(into, 0o755); err != nil {
-		return "", err
-	}
-	out := filepath.Join(into, uniqueName(into, base, ""))
-	if err := os.Mkdir(out, 0o755); err != nil {
-		return "", err
-	}
-	d.mu.Lock()
-	d.st.Folder.Out = out
-	d.mu.Unlock()
-	d.env.Changed(d)
-	return out, nil
-}
-
-// spaceNeeded is the room extraction still needs: every Entry's size plus the
-// largest one's compressed size as a margin, less what is already extracted.
-func spaceNeeded(a *archive.Archive, done []int64) int64 {
-	was := map[int64]bool{}
-	for _, s := range done {
-		was[s] = true
-	}
-	n := a.Total + a.LargestCompressed
-	for _, e := range a.Entries {
-		if was[e.Start] {
-			n -= e.Size
-		}
-	}
-	return n
-}
-
-// folderRecord saves what an extraction did. An Entry whose bytes came out
-// wrong is fetched again; the second time, the download pauses.
-func (d *Download) folderRecord(fr *folderRun, res archive.Result) error {
-	d.mu.Lock()
-	f := d.st.Folder
-	for _, e := range res.Done {
-		f.Done = append(f.Done, e.Start)
-	}
-	for _, r := range res.Freed {
-		f.Freed = append(f.Freed, Range{r.Start, r.End})
-	}
-	f.Freed = mergeRanges(f.Freed)
-	f.Files, f.Of = fr.x.Progress()
-	var err error
-	for _, fl := range res.Failed {
-		d.refetchLocked(Range{fl.Range.Start, fl.Range.End})
-		if i := slices.Index(f.Failed, fl.Range.Start); i >= 0 {
-			// Its next try after a resume gets another fetch first.
-			f.Failed = slices.Delete(f.Failed, i, i+1)
-			err = &pauseError{msg: fmt.Sprintf("Paused: %s came out wrong twice (%s). Resume to download it again", fl.Entry.Name, fl.Reason)}
-		} else {
-			f.Failed = append(f.Failed, fl.Range.Start)
-			log.Printf("download %s: %s, fetching it again", d.st.ID, fl)
-		}
-	}
-	fr.finished = fr.x.Finished()
-	if fr.finished {
-		f.Password = "" // kept only as long as it's needed
-	}
-	onDisk := d.st.Size - d.plan.remaining()
-	file := d.file
-	changed := len(res.Done) > 0 || len(res.Freed) > 0 || len(res.Failed) > 0
-	fr.idle = !changed && !res.More
-	d.mu.Unlock()
-	if changed {
-		if afterExtract != nil && len(res.Freed) > 0 {
-			afterExtract(file, onDisk)
-		}
-		d.env.Changed(d)
-	}
-	return err
-}
-
 // thousands writes n with commas: 1,280.
 func thousands(n int) string {
 	s := fmt.Sprint(n)
@@ -777,47 +717,4 @@ func thousands(n int) string {
 		s = s[:i] + "," + s[i:]
 	}
 	return s
-}
-
-// refetchLocked has the bytes r fetched again: those on disk go back in the
-// plan, and those freed are no longer counted as freed.
-func (d *Download) refetchLocked(r Range) {
-	for _, p := range subtractRanges([]Range{r}, d.plan.ranges()) {
-		d.plan.add(p)
-	}
-	f := d.st.Folder
-	f.Freed = subtractRanges(f.Freed, []Range{r})
-}
-
-// reclaimLocked puts back in the plan the bytes freed of Entries not done: a
-// large Entry stopped partway (a pause, a crash, a failed run) is extracted
-// again from its front, so the bytes freed behind its decompressor are
-// fetched again first.
-func (d *Download) reclaimLocked(a *archive.Archive) {
-	f := d.st.Folder
-	if len(f.Freed) == 0 {
-		return
-	}
-	done := map[int64]bool{}
-	for _, s := range f.Done {
-		done[s] = true
-	}
-	var lost []Range
-	for _, e := range a.Entries {
-		if done[e.Start] {
-			continue
-		}
-		n := len(lost)
-		for _, r := range f.Freed {
-			if r.Start < e.End && e.Start < r.End {
-				lost = append(lost, Range{max(r.Start, e.Start), min(r.End, e.End)})
-			}
-		}
-		if len(lost) > n {
-			log.Printf("download %s: %s was stopped partway, fetching its freed bytes again", d.st.ID, e.Name)
-		}
-	}
-	for _, r := range lost {
-		d.refetchLocked(r)
-	}
 }

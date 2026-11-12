@@ -77,6 +77,7 @@ type folderParams struct {
 	ID   string  `json:"id"`
 	On   *bool   `json:"on"`
 	Into *string `json:"into"` // the folder to extract into, confirmed by the user
+	Keep *string `json:"keep"` // archive keeping: download.KeepAuto, KeepFree, KeepUntil or KeepAfter
 }
 
 type helloParams struct {
@@ -246,12 +247,18 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, err
 		}
 		return nil, d.SetHashes(p.SHA256, p.MD5)
+	case "retryExtraction":
+		p, err := decode[idParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.RetryExtraction(p.ID)
 	case "setFolder":
 		p, err := decode[folderParams](raw)
 		if err != nil {
 			return nil, err
 		}
-		return nil, e.SetFolder(p.ID, p.On, p.Into)
+		return nil, e.SetFolder(p.ID, p.On, p.Into, p.Keep)
 	case "setArchivePassword":
 		p, err := decode[passwordParams](raw)
 		if err != nil {
@@ -412,6 +419,8 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, err
 		}
 		return nil, winutil.SetAutostart(p.On)
+	case "restartCost": // an update asks before it has the engine quit
+		return e.RestartCost(), nil
 	case "quit":
 		// The caller waits for this process to exit before replacing or removing it.
 		e.reqOnce.Do(func() { close(e.quitReq) })

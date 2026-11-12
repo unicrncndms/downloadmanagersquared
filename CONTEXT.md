@@ -110,6 +110,10 @@ How much a torrent has uploaded divided by its size. Seeding stops when the rati
 A ZIP, 7z or RAR download that is extracted while it downloads, so the user ends up with the extracted folder and never the archive. The archive's bytes are thrown away once the files in them are extracted.
 _Avoid_: Unpack in place, streaming unzip, auto-extract
 
+**Archive keeping**:
+What a Download as folder does with its archive's bytes: free them as it extracts, keep them until it is extracted (interruption recovery: an update, reboot or crash then downloads nothing again), or keep the archive afterwards. Automatic, the default, keeps it until extracted when the drive has room, and frees it otherwise.
+_Avoid_: Backup, cache
+
 **Entry**:
 One file or folder stored inside a ZIP archive. In a 7z, an Entry is a block: packed bytes that decompress into one or more files, front to back. A RAR is one Entry: the whole archive, as it has no list of files to read first.
 _Avoid_: File (that is the download), member, item

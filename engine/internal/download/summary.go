@@ -78,6 +78,8 @@ type Summary struct {
 	UpSpeed   float64       `json:"upSpeed,omitempty"`
 	InSwarm   bool          `json:"inSwarm,omitempty"` // exchanging pieces with peers right now
 
+	WaitVPN bool `json:"-"` // paused only because no tunnel is up: it resumes by itself, so for the section it needs nobody
+
 	hashResult string // State.HashResult, for the label and note
 	serverSHA  bool   // no checksum pasted: the server's SHA-256 is the one checked
 	serverMD   bool   // and its MD5
@@ -88,7 +90,9 @@ type Summary struct {
 	Tone        string  `json:"tone,omitempty"`
 	Note        string  `json:"note,omitempty"` // after the progress numbers, or alone when there are none
 	Actions     Actions `json:"actions"`
-	PartialFile bool    `json:"partialFile"` // Remove asks whether to delete it
+	PartialFile bool    `json:"partialFile"`     // Remove asks whether to delete it
+	Section     string  `json:"section"`         // which section of the list it is in: needs, active, seeding, queued, paused, done
+	Plain       bool    `json:"plain,omitempty"` // the label says only what the status does, so a UI may leave it off
 }
 
 // FileSummary is one file of a torrent.
@@ -110,7 +114,7 @@ func (d *Download) Summary() Summary {
 		serverSHA: d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.SHA256 != "",
 		serverMD:  d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.MD5 != "",
 		Added:     d.st.Added, Finished: d.st.Finished, VPN: d.st.VPN,
-		Folder: d.folderSummaryLocked(), Limit: d.st.Limit,
+		Folder: d.folderSummaryLocked(), Limit: d.st.Limit, WaitVPN: d.st.WaitVPN,
 		Mirrors: slices.Clone(d.st.Mirrors), Group: d.st.Group, GroupName: d.st.GroupName,
 	}
 	if s.Group == "" && s.Filename != "" {

@@ -61,7 +61,7 @@ func TestSetFolderOnOnePartAppliesToItsWholeSet(t *testing.T) {
 	ids := addParts(t, e, "a.part1.rar", "a.part2.rar", "a.part3.rar")
 	e.syncSets()
 	on, into := true, t.TempDir()
-	if err := e.SetFolder(ids["a.part2.rar"], &on, &into); err != nil {
+	if err := e.SetFolder(ids["a.part2.rar"], &on, &into, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.syncSets()
@@ -78,7 +78,7 @@ func TestSetFolderOnOnePartAppliesToItsWholeSet(t *testing.T) {
 		t.Fatalf("the parts are in %d groups and %d sets, want one of each", len(groups), len(e.sets))
 	}
 	off := false
-	if err := e.SetFolder(ids["a.part1.rar"], &off, nil); err != nil {
+	if err := e.SetFolder(ids["a.part1.rar"], &off, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	for n, id := range ids {
@@ -242,10 +242,10 @@ func TestASetSwitchedToAFolderLateStaysOneSetAndStaysFinished(t *testing.T) {
 	}
 	// The switch, then the folder, as the group card sends them: to a part not yet fetched.
 	on, into := true, t.TempDir()
-	if err := e.SetFolder(ids[1], &on, nil); err != nil {
+	if err := e.SetFolder(ids[1], &on, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.SetFolder(ids[1], nil, &into); err != nil {
+	if err := e.SetFolder(ids[1], nil, &into, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.queue.Resume(ids[1])
@@ -304,7 +304,7 @@ func TestAPartAddedAfterTheSwitchJoinsItsSet(t *testing.T) {
 	ds := []*download.Download{add(names[1]), add(names[2])}
 	e.syncSets()
 	on, into := true, t.TempDir()
-	if err := e.SetFolder(ds[0].ID(), &on, &into); err != nil {
+	if err := e.SetFolder(ds[0].ID(), &on, &into, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.syncSets()
@@ -344,7 +344,7 @@ func TestRemovingASetsPartsWithFilesLeavesNoPart(t *testing.T) {
 	}
 	e.syncSets()
 	on, into := true, t.TempDir()
-	if err := e.SetFolder(ds[0].ID(), &on, &into); err != nil {
+	if err := e.SetFolder(ds[0].ID(), &on, &into, nil); err != nil {
 		t.Fatal(err)
 	}
 	parts := func() (n int) {

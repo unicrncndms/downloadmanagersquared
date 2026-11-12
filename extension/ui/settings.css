@@ -67,6 +67,10 @@ h3 { display: flex; align-items: center; margin: 0 0 var(--s2); font-size: 12px;
   border-radius: var(--r); background: var(--bg); }
 .conn-more label, .conn-more > span { display: inline-flex; align-items: center; gap: 6px; }
 .conn-more input[type=number] { width: 60px; }
+.conn-more .colours { display: inline-flex; gap: 6px; }
+.conn-more .colours input { appearance: none; width: 20px; height: 20px; margin: 0; border-radius: var(--r); background: currentColor; cursor: pointer; border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--line); }
+.conn-more .colours input:checked { box-shadow: 0 0 0 2px var(--text); }
+.conn-more .colours input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .conn-more .limits { color: var(--muted); }
 .conn-more .vpn { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .conn-more .vpn input.port { width: 72px; }

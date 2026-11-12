@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"fyne.io/systray"
+	"golang.org/x/sys/windows"
 
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/engine"
@@ -70,6 +71,10 @@ func onReady(e *engine.Engine, w Window) {
 			case <-resume.item.ClickedCh:
 				go e.ResumeAll()
 			case <-quit.ClickedCh:
+				if w := e.RestartCost().Warning("Quitting now"); w != "" && winutil.Dialog(winutil.AppName, w+"\n\nQuit anyway?",
+					windows.MB_OKCANCEL|windows.MB_ICONWARNING|windows.MB_DEFBUTTON2) != winutil.IDOK {
+					continue
+				}
 				e.QuitByUser()
 				w.Close()
 				systray.Quit()

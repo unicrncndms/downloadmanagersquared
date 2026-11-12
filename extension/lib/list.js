@@ -30,37 +30,22 @@ function percent(d) {
   return d.size > 0 ? Math.min(100, (d.done / d.size) * 100) : 0;
 }
 
+// The list's sections, in the order they are listed. The engine puts each
+// download in one (its "section", see Present in the engine); the headings are
+// ours. Folded sections are saved by heading, so the words must not change.
+const SECTION_KEYS = ["needs", "active", "seeding", "queued", "paused", "done"];
+const SECTIONS = { needs: "Needs you", active: "Downloading", seeding: "Seeding", queued: "Queue", paused: "Paused", done: "Finished" };
+
 // finished: complete and done with, so it shrinks to one line. A seeding
-// torrent is still at work.
+// torrent is still at work, and so is a part whose archive isn't extracted.
 function finished(d) {
-  // A part of a split archive is done once its set is extracted.
-  return d.status === "completed" && !(d.folder && d.folder.set && !d.folder.set.finished);
+  return d.section === "done";
 }
 
-// The groups, in the order they are listed: what needs you (failed, a pause
-// with a reason, a torrent waiting for its files, a Download as folder
-// waiting for its folder or its archive's password or a part not added, a
-// connection to retry), then downloading, seeding, queued, paused, finished.
+// group is a download's place in the list: its section's number.
 function group(d) {
-  const f = d.kind !== "torrent" && d.folder && d.folder.on ? d.folder : null;
-  const asking = f && !f.into && d.status !== "completed";
-  const stuck = f && !finished(d) && (!!f.ask || !!(f.set && f.set.missing && f.set.missing.length));
-  const retry = Object.values(d.links || {}).some((l) => l.canRetry);
-  if (d.status === "failed" || d.status === "choosing" || asking || stuck || retry || (d.status === "paused" && d.error)) return 0;
-  switch (d.status) {
-    case "running": case "verifying": case "metadata": case "checking": return 1;
-    case "seeding": return 2;
-    case "queued": return 3;
-    case "paused": return 4;
-    case "completed": return finished(d) ? 5 : 1; // a part fetched while its archive extracts
-  }
-  return 1;
-}
-
-// The list's sections, by group: each has a heading over its downloads.
-const SECTIONS = ["Needs you", "Downloading", "Seeding", "Queue", "Paused", "Finished"];
-function sectionName(d) {
-  return SECTIONS[finished(d) ? 5 : Math.min(group(d), 4)];
+  const i = SECTION_KEYS.indexOf(d.section);
+  return i < 0 ? 1 : i;
 }
 
 // tileOf is a row's status tile: its tone (need, run, seed, done, or plain)
@@ -84,74 +69,17 @@ function rowNums(d) {
   return { main: pct || (d.done > 0 ? fmtBytes(d.done) : ""), sub: d.size > 0 ? `${fmtBytes(d.done)} / ${fmtBytes(d.size)}` : "" };
 }
 
-// sortDownloads orders the engine's list (in queue order) by group, newest
-// first within each, except the queued: those in the order they will start.
-function sortDownloads(downloads) {
-  return downloads.map((d, i) => ({ d, i }))
-    .sort((a, b) => group(a.d) - group(b.d) || (group(a.d) === 3 ? a.i - b.i : b.i - a.i))
-    .map((x) => x.d);
-}
-
-// listEntries is what the list draws, in order: a download on its own, or
-// the files of one Metalink or the parts of one split archive together as a group, where the first of them
-// would be. A group down to one file shows that file on its own.
-function listEntries(sorted) {
-  const out = [];
-  const groups = new Map();
-  for (const d of sorted) {
-    if (!d.group) { out.push({ d }); continue; }
-    let g = groups.get(d.group);
-    if (!g) {
-      g = { group: d.group, name: d.groupName || "Metalink", items: [] };
-      groups.set(d.group, g);
-      out.push(g);
-    }
-    g.items.push(d);
-  }
-  return out.map((e) => (e.items && e.items.length === 1 ? { d: e.items[0] }
-    : e.items ? { ...e, items: groupOrder(e.items) } : e));
-}
-
-// groupOrder is the order of a group's files or parts under its row: what
-// needs you, then downloading, seeding, queued, paused, and last whatever is
-// fetched (a part waiting for its archive to extract too); by name within
-// each, so part 2 comes before part 10.
-function groupOrder(items) {
-  const rank = (d) => (group(d) === 0 ? 0 : d.status === "completed" ? 5 : group(d));
-  return [...items].sort((a, b) => rank(a) - rank(b) ||
-    String(a.filename).localeCompare(String(b.filename), undefined, { numeric: true }));
-}
-
-// groupView is a group card's lines: its files added up, the badge of the
-// file that needs the most attention (items come sorted, so the first), and
-// what its buttons can do to the files.
-function groupView(items) {
-  const n = items.length;
-  // A split archive's parts: its Set (engine) knows how many there are and
-  // extracts them once fetched. It also knows about how long they all are
-  // before each has started (its total).
-  const set = items.map((d) => d.folder && d.folder.set).find(Boolean);
-  const known = items.every((d) => d.size > 0);
-  const size = known ? items.reduce((a, d) => a + d.size, 0) : set && set.total > 0 ? set.total : -1;
-  const done = items.reduce((a, d) => a + (d.done || 0), 0);
-  const speed = items.reduce((a, d) => a + (d.status === "running" ? d.speed || 0 : 0), 0);
-  const nDone = items.filter((d) => d.status === "completed").length;
-  const unit = String(items[0].group || "").startsWith("parts:") ? "parts" : "files";
-  const count = set && set.parts ? set.parts : n;
-  const waiting = set && !set.finished; // every part fetched isn't the end: extracting, or a part missing
-  const all = nDone === n && !waiting;
-  const files = nDone === count ? `${count} ${unit}` : `${nDone} of ${count} ${unit} done`;
-  let left = (size > 0 ? `${Math.round(Math.min(100, (done / size) * 100))}% · ${fmtBytes(done)} / ${fmtBytes(size)}` : fmtBytes(done)) + ` · ${files}`;
-  if (waiting && set.of) left += ` · ${set.files} of ${set.of} files extracted`;
-  const can = (k) => items.some((d) => d.actions && d.actions[k]);
-  let label = all ? "Completed" : items[0].label, tone = all ? "ok" : items[0].tone || "";
-  if (waiting && nDone === n) [label, tone] = set.note ? ["Waiting", "warn"] : ["Extracting", ""];
+// groupView is a group card's lines: the engine's summary of its files, with
+// the numbers worded.
+function groupView(g) {
+  const unit = g.parts ? "parts" : "files";
+  const files = g.done === g.count ? `${g.count} ${unit}` : `${g.done} of ${g.count} ${unit} done`;
+  const percent = g.size > 0 ? Math.min(100, (g.got / g.size) * 100) : 0;
+  let left = (g.size > 0 ? `${Math.round(percent)}% · ${fmtBytes(g.got)} / ${fmtBytes(g.size)}` : fmtBytes(g.got)) + ` · ${files}`;
+  if (g.speed > 0 && g.eta > 0) left += ` · ${fmtETA(g.eta)} left`;
   return {
-    left, right: speed > 0 ? `↓ ${fmtSpeed(speed)}` : "", speed,
-    percent: size > 0 ? Math.min(100, (done / size) * 100) : 0,
-    label, tone,
-    pause: can("pause"), resume: can("resume"), finished: all,
-    partialFile: items.some((d) => d.partialFile),
+    left, right: g.speed > 0 ? `↓ ${fmtSpeed(g.speed)}` : "", speed: g.speed, percent,
+    label: g.label, tone: g.tone || "", pause: g.pause, resume: g.resume, finished: g.finished, partialFile: g.partialFile,
   };
 }
 
@@ -160,17 +88,23 @@ function groupView(items) {
 // what it is doing or waiting for (the engine's words, ADR 0003) with the
 // time left. items: one download, or a split archive's parts. null when
 // nothing is being extracted.
-function extractView(items) {
-  const line = (bytes, total, what, eta) => ({
-    percent: total > 0 ? Math.min(100, ((bytes || 0) / total) * 100) : 0,
-    text: [what, eta > 0 ? `${fmtETA(eta)} left` : ""].filter(Boolean).join(" · "),
-  });
+// eta: a split archive's, from its group summary (the later of its pace and
+// the download's), in place of the Set's own pace.
+function extractView(items, eta) {
+  // Labelled, as it sits under the download's own bar: while extracting, how
+  // far it is; else what it waits for (the engine's words).
+  const line = (bytes, total, what, eta, files) => {
+    const percent = total > 0 ? Math.min(100, ((bytes || 0) / total) * 100) : 0;
+    const where = what === "Extracting" ? `${Math.round(percent)}%` : what;
+    return { percent, text: ["Extraction", where, files, eta > 0 ? `${fmtETA(eta)} left` : ""].filter(Boolean).join(" · ") };
+  };
   if (!items.some((d) => d.kind !== "torrent" && d.folder && d.folder.on && d.folder.into)) return null;
   const set = items.map((d) => d.folder.set).find(Boolean);
   if (set) {
     if (set.finished || !(set.note || set.phase)) return null;
     // A part missing or a password wanted: no time left to give.
-    return line(set.extracted, set.total, set.note || set.phase, set.note ? 0 : set.eta);
+    return line(set.extracted, set.total, set.note || set.phase, set.note ? 0 : eta || set.eta,
+      set.of ? `${set.files} of ${set.of} files` : "");
   }
   const d = items[0];
   if (items.length !== 1 || !d.folder.phase) return null;
@@ -218,7 +152,8 @@ function predict(state, method, p) {
   const me = ds.find((d) => d.id === p.id);
   const map = (pick, f) => (ds.some(pick) ? { ...state, downloads: ds.map((d) => (pick(d) ? f(d) : d)) } : state);
   const can = (a) => (d) => !!(d.actions && d.actions[a]);
-  const stopped = (status, label) => (d) => ({ ...d, status, label, tone: "dim", speed: 0, eta: -1, error: status === "queued" ? "" : d.error,
+  // The three labels mirror statusText in engine/internal/download/present.go.
+  const stopped = (status, label) => (d) => ({ ...d, status, section: status, label, plain: true, tone: "dim", speed: 0, eta: -1, error: status === "queued" ? "" : d.error,
     actions: { ...d.actions, pause: status === "queued", resume: status !== "queued" } });
   const paused = stopped("paused", "Paused"), queued = stopped("queued", "Queued");
   switch (method) {
@@ -241,7 +176,7 @@ function predict(state, method, p) {
       const swap = b && b.status === "running" && me.status === "queued";
       const rest = ds.filter((d) => d !== me).map((d) => (swap && d === b ? queued(d) : d));
       const at = b ? ds.filter((d) => d !== me).indexOf(b) : rest.length;
-      rest.splice(at, 0, swap ? { ...me, status: "running", label: "Downloading", tone: "" } : me);
+      rest.splice(at, 0, swap ? { ...me, status: "running", section: "active", label: "Downloading", plain: true, tone: "" } : me);
       return { ...state, downloads: rest };
     }
   }
@@ -429,5 +364,5 @@ function addView(text) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { addLines, addView, groupOrder, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, sortDownloads, listEntries, groupView, extractView, predict, viaLinks, sectionName, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
+  module.exports = { addLines, addView, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
 }

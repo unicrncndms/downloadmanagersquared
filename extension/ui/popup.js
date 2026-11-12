@@ -17,8 +17,6 @@ function showDetail(id, quiet) {
   $("detail").hidden = false;
   document.body.classList.add("detailing");
   if (quiet) return;
-  const c = cards.get(id);
-  if (c) c.whole(); // a finished line has no Details of its own
   if (latest.state) renderDownloads(latest.state);
   // Under the sheet the row would be covered: it goes to the top of what is left of the list.
   const row = $("list").querySelector(".card.detailed");
@@ -292,7 +290,7 @@ $("addBox").addEventListener("submit", async (e) => {
   openAdd(false);
 });
 
-// The list's sections (lib/list.js sectionName): a heading with how many it
+// The list's sections (lib/rows.js): a heading with how many it
 // holds, which folds its rows away. Folded ones are remembered in this browser.
 const FOLDED = "dms.foldedSections";
 const folded = new Set((() => { try { return JSON.parse(localStorage.getItem(FOLDED)) || []; } catch { return []; } })());
@@ -361,51 +359,44 @@ function renderDownloads(state) {
   announced = news.seen;
   if (news.texts.length) $("announce").textContent = news.texts.join(". ");
   const query = $("search").value;
-  const downloads = sortDownloads(all.filter((d) => matchesSearch(d, query)));
+  const res = listRows(state, { query, folded, selected, opened: detail.id });
   const seen = new Set();
   const seenGroups = new Set();
-  const ids = new Set(all.map((d) => d.id));
-  for (const id of selected) if (!ids.has(id)) selected.delete(id);
-  if (detail.id && !ids.has(detail.id)) { // the download opened is gone
+  for (const id of selected) if (!res.selected.has(id)) selected.delete(id);
+  if (res.openedGone) {
     detail.id = "";
     $("detail").hidden = true;
     document.body.classList.remove("detailing");
   }
   const want = []; // the list's nodes, in order
-  shown = [];
-  let head = null, section = "", n = 0, place = 0;
-  for (const e of listEntries(downloads)) {
-    const name = sectionName(e.d || e.items[0]);
-    if (name !== section) {
-      if (head) head.count.textContent = n;
-      [head, section, n, place] = [sectionHead(name), name, 0, 0];
-      want.push(head.root);
+  shown = res.shown;
+  for (const s of res.sections) {
+    const head = sectionHead(s.name);
+    head.count.textContent = s.count;
+    want.push(head.root);
+    for (const row of s.rows) {
+      let c;
+      if (row.d) {
+        seen.add(row.d.id);
+        c = cardFor(row.d.id);
+        c.update(row.d, row.form);
+      } else {
+        seenGroups.add(row.group);
+        for (const i of row.items) seen.add(i.d.id);
+        c = groupCards.get(row.group);
+        if (!c) groupCards.set(row.group, c = makeGroupCard(row.group));
+        c.update(row);
+      }
+      c.number(row.place);
+      if (!s.folded) want.push(c.root);
     }
-    n++;
-    let c;
-    if (e.d) {
-      seen.add(e.d.id);
-      c = cardFor(e.d.id);
-      c.update(e.d);
-    } else {
-      seenGroups.add(e.group);
-      for (const d of e.items) seen.add(d.id);
-      c = groupCards.get(e.group);
-      if (!c) groupCards.set(e.group, c = makeGroupCard(e.group));
-      c.update(e);
-    }
-    c.number(name === "Queue" ? ++place : 0);
-    if (folded.has(name)) continue;
-    want.push(c.root);
-    shown.push(e.d ? [e.d.id] : e.items.map((d) => d.id));
   }
-  if (head) head.count.textContent = n;
   for (const id of cards.keys()) if (!seen.has(id)) cards.delete(id);
   for (const id of groupCards.keys()) if (!seenGroups.has(id)) groupCards.delete(id);
   renderSelBar();
   const emptyText = `No downloads match “${query.trim()}”.`;
   if (!all.length) want.push(welcome(state));
-  else if (!downloads.length) {
+  else if (!res.matched) {
     if (emptyNote.textContent !== emptyText) emptyNote.textContent = emptyText;
     want.push(emptyNote);
   }

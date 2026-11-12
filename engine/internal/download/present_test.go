@@ -89,3 +89,71 @@ func TestPresentLabelsLinks(t *testing.T) {
 		})
 	}
 }
+
+func TestPresentSection(t *testing.T) {
+	retry := map[string]LinkSummary{"eth": {Status: LinkFailed}}
+	on := func(f FolderSummary) *FolderSummary { f.On = true; return &f }
+	cases := []struct {
+		name string
+		in   Summary
+		want string
+	}{
+		{"running", Summary{Status: StatusRunning}, SectionActive},
+		{"verifying", Summary{Status: StatusVerifying}, SectionActive},
+		{"finding files", Summary{Kind: KindTorrent, Status: StatusMetadata}, SectionActive},
+		{"checking files", Summary{Kind: KindTorrent, Status: StatusChecking}, SectionActive},
+		{"seeding", Summary{Kind: KindTorrent, Status: StatusSeeding}, SectionSeeding},
+		{"queued", Summary{Status: StatusQueued}, SectionQueued},
+		{"paused", Summary{Status: StatusPaused}, SectionPaused},
+		{"paused with an error", Summary{Status: StatusPaused, Error: "disk full"}, SectionNeeds},
+		{"paused for the VPN", Summary{Status: StatusPaused, Error: "no tunnel", WaitVPN: true}, SectionPaused},
+		{"torrent paused for the VPN", Summary{Kind: KindTorrent, Status: StatusPaused, Error: "no tunnel", WaitVPN: true}, SectionPaused},
+		{"failed", Summary{Status: StatusFailed}, SectionNeeds},
+		{"torrent choosing", Summary{Kind: KindTorrent, Status: StatusChoosing}, SectionNeeds},
+		{"link to retry", Summary{Status: StatusRunning, Links: retry}, SectionNeeds},
+		{"completed", Summary{Status: StatusCompleted}, SectionDone},
+		{"torrent done seeding", Summary{Kind: KindTorrent, Status: StatusCompleted}, SectionDone},
+		{"folder without a folder chosen", Summary{Status: StatusRunning, Folder: on(FolderSummary{})}, SectionNeeds},
+		{"folder chosen", Summary{Status: StatusRunning, Folder: on(FolderSummary{Into: "x"})}, SectionActive},
+		{"folder off", Summary{Status: StatusRunning, Folder: &FolderSummary{}}, SectionActive},
+		{"torrent ignores the folder", Summary{Kind: KindTorrent, Status: StatusRunning, Folder: on(FolderSummary{})}, SectionActive},
+		{"completed folder without a folder chosen", Summary{Status: StatusCompleted, Folder: on(FolderSummary{})}, SectionDone},
+		{"archive password wanted", Summary{Status: StatusRunning, Folder: on(FolderSummary{Into: "x", Ask: AskPassword})}, SectionNeeds},
+		{"password wanted by a fetched part", Summary{Status: StatusCompleted, Folder: on(FolderSummary{Into: "x", Ask: AskWrong, Set: &SetSummary{}})}, SectionNeeds},
+		{"password wanted by a finished download", Summary{Status: StatusCompleted, Folder: on(FolderSummary{Into: "x", Ask: AskWrong})}, SectionDone},
+		{"a part missing", Summary{Status: StatusRunning, Folder: on(FolderSummary{Into: "x", Set: &SetSummary{Missing: []int{2}}})}, SectionNeeds},
+		{"a part fetched while its set extracts", Summary{Status: StatusCompleted, Folder: on(FolderSummary{Into: "x", Set: &SetSummary{}})}, SectionActive},
+		{"a part of an extracted set", Summary{Status: StatusCompleted, Folder: on(FolderSummary{Into: "x", Set: &SetSummary{Finished: true}})}, SectionDone},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := Present(c.in).Section; got != c.want {
+				t.Errorf("section %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// A label that only restates the status is plain, so the row leaves it off;
+// one that says more (Moving…, Failed, a checksum mismatch) is not.
+func TestPresentPlain(t *testing.T) {
+	moving := &FolderSummary{On: true, Into: "x", MovingNow: true}
+	cases := []struct {
+		name string
+		in   Summary
+		want bool
+	}{
+		{"downloading", Summary{Status: StatusRunning}, true},
+		{"queued", Summary{Status: StatusQueued}, true},
+		{"paused", Summary{Status: StatusPaused}, true},
+		{"seeding", Summary{Kind: KindTorrent, Status: StatusSeeding}, true},
+		{"moving", Summary{Status: StatusRunning, Folder: moving}, false},
+		{"failed", Summary{Status: StatusFailed}, false},
+		{"completed", Summary{Status: StatusCompleted}, false},
+	}
+	for _, c := range cases {
+		if got := Present(c.in).Plain; got != c.want {
+			t.Errorf("%s: plain %v, want %v", c.name, got, c.want)
+		}
+	}
+}

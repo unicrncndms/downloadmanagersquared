@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anacrolix/torrent/storage"
 	"golang.org/x/sys/windows"
 
 	"downloadmanagersquared/engine/internal/atomicfile"
@@ -47,8 +48,8 @@ type Engine struct {
 	sessions map[paths.Mode]*torrent.Session
 	queue    *queue.Queue
 	setsMu   sync.Mutex
-	sets     map[string]*download.Set      // split archives, by key
-	tails    map[string]*download.Download // the part each set had start first last tick, for its end (syncSets)
+	sets     map[string]*download.Set // split archives, by key
+	tails    map[string]string        // the id of the part each set had start first last tick, for its end (syncSets)
 
 	mu        sync.Mutex
 	settings  Settings
@@ -82,9 +83,15 @@ type Engine struct {
 	mapPort func(ctx context.Context, gw portmap.Gateway, port int, lifetime time.Duration) error
 	vpn     *vpn.Tunnels
 
+	// unclean: the engine last stopped without Shutdown (a crash, a power
+	// cut), so what it saved may be behind what was on disk.
+	unclean bool
+	pieces  storage.PieceCompletion // the torrents' pieces complete, kept between runs; nil if it can't be opened
+
 	quit     chan struct{}
 	quitOnce sync.Once
 	running  atomic.Bool   // Run was called
+	keeping  atomic.Value  // the archiveKeeping setting, a string, for ArchiveKeeping
 	ran      chan struct{} // closed when Run returns
 	quitReq  chan struct{} // closed when a client asks the engine to quit
 	reqOnce  sync.Once
@@ -177,7 +184,14 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		ran:      make(chan struct{}),
 		quitReq:  make(chan struct{}),
 	}
+	e.keepingNow()
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
+	e.unclean = markRunning(dir)
+	if pc, err := storage.NewBoltPieceCompletion(filepath.Join(dir, "torrents")); err != nil {
+		log.Printf("keeping the torrents' pieces: %v; their data is checked at each start", err)
+	} else {
+		e.pieces = pc
+	}
 	e.sessions = map[paths.Mode]*torrent.Session{}
 	// Alongside listens nowhere: the other two hold the torrent port on the
 	// interfaces and in the tunnels.
@@ -194,11 +208,16 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 				defer e.mu.Unlock()
 				return e.settings.SeedRatio
 			},
-			Port: ports[m],
+			Port:       ports[m],
+			Completion: e.pieces,
+			Unclean:    e.unclean,
 		})
 		if err != nil {
 			for _, s := range e.sessions {
 				s.Close()
+			}
+			if e.pieces != nil {
+				e.pieces.Close()
 			}
 			return nil, err
 		}
@@ -292,13 +311,39 @@ func (e *Engine) Shutdown() {
 		for _, s := range e.sessions {
 			s.Close()
 		}
+		if e.pieces != nil {
+			e.pieces.Close()
+		}
 		e.vpn.Close()
 		e.mu.Lock()
 		for _, ent := range e.ifaces {
 			ent.socks.Close()
 		}
 		e.mu.Unlock()
+		markStopped(e.dir) // last: everything is saved
 	})
+}
+
+// runningMarker is a file in the data folder that is there while an engine
+// runs: found at the start, the last engine didn't stop cleanly.
+const runningMarker = "running"
+
+// markRunning marks the engine in dir as running, and says whether the last
+// one stopped without Shutdown.
+func markRunning(dir string) (unclean bool) {
+	p := filepath.Join(dir, runningMarker)
+	_, err := os.Stat(p)
+	if err := atomicfile.Write(p, nil, 0o644); err != nil {
+		log.Printf("marking the engine as running: %v", err)
+	}
+	return err == nil
+}
+
+// markStopped says the engine in dir stopped cleanly.
+func markStopped(dir string) {
+	if err := os.Remove(filepath.Join(dir, runningMarker)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		log.Printf("marking the engine as stopped: %v", err)
+	}
 }
 
 // get is for what only HTTP downloads have: links, hashes, landing pages.
@@ -334,7 +379,21 @@ func (e *Engine) ETAWindow() time.Duration {
 	return time.Duration(e.settings.ETAWindowSec) * time.Second
 }
 
+// ArchiveKeeping is download.Env's. Downloads ask for it under their own
+// lock, so it reads a copy of the setting rather than take e.mu.
+func (e *Engine) ArchiveKeeping() string {
+	if k, ok := e.keeping.Load().(string); ok {
+		return k
+	}
+	return download.KeepAuto
+}
+
+// keepingNow copies the archiveKeeping setting for ArchiveKeeping; with e.mu held.
+func (e *Engine) keepingNow() { e.keeping.Store(e.settings.ArchiveKeeping) }
+
 func (e *Engine) Changed(d *download.Download) { e.queue.MarkDirty(d.ID()) }
+
+func (e *Engine) Save(d *download.Download) error { return e.queue.SaveNow(d.ID()) }
 
 func (e *Engine) Finished(d *download.Download) { e.notifyFinished(d.Summary(), d.Path()) }
 
@@ -486,7 +545,7 @@ func (e *Engine) PickFolder(id string) error {
 		if !ok {
 			return
 		}
-		if err := e.SetFolder(id, nil, &dir); err != nil {
+		if err := e.SetFolder(id, nil, &dir, nil); err != nil {
 			log.Printf("download %s: the folder chosen: %v", id, err)
 		}
 	}()
@@ -496,7 +555,7 @@ func (e *Engine) PickFolder(id string) error {
 // SetFolder sets a download's folder to extract into, which becomes the last
 // one used, and switches Download as folder on or off; either may be nil.
 // A part of a split archive sets them for its whole Set.
-func (e *Engine) SetFolder(id string, on *bool, into *string) error {
+func (e *Engine) SetFolder(id string, on *bool, into, keep *string) error {
 	d, err := e.get(id)
 	if err != nil {
 		return err
@@ -504,6 +563,11 @@ func (e *Engine) SetFolder(id string, on *bool, into *string) error {
 	// The switch first: refused, it leaves the folder and the setting as they were.
 	if on != nil {
 		if err := d.SetFolder(*on); err != nil {
+			return err
+		}
+	}
+	if keep != nil {
+		if err := d.SetArchiveKeeping(*keep); err != nil {
 			return err
 		}
 	}
@@ -523,6 +587,9 @@ func (e *Engine) SetFolder(id string, on *bool, into *string) error {
 		}
 		if into != nil {
 			m.SetFolderInto(dir)
+		}
+		if keep != nil {
+			m.SetArchiveKeeping(*keep)
 		}
 	}
 	return nil

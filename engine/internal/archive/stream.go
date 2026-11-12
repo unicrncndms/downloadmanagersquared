@@ -30,6 +30,7 @@ type stream struct {
 	data  int64    // where the Entry's compressed data starts
 	fed   int64    // bytes before this have been handed to the decompressor
 	freed int64    // the Entry's bytes before this are freed (from its Start)
+	step  int64    // where the last FreeStep ended, freed or kept
 	file  *os.File // the unfinished file
 	pw    *io.PipeWriter
 	end   chan streamEnd
@@ -82,16 +83,24 @@ func (x *Extractor) streamStep(ctx context.Context, i int, missing []Range, r *R
 			break
 		}
 		s.fed += n
-		if s.fed-s.freed >= FreeStep {
-			if err := x.f.Free(s.freed, s.fed-s.freed); err != nil {
-				x.stopStream()
-				return "", false, err
+		if s.fed-s.step >= FreeStep {
+			s.step = s.fed
+			if !x.Keep {
+				// The unfinished file isn't flushed first: a large Entry not
+				// done is extracted again from its front after a crash, and
+				// its freed bytes fetched again. Bytes kept before are freed
+				// with these, should Keep have gone off since.
+				if err := x.freeAll([]Range{{s.freed, s.fed}}); err != nil {
+					x.stopStream()
+					return "", false, err
+				}
+				r.Freed = append(r.Freed, Range{s.freed, s.fed})
+				s.freed = s.fed
 			}
-			r.Freed = append(r.Freed, Range{s.freed, s.fed})
-			s.freed = s.fed
 			// Back to the caller, to save what was freed before more is:
 			// bytes freed but not saved would be taken as on disk after a
-			// crash. It calls again at once (Result.More).
+			// crash. Kept, it still returns, so its progress is shown. It
+			// calls again at once (Result.More).
 			r.More = true
 			return "", false, nil
 		}
@@ -107,9 +116,7 @@ func (x *Extractor) streamStep(ctx context.Context, i int, missing []Range, r *R
 		discard(out)
 		return end.bad, false, end.err
 	}
-	if err := finish(e, out, s.path, x.Mark); err != nil {
-		return "", false, err
-	}
+	x.fl.finish(i, e, out, s.path, x.Mark)
 	return "", true, nil
 }
 
@@ -122,7 +129,7 @@ func (x *Extractor) startStream(i int, data int64) error {
 		return err
 	}
 	pr, pw := io.Pipe()
-	s := &stream{i: i, path: path, data: data, fed: data, freed: e.Start, file: out, pw: pw, end: make(chan streamEnd, 1)}
+	s := &stream{i: i, path: path, data: data, fed: data, freed: e.Start, step: e.Start, file: out, pw: pw, end: make(chan streamEnd, 1)}
 	go func() {
 		bad, err := copyEntry(context.Background(), e, pr, out)
 		// A feed still writing gets an error, rather than waiting for ever.
@@ -154,4 +161,37 @@ func (x *Extractor) Close() {
 	if x.z != nil {
 		x.stopBlock()
 	}
+	x.fl.drain()
+}
+
+// Passed is how many of the archive's bytes are extracted: every Entry done,
+// and as far as the decompressor has got in the large one under way, whether
+// they are freed or kept. Not safe while Extract runs.
+func (x *Extractor) Passed() int64 {
+	var n int64
+	for i, e := range x.a.Entries {
+		if x.done[i] {
+			n += e.End - e.Start
+		}
+	}
+	switch {
+	case x.s != nil:
+		n += x.s.fed - x.a.Entries[x.s.i].Start
+	case x.z != nil && x.z.run != nil:
+		n += x.z.gate.readTo() - x.a.Entries[x.z.run.i].Start
+	}
+	return n
+}
+
+// Streaming is how many bytes of the large Entry under way are freed: a stop
+// now loses its decompressor, so they would be fetched again. Not safe while
+// Extract runs.
+func (x *Extractor) Streaming() int64 {
+	switch {
+	case x.s != nil:
+		return x.s.freed - x.a.Entries[x.s.i].Start
+	case x.z != nil && x.z.run != nil:
+		return x.z.run.freed - x.a.Entries[x.z.run.i].Start
+	}
+	return 0
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net"
-	"net/http"
 	"slices"
 	"sort"
 	"strings"
@@ -63,6 +62,7 @@ func (e *Engine) refreshInterfaces() {
 func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 	seen := map[string]bool{}
 	nameChanged := false
+	var ids []string
 	for _, i := range list {
 		seen[i.ID] = true
 		ent := e.ifaces[i.ID]
@@ -90,6 +90,9 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 			s = &IfaceSettings{}
 			e.settings.Interfaces[i.ID] = s
 		}
+		if s.Color == nil {
+			ids = append(ids, i.ID)
+		}
 		if s.Name != i.Name {
 			s.Name, nameChanged = i.Name, true
 		}
@@ -99,10 +102,22 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 			ent.present = false
 		}
 	}
-	if nameChanged {
+	// Interfaces without a colour (new ones, or every one for a user from before
+	// colours) get theirs in the order the pages list them, by name, so an
+	// existing user's colours stay as they were.
+	sort.Slice(ids, func(a, b int) bool { return e.settings.Interfaces[ids[a]].Name < e.settings.Interfaces[ids[b]].Name })
+	if e.settings.assignColors(ids) || nameChanged {
 		e.saveSettingsLocked()
 	}
 	e.applyLimitsLocked()
+}
+
+// colorLocked is the palette index an interface is shown in.
+func (e *Engine) colorLocked(id string) int {
+	if s := e.settings.Interfaces[id]; s != nil && s.Color != nil {
+		return *s.Color
+	}
+	return 0
 }
 
 // addrs are an interface's addresses, IPv4 first.
@@ -201,46 +216,64 @@ func (e *Engine) refreshPortMaps(now time.Time) {
 	}
 }
 
-// dialVia dials through a path: an interface, or its tunnel.
-func (e *Engine) dialVia(id string) socks.DialFunc {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if ifaceID, ok := paths.IfaceOf(id); ok {
-			tn, ok := e.vpn.Up(ifaceID)
-			if !ok {
-				return nil, errors.New("the VPN tunnel is not up")
-			}
-			return tn.Dial(ctx, network, addr)
-		}
-		b, err := e.bindingOf(id)
-		if err != nil {
-			return nil, err
-		}
-		return b.DialContext(ctx, network, addr)
+// pathSource is the engine as paths.Open reaches interfaces and tunnels.
+type pathSource struct{ e *Engine }
+
+func (s pathSource) Binding(id string) (paths.Binding, error) {
+	b, err := s.e.bindingOf(id)
+	if err != nil { // not b itself: a nil *Binding in the interface would not be nil
+		return nil, err
 	}
+	return b, nil
+}
+
+func (s pathSource) Tunnel(ifaceID string) (paths.Stack, bool) {
+	tn, ok := s.e.vpn.Up(ifaceID)
+	if !ok {
+		return paths.Stack{}, false
+	}
+	return paths.Stack(tn), true
+}
+
+// Iface needs e.mu held.
+func (s pathSource) Iface(id string) paths.Facts {
+	f := paths.Facts{Conns: s.e.connsLocked(id), Upload: s.e.uploadLocked(id)}
+	if ent := s.e.ifaces[id]; ent != nil && ent.present && ent.binding != nil {
+		f.Gen, f.Binding = ent.gen, ent.binding
+	}
+	return f
+}
+
+// openPath is one path by ID, for a resolve's SOCKS proxy to use at the moment
+// it needs it.
+func (e *Engine) openPath(id string) (paths.Path, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return paths.Open(pathSource{e}, id)
 }
 
 // socksPath is a path as a resolve's SOCKS proxy sends its connections out.
 func (e *Engine) socksPath(id string) socks.Path {
-	return socks.Path{Dial: e.dialVia(id), Lookup: func(ctx context.Context, host string) ([]net.IP, error) {
-		if ifaceID, ok := paths.IfaceOf(id); ok {
-			tn, ok := e.vpn.Up(ifaceID)
-			if !ok {
-				return nil, errors.New("the VPN tunnel is not up")
+	return socks.Path{
+		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			p, err := e.openPath(id)
+			if err != nil {
+				return nil, err
 			}
-			return tn.LookupIP(ctx, host)
-		}
-		b, err := e.bindingOf(id)
-		if err != nil {
-			return nil, err
-		}
-		return b.LookupIP(ctx, host)
-	}, IPv6: func() bool { // a tunnel carries only IPv4
-		if _, tun := paths.IfaceOf(id); tun {
-			return false
-		}
-		b, err := e.bindingOf(id)
-		return err == nil && b.Has6()
-	}}
+			return p.Dial(ctx, network, addr)
+		},
+		Lookup: func(ctx context.Context, host string) ([]net.IP, error) {
+			p, err := e.openPath(id)
+			if err != nil {
+				return nil, err
+			}
+			return p.LookupIP(ctx, host)
+		},
+		IPv6: func() bool {
+			p, err := e.openPath(id)
+			return err == nil && p.IPv6()
+		},
+	}
 }
 
 func (e *Engine) bindingOf(id string) (*netif.Binding, error) {
@@ -266,63 +299,12 @@ func (e *Engine) torrentIfacesFor(m paths.Mode) []torrent.Iface {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var ifs []torrent.Iface
-	for _, id := range paths.For(m, e.pathSnapshotLocked()).Paths {
-		if base, tun := paths.IfaceOf(id); tun {
-			// Bound to this tunnel's stack: after a restart it is a new generation.
-			tn, ok := e.vpn.Up(base)
-			if !ok { // went down since the snapshot
-				continue
-			}
-			ifs = append(ifs, torrent.Iface{
-				ID: id, Gen: tn.Gen, Port: tn.Port, Upload: e.uploadLocked(base),
-				Dial: tn.Dial, ListenPacket: tn.ListenPacket, LookupIP: tn.LookupIP, Listen: tn.Listen,
-			})
-			continue
-		}
-		ifc := torrent.Iface{
-			ID:     id,
-			Gen:    e.ifaces[id].gen, // a new address: the old sockets are bound to the old one
-			Upload: e.uploadLocked(id),
-			Dial:   e.dialVia(id),
-			ListenPacket: func(port int) (net.PacketConn, error) {
-				b, err := e.bindingOf(id)
-				if err != nil {
-					return nil, err
-				}
-				return b.ListenPacket(port)
-			},
-			Listen: func(port int) (net.Listener, error) {
-				b, err := e.bindingOf(id)
-				if err != nil {
-					return nil, err
-				}
-				return b.Listen(port)
-			},
-			LookupIP: func(ctx context.Context, host string) ([]net.IP, error) {
-				b, err := e.bindingOf(id)
-				if err != nil {
-					return nil, err
-				}
-				return b.LookupIP(ctx, host)
-			},
-		}
-		if e.ifaces[id].binding.Has6() { // only with Enable IPv6 on
-			ifc.ListenPacket6 = func(port int) (net.PacketConn, error) {
-				b, err := e.bindingOf(id)
-				if err != nil {
-					return nil, err
-				}
-				return b.ListenPacket6(port)
-			}
-			ifc.Listen6 = func(port int) (net.Listener, error) {
-				b, err := e.bindingOf(id)
-				if err != nil {
-					return nil, err
-				}
-				return b.Listen6(port)
-			}
-		}
-		ifs = append(ifs, ifc)
+	for _, p := range paths.Build(m, e.pathSnapshotLocked(), pathSource{e}) {
+		ifs = append(ifs, torrent.Iface{
+			ID: p.ID, Gen: p.Gen, Port: p.Port, Upload: p.Upload,
+			Dial: p.Dial, ListenPacket: p.ListenPacket, LookupIP: p.LookupIP, Listen: p.Listen,
+			ListenPacket6: p.ListenPacket6, Listen6: p.Listen6,
+		})
 	}
 	return ifs
 }
@@ -359,21 +341,8 @@ func (e *Engine) Paths(m paths.Mode) []download.Iface {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var out []download.Iface
-	for _, id := range paths.For(m, e.pathSnapshotLocked()).Paths {
-		base, tun := paths.IfaceOf(id)
-		var client *http.Client
-		var byFamily map[string]*http.Client
-		if tun {
-			tn, ok := e.vpn.Up(base)
-			if !ok { // went down since the snapshot
-				continue
-			}
-			client = tn.Client
-		} else {
-			b := e.ifaces[id].binding
-			client, byFamily = b.HTTPClient(), b.FamilyClients()
-		}
-		out = append(out, download.Iface{ID: id, Client: client, ByFamily: byFamily, Conns: e.connsLocked(base)})
+	for _, p := range paths.Build(m, e.pathSnapshotLocked(), pathSource{e}) {
+		out = append(out, download.Iface{ID: p.ID, Client: p.Client, ByFamily: p.ByFamily, Conns: p.Conns})
 	}
 	return out
 }

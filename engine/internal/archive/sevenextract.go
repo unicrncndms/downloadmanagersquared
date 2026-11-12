@@ -224,9 +224,22 @@ func (x *Extractor) prepare7z() error {
 
 // extract7z is Extract for a 7z: each block once its bytes are on disk, or a
 // large one as they arrive.
-func (x *Extractor) extract7z(ctx context.Context, missing []Range) (Result, error) {
-	var r Result
-	defer x.skipDone()
+func (x *Extractor) extract7z(ctx context.Context, missing []Range) (r Result, err error) {
+	var ready []int // decoded in this call: done once their files are flushed
+	defer func() {
+		if serr := x.settle(ready, &r); err == nil {
+			err = serr
+		}
+		x.skipDone()
+		if x.Finished() && !x.z.timed {
+			x.z.timed = true
+			for i, f := range x.a.z.files {
+				if f.Dir && x.z.rel[i] != "" {
+					os.Chtimes(x.z.path(x.dir, i), f.Modified, f.Modified)
+				}
+			}
+		}
+	}()
 	if !x.z.prepared {
 		if err := x.prepare7z(); err != nil {
 			return r, err
@@ -260,29 +273,16 @@ func (x *Extractor) extract7z(ctx context.Context, missing []Range) (Result, err
 				return r, err
 			}
 		}
-		if x.wrongPassword(bad) {
+		if x.wrongPassword(bad, ready) {
+			x.fl.wait(i) // its files before the wrong one are let finish
 			return r, ErrWrongPassword
 		}
 		if bad != "" {
+			x.fl.wait(i)
 			r.Failed = append(r.Failed, &Failure{Entry: e, Range: Range{e.Start, e.End}, Reason: bad})
 			continue
 		}
-		x.done[i] = true
-		if err := x.free(i); err != nil {
-			x.done[i] = false
-			return r, err
-		}
-		x.extracted += len(x.a.z.blocks[i])
-		r.Done = append(r.Done, e)
-		r.Freed = append(r.Freed, Range{e.Start, e.End})
-	}
-	if x.Finished() && !x.z.timed {
-		x.z.timed = true
-		for i, f := range x.a.z.files {
-			if f.Dir && x.z.rel[i] != "" {
-				os.Chtimes(x.z.path(x.dir, i), f.Modified, f.Modified)
-			}
-		}
+		ready = append(ready, i)
 	}
 	return r, nil
 }
@@ -317,8 +317,10 @@ func (x *Extractor) blockStep(i int, missing []Range, r *Result) (bad string, fi
 		return end.bad, end.bad == "" && end.err == nil, end.err
 	default:
 	}
-	if to := x.z.gate.readTo(); to-run.freed >= FreeStep {
-		if err := x.f.Free(run.freed, to-run.freed); err != nil {
+	if to := x.z.gate.readTo(); !x.Keep && to-run.freed >= FreeStep {
+		// Its files aren't flushed first: a block not done is decompressed
+		// again from its front after a crash, and its freed bytes fetched again.
+		if err := x.freeAll([]Range{{run.freed, to}}); err != nil {
 			x.stopBlock()
 			return "", false, err
 		}
@@ -339,6 +341,7 @@ func (x *Extractor) stopBlock() {
 	x.z.run = nil
 	x.z.gate.close()
 	<-run.end
+	x.fl.wait(run.i)
 }
 
 // decodeBlock decompresses block i into its files, each checked against its
@@ -367,9 +370,7 @@ func (x *Extractor) decodeBlock(ctx context.Context, i int) (bad string, err err
 			discard(out)
 			return bad, err
 		}
-		if err := finish(e, out, path, x.Mark); err != nil {
-			return "", err
-		}
+		x.fl.finish(i, e, out, path, x.Mark)
 	}
 	return "", nil
 }

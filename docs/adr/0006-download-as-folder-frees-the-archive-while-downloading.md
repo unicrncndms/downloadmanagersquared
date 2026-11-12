@@ -2,7 +2,7 @@
 
 Date: 2026-11-06
 Amended: 2026-11-11 (formats, integrity per format, split sets with `partsParallel` on by default, scheduling described as it is)
-Status: accepted
+Status: accepted, amended by 0007 (keeping the archive is now a choice; freeing is one of its values)
 
 ## Context
 

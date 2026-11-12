@@ -36,6 +36,9 @@ func putFiles(src, dir string) {
 // nil, upgrades from the folder this exe was started in, then starts the
 // installed engine.
 func installFrom(l install.Layout, src string, first *install.Options) error {
+	if first == nil && !updateNow() {
+		return winutil.ErrShown // later: nothing is touched
+	}
 	if !quitEngine() && len(winutil.ProcessesOf(l.Engine())) > 0 {
 		// An engine from before the quit method and the per-user pipe.
 		winutil.Dialog(title, "An older DMS² engine is running. Quit it from its tray icon (right-click → Quit), then press OK to update.",
@@ -85,6 +88,23 @@ func uninstall(l install.Layout) {
 	if err := l.RemoveLater(); err != nil {
 		winutil.MessageBox(title, "Could not remove "+l.Dir+": "+err.Error())
 	}
+}
+
+// updateNow asks first when quitting the running engine would download a
+// lot again. False: the user updates later. An engine that doesn't answer,
+// or is too old to know the question, is updated.
+func updateNow() bool {
+	res, err := ipc.Call("restartCost")
+	if err != nil {
+		return true
+	}
+	var c engine.RestartCost
+	if json.Unmarshal(res, &c) != nil {
+		return true
+	}
+	w := c.Warning("Updating now")
+	return w == "" || winutil.Dialog(title, w+"\n\nUpdate now? If you choose No, nothing is changed and you can update later.",
+		windows.MB_YESNO|windows.MB_ICONWARNING|windows.MB_DEFBUTTON2) == winutil.IDYES
 }
 
 // quitEngine asks this user's running engine to quit and waits until it has

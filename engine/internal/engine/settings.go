@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"downloadmanagersquared/engine/internal/atomicfile"
+	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/winutil"
 )
@@ -24,6 +25,39 @@ type IfaceSettings struct {
 	Upload        *bool  `json:"upload,omitempty"`        // nil: default (on)
 	UploadLimit   int64  `json:"uploadLimit,omitempty"`   // bytes per second, 0 = none
 	DownloadLimit int64  `json:"downloadLimit,omitempty"` // bytes per second, 0 = none
+	Color         *int   `json:"color,omitempty"`         // palette index 0..colorCount-1 the pages show it in; nil: not given yet
+}
+
+// colorCount is how many colours the pages' palette has (ui.css --c0 …).
+const colorCount = 6
+
+// assignColors gives each of ids (in the order they are to be served) that has
+// no colour yet the lowest palette index no other known interface uses, and says
+// whether it gave any. Colours are kept so one never changes when another
+// interface turns up; with every colour taken, the least used one is shared.
+func (s *Settings) assignColors(ids []string) bool {
+	var used [colorCount]int
+	for _, is := range s.Interfaces {
+		if is.Color != nil {
+			used[*is.Color]++
+		}
+	}
+	changed := false
+	for _, id := range ids {
+		is := s.Interfaces[id]
+		if is == nil || is.Color != nil {
+			continue
+		}
+		c := 0
+		for i, n := range used {
+			if n < used[c] {
+				c = i
+			}
+		}
+		used[c]++
+		is.Color, changed = &c, true
+	}
+	return changed
 }
 
 type Settings struct {
@@ -45,10 +79,11 @@ type Settings struct {
 	IPv6               bool                      `json:"ipv6"`        // Enable IPv6 (experimental); off: IPv4 only, no AAAA lookups, no IPv6 sockets
 
 	// Download as folder
-	FolderDefault bool     `json:"folderDefault"`        // new .zip, .7z and .rar downloads are one
-	PartsParallel bool     `json:"partsParallel"`        // a split archive's parts download at once even where that keeps more on disk
-	FolderDir     string   `json:"folderDir,omitempty"`  // the folder last extracted into; "" = SaveDir
-	FolderDirs    []string `json:"folderDirs,omitempty"` // the folders last extracted into, newest first: Change… offers them
+	FolderDefault  bool     `json:"folderDefault"`        // new .zip, .7z and .rar downloads are one
+	PartsParallel  bool     `json:"partsParallel"`        // a split archive's parts download at once even where that keeps more on disk
+	ArchiveKeeping string   `json:"archiveKeeping"`       // what one does with its archive unless chosen for it: download.KeepAuto, KeepFree, KeepUntil or KeepAfter (ADR 0007)
+	FolderDir      string   `json:"folderDir,omitempty"`  // the folder last extracted into; "" = SaveDir
+	FolderDirs     []string `json:"folderDirs,omitempty"` // the folders last extracted into, newest first: Change… offers them
 
 	// The pages' accent color, "#rrggbb": the one chosen, else Firefox's
 	// theme's as the extension last saw it, else the pages' own.
@@ -134,6 +169,7 @@ func defaultSettings() Settings {
 		ETAWindowSec:       60,
 		DefaultConnections: 4,
 		PartsParallel:      true,
+		ArchiveKeeping:     download.KeepAuto,
 		SeedRatio:          1,
 		VPNHTTP:            paths.Off,
 		VPNTorrent:         paths.Off, // each new torrent asks first
@@ -162,6 +198,9 @@ func (s *Settings) normalize() {
 	}
 	s.DefaultConnections = min(s.DefaultConnections, 32)
 	s.SeedRatio = min(max(s.SeedRatio, 0), 100)
+	if !download.KeepChoice(s.ArchiveKeeping) {
+		s.ArchiveKeeping = d.ArchiveKeeping
+	}
 	s.VPNHTTP = paths.ParseMode(string(s.VPNHTTP), d.VPNHTTP)
 	s.VPNTorrent = paths.ParseMode(string(s.VPNTorrent), d.VPNTorrent)
 	switch s.VPNProvider {
@@ -180,6 +219,9 @@ func (s *Settings) normalize() {
 	for _, is := range s.Interfaces {
 		if is.Connections != 0 { // 0 = use DefaultConnections
 			is.Connections = min(max(is.Connections, 1), 32)
+		}
+		if is.Color != nil && (*is.Color < 0 || *is.Color >= colorCount) {
+			is.Color = nil // assigned again when the interface is next seen
 		}
 		is.UploadLimit, is.DownloadLimit = max(is.UploadLimit, 0), max(is.DownloadLimit, 0)
 	}

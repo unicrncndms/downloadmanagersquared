@@ -48,10 +48,11 @@ type Set struct {
 	stopped bool
 
 	view     atomic.Pointer[SetSummary]
-	tail     atomic.Pointer[Download] // the part whose end is needed before anything can be extracted
-	inOrder  atomic.Bool              // read front to back only: a part fetched ahead waits on disk (Sequential)
-	accepted atomic.Bool              // the archive's list of files has been read: completed parts keep their .part
+	tail     atomic.Pointer[Download] // the part whose end the Set needs before it can extract anything: a 7z's or ZIP's list of files is at the end of its last part; it starts first, fetches its end first, and gives way again once nil
+	inOrder  atomic.Bool              // read front to back only (a RAR, a solid 7z, one huge Entry): a part fetched before the ones ahead of it waits whole on disk; else fetching several at once costs no space
+	accepted atomic.Bool              // the archive's list of files has been read: the Set extracts as parts come, and completed parts keep their .part; until then only part 1 and tail are of any use
 	finished atomic.Bool              // all extracted: no part's .part is needed
+	cost     atomic.Int64             // RestartCost, as of the last step
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -66,8 +67,9 @@ type SetSummary struct {
 	Of       int    `json:"of"`
 	Out      string `json:"out,omitempty"`
 	Finished bool   `json:"finished,omitempty"`
+	Locked   bool   `json:"locked,omitempty"` // a part's bytes are freed: archive keeping can't change any more
 
-	// The extraction's progress: bytes of the archive extracted and freed, of
+	// The extraction's progress: bytes of the archive extracted (freed or kept), of
 	// how many (a part not started yet counts as long as part 1), what it is
 	// doing or waiting for, and the seconds left at its pace, 0 while unknown.
 	Extracted int64   `json:"extracted,omitempty"`
@@ -109,7 +111,7 @@ func (m *meter) left(total int64) float64 {
 
 // Splittable says whether a file is a part of a split archive that a Set
 // extracts: the set's name and the part's number.
-// A plain x.rar is only part 1 of a set beside an x.r00 (see SetOf), and
+// A plain x.rar is only part 1 of a set beside an x.r00 (see setOf), and
 // x.rar.001 parts are a cut file, not volumes: neither is Splittable.
 func Splittable(name string) (set string, part int, ok bool) {
 	set, part, ok = archive.PartOf(name)
@@ -132,11 +134,11 @@ func Splittable(name string) (set string, part int, ok bool) {
 	return set, part, true
 }
 
-// SetOf is the Set a download belongs to: its key ("" for none), the
+// setOf is the Set a download belongs to: its key ("" for none), the
 // archive's name and the part's number. lone is a plain x.rar or x.zip: part
 // 1 or the last part of the set only when other parts of it (x.r00…, x.z01…)
 // are there.
-func SetOf(d *Download) (key, set string, part int, lone bool) {
+func setOf(d *Download) (key, set string, part int, lone bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	dir := d.setDirLocked()
@@ -254,6 +256,18 @@ func (s *Set) Start() {
 	go s.loop(ctx)
 }
 
+// Holds is whether d is one of the Set's parts.
+func (s *Set) Holds(d *Download) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range s.members {
+		if m == d {
+			return true
+		}
+	}
+	return false
+}
+
 // Stop stops extracting and waits until it has.
 func (s *Set) Stop() {
 	if s.cancel != nil {
@@ -266,11 +280,9 @@ func (s *Set) Stop() {
 // after a restart.
 type setRun struct {
 	parts    *archive.Parts
-	files    []*os.File // the Set's own handles, by part index
-	released []bool     // the part's .part is deleted: all of it is freed
-	need     int64
-	arc      *archive.Archive
-	x        *archive.Extractor
+	files    []*os.File  // the Set's own handles, by part index
+	released []bool      // the part's .part is deleted: all of it is freed
+	ex       *Extraction // once the parts are laid out
 	out      string
 	files1   int // files extracted and in the archive, kept once the Extractor is closed
 	of       int
@@ -279,15 +291,15 @@ type setRun struct {
 	disks    int       // a split ZIP's parts, once its .zip says
 	tail     *Download // the part whose end this step waits for
 
-	extracted, sizes int64 // bytes freed of the parts, and the parts' sizes
+	extracted, sizes int64 // bytes extracted of the parts (freed or kept), and the parts' sizes
+	locked           bool  // some part's bytes are freed
 	phase            string
 	pace             meter
 }
 
 func (r *setRun) close() {
-	if r.x != nil {
-		r.x.Close()
-		r.x = nil
+	if r.ex != nil {
+		r.ex.close()
 	}
 	for i, f := range r.files {
 		if f != nil {
@@ -337,48 +349,6 @@ func (s *Set) loop(ctx context.Context) {
 	}
 }
 
-// partInfo is what the Set reads of a part, under its lock.
-type partInfo struct {
-	d         *Download
-	on        bool
-	into      string
-	size      int64
-	probed    bool
-	completed bool
-	path      string
-	missing   []Range // in the part
-	freed     []Range
-	done      []int64
-	out       string
-	allocated bool
-	note      string
-	name      string
-	password  string // part 1's: the archive's
-	ask       string
-	files, of int
-}
-
-func (d *Download) partInfo() partInfo {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	p := partInfo{d: d, size: d.st.Size, probed: d.st.Probed, completed: d.st.Status == StatusCompleted,
-		path: d.partPath(), allocated: d.st.Allocated, name: d.st.Filename}
-	if f := d.st.Folder; f != nil {
-		p.on, p.into, p.freed, p.done, p.out, p.note = f.On, f.Into, slices.Clone(f.Freed), slices.Clone(f.Done), f.Out, f.Note
-		p.password, p.ask, p.files, p.of = string(f.Password), f.Ask, f.Files, f.Of
-	}
-	switch {
-	case p.completed:
-	case d.plan != nil:
-		p.missing = d.plan.ranges()
-	case d.st.Allocated:
-		p.missing = slices.Clone(d.st.Remaining)
-	default:
-		p.missing = []Range{{0, d.st.Size}}
-	}
-	return p
-}
-
 // step does what can be done now. more: call again at once.
 func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 	s.empty(run, false)
@@ -393,9 +363,10 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 		delete(members, archive.LastPart) // a split ZIP's .zip: its last part
 		members[run.disks] = m
 	}
-	run.extracted, run.sizes = 0, 0
+	run.extracted, run.sizes, run.locked = 0, 0, false
 	for _, m := range members {
 		run.extracted += sumRanges(m.freed)
+		run.locked = run.locked || len(m.freed) > 0
 		switch {
 		case m.probed && m.size > 0:
 			run.sizes += m.size
@@ -460,7 +431,7 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 
 	cut := s.zip && strings.HasPrefix(strings.ToLower(p1.name), strings.ToLower(s.set)+".")
 	switch {
-	case s.rar, cut && run.arc == nil:
+	case s.rar, cut && run.arc() == nil:
 		s.layVolumes(run, members, cut)
 		if run.tail != nil {
 			return false, nil // a cut file's last piece is to say its size first
@@ -495,10 +466,16 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 		run.parts = archive.NewParts(sizes)
 		run.files = make([]*os.File, len(sizes))
 		run.released = make([]bool, len(sizes))
-		// The list of files is at the end: guess within the last part, so the
-		// one before it needn't be there; Need widens it if it must.
-		last := run.parts.Span(len(sizes) - 1)
-		run.need = max(min(archive.TailGuess, last.End-last.Start), 1)
+	}
+	if run.ex == nil {
+		// A RAR's headers are at its front; a 7z's start header and a ZIP's
+		// first bytes say what it is, and its list of files is at its end.
+		head := int64(32)
+		if s.rar {
+			head = archive.HeadLen
+		}
+		run.ex = &Extraction{name: s.set, who: "set " + s.set, file: run.parts, parts: run.parts,
+			head: head, volumes: s.rar, mark: p1.d.markFunc(), tail: -1}
 	}
 	n := run.parts.Len()
 	for k, m := range members {
@@ -558,135 +535,53 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 		run.note = partsMissing(gone)
 	}
 
-	if run.arc == nil && s.rar {
-		if !onDiskA(missing, 0, min(archive.HeadLen, run.parts.Span(0).End)) {
-			return false, nil
+	ps := make([]archivePart, n)
+	for i := range n {
+		if m, ok := members[i+1]; ok {
+			ps[i] = m.d
 		}
-		if p1.ask != "" {
-			run.note = passwordNote
-			return false, nil
+	}
+	more, err = run.ex.step(ctx, ps, missing)
+	run.extracted = max(run.extracted, run.ex.passed) // a kept archive frees nothing
+	if run.ex.tail >= 0 {
+		if last, ok := members[run.ex.tail+1]; ok {
+			run.tail = last.d // its end first, and it starts first for it (Tail)
 		}
-		a, err := archive.ReadVolumes(run.parts, p1.password)
-		var u *archive.Unsupported
-		switch {
-		case errors.Is(err, archive.ErrWrongPassword):
-			return s.askPassword(run, p1, true)
-		case errors.Is(err, archive.ErrPassword):
-			return s.askPassword(run, p1, false)
-		case errors.As(err, &u):
-			return false, s.giveUp(members, err)
-		case err != nil:
-			return false, nil
+	}
+	if run.ex.asking {
+		run.note = passwordNote
+	}
+	run.out = run.ex.out
+	var u *archive.Unsupported
+	switch {
+	case err == nil:
+	case errors.As(err, &u) && run.ex.arc == nil && cut && wholePiece(run.parts):
+		// A cut ZIP whose last part known is a whole piece: more may follow.
+		if _, ok := members[n+1]; !ok {
+			run.note = partsMissing([]int{n + 1})
 		}
-		run.arc = a
+		return false, nil
+	case errors.As(err, &u):
+		return false, s.giveUp(members, err)
+	case run.ex.arc == nil:
+		return false, nil // its list of files isn't all there yet
+	default:
+		return false, err
+	}
+	if run.ex.arc != nil {
 		s.accepted.Store(true)
-		s.reclaim(run, members, p1.done)
-		return true, nil
 	}
-	if run.arc == nil {
-		if run.need == 0 {
-			// The list of files is at the end: guess within the last part.
-			last := run.parts.Span(n - 1)
-			run.need = max(min(archive.TailGuess, last.End-last.Start), 1)
-		}
-		from := total - run.need
-		if !onDiskA(missing, from, total) {
-			// The list of files is at the archive's end: the last part fetches
-			// that first, and starts first for it (Tail).
-			if last, ok := members[n]; ok {
-				span := run.parts.Span(n - 1)
-				last.d.preferTail(max(from-span.Start, 0))
-				run.tail = last.d
-			}
-			return false, nil
-		}
-		if !onDiskA(missing, 0, 32) {
-			return false, nil
-		}
-		if p1.ask != "" {
-			run.note = passwordNote
-			return false, nil
-		}
-		need, err := archive.NeedWith(run.parts, total, run.need, p1.password)
-		if err == nil && need > run.need {
-			run.need = need
-			if last, ok := members[n]; ok {
-				run.tail = last.d // more of its end, then
-			}
-			return true, nil
-		}
-		var a *archive.Archive
-		if err == nil {
-			a, err = archive.ReadWith(run.parts, total, p1.password)
-		}
-		switch {
-		case errors.Is(err, archive.ErrWrongPassword):
-			return s.askPassword(run, p1, true)
-		case errors.Is(err, archive.ErrPassword):
-			return s.askPassword(run, p1, false)
-		}
-		var u *archive.Unsupported
-		if errors.As(err, &u) && cut && wholePiece(run.parts) {
-			// A cut ZIP whose last part known is a whole piece: more may follow.
-			if _, ok := members[n+1]; !ok {
-				run.note = partsMissing([]int{n + 1})
-			}
-			return false, nil
-		}
-		if errors.As(err, &u) {
-			return false, s.giveUp(members, err)
-		}
-		if err != nil {
-			return false, nil // its tail isn't all there yet
-		}
-		run.arc = a
-		s.accepted.Store(true)
-		s.reclaim(run, members, p1.done)
-		return true, nil // what is on disk changed: look again
-	}
-	if p1.into == "" {
-		return false, nil // part 1's card asks where to extract
-	}
-
-	if run.x == nil {
-		out := p1.out
-		if out == "" {
-			if out, err = s.nameOut(run.arc, p1); err != nil {
-				return false, err
-			}
-		} else if !exists(out) {
-			return false, errFolderRemoved
-		}
-		if err := checkSpace(p1.into, spaceNeeded(run.arc, p1.done)); err != nil {
-			return false, err
-		}
-		x, err := archive.NewExtractorFrom(run.arc, run.parts, out, p1.done)
-		if errors.Is(err, archive.ErrWrongPassword) {
-			return s.askPassword(run, p1, true)
-		}
-		if err != nil {
-			return false, s.giveUp(members, err)
-		}
-		x.Mark = p1.d.markFunc()
-		run.x, run.out = x, out
-	}
-
-	res, xerr := run.x.Extract(ctx, missing)
-	s.record(run, members, res)
-	if errors.Is(xerr, archive.ErrWrongPassword) {
-		return s.askPassword(run, p1, true)
-	}
-	if xerr != nil {
-		return false, xerr
-	}
-	if run.x.Finished() {
+	if run.ex.finished {
 		run.finished = true
 		s.finish(run, members)
 		return false, nil
 	}
+	if run.ex.x == nil {
+		return more, nil // it waits for the folder or the password
+	}
 	s.release(run, members)
 	run.phase = "Extracting"
-	if len(res.Done) == 0 && len(res.Freed) == 0 && !res.More {
+	if run.ex.idle {
 		// Nothing to do with what is on disk: it waits for the first part still to be fetched.
 		for i := range run.parts.Len() {
 			if m, ok := members[i+1]; ok && !run.released[i] && !m.completed {
@@ -695,47 +590,18 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 			}
 		}
 	}
-	return res.More, nil
+	return more, nil
 }
 
 const passwordNote = "Needs the archive's password"
 
-// askPassword has the Set wait for the archive's password, the first one or
-// after a wrong one. Part 1 holds it, as it does the switch; the parts go on
-// downloading, as nothing is freed until the archive opens.
-func (s *Set) askPassword(run *setRun, p1 partInfo, wrong bool) (bool, error) {
-	if run.x != nil {
-		run.x.Close()
-		run.x = nil
+// arc is the archive's list of files, nil until it is read.
+func (r *setRun) arc() *archive.Archive {
+	if r.ex == nil {
+		return nil
 	}
-	run.arc = nil
-	run.note = passwordNote
-	d := p1.d
-	d.mu.Lock()
-	f := d.st.Folder
-	f.Password, f.Ask = "", AskPassword
-	if wrong {
-		f.Ask = AskWrong
-	}
-	d.mu.Unlock()
-	d.env.Changed(d)
-	return false, nil
+	return r.ex.arc
 }
-
-// Tail is the part whose end the Set needs before it can extract anything:
-// a 7z's or ZIP's list of files is at the end of its last part. That part
-// starts first, fetches its end first, and gives way again once Tail is nil.
-func (s *Set) Tail() *Download { return s.tail.Load() }
-
-// Accepted: the archive's list of files is read, so the Set extracts as its
-// parts come. Until then only part 1 and Tail are of any use to it.
-func (s *Set) Accepted() bool { return s.accepted.Load() }
-
-// Sequential: the archive can only be read front to back (a RAR, a solid 7z,
-// one huge Entry), so a part fetched before the ones ahead of it waits whole
-// on disk. Otherwise each part's Entries are extracted as they arrive, and
-// fetching several parts at once costs no space.
-func (s *Set) Sequential() bool { return s.inOrder.Load() }
 
 // layVolumes lays out a RAR's volumes known so far: each after the last, once
 // its download knows its size, with none missing before it. A cut file's
@@ -768,7 +634,9 @@ func (s *Set) layVolumes(run *setRun, members map[int]partInfo, cut bool) {
 	if len(add) == 0 {
 		return
 	}
-	run.need = 0 // the last part changed
+	if run.ex != nil {
+		run.ex.need = 0 // the last part changed
+	}
 	if run.parts == nil {
 		run.parts = archive.NewParts(add)
 	} else {
@@ -865,6 +733,7 @@ func partsMissing(gone []int) string {
 // follow has every part take part 1's switch and folder: the Set is one
 // download as folder.
 func (s *Set) follow(p1 partInfo, members map[int]partInfo) {
+	keep, keeping := p1.d.folderKeep()
 	for n, m := range members {
 		if n == 1 || m.on && m.into == p1.into {
 			continue
@@ -877,6 +746,7 @@ func (s *Set) follow(p1 partInfo, members map[int]partInfo) {
 		if !d.st.Folder.locked() {
 			// The Note goes too: one read alone before its set was known says it is a part of one.
 			d.st.Folder.On, d.st.Folder.Auto, d.st.Folder.Into, d.st.Folder.Note = true, false, p1.into, ""
+			d.st.Folder.Keep, d.st.Folder.Keeping = keep, keeping
 			if !d.st.Allocated {
 				d.st.Dir = p1.into
 			}
@@ -886,165 +756,26 @@ func (s *Set) follow(p1 partInfo, members map[int]partInfo) {
 	}
 }
 
-// preferTail has a running download fetch from `at` on first.
-func (d *Download) preferTail(at int64) {
+// folderKeep is the download's archive keeping as chosen and as Automatic
+// decided, for the other parts of its Set to take.
+func (d *Download) folderKeep() (keep, keeping string) {
 	d.mu.Lock()
-	if d.plan != nil && d.plan.prefer != at {
-		d.plan.cut(at)
-		d.plan.prefer = at
-	}
-	d.mu.Unlock()
-}
-
-// nameOut makes the output folder, named after the archive's Root or the set.
-func (s *Set) nameOut(a *archive.Archive, p1 partInfo) (string, error) {
-	base := a.Root
-	if base == "" {
-		base = strings.TrimSuffix(s.set, filepath.Ext(s.set))
-	}
-	if strings.TrimSpace(base) == "" {
-		base = "download"
-	}
-	if err := os.MkdirAll(p1.into, 0o755); err != nil {
-		return "", err
-	}
-	out := filepath.Join(p1.into, uniqueName(p1.into, base, ""))
-	if err := os.Mkdir(out, 0o755); err != nil {
-		return "", err
-	}
-	d := p1.d
-	d.mu.Lock()
-	d.st.Folder.Out = out
-	d.mu.Unlock()
-	d.env.Changed(d)
-	return out, nil
-}
-
-// reclaim fetches again the bytes freed of blocks not done: a block stopped
-// partway is extracted again from its front.
-func (s *Set) reclaim(run *setRun, members map[int]partInfo, done []int64) {
-	was := map[int64]bool{}
-	for _, st := range done {
-		was[st] = true
-	}
-	for _, e := range run.arc.Entries {
-		if was[e.Start] {
-			continue
-		}
-		s.refetch(run, members, archive.Range{Start: e.Start, End: e.End}, true)
-	}
-}
-
-// refetch has the parts fetch r again: only what was freed of it, or all of it.
-func (s *Set) refetch(run *setRun, members map[int]partInfo, r archive.Range, freedOnly bool) {
-	parts, local := run.parts.Cut(r)
-	for k, i := range parts {
-		m, ok := members[i+1]
-		if !ok || run.released[i] {
-			continue
-		}
-		want := []Range{{local[k].Start, local[k].End}}
-		if freedOnly {
-			want = intersectRanges(want, m.freed)
-		}
-		for _, w := range want {
-			m.d.refetch(w)
-		}
-	}
-}
-
-// refetch puts r back to be fetched: a completed part is downloaded again.
-func (d *Download) refetch(r Range) {
-	d.mu.Lock()
+	defer d.mu.Unlock()
 	if f := d.st.Folder; f != nil {
-		f.Freed = subtractRanges(f.Freed, []Range{r})
+		return f.Keep, f.Keeping
 	}
-	switch {
-	case d.plan != nil:
-		for _, p := range subtractRanges([]Range{r}, d.plan.ranges()) {
-			d.plan.add(p)
-		}
-	default:
-		d.st.Remaining = mergeRanges(append(d.st.Remaining, r))
-		if d.st.Status == StatusCompleted {
-			d.st.Status, d.st.Finished = StatusQueued, time.Time{}
-		}
-	}
-	d.mu.Unlock()
-	log.Printf("download %s: fetching %d-%d again for its set", d.ID(), r.Start, r.End)
-	d.env.Changed(d)
+	return "", ""
 }
 
-// record saves what Extract did: the blocks done on part 1, the bytes freed
-// on the part they are in, and wrong blocks fetched again: a block wrong twice
-// pauses the parts it is in.
-func (s *Set) record(run *setRun, members map[int]partInfo, res archive.Result) {
-	p1 := members[1].d
-	files, of := run.x.Progress()
-	p1.mu.Lock()
-	f := p1.st.Folder
-	for _, e := range res.Done {
-		f.Done = append(f.Done, e.Start)
-	}
-	f.Files, f.Of = files, of
-	p1.mu.Unlock()
-	if len(res.Done) > 0 || f.Files != files {
-		p1.env.Changed(p1)
-	}
-	for _, r := range res.Freed {
-		parts, local := run.parts.Cut(r)
-		for k, i := range parts {
-			m, ok := members[i+1]
-			if !ok {
-				continue
-			}
-			m.d.mu.Lock()
-			mf := m.d.st.Folder
-			mf.Freed = mergeRanges(append(mf.Freed, Range{local[k].Start, local[k].End}))
-			m.d.mu.Unlock()
-			m.d.env.Changed(m.d)
-		}
-	}
-	for _, fl := range res.Failed {
-		// Part 1 remembers it, as it does the Entries done: a restart doesn't forget.
-		p1.mu.Lock()
-		i := slices.Index(f.Failed, fl.Range.Start)
-		if i >= 0 {
-			// Its next try after a resume gets another fetch first.
-			f.Failed = slices.Delete(f.Failed, i, i+1)
-		} else {
-			f.Failed = append(f.Failed, fl.Range.Start)
-		}
-		p1.mu.Unlock()
-		p1.env.Changed(p1)
-		log.Printf("set %s: %s, fetching it again", s.set, fl)
-		s.refetch(run, members, fl.Range, false)
-		if i < 0 {
-			continue
-		}
-		msg := fmt.Sprintf("Paused: %s came out wrong twice (%s). Resume to download it again", fl.Entry.Name, fl.Reason)
-		parts, _ := run.parts.Cut(fl.Range)
-		for _, k := range parts {
-			if m, ok := members[k+1]; ok {
-				m.d.pauseWith(msg)
-			}
-		}
-	}
-}
-
-// pauseWith pauses the part and says why; the Set's loop holds no part's lock.
-func (d *Download) pauseWith(msg string) {
-	d.Stop(StatusPaused)
-	d.mu.Lock()
-	if d.st.Status == StatusPaused {
-		d.st.Error = msg
-	}
-	d.mu.Unlock()
-	d.env.Changed(d)
-}
-
-// release deletes the .part of every completed part that is all freed.
+// release deletes the .part of every completed part that is all freed, once
+// the parts' record says so on disk: part 1's Entries done and the part's
+// bytes freed. A crash after the delete would otherwise find its bytes neither
+// on disk nor saved as freed.
 func (s *Set) release(run *setRun, members map[int]partInfo) {
+	if run.ex.x.Keep {
+		return // the archive is kept (Extraction.mayFree): a part with little in it isn't let go either
+	}
+	saved1 := false
 	for i := range run.parts.Len() {
 		m, ok := members[i+1]
 		if !ok || run.released[i] || run.files[i] == nil || !m.completed {
@@ -1059,6 +790,19 @@ func (s *Set) release(run *setRun, members map[int]partInfo) {
 		if !run.arcCovers(i) {
 			continue
 		}
+		if !saved1 {
+			if err := members[1].d.save(); err != nil {
+				log.Printf("set %s: saving part 1: %v", s.set, err)
+				return
+			}
+			saved1 = true
+		}
+		if i > 0 {
+			if err := m.d.save(); err != nil {
+				log.Printf("set %s: saving part %d: %v", s.set, i+1, err)
+				continue
+			}
+		}
 		run.files[i].Close()
 		run.files[i] = nil
 		run.parts.Set(i, nil)
@@ -1072,8 +816,8 @@ func (s *Set) release(run *setRun, members map[int]partInfo) {
 // arcCovers: every block with bytes in part i is done.
 func (r *setRun) arcCovers(i int) bool {
 	span := r.parts.Span(i)
-	for k, e := range r.arc.Entries {
-		if e.Start < span.End && span.Start < e.End && !r.x.Done(k) {
+	for k, e := range r.ex.arc.Entries {
+		if e.Start < span.End && span.Start < e.End && !r.ex.x.Done(k) {
 			return false
 		}
 	}
@@ -1084,19 +828,33 @@ func (r *setRun) arcCovers(i int) bool {
 // finish deletes every part's .part: all is extracted.
 func (s *Set) finish(run *setRun, members map[int]partInfo) {
 	out := run.out
-	run.files1, run.of = run.x.Progress()
+	run.files1, run.of = run.ex.x.Progress()
 	run.close()
 	s.finished.Store(true)
+	saved := true
 	for _, m := range members {
 		d := m.d
 		d.mu.Lock()
 		d.st.Folder.Out = out
 		d.st.Folder.Password = "" // kept only as long as it's needed
-		if m.completed {
-			os.Remove(m.path) // one still to complete (queued with all its bytes, say) removes it when it does
-		}
 		d.mu.Unlock()
 		d.env.Changed(d)
+		// On disk before any .part goes, as in release.
+		if err := d.save(); err != nil {
+			log.Printf("set %s: saving a part: %v", s.set, err)
+			saved = false
+		}
+	}
+	keep := members[1].keep == KeepAfter
+	for _, m := range members {
+		switch {
+		case !m.completed || !saved: // one still to complete (queued with all its bytes, say) does this when it does
+		case keep:
+			m.d.keepPart(m.path) // kept afterwards (ADR 0007): each part under its own name
+			m.d.env.Changed(m.d)
+		default:
+			os.Remove(m.path)
+		}
 	}
 	log.Printf("set %s: extracted to %s", s.set, out)
 }
@@ -1116,7 +874,8 @@ func (s *Set) giveUp(members map[int]partInfo, err error) error {
 			d.folderOffLocked()
 			f.On, f.Note = false, u.Reason+", so its parts are downloaded as files"
 		}
-		path, done := d.partPath(), d.st.Status == StatusCompleted
+		// A part with bytes freed has holes: it is no file of its own.
+		path, done := d.partPath(), d.st.Status == StatusCompleted && !d.st.Folder.locked()
 		d.mu.Unlock()
 		if done {
 			d.keepPart(path)
@@ -1145,13 +904,26 @@ func (d *Download) keepPart(part string) {
 	d.mu.Unlock()
 }
 
+// RestartCost is the bytes an engine restart now would download again (see
+// Download.RestartCost).
+func (s *Set) RestartCost() int64 { return s.cost.Load() }
+
+// Name is the archive's name: x.7z, x.rar or x.zip.
+func (s *Set) Name() string { return s.set }
+
 // publish updates what the parts' summaries show.
 func (s *Set) publish(run *setRun) {
+	var cost int64
+	if run.ex != nil {
+		cost = run.ex.streaming.Load()
+	}
+	s.cost.Store(cost)
 	s.tail.Store(run.tail)
 	// A RAR is one stream, and so is an archive whose largest Entry is longer
 	// than a part: read front to back only. Not known before its list is read.
-	s.inOrder.Store(run.arc == nil || s.rar || run.parts != nil && run.arc.LargestCompressed > run.parts.Span(0).End)
-	v := &SetSummary{Note: run.note, Out: run.out, Finished: run.finished, Phase: run.phase, Extracted: run.extracted, Total: run.sizes}
+	arc := run.arc()
+	s.inOrder.Store(arc == nil || s.rar || run.parts != nil && arc.LargestCompressed > run.parts.Span(0).End)
+	v := &SetSummary{Note: run.note, Out: run.out, Finished: run.finished, Locked: run.locked, Phase: run.phase, Extracted: run.extracted, Total: run.sizes}
 	if run.tail != nil && v.Phase == "" {
 		v.Phase = "Waiting for the archive's list of files"
 	}
@@ -1170,8 +942,8 @@ func (s *Set) publish(run *setRun) {
 		s.mu.Unlock()
 	}
 	v.Files, v.Of = run.files1, run.of
-	if run.x != nil {
-		v.Files, v.Of = run.x.Progress()
+	if run.ex != nil && run.ex.x != nil {
+		v.Files, v.Of = run.ex.x.Progress()
 	}
 	old := s.view.Load()
 	changed := old == nil

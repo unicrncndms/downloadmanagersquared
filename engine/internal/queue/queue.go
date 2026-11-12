@@ -132,8 +132,6 @@ func (q *Queue) Replace(old, e Entry) error {
 // A queued entry moved before one that holds a slot takes that slot: the
 // other goes back to the queue, next after it.
 func (q *Queue) Move(id, before string) error {
-	q.saveMu.Lock()
-	defer q.saveMu.Unlock()
 	q.mu.Lock()
 	if q.byID[id] == nil || (before != "" && q.byID[before] == nil) {
 		q.mu.Unlock()
@@ -147,14 +145,19 @@ func (q *Queue) Move(id, before string) error {
 		}
 		q.order = slices.Insert(q.order, at, id)
 	}
-	order := slices.Clone(q.order)
 	me, b := q.byID[id], q.byID[before]
 	swap := b != nil && b != me && b.Running() && me.Status() == download.StatusQueued && !q.held[id]
 	q.mu.Unlock()
 	if swap {
+		// Not under saveMu: a download stopping may save its state at once (SaveNow).
 		b.Stop(download.StatusQueued)
 		me.Start()
 	}
+	q.saveMu.Lock()
+	defer q.saveMu.Unlock()
+	q.mu.Lock()
+	order := slices.Clone(q.order) // taken now, so the last write has the last move
+	q.mu.Unlock()
 	return atomicfile.WriteJSON(q.orderPath(), order)
 }
 
@@ -348,6 +351,21 @@ func (q *Queue) Save() {
 			log.Printf("saving %s: %v", e.ID(), err)
 		}
 	}
+}
+
+// SaveNow writes the state of the entry id at once, for a caller that must
+// have it on disk before going on. An entry removed has nothing to save.
+func (q *Queue) SaveNow(id string) error {
+	q.saveMu.Lock()
+	defer q.saveMu.Unlock()
+	q.mu.Lock()
+	e := q.byID[id]
+	q.mu.Unlock()
+	if e == nil {
+		return nil
+	}
+	_, st := e.Saved()
+	return atomicfile.WriteJSON(q.statePath(e), st)
 }
 
 // Close stops every running entry, to queue again at the next start, and saves them all.

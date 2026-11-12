@@ -72,12 +72,7 @@ function windowHeader() {
   return true;
 }
 
-// ifaceHue is a connection's colour on the pages (ui.css --c0 …): its place
-// among the engine's connections, so it is the same on every page.
-function ifaceHue(id, state) {
-  const i = ((state && state.interfaces) || []).findIndex((x) => x.id === id);
-  return `var(--c${Math.max(i, 0) % 6})`;
-}
+// ifaceHue and IFACE_COLORS (the connection's colour) are in lib/iface.js.
 
 // fmtBytes, fmtSpeed, fmtETA and percent are in lib/list.js.
 

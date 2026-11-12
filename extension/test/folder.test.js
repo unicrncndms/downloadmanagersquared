@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
-const { folderView, setFolderView, removeWording, addFolderChoice } = require("../lib/folder.js");
+const { folderView, setFolderView, keepView, removeWording, addFolderChoice } = require("../lib/folder.js");
 
 const SETTINGS = { saveDir: "C:\\Users\\you\\Downloads", folderDefault: false };
 const zip = (folder, extra) => ({ kind: "http", id: "z", filename: "big.zip", status: "running", folder, ...extra });
@@ -111,7 +111,7 @@ test("an encrypted archive asks for its password until it's done, and says when 
 test("a split archive's group card has one switch for its parts, asked of an unfinished part", () => {
   const part = (id, folder, status = "running") => ({ kind: "http", id, filename: `a.part${id}.rar`, status, folder });
   const off = setFolderView([part(1, { on: false }, "completed"), part(2, { on: false })], SETTINGS);
-  assert.deepEqual(off, { id: 2, toggle: { on: false, disabled: false, reason: "" }, ask: null, password: null });
+  assert.deepEqual(off, { id: 2, toggle: { on: false, disabled: false, reason: "" }, ask: null, keep: null, password: null });
   assert.deepEqual(setFolderView([part(1, { on: true }), part(2, { on: true })], SETTINGS).ask, { prefill: SETTINGS.saveDir });
   // Part 1 is being freed: the set can't change any more, whatever part 2 could still do.
   assert.equal(setFolderView([part(1, { on: true, into: "D:\\x", locked: true }), part(2, { on: true, into: "D:\\x" })], SETTINGS).toggle, null);
@@ -119,4 +119,32 @@ test("a split archive's group card has one switch for its parts, asked of an unf
   // The password is asked on part 1, even once every part is fetched.
   const asks = setFolderView([part(1, { on: true, into: "D:\\x", ask: "wrong" }, "completed"), part(2, { on: true, into: "D:\\x" }, "completed")], SETTINGS);
   assert.deepEqual(asks.password, { wrong: true, id: 1 });
+});
+
+test("archive keeping is a select of its four ways while on and unfinished, fixed once anything is freed", () => {
+  assert.equal(folderView(zip({ on: false }), SETTINGS).keep, null);
+  assert.equal(folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big" }, { status: "completed" }), SETTINGS).keep, null);
+  const k = folderView(zip({ on: true, into: "D:\\x", keep: "untilExtracted" }), SETTINGS).keep;
+  assert.equal(k.value, "untilExtracted");
+  assert.deepEqual(k.options.map(([v]) => v), ["auto", "free", "untilExtracted", "keep"]);
+  assert.deepEqual(k.options.map(([, t]) => t), ["Automatic", "Free while extracting", "Keep until extracted (interruption recovery)", "Keep the archive"]);
+  assert.equal(k.disabled, false);
+  assert.equal(k.decided, "");
+  assert.match(k.help, /update, reboot or crash/);
+  // No choice made: Automatic, and what it decided once extraction started.
+  assert.equal(keepView({}, false).value, "auto");
+  assert.equal(keepView({ keep: "auto", keeping: "untilExtracted" }, false).decided, "Automatic chose: keep until extracted");
+  assert.equal(keepView({ keep: "auto", keeping: "free" }, false).decided, "Automatic chose: free while extracting");
+  const fixed = folderView(zip({ on: true, into: "D:\\x", keep: "auto", keeping: "free", locked: true, keepFixed: true }), SETTINGS).keep;
+  assert.equal(fixed.disabled, true);
+  assert.ok(fixed.reason);
+});
+
+test("a split archive's archive keeping is fixed once any part is freed", () => {
+  const part = (id, folder, status = "running") => ({ kind: "http", id, filename: `a.part${id}.rar`, status, folder });
+  const free = setFolderView([part(1, { on: true, into: "D:\\x", keep: "keep" }), part(2, { on: true, into: "D:\\x", keep: "keep" })], SETTINGS);
+  assert.equal(free.keep.value, "keep");
+  assert.equal(free.keep.disabled, false);
+  const fixed = setFolderView([part(1, { on: true, into: "D:\\x" }, "completed"), part(2, { on: true, into: "D:\\x", keepFixed: true })], SETTINGS);
+  assert.equal(fixed.keep.disabled, true);
 });

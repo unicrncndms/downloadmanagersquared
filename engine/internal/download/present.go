@@ -121,6 +121,8 @@ func Present(s Summary) Summary {
 			s.Note = f.Set.Note
 		case s.Status == StatusCompleted && f.Set != nil && !f.Set.Finished:
 			s.Note = "kept until its set is extracted"
+		case s.Status == StatusCompleted && f.Out != "" && f.Keeping == KeepAfter:
+			s.Note = "Extracted to " + filepath.Base(f.Out) + " · archive kept"
 		case s.Status == StatusCompleted && f.Out != "":
 			s.Note = "Extracted to " + filepath.Base(f.Out)
 		case s.Status == StatusCompleted:
@@ -128,6 +130,8 @@ func Present(s Summary) Summary {
 			s.Note = joinNote(s.Note, "needs the archive's password")
 		case f.Into == "":
 			s.Note = joinNote(s.Note, "choose a folder to extract into")
+		case f.Of > 0 && f.Keeping == KeepUntil || f.Of > 0 && f.Keeping == KeepAfter:
+			s.Note = joinNote(s.Note, fmt.Sprintf("%s of %s files extracted, keeping the archive", thousands(f.Files), thousands(f.Of)))
 		case f.Of > 0:
 			s.Note = joinNote(s.Note, fmt.Sprintf("%s of %s files extracted", thousands(f.Files), thousands(f.Of)))
 		}
@@ -148,7 +152,69 @@ func Present(s Summary) Summary {
 		links[id] = presentLink(l, s)
 	}
 	s.Links = links
+	s.Section = sectionOf(s)
+	// The row's square already says it is downloading, seeding, paused or
+	// queued: a label that says only that is left off. "Moving…" is not.
+	switch s.Status {
+	case StatusRunning, StatusSeeding, StatusPaused, StatusQueued:
+		s.Plain = s.Label == statusText[s.Status] && s.Tone != toneWarn && s.Tone != toneBad
+	}
 	return s
+}
+
+// The sections of the downloads list, in the order they are listed. The UIs
+// keep their headings and nothing of the rule that puts a download in one.
+const (
+	SectionNeeds   = "needs"  // needs you
+	SectionActive  = "active" // downloading
+	SectionSeeding = "seeding"
+	SectionQueued  = "queued"
+	SectionPaused  = "paused"
+	SectionDone    = "done"
+)
+
+// sectionRank orders the sections for a group's files.
+var sectionRank = map[string]int{SectionNeeds: 0, SectionActive: 1, SectionSeeding: 2, SectionQueued: 3, SectionPaused: 4, SectionDone: 5}
+
+// extractedWith is false for a part of a split archive whose Set isn't
+// extracted yet: its file is fetched, but it is kept until then.
+func extractedWith(s Summary) bool {
+	return s.Folder == nil || s.Folder.Set == nil || s.Folder.Set.Finished
+}
+
+// sectionOf says which section of the list a download is in. s has its links
+// presented already (CanRetry).
+func sectionOf(s Summary) string {
+	done := s.Status == StatusCompleted && extractedWith(s)
+	if f := s.Folder; s.Kind != KindTorrent && f != nil && f.On {
+		asking := f.Into == "" && s.Status != StatusCompleted
+		stuck := !done && (f.Ask != "" || (f.Set != nil && len(f.Set.Missing) > 0))
+		if asking || stuck {
+			return SectionNeeds
+		}
+	}
+	retry := false
+	for _, l := range s.Links {
+		retry = retry || l.CanRetry
+	}
+	// A pause only for the VPN ends by itself, so it needs nobody.
+	pausedWithError := s.Status == StatusPaused && s.Error != "" && !s.WaitVPN
+	if s.Status == StatusFailed || s.Status == StatusChoosing || retry || pausedWithError {
+		return SectionNeeds
+	}
+	switch s.Status {
+	case StatusSeeding:
+		return SectionSeeding
+	case StatusQueued:
+		return SectionQueued
+	case StatusPaused:
+		return SectionPaused
+	case StatusCompleted:
+		if done {
+			return SectionDone
+		}
+	}
+	return SectionActive // downloading, verifying, finding files, checking, or a part fetched while its archive extracts
 }
 
 func joinNote(a, b string) string {

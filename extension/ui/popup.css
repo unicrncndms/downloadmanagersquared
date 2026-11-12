@@ -193,6 +193,7 @@ button.icon[aria-expanded] svg { transition: transform .15s; }
 .extract.pass .row { flex-wrap: wrap; }
 .extract.pass input { flex: 1 1 140px; min-width: 0; }
 .extract.pass .grow { flex: 0 1 auto; }
+.extract.keep select { flex: 0 1 auto; min-width: 0; }
 .conns .who { display: inline-flex; align-items: center; gap: 6px; }
 .row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .row .grow, .row .path { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -220,7 +221,8 @@ button.icon[aria-expanded] svg { transition: transform .15s; }
 .switch .badge { cursor: help; }
 /* The extraction's bar, under the download's: thinner and paler. */
 .bar.xbar { height: 4px; margin-top: 6px; max-width: 300px; }
-.bar.xbar > div { opacity: .55; }
+/* The extraction's bar: its own colour, so it isn't read as the download's. */
+.bar.xbar > div { background: var(--ok); }
 /* A split archive's switch and extraction are on its group's row, for all its parts. */
 .group.parts .group-files .fold { display: none !important; }
 

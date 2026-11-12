@@ -96,6 +96,26 @@ function folderSwitch(getId, getPassId) {
   return { row, pass, ask, update, asFile, declinable: (v) => !!(v && (v.password || v.ask)) };
 }
 
+// keepSelect is a Download as folder's archive keeping (lib/folder.js
+// keepView): what it does with the archive, set for the download or its
+// whole Set until any of it is freed, with a line on what it means.
+function keepSelect(getId) {
+  const sel = el("select", { "aria-label": "Archive", onchange: () => act("setFolder", { id: getId(), keep: sel.value }, "Saved") });
+  const help = el("div", { class: "muted" });
+  const root = el("div", { class: "extract fold keep", hidden: true },
+    el("div", { class: "row" }, el("span", { class: "muted" }, "Archive"), sel), help);
+  function update(k) {
+    root.hidden = !k;
+    if (!k) return;
+    if (!sel.options.length) sel.replaceChildren(...k.options.map(([v, text]) => el("option", { value: v }, text)));
+    if (document.activeElement !== sel) sel.value = k.value;
+    sel.disabled = k.disabled;
+    sel.title = k.reason;
+    help.textContent = k.decided ? `${k.decided}. ${k.help}` : k.help;
+  }
+  return { root, update };
+}
+
 // extractBar is a Download as folder's extraction under the download's own
 // bar: how far it is, and what it is doing or waiting for (extractView).
 function extractBar() {
@@ -270,8 +290,9 @@ function makeCard(id) {
   const foldMove = el("div", {},
     el("div", { class: "row" }, el("span", { class: "muted" }, "Extract into"), moveInto, moveChange.button),
     moveChange.box, moveWarn, moveErr);
+  const foldKeep = keepSelect(() => id);
   const foldFacts = el("dl", { class: "facts" });
-  const foldSection = section("Folder", foldExtracting, foldMove, foldFacts);
+  const foldSection = section("Folder", foldExtracting, foldMove, foldKeep.root, foldFacts);
 
   const fileFacts = el("dl", { class: "facts" });
   const fileSection = section("File", fileFacts);
@@ -405,7 +426,7 @@ function makeCard(id) {
     status.textContent = d.label;
     status.className = "badge st " + (d.tone || "");
     // Its section's heading says it, unless it says more (Checking, Extracting) or warns.
-    status.hidden = slim || (["Downloading", "Seeding", "Paused", "Queued"].includes(d.label) && !["warn", "bad"].includes(d.tone));
+    status.hidden = slim || !!d.plain;
     dropDone.hidden = !done;
     showDone.hidden = !done || !(d.actions || {}).showInFolder;
     paintTile(num, tileOf(d), queuePlace, d.label);
@@ -487,7 +508,8 @@ function makeCard(id) {
     menuAsFile.hidden = !fold.declinable(fv);
     if (fv && fv.ask) sub.hidden = true; // the engine's "choose a folder" says what the step shows
     if (fv && fv.password) sub.hidden = true; // the engine's "needs the archive's password" says what the form asks
-    foldSection.hidden = !fv || !(fv.extracting || fv.move || fv.facts.length);
+    foldSection.hidden = !fv || !(fv.extracting || fv.move || fv.keep || fv.facts.length);
+    foldKeep.update(fv && fv.keep);
     if (fv) {
       foldExtracting.hidden = !fv.extracting;
       foldMove.hidden = !fv.move;
@@ -661,10 +683,10 @@ function makeCard(id) {
 function makeGroupCard(gid) {
   let g = null; // the group as last shown
   let open = false;
-  const ids = () => (g ? g.items.map((d) => d.id) : []);
+  const ids = () => (g ? g.items.map((i) => i.d.id) : []);
   const each = async (method, params, okText, pick) => {
     // All at once: a pause answers only once its connections have closed.
-    await Promise.all(g.items.filter((d) => !pick || pick(d)).map((d) => call(method, { id: d.id, ...params }).catch((e) => toast(e.message))));
+    await Promise.all(g.items.map((i) => i.d).filter((d) => !pick || pick(d)).map((d) => call(method, { id: d.id, ...params }).catch((e) => toast(e.message))));
     if (okText) toast(okText);
   };
 
@@ -687,11 +709,13 @@ function makeGroupCard(gid) {
     el("button", { class: "small", onclick: () => { ask.hidden = true; } }, "Cancel"));
   const menuRemove = el("button", { onclick: () => {
     closeMenu();
-    if (groupView(g.items).partialFile) { ask.hidden = false; ask.querySelector("[data-keep]").focus(); }
+    if (groupView(g.summary).partialFile) { ask.hidden = false; ask.querySelector("[data-keep]").focus(); }
     else each("remove", { deleteFile: false }, "Removed from list (files kept)");
   } }, "Remove all…");
   const menuAsFile = el("button", { onclick: () => { closeMenu(); fold.asFile(); } }, "Download as a file instead");
-  const menu = el("div", { class: "menu", hidden: true }, menuAsFile, menuRemove);
+  // A split archive's extraction that seems stuck starts over, as after a restart.
+  const menuRetry = el("button", { onclick: () => { closeMenu(); act("retryExtraction", { id: g.items[0].d.id }, "Extraction started over"); } }, "Retry extraction");
+  const menu = el("div", { class: "menu", hidden: true }, menuRetry, menuAsFile, menuRemove);
   const more = iconButton("more", "More", (e) => {
     e.stopPropagation();
     const was = !menu.hidden;
@@ -701,42 +725,48 @@ function makeGroupCard(gid) {
   // A split archive is one Download as folder: its switch is here, not on its parts' cards.
   let foldId = "", passId = "";
   const fold = folderSwitch(() => foldId, () => passId);
+  const keep = keepSelect(() => foldId);
   const extract = extractBar();
   const toggle = iconButton("chevron", "Show its files", () => { open = !open; update(g); });
   const files = el("div", { class: "group-files" });
   const root = el("div", { class: "card group", tabindex: "-1", "data-group": gid },
     num, name, el("span", { class: "end" }, toggle, pause, resume, el("span", { class: "more" }, more, menu)),
     el("div", { class: "prog" }, bar), el("div", { class: "nums" }, numsMain), el("div", { class: "what" }, status, left),
-    extract.bar, extract.line, fold.row, fold.pass, fold.ask, ask, files);
+    extract.bar, extract.line, fold.row, fold.pass, fold.ask, keep.root, ask, files);
 
   function update(next) {
     g = next;
-    const v = groupView(g.items);
-    title.textContent = name.title = g.name;
+    const v = groupView(g.summary);
+    const ds = g.items.map((i) => i.d);
+    title.textContent = name.title = g.summary.name;
     toggle.setAttribute("aria-expanded", String(open));
-    root.classList.toggle("sel", g.items.every((d) => selected.has(d.id)));
-    const parts = String(g.group).startsWith("parts:");
+    root.classList.toggle("sel", ds.every((d) => selected.has(d.id)));
+    const parts = g.summary.parts;
     count.textContent = `${g.items.length} ${parts ? "parts" : "files"}`;
     root.classList.toggle("parts", parts);
-    const fv = parts ? setFolderView(g.items, latest.settings) : null;
+    const fv = parts ? setFolderView(ds, latest.settings) : null;
     foldId = fv ? fv.id : "";
     passId = fv && fv.password ? fv.password.id : "";
-    extract.update(parts ? extractView(g.items) : null);
+    const xv = parts ? extractView(ds, g.summary.extractEta) : null;
+    extract.update(xv);
     fold.update(fv);
+    keep.update(fv && fv.keep);
     menuAsFile.hidden = !fold.declinable(fv);
+    menuRetry.hidden = !parts || g.summary.finished || !ds.some((d) => d.folder && d.folder.on);
     status.textContent = v.label;
     status.className = "badge st " + v.tone;
     paintTile(num, v.speed > 0 ? { kind: "run", icon: "down" } : queuePlace ? { kind: "", icon: "" } : { kind: "", icon: "pause" }, queuePlace, v.label);
     fill.style.width = v.percent + "%";
-    left.textContent = v.left;
+    // Beside the extraction's bar, this one says it is the download's.
+    left.textContent = (xv ? "Download · " : "") + v.left;
     numsMain.textContent = v.speed > 0 ? fmtSpeed(v.speed) : "";
     pause.hidden = !v.pause;
     resume.hidden = !v.resume;
     files.hidden = !open;
     let i = 0;
-    for (const d of g.items) {
+    for (const { d, form } of g.items) {
       const c = cardFor(d.id);
-      c.update(d, d.status === "completed");
+      c.update(d, form);
       place(files, c.root, i++);
     }
     while (files.children.length > i) files.lastChild.remove();
@@ -748,30 +778,24 @@ function makeGroupCard(gid) {
 function cardFor(id) {
   let c = cards.get(id);
   if (!c) {
-    let line = null, full = null, d = null;
-    // The whole row in place of the finished line: it has the Details.
-    const whole = () => {
-      if (full) return;
-      full = makeCard(id);
-      if (line) line.root.replaceWith(full.root);
-      line = null;
-      if (d) full.update(d);
-    };
+    let line = null, full = null;
     c = {
       get root() { return (full || line).root; },
-      whole,
       number(n) { if (full) full.number(n); },
-      // fetched: a group's part that is fetched, waiting only for its archive's
-      // extraction (the group's row says how that goes): its line, not its card.
-      update(next, fetched = false) {
-        d = next;
-        if (fetched && full && detail.id !== id) {
+      // form is the row's (lib/rows.js): "card", or a line ("line", or "part"
+      // for a group's fetched part). The DOM follows it.
+      update(d, form) {
+        if (form === "card" && !full) {
+          full = makeCard(id);
+          if (line) line.root.replaceWith(full.root);
+          line = null;
+        } else if (!line && (form === "part" || (form === "line" && !full))) {
+          // A download that finishes while its card is shown keeps the card
+          // until the page opens again; a group's fetched part turns into a line.
           line = makeLine(id);
-          full.root.replaceWith(line.root);
+          if (full) full.root.replaceWith(line.root);
           full = null;
         }
-        if (!full && !fetched && !finished(d)) whole(); // back at work (a checksum being checked), or never finished
-        else if (!full && !line) line = makeLine(id);
         (full || line).update(d);
       },
     };

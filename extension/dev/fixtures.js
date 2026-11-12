@@ -4,13 +4,13 @@
 // window.feed(FIXTURES.x) switches state on an open page.
 
 const IFACES = [
-  { id: "eth", name: "Ethernet", description: "Intel I225-V", ip: "192.168.1.20", present: true, enabled: true, isDefault: true, isMain: true,
+  { id: "eth", color: 0, name: "Ethernet", description: "Intel I225-V", ip: "192.168.1.20", present: true, enabled: true, isDefault: true, isMain: true,
     connections: 4, socksPort: 50001, speed: 7.1e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "reachable" },
-  { id: "wifi", name: "Wi-Fi", description: "Intel AX211", ip: "192.168.2.33", present: true, enabled: true,
+  { id: "wifi", color: 1, name: "Wi-Fi", description: "Intel AX211", ip: "192.168.2.33", present: true, enabled: true,
     connections: 4, socksPort: 50002, speed: 4.4e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" },
-  { id: "corp", name: "Corporate VPN", description: "WireGuard Tunnel", ip: "10.8.0.2", present: true, enabled: false, vpn: true,
+  { id: "corp", color: 2, name: "Corporate VPN", description: "WireGuard Tunnel", ip: "10.8.0.2", present: true, enabled: false, vpn: true,
     connections: 4, socksPort: 50003, speed: 0, upload: true, uploadLimit: 0, downloadLimit: 0 },
-  { id: "eth~vpn", name: "VPN via Ethernet", ip: "10.2.0.2/32", present: true, enabled: true, tunnel: true, of: "eth", provider: "conf",
+  { id: "eth~vpn", color: 0, name: "VPN via Ethernet", ip: "10.2.0.2/32", present: true, enabled: true, tunnel: true, of: "eth", provider: "conf",
     tunnelState: "up", connections: 4, socksPort: 50004, speed: 2.1e6, upload: true, uploadLimit: 0, downloadLimit: 0,
     incoming: "forwarded", forwardedPort: 41000 },
 ];
@@ -57,7 +57,7 @@ const zipDownload = (id, filename, folder, extra) => ({
 const FOLDER_DOWNLOADS = [
   zipDownload("f3", "photos.zip", { on: false, files: 0, of: 0, why: "A checksum is entered, and only a whole file can be checked against it: clear it first" },
     { sha256: "a".repeat(64) }),
-  zipDownload("f2", "dataset.zip", { on: true, into: "E:\\Data", out: "E:\\Data\\dataset", locked: true, why: "Some files are already extracted and their space freed, so this can't change any more", files: 412, of: 1280,
+  zipDownload("f2", "dataset.zip", { on: true, into: "E:\\Data", out: "E:\\Data\\dataset", locked: true, why: "Some files are already extracted and their space freed, so this can't change any more", keep: "auto", keeping: "free", keepFixed: true, files: 412, of: 1280,
     extracted: 9e9, phase: "Waiting for the download", extractEta: 3150,
     refetch: 3435973837, moveWarning: "Moving now re-downloads about 3.2 GiB",
     renamed: ["CON.txt → _CON.txt", "notes:v2.md → notes_v2.md"], note: "The server's checksum wasn't checked: the archive was extracted as it downloaded, so there was no whole file to check" },
@@ -108,9 +108,9 @@ const CHOOSING = { kind: "torrent", id: "t", url: "magnet:?xt=urn:btih:9f1c", fi
 const LONG = "Very.Long.Release.Name.With.Many.Dots.And.No.Spaces.2026.Remastered.Director's.Cut.Extended.Edition.4K.HDR.x265.mkv";
 const STRESS_IFACES = [
   ...IFACES,
-  { id: "phone", name: "Pixel 9 Pro USB-Tethering (Remote NDIS based Internet Sharing Device #2)", description: "Remote NDIS", ip: "192.168.42.129",
+  { id: "phone", color: 3, name: "Pixel 9 Pro USB-Tethering (Remote NDIS based Internet Sharing Device #2)", description: "Remote NDIS", ip: "192.168.42.129",
     present: true, enabled: true, connections: 32, socksPort: 50005, speed: 1.23e9, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" },
-  { id: "lte", name: "Mobilfunk-Breitbandverbindung", description: "Qualcomm X65", ip: "10.64.1.9",
+  { id: "lte", color: 4, name: "Mobilfunk-Breitbandverbindung", description: "Qualcomm X65", ip: "10.64.1.9",
     present: true, enabled: true, connections: 4, socksPort: 50006, speed: 0, upload: true, uploadLimit: 0, downloadLimit: 0 },
 ];
 const STRESS = { connected: true, settings: { ...SETTINGS, saveDir: "D:\\" + "Sehr langer Ordnername\\".repeat(6) }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
@@ -146,14 +146,14 @@ const FIXTURES = {
   // Ethernet and Wi-Fi behind one router; Check lines finds them on one public IP.
   uplink: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
     state: { ...STATE, interfaces: IFACES.map((i) => (i.id === "eth" ? { ...i, sameRouter: ["Wi-Fi"] } : i.id === "wifi" ? { ...i, sameRouter: ["Ethernet"] } : i)) },
-    lines: [{ id: "eth", name: "Ethernet", ip: "203.0.113.7" }, { id: "wifi", name: "Wi-Fi", ip: "203.0.113.7" }] },
+    lines: [{ id: "eth", color: 0, name: "Ethernet", ip: "203.0.113.7" }, { id: "wifi", color: 1, name: "Wi-Fi", ip: "203.0.113.7" }] },
   // IPv6 on: Wi-Fi is dual-stack, a phone tether has only IPv6.
   ipv6: { connected: true, settings: { ...SETTINGS, ipv6: true }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
     state: { ...STATE, downloads: [{ ...DOWNLOADS[0], links: { ...DOWNLOADS[0].links,
       wifi: { ...DOWNLOADS[0].links.wifi, family: "IPv6" },
       phone: { status: "ready", conns: 4, speed: 1.3e6, family: "IPv6", label: "Downloading", tone: "ok" } } }, ...DOWNLOADS.slice(1)], interfaces: [
       ...IFACES.map((i) => (i.id === "wifi" ? { ...i, ip6: "2a02:2c60:f110:a80:1e29:3239:c102:ce4a", families: ["IPv4", "IPv6"] } : i.tunnel ? i : { ...i, families: ["IPv4"] })),
-      { id: "phone", name: "Phone", description: "Remote NDIS", ip: "2a00:20:6000::42", ip6: "2a00:20:6000::42", families: ["IPv6"], present: true, enabled: true,
+      { id: "phone", color: 3, name: "Phone", description: "Remote NDIS", ip: "2a00:20:6000::42", ip6: "2a00:20:6000::42", families: ["IPv6"], present: true, enabled: true,
         connections: 4, socksPort: 50005, speed: 1.3e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" }] } },
   // IPv6 off, with an adapter that has only IPv6: the hint.
   ipv6hint: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", state: { ...STATE, ipv6Only: ["Phone"] } },
@@ -193,5 +193,48 @@ const FIXTURES = {
   window: { connected: true, state: STATE, settings: { ...SETTINGS, vpnProvider: "pia" }, autostart: true, recipes: null, engineVersion: "0.3.0",
     host: { version: "0.3.0", userAgent: null, recipesHere: false, openDownloads: true } },
 };
+
+// What the real engine adds to every download and to each group of them (Present
+// and Groups in engine/internal/download): the section, whether the label is plain, and the group summaries.
+// The fake state is written by hand, so this fills them in from its statuses.
+const SECTION_OF = { running: "active", verifying: "active", metadata: "active", checking: "active", seeding: "seeding", queued: "queued", paused: "paused", completed: "done" };
+const RANKS = ["needs", "active", "seeding", "queued", "paused", "done"];
+function sectionOf(d) {
+  const f = d.kind !== "torrent" && d.folder && d.folder.on ? d.folder : null;
+  const set = d.folder && d.folder.set;
+  const fetched = d.status === "completed" && !(set && !set.finished);
+  const asking = f && !f.into && d.status !== "completed";
+  const stuck = f && !fetched && (f.ask || (set && set.missing && set.missing.length));
+  if (d.status === "failed" || d.status === "choosing" || asking || stuck || Object.values(d.links || {}).some((l) => l.canRetry) || (d.status === "paused" && d.error && !d.waitVpn)) return "needs";
+  return d.status === "completed" && !fetched ? "active" : SECTION_OF[d.status] || "active";
+}
+// A label that only says what the status does, as Present's Plain.
+const PLAIN = { running: "Downloading", seeding: "Seeding", paused: "Paused", queued: "Queued" };
+function plainOf(d) {
+  return PLAIN[d.status] === d.label && d.tone !== "warn" && d.tone !== "bad";
+}
+function groupsOf(downloads) {
+  const by = new Map();
+  for (const d of downloads) if (d.group) by.set(d.group, [...(by.get(d.group) || []), d]);
+  return [...by].filter(([, items]) => items.length > 1).map(([id, all]) => {
+    const rank = (d) => (d.status === "completed" ? 5 : RANKS.indexOf(d.section));
+    const items = [...all].sort((a, b) => rank(a) - rank(b) || String(a.filename).localeCompare(String(b.filename), undefined, { numeric: true }));
+    const set = items.map((d) => d.folder && d.folder.set).find(Boolean);
+    const done = items.filter((d) => d.status === "completed").length;
+    const waiting = set && !set.finished;
+    const finished = done === items.length && !waiting;
+    const size = items.every((d) => d.size > 0) ? items.reduce((a, d) => a + d.size, 0) : set && set.total > 0 ? set.total : -1;
+    const [label, tone] = finished ? ["Completed", "ok"] : done === items.length ? (set.note ? ["Waiting", "warn"] : ["Extracting", ""]) : [items[0].label, items[0].tone || ""];
+    const can = (k) => items.some((d) => d.actions && d.actions[k]);
+    return { id, name: items[0].groupName || "Metalink", parts: id.startsWith("parts:"), count: set && set.parts ? set.parts : items.length, items: items.length, done, size,
+      got: items.reduce((a, d) => a + (d.done || 0), 0), speed: items.reduce((a, d) => a + (d.status === "running" ? d.speed || 0 : 0), 0), finished, label, tone,
+      pause: can("pause"), resume: can("resume"), partialFile: items.some((d) => d.partialFile), files: waiting ? set.files : 0, of: waiting ? set.of : 0, order: items.map((d) => d.id) };
+  });
+}
+for (const f of Object.values(FIXTURES)) {
+  if (!f.state || !f.state.downloads) continue;
+  const downloads = f.state.downloads.map((d) => ({ ...d, section: sectionOf(d), plain: d.plain ?? plainOf(d) }));
+  f.state = { ...f.state, downloads, groups: groupsOf(downloads) };
+}
 
 window.fixture = () => FIXTURES[new URLSearchParams(location.search).get("fixture") || "downloads"] || FIXTURES.downloads;

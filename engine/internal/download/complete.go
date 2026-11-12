@@ -114,6 +114,9 @@ func (d *Download) complete(ctx context.Context) error {
 	dir, name := d.st.Dir, d.st.Filename
 	folder := d.folderOnLocked()
 	set := d.set
+	// Kept afterwards (ADR 0007): the archive is whole, so it is finished as
+	// a normal download is, checked and named, beside its folder.
+	keep := folder && d.st.Folder.keepNow(d.keepDefault()) == KeepAfter
 	d.mu.Unlock()
 
 	if _, _, ok := Splittable(name); (ok || set != nil) && folder {
@@ -122,12 +125,16 @@ func (d *Download) complete(ctx context.Context) error {
 		if f != nil {
 			f.Close()
 		}
-		if set != nil && set.finished.Load() {
+		switch {
+		case set == nil || !set.finished.Load():
+		case keep:
+			d.keepPart(part)
+		default:
 			os.Remove(part)
 		}
 		return nil
 	}
-	if folder {
+	if folder && !keep {
 		// Every Entry is extracted and checked: the archive itself isn't kept.
 		if f != nil {
 			f.Close()
@@ -183,8 +190,12 @@ func (d *Download) complete(ctx context.Context) error {
 // only logged: the file is fine without it.
 func (d *Download) markFunc() func(path string) {
 	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.markLocked()
+}
+
+func (d *Download) markLocked() func(path string) {
 	id, host, ref := d.st.ID, d.st.URL, cmp.Or(d.st.Referer, d.st.PageURL)
-	d.mu.Unlock()
 	return func(path string) {
 		if err := winutil.MarkFromInternet(path, host, ref); err != nil {
 			log.Printf("download %s: marking %s as from the internet: %v", id, filepath.Base(path), err)

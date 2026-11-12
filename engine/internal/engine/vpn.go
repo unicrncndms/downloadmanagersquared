@@ -82,7 +82,7 @@ func (e *Engine) tunnelViewsLocked(tunnels []vpn.Status, speeds map[string]float
 		}
 		v := IfaceView{
 			ID: paths.Tunnel(id), Name: "VPN via " + name, Tunnel: true, Of: id, IP: st.Address,
-			Present: st.State == "up", Enabled: true, Connections: e.connsLocked(id),
+			Present: st.State == "up", Color: e.colorLocked(id), Enabled: true, Connections: e.connsLocked(id),
 			SocksPort: st.SocksPort, Speed: speeds[paths.Tunnel(id)], Incoming: st.Incoming,
 			TunnelState: st.State, TunnelError: st.Err, Provider: st.Provider, ForwardedPort: st.ForwardedPort,
 		}

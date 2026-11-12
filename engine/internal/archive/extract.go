@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -59,8 +60,23 @@ type Extractor struct {
 
 	z *blockExtract // a 7z's or a RAR's
 
+	fl flusher // the files written, being flushed to disk
+
 	// Mark, if set, is called on each file before it takes its final name.
+	// It may be called from several goroutines at once.
 	Mark func(path string)
+
+	// Keep, while set, frees nothing: an Entry is done once extracted and its
+	// files flushed, and a large one's bytes stay behind its decompressor. The
+	// archive stays whole on disk, so a stop decodes it again from bytes still
+	// there (archive keeping, ADR 0007). It may change between calls.
+	Keep bool
+
+	// Freeing, if set, is called with the bytes about to be freed, before
+	// they are, from the goroutine calling Extract. It must have them
+	// recorded as freed and saved when it returns: bytes freed but not saved
+	// would be taken as on disk after a crash. An error stops the free.
+	Freeing func([]Range) error
 }
 
 // Result is what one call to Extract did, for the caller to save.
@@ -120,6 +136,7 @@ func (s sparseFile) Free(off, n int64) error { return winutil.FreeRange(s.File, 
 // NewExtractorFrom is NewExtractor for any File.
 func NewExtractorFrom(a *Archive, f File, dir string, done []int64) (*Extractor, error) {
 	x := &Extractor{a: a, f: f, dir: dir, done: make([]bool, len(a.Entries)), folders: map[string]int{}}
+	x.fl.init()
 	if a.z != nil {
 		return newSevenExtractor(x, done)
 	}
@@ -205,7 +222,7 @@ func (x *Extractor) Finished() bool { return x.first == len(x.done) && (x.z == n
 // archive order. missing is what isn't on disk yet, as the download's plan
 // has it. It stops at the first error that isn't the Entry's own fault (the
 // disk, the output folder, ctx), returning what it did up to then.
-func (x *Extractor) Extract(ctx context.Context, missing []Range) (Result, error) {
+func (x *Extractor) Extract(ctx context.Context, missing []Range) (r Result, err error) {
 	missing = merge(missing)
 	if x.z != nil && x.z.rar != nil {
 		return x.extractRar(ctx, missing)
@@ -213,10 +230,15 @@ func (x *Extractor) Extract(ctx context.Context, missing []Range) (Result, error
 	if x.z != nil {
 		return x.extract7z(ctx, missing)
 	}
-	var r Result
 	touched := map[string]bool{} // folders written into
 	defer x.restoreFolderTimes(touched)
 	defer x.skipDone()
+	var ready []int // extracted in this call: done once their files are flushed
+	defer func() {
+		if serr := x.settle(ready, &r); err == nil {
+			err = serr
+		}
+	}()
 	for i := x.first; i < len(x.a.Entries); i++ {
 		e := x.a.Entries[i]
 		isLarge := !e.Dir && large(e)
@@ -239,7 +261,7 @@ func (x *Extractor) Extract(ctx context.Context, missing []Range) (Result, error
 			if isLarge {
 				bad, finished, err = x.streamStep(ctx, i, missing, &r)
 			} else {
-				bad, err = x.extractFile(ctx, e, path)
+				bad, err = x.extractFile(ctx, i, e, path)
 			}
 			if err != nil {
 				return r, err
@@ -256,21 +278,51 @@ func (x *Extractor) Extract(ctx context.Context, missing []Range) (Result, error
 			p = parent(p)
 			touched[p] = true
 		}
-		// Done only once its bytes are freed: an Entry done is never looked
-		// at again, so its bytes would stay. If freeing fails, it is
-		// extracted again next time.
+		ready = append(ready, i)
+	}
+	return r, nil
+}
+
+// settle makes the Entries in ready done once the files written for them are
+// flushed to disk, and frees their bytes, all in one go so they are saved
+// once. Done only once their bytes are freed: an Entry done is never looked at
+// again, so its bytes would stay. If flushing or freeing fails, none of them
+// is done, and they are extracted again next time.
+func (x *Extractor) settle(ready []int, r *Result) error {
+	if len(ready) == 0 {
+		return nil
+	}
+	if err := x.fl.wait(ready...); err != nil {
+		return err
+	}
+	for _, i := range ready {
 		x.done[i] = true
-		if err := x.free(i); err != nil {
+	}
+	rs := make([]Range, len(ready))
+	for k, i := range ready {
+		rs[k] = x.reach(i)
+	}
+	if err := x.freeAll(rs); err != nil {
+		for _, i := range ready {
 			x.done[i] = false
-			return r, err
 		}
-		if !e.Dir {
+		return err
+	}
+	freed := !x.Keep
+	for _, i := range ready {
+		e := x.a.Entries[i]
+		switch {
+		case x.z != nil && x.z.rar == nil:
+			x.extracted += len(x.a.z.blocks[i]) // a 7z block's files
+		case x.z == nil && !e.Dir:
 			x.extracted++
 		}
 		r.Done = append(r.Done, e)
-		r.Freed = append(r.Freed, Range{e.Start, e.End})
+		if freed {
+			r.Freed = append(r.Freed, Range{e.Start, e.End})
+		}
 	}
-	return r, nil
+	return nil
 }
 
 // merge sorts ranges and joins those that overlap or touch, so ready can
@@ -312,9 +364,9 @@ func (x *Extractor) path(i int) string {
 	return filepath.Join(x.dir, filepath.FromSlash(x.rel[i]))
 }
 
-// free frees Entry i's bytes, reaching up to freeReach into the done Entries
-// around it, so that the allocation units they share go too.
-func (x *Extractor) free(i int) error {
+// reach is the bytes freeing Entry i frees: its own, and up to freeReach into
+// the done Entries around it, so that the allocation units they share go too.
+func (x *Extractor) reach(i int) Range {
 	es := x.a.Entries
 	lo, hi := es[i].Start, es[i].End
 	for j := i - 1; j >= 0 && x.done[j] && lo > es[i].Start-freeReach; j-- {
@@ -323,12 +375,110 @@ func (x *Extractor) free(i int) error {
 	for j := i + 1; j < len(es) && x.done[j] && hi < es[i].End+freeReach; j++ {
 		hi = min(es[j].End, es[i].End+freeReach)
 	}
-	return x.f.Free(lo, hi-lo)
+	return Range{lo, hi}
+}
+
+// freeAll frees rs in the archive file, once Freeing has saved them as
+// freed; nothing while Keep is set.
+func (x *Extractor) freeAll(rs []Range) error {
+	if x.Keep {
+		return nil
+	}
+	if x.Freeing != nil {
+		if err := x.Freeing(rs); err != nil {
+			return err
+		}
+	}
+	for _, r := range rs {
+		if err := x.f.Free(r.Start, r.End-r.Start); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// syncFile flushes a file's data to disk. Tests watch its calls.
+var syncFile = (*os.File).Sync
+
+// flusher flushes the files an Extractor wrote to disk and then puts them in
+// place, a few at once on goroutines of their own, so extracting goes on
+// meanwhile. An Entry's bytes may only be freed once its files are flushed:
+// a crash would otherwise lose both. Each file counts under its Entry.
+type flusher struct {
+	mu   sync.Mutex
+	cond *sync.Cond
+	busy map[int]int   // files not flushed yet, by Entry
+	errs map[int]error // the first failure, by Entry
+	slot chan struct{} // one per file being flushed
+}
+
+// flushers is how many files are flushed at once.
+const flushers = 4
+
+func (f *flusher) init() {
+	f.cond = sync.NewCond(&f.mu)
+	f.busy, f.errs, f.slot = map[int]int{}, map[int]error{}, make(chan struct{}, flushers)
+}
+
+// finish flushes Entry i's checked file out and then puts it in place (see
+// finish) on a goroutine of its own. It waits only while flushers files are
+// being flushed already.
+func (f *flusher) finish(i int, e Entry, out *os.File, path string, mark func(string)) {
+	f.mu.Lock()
+	f.busy[i]++
+	f.mu.Unlock()
+	f.slot <- struct{}{}
+	go func() {
+		err := syncFile(out)
+		if err != nil {
+			discard(out)
+		} else {
+			err = finish(e, out, path, mark)
+		}
+		<-f.slot
+		f.mu.Lock()
+		if err != nil && f.errs[i] == nil {
+			f.errs[i] = err
+		}
+		if f.busy[i]--; f.busy[i] == 0 {
+			delete(f.busy, i)
+		}
+		f.cond.Broadcast()
+		f.mu.Unlock()
+	}()
+}
+
+// wait waits until the files of the Entries is are flushed and in place, and
+// says the first failure among them. Their failures are forgotten then.
+func (f *flusher) wait(is ...int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var err error
+	for _, i := range is {
+		for f.busy[i] > 0 {
+			f.cond.Wait()
+		}
+		if err == nil {
+			err = f.errs[i]
+		}
+		delete(f.errs, i)
+	}
+	return err
+}
+
+// drain waits until every file is flushed, and forgets every failure.
+func (f *flusher) drain() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for len(f.busy) > 0 {
+		f.cond.Wait()
+	}
+	clear(f.errs)
 }
 
 // extractFile writes the Entry to path. bad is why its bytes are wrong; err is
 // any other failure.
-func (x *Extractor) extractFile(ctx context.Context, e Entry, path string) (bad string, err error) {
+func (x *Extractor) extractFile(ctx context.Context, i int, e Entry, path string) (bad string, err error) {
 	data, bad, err := x.header(e)
 	if bad != "" || err != nil {
 		return bad, err
@@ -342,7 +492,8 @@ func (x *Extractor) extractFile(ctx context.Context, e Entry, path string) (bad 
 		discard(out)
 		return bad, err
 	}
-	return "", finish(e, out, path, x.Mark)
+	x.fl.finish(i, e, out, path, x.Mark)
+	return "", nil
 }
 
 // header reads the Entry's local header: where its data starts.
@@ -556,6 +707,6 @@ func (x *Extractor) restoreFolderTimes(touched map[string]bool) {
 // is the password's fault, not the bytes', so nothing is fetched again.
 // shortcut: wrong bytes in that first Entry ask for the password again too;
 // telling them apart needs a check the archive formats don't all have.
-func (x *Extractor) wrongPassword(bad string) bool {
-	return bad != "" && x.a.encrypted && !slices.Contains(x.done, true)
+func (x *Extractor) wrongPassword(bad string, ready []int) bool {
+	return bad != "" && x.a.encrypted && !slices.Contains(x.done, true) && len(ready) == 0
 }

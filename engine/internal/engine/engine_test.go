@@ -623,6 +623,7 @@ func TestTheAccentIsAColorOrNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer e.Shutdown()
 	for in, want := range map[string]string{"#1A2B3C": "#1a2b3c", "": "", "red": "", "#12345": "", "#1234567": ""} {
 		r, err := e.Call(nil, "setSettings", []byte(`{"accent":"`+in+`","themeAccent":"`+in+`"}`))
 		if err != nil {
@@ -645,5 +646,51 @@ func TestSettingsCloneSharesNothing(t *testing.T) {
 	s.FolderDirs[0] = `C:\b`
 	if len(c.Interfaces) != 1 || c.Interfaces["eth"].Name != "Ethernet" || !*c.Interfaces["eth"].Enabled || c.FolderDirs[0] != `C:\a` {
 		t.Fatalf("the clone changed with the original: %+v", c)
+	}
+}
+
+// The running marker tells a start after a crash from one after Shutdown.
+func TestTheRunningMarkerTellsAnUncleanStop(t *testing.T) {
+	dir := t.TempDir()
+	if markRunning(dir) {
+		t.Fatal("a first start counts as after an unclean stop")
+	}
+	if !markRunning(dir) {
+		t.Fatal("a start without a stop between counts as clean")
+	}
+	markStopped(dir)
+	if markRunning(dir) {
+		t.Fatal("a start after a clean stop counts as unclean")
+	}
+}
+
+// Archive keeping is Automatic unless set, takes each of its values through
+// setSettings, falls back to Automatic for one it doesn't know, and is what
+// downloads are told the setting is.
+func TestArchiveKeepingIsSetThroughSetSettings(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	if got := e.ArchiveKeeping(); got != download.KeepAuto || e.settings.ArchiveKeeping != download.KeepAuto {
+		t.Fatalf("a new engine keeps %q (setting %q), want %q", got, e.settings.ArchiveKeeping, download.KeepAuto)
+	}
+	set := func(k string) string {
+		t.Helper()
+		r, err := e.Call(nil, "setSettings", []byte(`{"archiveKeeping":"`+k+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.(Settings).ArchiveKeeping
+	}
+	for _, k := range []string{download.KeepFree, download.KeepUntil, download.KeepAfter, download.KeepAuto} {
+		if got := set(k); got != k || e.ArchiveKeeping() != k {
+			t.Fatalf("set %q, got %q (downloads told %q)", k, got, e.ArchiveKeeping())
+		}
+	}
+	set(download.KeepAfter)
+	if got := set("sometimes"); got != download.KeepAuto {
+		t.Fatalf("an unknown value became %q, want %q", got, download.KeepAuto)
 	}
 }

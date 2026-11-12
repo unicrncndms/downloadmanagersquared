@@ -200,21 +200,17 @@ func (x *Extractor) extractRar(ctx context.Context, missing []Range) (Result, er
 			return r, err
 		}
 	}
-	if x.wrongPassword(bad) {
+	if bad != "" {
+		x.fl.wait(0) // its files before the wrong one are let finish
+	}
+	if x.wrongPassword(bad, nil) {
 		return r, ErrWrongPassword
 	}
 	if bad != "" {
 		r.Failed = append(r.Failed, &Failure{Entry: e, Range: Range{e.Start, e.End}, Reason: bad})
 		return r, nil
 	}
-	x.done[0] = true
-	if err := x.free(0); err != nil {
-		x.done[0] = false
-		return r, err
-	}
-	r.Done = append(r.Done, e)
-	r.Freed = append(r.Freed, Range{e.Start, e.End})
-	return r, nil
+	return r, x.settle([]int{0}, &r)
 }
 
 // decodeRar decompresses the whole RAR into the output folder, each file
@@ -297,13 +293,15 @@ func (x *Extractor) decodeRar(ctx context.Context, _ int) (bad string, err error
 			}
 			return bad, err
 		}
-		if err := finish(e, out, path, x.Mark); err != nil {
-			return "", err
-		}
+		x.fl.finish(0, e, out, path, x.Mark)
 		if !s.seen[key] {
 			s.seen[key] = true
 			s.files.Add(1)
 		}
+	}
+	// Its files in place first: putting them there changes their folders' times.
+	if err := x.fl.wait(0); err != nil {
+		return "", err
 	}
 	for path, t := range s.dirs {
 		if !t.IsZero() {

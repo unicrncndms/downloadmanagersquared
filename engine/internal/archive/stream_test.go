@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 )
 
@@ -105,6 +107,14 @@ func TestALargeEntrysFreedBytesAreReportedBeforeItIsDone(t *testing.T) {
 	}
 	if r.Freed[0].Start != e.Start {
 		t.Fatalf("freed from %d, the Entry starts at %d", r.Freed[0].Start, e.Start)
+	}
+	// What a stop now would fetch again: all that is freed of it.
+	if s := x.Streaming(); s != n {
+		t.Fatalf("a stop would cost %d bytes, %d are freed", s, n)
+	}
+	x.Close()
+	if s := x.Streaming(); s != 0 {
+		t.Fatalf("closed, a stop still costs %d", s)
 	}
 }
 
@@ -206,5 +216,77 @@ func TestACancelledCallKeepsTheLargeEntryGoing(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(out, "big.bin"))
 	if !bytes.Equal(got, big) {
 		t.Fatal("big.bin wrong")
+	}
+}
+
+// watchedFile is a File that checks, at each free, that every Entry it frees
+// whole has had its file flushed, and that Freeing was told first.
+type watchedFile struct {
+	File
+	t      *testing.T
+	a      *Archive
+	out    string
+	synced map[string]bool // set by syncFile, under mu
+	told   []Range         // what Freeing was told
+	frees  int
+}
+
+var syncMu sync.Mutex
+
+func (w *watchedFile) Free(off, n int64) error {
+	w.t.Helper()
+	w.frees++
+	if !slices.ContainsFunc(w.told, func(r Range) bool { return r.Start <= off && off+n <= r.End }) {
+		w.t.Errorf("%d-%d freed before Freeing was told", off, off+n)
+	}
+	syncMu.Lock()
+	defer syncMu.Unlock()
+	for _, e := range w.a.Entries {
+		if !e.Dir && e.Start >= off && e.End <= off+n && !w.synced[filepath.Join(w.out, e.Name)+PartSuffix] {
+			w.t.Errorf("%s freed before its file was flushed", e.Name)
+		}
+	}
+	return w.File.Free(off, n)
+}
+
+// No Entry's bytes are freed before its file is flushed to disk and the bytes
+// are saved as freed: a crash would otherwise lose both.
+func TestBytesAreFreedOnlyOnceTheirFilesAreFlushedAndSaved(t *testing.T) {
+	lowerLarge(t, 1<<20, 1<<20)
+	files := []goFile{{name: "big.bin", data: random(6 << 20)}}
+	for i := range 12 {
+		files = append(files, goFile{name: string(rune('a'+i)) + ".bin", data: random(50<<10 + i)})
+	}
+	data := goZip(t, "", files...)
+	d := newDownload(t, data)
+	a := d.tail()
+	out := t.TempDir()
+	w := &watchedFile{File: Sparse(d.f), t: t, a: a, out: out, synced: map[string]bool{}}
+	was := syncFile
+	syncFile = func(f *os.File) error {
+		syncMu.Lock()
+		w.synced[f.Name()] = true
+		syncMu.Unlock()
+		return f.Sync()
+	}
+	t.Cleanup(func() { syncFile = was })
+	x, err := NewExtractorFrom(a, w, out, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer x.Close()
+	x.Freeing = func(rs []Range) error {
+		w.told = append(w.told, rs...)
+		return nil
+	}
+	for off := int64(0); off < a.DirStart; off += 256 << 10 {
+		d.arrive(off, min(off+256<<10, a.DirStart))
+		extract(t, x, d.missing)
+	}
+	if !x.Finished() || w.frees == 0 {
+		t.Fatalf("finished %v after %d frees", x.Finished(), w.frees)
+	}
+	if len(w.synced) != len(files) {
+		t.Fatalf("%d files flushed, want %d", len(w.synced), len(files))
 	}
 }

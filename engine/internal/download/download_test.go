@@ -2,6 +2,7 @@ package download
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -56,6 +57,7 @@ type testEnv struct {
 	asked    atomic.Value // the VPN mode Paths was last asked for
 	resolve  func(id, iface, page string)
 	finished chan struct{}
+	keeping  string // the archiveKeeping setting; "" is KeepFree, as the tests before it expect
 }
 
 func (e *testEnv) Paths(m paths.Mode) []Iface {
@@ -75,6 +77,8 @@ func (e *testEnv) Paths(m paths.Mode) []Iface {
 
 func (e *testEnv) ETAWindow() time.Duration { return 10 * time.Second }
 func (e *testEnv) Changed(*Download)        {}
+func (e *testEnv) ArchiveKeeping() string   { return cmp.Or(e.keeping, KeepFree) }
+func (e *testEnv) Save(*Download) error     { return nil }
 func (e *testEnv) Finished(*Download)       { close(e.finished) }
 func (e *testEnv) RequestResolve(id, iface, page, browser string) {
 	if e.resolve != nil {

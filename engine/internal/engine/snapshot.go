@@ -19,6 +19,7 @@ type IfaceView struct {
 	IP6         string   `json:"ip6,omitempty"`
 	Families    []string `json:"families,omitempty"` // "IPv4", "IPv6": the badge
 	Present     bool     `json:"present"`
+	Color       int      `json:"color"` // palette index the pages show it (and its tunnel) in
 	Enabled     bool     `json:"enabled"`
 	VPN         bool     `json:"vpn"`
 	IsDefault   bool     `json:"isDefault"`
@@ -46,14 +47,15 @@ type IfaceView struct {
 }
 
 type StateEvent struct {
-	Downloads  []download.Summary `json:"downloads"`
-	Interfaces []IfaceView        `json:"interfaces"`
-	PIA        vpn.PIAView        `json:"pia"`
-	Speed      float64            `json:"speed"`
-	ETA        float64            `json:"eta"`
-	Active     int                `json:"active"`
-	Update     *UpdateView        `json:"update,omitempty"`   // a newer release exists
-	IPv6Only   []string           `json:"ipv6Only,omitempty"` // adapters left out because they have only IPv6 and IPv6 is off
+	Downloads  []download.Summary      `json:"downloads"`
+	Groups     []download.GroupSummary `json:"groups"` // each Group of two or more downloads
+	Interfaces []IfaceView             `json:"interfaces"`
+	PIA        vpn.PIAView             `json:"pia"`
+	Speed      float64                 `json:"speed"`
+	ETA        float64                 `json:"eta"`
+	Active     int                     `json:"active"`
+	Update     *UpdateView             `json:"update,omitempty"`   // a newer release exists
+	IPv6Only   []string                `json:"ipv6Only,omitempty"` // adapters left out because they have only IPv6 and IPv6 is off
 }
 
 func (e *Engine) updateSnapshot(dt time.Duration) {
@@ -78,9 +80,11 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		if s.Status == download.StatusRunning {
 			total += s.Speed
 			active++
-			if s.Size > 0 {
-				remaining += s.Size - s.Done
-			}
+		}
+		// Time left is for all that will download, not only what runs now:
+		// a split archive's parts queued behind the one running count too.
+		if (s.Status == download.StatusRunning || s.Status == download.StatusQueued) && s.Size > 0 {
+			remaining += s.Size - s.Done
 		}
 	}
 
@@ -124,7 +128,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		views = append(views, IfaceView{
 			ID: id, Name: ent.info.Name, Description: ent.info.Description, IP: ipText(ent.info.IP()), IP6: ipText(ent.info.IPv6),
 			Families: ent.info.Families(),
-			Present:  ent.present, Enabled: e.enabledLocked(ent), VPN: ent.info.VPN,
+			Present:  ent.present, Color: e.colorLocked(id), Enabled: e.enabledLocked(ent), VPN: ent.info.VPN,
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
 			SocksPort: ent.socks.Port(), Speed: speeds[id],
 			Upload: e.uploadLocked(id), UploadLimit: up, DownloadLimit: down,
@@ -140,7 +144,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	tviews := e.tunnelViewsLocked(tunnels, speeds)
 	sort.Slice(tviews, func(i, j int) bool { return tviews[i].Name < tviews[j].Name })
 	views = append(views, tviews...)
-	e.snapshot = StateEvent{Downloads: sums, Interfaces: views, PIA: e.vpn.PIA(), Speed: total, ETA: e.eta.Seconds(), Active: active, Update: e.updateViewLocked(), IPv6Only: e.ipv6Only}
+	e.snapshot = StateEvent{Downloads: sums, Groups: download.Groups(sums), Interfaces: views, PIA: e.vpn.PIA(), Speed: total, ETA: e.eta.Seconds(), Active: active, Update: e.updateViewLocked(), IPv6Only: e.ipv6Only}
 }
 
 func ipText(ip net.IP) string {

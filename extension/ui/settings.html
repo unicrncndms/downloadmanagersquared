@@ -139,6 +139,9 @@
           <div class="setting"><label for="sParts">Download a split archive's parts at once
             <span class="info" tabindex="0" data-tip="For a split archive downloaded as a folder. Off, the parts of one that can only be read front to back (RAR volumes, a solid 7z) download one at a time, so none waits on disk for the extraction to reach it. On, they download side by side: faster where a server limits each connection, but the parts fetched ahead take up space until they are extracted. Archives whose files can be extracted in any order always download their parts at once."></span></label>
             <span><input type="checkbox" id="sParts" data-setting></span></div>
+          <div class="setting"><label for="sKeep">Keep the archive
+            <span class="info" tabindex="0" data-tip="What a download as folder does with the archive while it extracts, unless chosen for it in its Details. Interruption recovery: an update, reboot or crash while it extracts downloads nothing again, at the cost of room for the archive until it is extracted. Automatic keeps it until extracted when the drive has room for it, and frees it as it extracts otherwise."></span></label>
+            <select id="sKeep" data-setting></select></div>
         </div>
       </div>
     </section>
@@ -181,8 +184,10 @@
     <p class="empty" id="notFound" role="status" hidden></p>
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="../lib/folder.js"></script>
   <script src="../lib/list.js"></script>
   <script src="../lib/accent.js"></script>
+  <script src="../lib/iface.js"></script>
   <script src="../lib/rpc.js"></script>
   <script src="host.js"></script>
   <script src="common.js"></script>
