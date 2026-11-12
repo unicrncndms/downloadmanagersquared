@@ -38,3 +38,22 @@ Each of these sees the public IP address of the connection used, as any site you
 ## Contact
 
 Questions about privacy: open an issue at https://github.com/unicrncndms/downloadmanagersquared/issues. Security problems: see [SECURITY.md](SECURITY.md).
+
+## Extension permissions
+
+The extension asks for these permissions:
+
+| Permission | What DMS² uses it for |
+|---|---|
+| `nativeMessaging` | Talking to the engine through `dms-host.exe` |
+| `downloads` | Taking over downloads from the browser, and handing back ones the engine can't take |
+| `webRequest`, `webRequestBlocking` | Seeing a download's headers and cookies as it starts, and cancelling any container request that has no connection to go through |
+| `webNavigation` | Following which page a download came from (its landing page) |
+| `proxy` | Sending each temporary container's traffic through its connection's proxy |
+| `contextualIdentities` | Creating the temporary containers that open a site through one connection |
+| `cookies` | Reading the cookies a download needs when the browser didn't send any with it, and copying your cookies for a landing page into the temporary container, so the page opens logged in |
+| `tabs` | Opening and closing the windows that click through landing pages, recording and replaying the clicks in them, and opening the settings page |
+| `storage` | Keeping the learned sites and containers in this browser |
+| `contextMenus` | The *Download with DMS²* entries on links and pages |
+| `notifications` | Telling you when a download is taken over or can't be, and when a site needs your clicks or a captcha |
+| `<all_urls>` | Seeing downloads, magnet links and landing pages on any site |

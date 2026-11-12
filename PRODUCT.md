@@ -53,7 +53,7 @@ It is free and open source (MIT), with no account, no server and no telemetry. T
 
 - README.md, PRIVACY.md, SECURITY.md and CONTEXT.md describe the behavior and the vocabulary.
 - `.scratch/design-overhaul/spec.md` records the decisions so far: the web pages only are in scope for the visual overhaul; the accent follows Firefox's theme by default, with presets and a custom picker; the tray menu and setup window stay native.
-- No screenshots, customer quotes, reviews, benchmarks, press or case studies are on file. Do not fabricate any of them. Speed claims must match the README wording ("close to the sum" only when the connections are truly separate lines).
+- Screenshots of the UI harness are in `docs/img/`; measured benchmarks, once run, in `docs/benchmarks/results.csv`. No customer quotes, reviews, press or case studies are on file. Do not fabricate any of them. Speed claims must match the README wording ("close to the sum" only when the connections are truly separate lines).
 
 ## Product Principles
 
