@@ -3,6 +3,7 @@ package download
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -307,10 +308,96 @@ func TestUnknownSizeEndsWithTheResponse(t *testing.T) {
 	dir := t.TempDir()
 	env := &testEnv{ifaces: []Iface{iface("eth", 4, 0)}, main: "eth"}
 	d := runToEnd(t, env, State{ID: "t9", URL: srv.URL + "/stream.bin", Dir: dir, Size: -1})
-	if s := d.Summary(); s.Status != StatusCompleted || s.RangeOK || s.Size != -1 {
-		t.Fatalf("status %s rangeOk %v size %d: %s", s.Status, s.RangeOK, s.Size, s.Error)
+	if s := d.Summary(); s.Status != StatusCompleted || s.RangeOK || s.Size != int64(len(data)) || s.Done != int64(len(data)) {
+		t.Fatalf("status %s rangeOk %v size %d done %d: %s", s.Status, s.RangeOK, s.Size, s.Done, s.Error)
 	}
 	checkFile(t, filepath.Join(dir, "stream.bin"), data)
+}
+
+// A line slower than a buffer per stall timeout still delivers data, so it is
+// not a stall: the timer follows each read, not each full buffer.
+func TestSlowTrickleIsNotAStall(t *testing.T) {
+	old := stallTimeout
+	stallTimeout = 300 * time.Millisecond
+	defer func() { stallTimeout = old }()
+	data := randomData(20 << 10)
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Length", "20480")
+		for b := data; len(b) > 0; b = b[1<<10:] { // 20 reads, 50 ms apart: a second in all
+			w.Write(b[:1<<10])
+			w.(http.Flusher).Flush()
+			time.Sleep(50 * time.Millisecond)
+		}
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	env := &testEnv{ifaces: []Iface{iface("eth", 1, 0)}, main: "eth"}
+	d := runToEnd(t, env, State{ID: "trickle", URL: srv.URL + "/slow.bin", Dir: dir, Size: -1})
+	if s := d.Summary(); s.Status != StatusCompleted {
+		t.Fatalf("status %s: %s", s.Status, s.Error)
+	}
+	checkFile(t, filepath.Join(dir, "slow.bin"), data)
+}
+
+// An .html file the server sends as an attachment is the download, not a landing page.
+func TestAttachedHTMLIsNotALandingPage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		if r.URL.Path == "/report" {
+			w.Header().Set("Content-Disposition", `attachment; filename="x.html"`)
+		}
+		io.WriteString(w, "<html>report</html>")
+	}))
+	defer srv.Close()
+	for path, wantPage := range map[string]bool{"/report": false, "/page": true} {
+		res, err := probeLink(context.Background(), srv.Client(), Link{URL: srv.URL + path}, "")
+		if err != nil || res.isPage != wantPage {
+			t.Errorf("%s: isPage %v (err %v), want %v", path, res.isPage, err, wantPage)
+		}
+	}
+}
+
+// A failed write must stop the download as failed, with the bytes not counted as written.
+func TestFailedWriteFailsTheDownload(t *testing.T) {
+	data := randomData(32 << 20)
+	srv := fileServer(t, data, nil)
+	defer srv.Close()
+	env := &testEnv{ifaces: []Iface{iface("any", 2, 5*time.Millisecond)}, main: "any", finished: make(chan struct{})}
+	d := New(env, State{ID: "wf", URL: srv.URL + "/file/any", Dir: t.TempDir(), Size: -1})
+	d.Start()
+	waitSummary(t, d, func(s Summary) bool { return s.Done > 0 }, "some bytes")
+	d.mu.Lock()
+	d.file.Close() // every write from here on fails
+	d.mu.Unlock()
+	waitSummary(t, d, func(s Summary) bool { return s.Status == StatusFailed }, "the download to fail")
+	s := d.Summary()
+	if !strings.Contains(s.Error, "writing to disk failed") || s.Done >= int64(len(data)) {
+		t.Fatalf("error %q, done %d of %d", s.Error, s.Done, len(data))
+	}
+}
+
+// Free space below diskReserve pauses a running download instead of filling the drive.
+func TestDiskAlmostFullPauses(t *testing.T) {
+	data := randomData(8 << 20)
+	srv := fileServer(t, data, nil)
+	defer srv.Close()
+	was, calls := freeSpace, 0
+	freeSpace = func(string) (int64, error) { // room to allocate, then almost none
+		if calls++; calls == 1 {
+			return 1 << 40, nil
+		}
+		return diskReserve - 1, nil
+	}
+	defer func() { freeSpace = was }()
+	env := &testEnv{ifaces: []Iface{iface("any", 2, 5*time.Millisecond)}, main: "any", finished: make(chan struct{})}
+	d := New(env, State{ID: "df", URL: srv.URL + "/file/any", Dir: t.TempDir(), Size: -1})
+	d.Start()
+	waitSummary(t, d, func(s Summary) bool { return s.Status == StatusPaused }, "a pause")
+	if s := d.Summary(); !strings.Contains(s.Error, "disk almost full") {
+		t.Fatalf("paused with %q", s.Error)
+	}
 }
 
 func TestPauseAndResume(t *testing.T) {
@@ -412,12 +499,14 @@ func htmlForOtherIPs(data []byte) *httptest.Server {
 
 // The case from real use: the browser handed over the file link but no landing
 // page. Wi-Fi gets an HTML error page for Ethernet's link. That must not make the
-// file link the "landing page"; Wi-Fi waits until a landing page is set.
+// file link the "landing page"; Wi-Fi waits until a landing page is set. Ethernet
+// is slow enough that the download is still running when that happens (a
+// download that ends first stops its probes).
 func TestHTMLErrorPageDoesNotMakeFileLinkTheLandingPage(t *testing.T) {
 	data := randomData(16 << 20)
 	srv := htmlForOtherIPs(data)
 	defer srv.Close()
-	env := &testEnv{ifaces: []Iface{iface("eth", 2, 2*time.Millisecond), iface("wifi", 2, 2*time.Millisecond)}, main: "eth"}
+	env := &testEnv{ifaces: []Iface{iface("eth", 2, 10*time.Millisecond), iface("wifi", 2, 2*time.Millisecond)}, main: "eth"}
 	var mu sync.Mutex
 	var pages []string
 	var d *Download
@@ -794,5 +883,24 @@ func TestLinksCountTheirBytesAndKeepThemAcrossARestart(t *testing.T) {
 	}
 	if d.State().Links["eth"].Bytes == 0 {
 		t.Error("the main link fetched nothing")
+	}
+}
+
+// The time a download ran counts only while it ran: a pause before Start
+// is not part of it.
+func TestActiveTimeCountsOnlyTheRun(t *testing.T) {
+	data := randomData(256 << 10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "a.bin", t0, bytes.NewReader(data))
+	}))
+	defer srv.Close()
+	env := &testEnv{ifaces: []Iface{iface("eth", 1, 0)}, main: "eth"}
+	env.finished = make(chan struct{})
+	d := New(env, State{ID: "t10", URL: srv.URL + "/a.bin", Dir: t.TempDir(), Size: -1, Added: time.Now().Add(-time.Hour)})
+	time.Sleep(3 * time.Second) // queued: a run takes about a second
+	d.Start()
+	<-env.finished
+	if a := d.Summary().Active; a <= 0 || a >= 2.5 {
+		t.Fatalf("active %v s, want the run only (under 2.5 s, not the 3 s queued)", a)
 	}
 }

@@ -335,11 +335,12 @@ test("the tiles of a download's connections keep their places as the counts chan
 
 test("finishedSummary: size, time, speed and each connection's share when several fetched", () => {
   const nameOf = (id) => ({ eth: "Ethernet", wifi: "Wi-Fi" })[id];
-  const base = { size: 3e9, added: "2026-11-03T19:00:00Z", finished: "2026-11-03T19:04:10Z" };
+  const base = { size: 3e9, added: "2026-11-03T10:00:00Z", finished: "2026-11-03T19:04:10Z", active: 250 }; // queued for hours: only the 250 s it ran count
   assert.equal(finishedSummary({ ...base, links: { eth: { bytes: 1.86e9 }, wifi: { bytes: 1.14e9 } } }, nameOf),
     "3.0 GB in 4m 10s · 12.0 MB/s · Ethernet 62%, Wi-Fi 38%");
   assert.equal(finishedSummary({ ...base, links: { eth: { bytes: 3e9 }, wifi: {} } }, nameOf), "3.0 GB in 4m 10s · 12.0 MB/s");
   assert.equal(finishedSummary({ size: 5, links: {} }, nameOf), "5 B");
+  assert.equal(finishedSummary({ size: 5, added: "2026-11-03T19:00:00Z", finished: "2026-11-03T19:04:10Z", links: {} }, nameOf), "5 B"); // no active time recorded: no time or speed
 });
 
 test("badgeOf: ! for a download that needs you or failed, else the running count", () => {

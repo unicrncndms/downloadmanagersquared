@@ -100,16 +100,21 @@ func (d *Download) checkFinished(path string) {
 	}
 }
 
+// hashesLocked: the checksums the file must have, and whether they are the server's.
+func (d *Download) hashesLocked() (sha, md string, fromServer bool) {
+	sha, md = d.st.SHA256, d.st.MD5
+	if sha == "" && md == "" && d.st.Version.hashed() { // a pasted checksum wins
+		return d.st.Version.SHA256, d.st.Version.MD5, true
+	}
+	return sha, md, false
+}
+
 func (d *Download) complete(ctx context.Context) error {
 	d.mu.Lock()
 	f := d.file
 	d.file = nil
 	sparse := d.st.RangeOK
-	sha, md := d.st.SHA256, d.st.MD5
-	fromServer := sha == "" && md == "" && d.st.Version.hashed() // a pasted checksum wins
-	if fromServer {
-		sha, md = d.st.Version.SHA256, d.st.Version.MD5
-	}
+	sha, md, fromServer := d.hashesLocked()
 	part := d.partPath()
 	dir, name := d.st.Dir, d.st.Filename
 	folder := d.folderOnLocked()
@@ -119,34 +124,7 @@ func (d *Download) complete(ctx context.Context) error {
 	keep := folder && d.st.Folder.keepNow(d.keepDefault()) == KeepAfter
 	d.mu.Unlock()
 
-	if _, _, ok := Splittable(name); (ok || set != nil) && folder {
-		// A part of a split archive: its Set reads the .part, frees it and
-		// deletes it once extracted.
-		if f != nil {
-			f.Close()
-		}
-		switch {
-		case set == nil || !set.finished.Load():
-		case keep:
-			d.keepPart(part)
-		default:
-			os.Remove(part)
-		}
-		return nil
-	}
-	if folder && !keep {
-		// Every Entry is extracted and checked: the archive itself isn't kept.
-		if f != nil {
-			f.Close()
-		}
-		if err := os.Remove(part); err != nil {
-			log.Printf("download %s: removing the partial file: %v", d.st.ID, err)
-		}
-		if fromServer {
-			d.mu.Lock()
-			d.st.Folder.Note = serverMD5
-			d.mu.Unlock()
-		}
+	if d.completeFolder(f, part, name, folder, keep, fromServer, set) {
 		return nil
 	}
 	if f != nil {
@@ -156,12 +134,12 @@ func (d *Download) complete(ctx context.Context) error {
 		f.Sync()
 		f.Close()
 	}
-	if sha != "" || md != "" {
+	for sha != "" || md != "" {
 		d.mu.Lock()
 		d.st.Status = StatusVerifying
 		d.mu.Unlock()
 		d.env.Changed(d)
-		if err := verify(ctx, part, sha, md); err != nil {
+		if err := verifyFile(ctx, part, sha, md); err != nil {
 			switch {
 			case errors.Is(err, errMismatch) && fromServer:
 				return fmt.Errorf("%s from the server %w: the file arrived damaged, remove the download and add it again", strings.Fields(err.Error())[0], errMismatch)
@@ -171,7 +149,14 @@ func (d *Download) complete(ctx context.Context) error {
 			return err
 		}
 		d.mu.Lock()
-		d.st.HashResult = "match"
+		nsha, nmd, nfrom := d.hashesLocked()
+		if nsha == sha && nmd == md && nfrom == fromServer {
+			d.st.HashResult = "match"
+			d.mu.Unlock()
+			break
+		}
+		// Changed meanwhile (SetHashes): "match" is for the value that was checked, so check the new one.
+		sha, md, fromServer = nsha, nmd, nfrom
 		d.mu.Unlock()
 	}
 	d.markFunc()(part)
@@ -202,6 +187,9 @@ func (d *Download) markLocked() func(path string) {
 		}
 	}
 }
+
+// verifyFile is verify; tests swap it to act while a check runs.
+var verifyFile = verify
 
 func verify(ctx context.Context, path, wantSHA, wantMD5 string) error {
 	f, err := os.Open(path)

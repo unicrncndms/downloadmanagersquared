@@ -58,6 +58,7 @@ type Summary struct {
 	MapFill   string                 `json:"mapFill,omitempty"` // how far each square Map's digits mark is (mapFill)
 	Added     time.Time              `json:"added"`
 	Finished  time.Time              `json:"finished,omitzero"`
+	Active    float64                `json:"active,omitempty"` // seconds it ran, not counting the time queued or paused
 
 	VPN paths.Mode `json:"vpn,omitempty"`
 
@@ -119,7 +120,7 @@ func (d *Download) Summary() Summary {
 		hashResult: d.st.HashResult, checking: d.checking,
 		serverSHA: d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.SHA256 != "",
 		serverMD:  d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.MD5 != "",
-		Added:     d.st.Added, Finished: d.st.Finished, VPN: d.st.VPN,
+		Added:     d.st.Added, Finished: d.st.Finished, Active: d.st.Active, VPN: d.st.VPN,
 		Folder: d.folderSummaryLocked(), Limit: d.st.Limit, WaitVPN: d.st.WaitVPN,
 		Mirrors: slices.Clone(d.st.Mirrors), Group: d.st.Group, GroupName: d.st.GroupName,
 	}

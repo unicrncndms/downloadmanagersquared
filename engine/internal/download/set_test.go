@@ -2,6 +2,8 @@ package download
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -569,3 +571,114 @@ func TestARarSetStoppedAfterFreeingItsFrontStartsOver(t *testing.T) {
 	}
 	checkSet(t, seven, filepath.Join(into, "big", "Game"))
 }
+
+// Moving part 1's folder while the Set reads its .part: the Set lets go of its
+// files for the move, and goes on from the new place.
+func TestMovingASetsPartWhileItExtractsMovesItsPart(t *testing.T) {
+	whole, srv := serveParts(t, "split-solid.7z")
+	into, moved := t.TempDir(), t.TempDir()
+	env := &setEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}
+	p := map[int]*Download{1: part(env, srv, 1, into), 2: part(env, srv, 2, into), 3: part(env, srv, 3, into)}
+	p[3].Start()
+	p[1].Start()
+	waitUntil(t, "parts 1 and 3 completed", completed(p[1], p[3]))
+	s := NewSet("k", "big.7z")
+	s.SetMembers(p)
+	s.Start()
+	defer s.Stop()
+	waitUntil(t, "the archive's list read", s.accepted.Load)
+	if err := p[1].SetFolderInto(moved); err != nil {
+		t.Fatal(err)
+	}
+	if d := p[1].State().Dir; d != moved {
+		t.Fatalf("part 1 stayed in %s, want %s", d, moved)
+	}
+	p[2].Start()
+	waitUntil(t, "set finished", func() bool { v := s.Summary(); return v != nil && v.Finished })
+	waitUntil(t, "every part completed", completed(p[1], p[2], p[3]))
+	waitUntil(t, "no .part left", func() bool {
+		a, _ := filepath.Glob(filepath.Join(into, "*"+partSuffix))
+		b, _ := filepath.Glob(filepath.Join(moved, "*"+partSuffix))
+		return len(a)+len(b) == 0
+	})
+	_ = whole
+}
+
+// A step that fails again is not tried five times a second.
+func TestASetStepThatFailsIsTriedAgainAfterAWait(t *testing.T) {
+	s := NewSet("k", "big.7z")
+	var calls atomic.Int32
+	s.stepFn = func(context.Context, *setRun) (bool, error) {
+		calls.Add(1)
+		return false, fmt.Errorf("disk full")
+	}
+	s.Start()
+	time.Sleep(1500 * time.Millisecond)
+	s.Stop()
+	if n := calls.Load(); n > 2 {
+		t.Fatalf("%d steps in 1.5 s, want at most 2", n)
+	}
+}
+
+// A .part left behind by a finished Set (a failed save, a stop in the middle
+// of finish) is deleted by the next Set over the parts, as after a restart,
+// once the part's record can be saved.
+func TestAFinishedSetDeletesTheLeftoverParts(t *testing.T) {
+	whole, srv := serveParts(t, "split-nonsolid.7z")
+	into := t.TempDir()
+	env := &failingSetEnv{setEnv: setEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 2, 0)}, main: "eth"}}}
+	p := map[int]*Download{1: part(env, srv, 1, into), 2: part(env, srv, 2, into), 3: part(env, srv, 3, into)}
+	s := NewSet("k", "big.7z")
+	s.SetMembers(p)
+	s.Start()
+	for _, d := range p {
+		d.Start()
+	}
+	waitUntil(t, "set finished", func() bool { v := s.Summary(); return v != nil && v.Finished })
+	waitUntil(t, "every part completed", completed(p[1], p[2], p[3]))
+	s.Stop()
+	s.SetMembers(nil)
+	var left []string
+	for n := 1; n <= 3; n++ {
+		path := p[n].partPath()
+		if err := os.WriteFile(path, []byte("left"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		left = append(left, path)
+	}
+	gone := func() bool {
+		for _, f := range left {
+			if exists(f) {
+				return false
+			}
+		}
+		return true
+	}
+	env.fail.Store(true)
+	s = NewSet("k", "big.7z")
+	s.SetMembers(p)
+	s.Start()
+	defer s.Stop()
+	waitUntil(t, "the set finished again", func() bool { v := s.Summary(); return v != nil && v.Finished })
+	time.Sleep(600 * time.Millisecond)
+	if gone() {
+		t.Fatal("the .parts went though the parts could not be saved")
+	}
+	env.fail.Store(false)
+	waitUntil(t, "the .parts deleted", gone)
+	checkSet(t, whole, filepath.Join(into, "Game"))
+}
+
+type failingSetEnv struct {
+	setEnv
+	fail atomic.Bool
+}
+
+func (e *failingSetEnv) Save(d *Download) error {
+	if e.fail.Load() {
+		return errors.New("disk full")
+	}
+	return e.setEnv.Save(d)
+}
+
+func (e *failingSetEnv) Finished(*Download) {}

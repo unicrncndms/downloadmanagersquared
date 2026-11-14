@@ -42,7 +42,7 @@ const DOWNLOADS = [
     size: 3e9, done: 3e9, status: "completed", section: "done", speed: 0, eta: -1, probed: true, rangeOk: true,
     links: { eth: { bytes: 1.86e9, status: "ready", conns: 0 }, wifi: { bytes: 1.14e9, status: "ready", conns: 0 } },
     label: "Completed", tone: "ok", actions: { open: true, showInFolder: true, deleteFile: true, again: true, remove: true }, partialFile: false,
-    added: "2026-11-03T19:00:00Z", finished: "2026-11-03T19:04:10Z" },
+    added: "2026-11-03T19:00:00Z", finished: "2026-11-03T19:04:10Z", active: 250 },
   // One interface only: no shares in its summary line.
   { kind: "http", id: "b2", url: "https://cdn.example.org/notes.pdf", filename: "notes.pdf", dir: "C:\Users\you\Downloads",
     size: 4.2e7, done: 4.2e7, status: "completed", section: "done", speed: 0, eta: -1, probed: true, rangeOk: true,

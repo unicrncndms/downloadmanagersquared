@@ -224,7 +224,7 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 
 	ir := w.ir
 	for {
-		n, rerr := io.ReadFull(resp.Body, buf)
+		n, rerr := io.ReadFull(stallReader{resp.Body, stall}, buf)
 		if n > 0 {
 			stall.Reset(stallTimeout)
 			d.mu.Lock()
@@ -280,4 +280,19 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 			return rerr
 		}
 	}
+}
+
+// stallReader restarts the stall timer on every read that brings data, so a
+// slow line that fills a buffer only after minutes is not mistaken for a dead one.
+type stallReader struct {
+	r     io.Reader
+	timer *time.Timer
+}
+
+func (s stallReader) Read(p []byte) (int, error) {
+	n, err := s.r.Read(p)
+	if n > 0 {
+		s.timer.Reset(stallTimeout)
+	}
+	return n, err
 }

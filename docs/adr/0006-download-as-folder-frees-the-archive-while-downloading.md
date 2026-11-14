@@ -54,3 +54,4 @@ After a crash, an unfinished Entry is extracted again from its start, and any of
 - Storage comes before speed in two places. With `partsParallel` off, a front-to-back split set can't use the other parts' connections until the list of files is read. The space check can pause a download that a normal download would have finished, because it needs the extracted size and not just the archive size.
 - The 10-second chunks add range requests compared with a normal download, and they cap how far ahead the disk fills only indirectly, through speed. Not measured.
 - Anything that later wants the finished archive (a whole-file hash, seeding it, keeping a copy) doesn't work with this mode.
+- A byte window from the extraction front (instead of the 10-second stride) was simulated and rejected: it halves peak disk only at very high speed, at the price of up to twice the finish time (`.scratch/download-as-folder/research-scheduling.md`).

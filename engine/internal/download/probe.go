@@ -91,7 +91,8 @@ func probeLink(ctx context.Context, client *http.Client, l Link, ua string) (pro
 
 	r := probeResult{status: resp.StatusCode, size: -1, family: family}
 	ct, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	r.isPage = ct == "text/html" || ct == "application/xhtml+xml"
+	disp, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Disposition"))
+	r.isPage = (ct == "text/html" || ct == "application/xhtml+xml") && disp != "attachment" // an attached .html is the file
 	switch resp.StatusCode {
 	case http.StatusPartialContent:
 		if _, total, ok := parseContentRange(resp.Header.Get("Content-Range")); ok && total >= 0 {

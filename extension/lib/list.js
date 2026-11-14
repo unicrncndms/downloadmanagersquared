@@ -422,12 +422,14 @@ function addView(text) {
 }
 
 // finishedSummary is a finished download's one line: "3.0 GB in 4m 10s · 12 MB/s
-// · Ethernet 62%, Wi-Fi 38%". The time is from added to finished; shares only
-// when more than one interface fetched bytes. "" when it can't say.
+// · Ethernet 62%, Wi-Fi 38%". The time is what the download ran (d.active, from
+// the engine), not the time since it was added: queued and paused time is no
+// speed. Without it (an old download) only the size; shares only when more
+// than one interface fetched bytes. "" when it can't say.
 function finishedSummary(d, nameOf) {
-  const secs = (new Date(d.finished) - new Date(d.added)) / 1000;
+  const secs = d.active;
   const parts = [];
-  if (d.size > 0) parts.push(secs >= 0 ? `${fmtBytes(d.size)} in ${fmtETA(secs)}` : fmtBytes(d.size));
+  if (d.size > 0) parts.push(secs > 0 ? `${fmtBytes(d.size)} in ${fmtETA(secs)}` : fmtBytes(d.size));
   if (d.size > 0 && secs > 0) parts.push(fmtSpeed(d.size / secs));
   const by = Object.keys(d.links || {}).filter((id) => d.links[id].bytes > 0).sort((a, b) => d.links[b].bytes - d.links[a].bytes);
   const total = by.reduce((n, id) => n + d.links[id].bytes, 0);

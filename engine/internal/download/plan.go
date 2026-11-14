@@ -21,6 +21,11 @@ type segment struct {
 // plan tracks which bytes of the file are still missing and who is fetching
 // them. Without range support it is a single chunk that can't be split and
 // starts over from byte 0 whenever its connection lets go of it.
+//
+// A plan has no lock of its own: every call is made with the Download's mu
+// held, and a worker pairs take (under mu) with wrote (under mu again) around
+// its unlocked WriteAt. Segments read their owner's speed and interface, which
+// the Download updates under the same mu.
 type plan struct {
 	size       int64 // -1 while unknown
 	splittable bool

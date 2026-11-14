@@ -98,8 +98,12 @@ func (d *Download) relocate(ctx context.Context) error {
 		d.mu.Unlock()
 		return nil
 	}
-	if d.parked != nil {
+	set := d.set
+	if d.parked != nil || set != nil {
 		d.mu.Unlock()
+		if set != nil {
+			defer set.Hold()() // the Set's handles on every part and on the output folder
+		}
 		d.dropParked() // its .part can't move while open
 		d.mu.Lock()
 	}

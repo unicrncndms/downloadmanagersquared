@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,12 +23,14 @@ import (
 )
 
 const (
-	minSplit     = 4 << 20   // never create a chunk smaller than this by splitting
-	bufSize      = 256 << 10 // read/write unit per connection
-	stallTimeout = 30 * time.Second
-	diskReserve  = 256 << 20 // pause when free space falls below this
-	partSuffix   = ".dms.part"
+	minSplit    = 4 << 20   // never create a chunk smaller than this by splitting
+	bufSize     = 256 << 10 // read/write unit per connection
+	diskReserve = 256 << 20 // pause when free space falls below this
+	partSuffix  = ".dms.part"
 )
+
+// stallTimeout is a var so tests can shorten it.
+var stallTimeout = 30 * time.Second
 
 type Status string
 
@@ -82,6 +85,7 @@ type State struct {
 	Remaining   []Range          `json:"remaining,omitempty"`
 	Added       time.Time        `json:"added"`
 	Finished    time.Time        `json:"finished,omitzero"`
+	Active      float64          `json:"active,omitempty"` // seconds spent running, not queued or paused: the finished average speed is over this
 	Folder      *Folder          `json:"folder,omitempty"`    // Download as folder; nil when never asked for
 	Mirrors     []Mirror         `json:"mirrors,omitempty"`   // the file's sources, URL among them; nil for one source
 	MetaSize    int64            `json:"metaSize,omitempty"`  // the size a Metalink gives; every mirror must match it
@@ -148,6 +152,7 @@ type Download struct {
 
 	renameFails int       // keepPart failures in a row
 	renameNext  time.Time // no new try before this
+	runStart    time.Time // when the run under way began, for State.Active
 	running     bool
 	checking    bool // a finished file is being checked against new checksums
 	cancel      context.CancelFunc
@@ -276,11 +281,15 @@ func (d *Download) startLocked() {
 	d.meter = rate.Meter{Window: d.env.ETAWindow()}
 	d.total, d.speed, d.eta = rate.EWMA{}, 0, rate.ETA{}
 	d.lastTick = time.Now()
+	d.runStart = d.lastTick
 	for _, l := range d.st.Links {
 		l.resume(d.st.Stuck)
 	}
 	d.st.Stuck, d.st.WaitVPN = false, false
-	go d.run(ctx)
+	go func() {
+		defer cancel() // whichever way the run ends, nothing of it lingers
+		d.run(ctx)
+	}()
 }
 
 // Stop halts a running download and leaves it in the given status (paused or queued).
@@ -371,7 +380,9 @@ func (d *Download) Path() string {
 
 func (d *Download) run(ctx context.Context) {
 	d.relocate(ctx) // a move asked for: before anything is open
-	err := d.loop(ctx)
+	lctx, stopLoop := context.WithCancel(ctx) // for what the loop starts; ctx itself still serves complete
+	err := d.loop(lctx)
+	stopLoop()
 	d.mu.Lock()
 	for w := range d.workers {
 		w.cancel()
@@ -390,6 +401,7 @@ func (d *Download) run(ctx context.Context) {
 	}
 
 	d.mu.Lock()
+	d.st.Active += time.Since(d.runStart).Seconds()
 	d.syncRemainingLocked()
 	if d.file != nil {
 		d.file.Sync() // a clean stop: what the saved state records is on disk
@@ -399,6 +411,9 @@ func (d *Download) run(ctx context.Context) {
 			d.file.Close()
 		}
 		d.file = nil
+	}
+	if err == nil && d.st.Size < 0 && d.plan != nil {
+		d.st.Size = d.plan.size // unknown until the response ended
 	}
 	d.plan = nil
 	var pe *pauseError
@@ -492,7 +507,11 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 		}
 		d.probing[ifc.ID] = true
 		l.probing()
-		go d.probe(ctx, ifc, *l)
+		d.wg.Add(1)
+		go func(l Link) { // l is copied now: the tick goes on changing the original
+			defer d.wg.Done()
+			d.probe(ctx, ifc, l)
+		}(*l)
 	}
 	d.decidePageHitsLocked(byID)
 	d.settleHeldLocked(byID, mainID)
@@ -648,7 +667,10 @@ func (d *Download) openFileLocked() error {
 			return err
 		}
 		// Sparse: setting the length is instant and nothing gets zero-filled.
-		winutil.SetSparse(f, true)
+		if err := winutil.SetSparse(f, true); err != nil {
+			// FAT, exFAT, some shares: the length below may zero-fill, which takes a while.
+			log.Printf("download %s: %s cannot hold a sparse file: %v", d.st.ID, d.st.Dir, err)
+		}
 		if err := f.Truncate(d.st.Size); err != nil {
 			f.Close()
 			return err

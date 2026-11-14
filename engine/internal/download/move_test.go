@@ -2,6 +2,7 @@ package download
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -425,5 +426,46 @@ func TestSwitchingOffCallsOffAPendingMove(t *testing.T) {
 	}
 	if f := d.State().Folder; f.Moving != "" || f.MoveError != "" {
 		t.Fatalf("still pending: moving %q, error %q", f.Moving, f.MoveError)
+	}
+}
+
+// failOnceEnv fails the next Save once armed.
+type failOnceEnv struct {
+	testEnv
+	armed atomic.Bool
+}
+
+func (e *failOnceEnv) Save(*Download) error {
+	if e.armed.CompareAndSwap(true, false) {
+		return errors.New("disk full")
+	}
+	return nil
+}
+
+// A move whose new place can't be saved leaves the old copies where they are:
+// a crash then still finds what the saved state points at.
+func TestAMoveThatCantBeSavedKeepsTheOldCopies(t *testing.T) {
+	otherDrive(t)
+	files := manyFiles("", 40, 256<<10)
+	data := buildZip(t, files)
+	srv := newZipServer(data)
+	defer srv.Close()
+	root := t.TempDir()
+	from, to := filepath.Join(root, "a"), filepath.Join(root, "b")
+	env := &failOnceEnv{testEnv: testEnv{ifaces: []Iface{iface("eth", 1, 5*time.Millisecond)}, main: "eth"}}
+	duringMove = func(string, string) { env.armed.Store(true) }
+	t.Cleanup(func() { duringMove = nil })
+	d := startUntil(t, &env.testEnv, State{ID: "m9", URL: srv.URL + "/dl", Dir: from, Size: -1, Folder: &Folder{On: true, Into: from}}, someExtracted)
+	d.env = env // after the start: the helper takes a testEnv
+	if err := d.SetFolderInto(to); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the move saved", func() bool { return !env.armed.Load() })
+	waitCompleted(t, &env.testEnv, d)
+	if f := d.State().Folder; f.Into != to {
+		t.Fatalf("folder after the move: %+v", f)
+	}
+	if left := names(t, from); len(left) == 0 {
+		t.Fatal("the old copies went though the move could not be saved")
 	}
 }
