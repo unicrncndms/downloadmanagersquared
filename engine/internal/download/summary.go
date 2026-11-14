@@ -56,6 +56,7 @@ type Summary struct {
 	Map       string                 `json:"map,omitempty"`     // HTTP, unfinished: the file as squares (fileMap)
 	MapBy     []string               `json:"mapBy,omitempty"`   // the interfaces Map's digits stand for
 	MapFill   string                 `json:"mapFill,omitempty"` // how far each square Map's digits mark is (mapFill)
+	MapPart   string                 `json:"mapPart,omitempty"` // how much of each square is on disk, two characters each (partMap)
 	Added     time.Time              `json:"added"`
 	Finished  time.Time              `json:"finished,omitzero"`
 	Active    float64                `json:"active,omitempty"` // seconds it ran, not counting the time queued or paused
@@ -141,8 +142,10 @@ func (d *Download) Summary() Summary {
 		at := d.plan.fetching()
 		s.Map, s.MapBy = fileMap(s.Size, d.plan.ranges(), at, d.plan.landed, d.plan.writers)
 		s.MapFill = mapFill(s.Size, at)
+		s.MapPart, s.MapBy = partMap(s.Size, d.plan.ranges(), d.plan.landed, d.plan.writers, s.MapBy)
 	case d.plan == nil && s.RangeOK:
 		s.Map, s.MapBy = fileMap(s.Size, d.st.Remaining, nil, nil, nil)
+		s.MapPart, s.MapBy = partMap(s.Size, d.st.Remaining, nil, nil, s.MapBy)
 	}
 	now := time.Now()
 	for id, l := range d.st.Links {

@@ -44,3 +44,15 @@ test("browserNames from exe paths", () => {
   assert.deepEqual(browserNames(["C:" + bs + "App" + bs + "firefox.exe", "C:/Other/Firefox.EXE", "/z/chrome.exe"]), ["Firefox", "Chrome"]);
   assert.deepEqual(browserNames(undefined), []);
 });
+
+test("a square with written bytes is never drawn empty (partTiles)", () => {
+  const { partTiles } = require("../lib/uirules.js");
+  // Four squares: untouched, a tenth by connection b, nine tenths by a, whole.
+  const t = partTiles("0-1b9a0-", 4);
+  assert.equal(t[0], null);
+  assert.deepEqual(t[1], { n: 1, who: 1 });
+  assert.deepEqual(t[2], { n: 9, who: 0 });
+  assert.equal(t[3], null);
+  assert.deepEqual(partTiles("5-", 1), [{ n: 5, who: -1 }]);
+  assert.deepEqual(partTiles(undefined, 2), [null, null]); // an engine that sends none
+});

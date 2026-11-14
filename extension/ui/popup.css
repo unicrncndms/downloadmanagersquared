@@ -141,7 +141,8 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .nums b { font-weight: 600; }
 .nums small { font-size: 11px; }
 .what { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--s3); font-size: 12px; min-width: 0; }
-.what .left.card.group > .name .badge { margin-left: var(--s1); font-weight: 400; line-height: 1.5; vertical-align: 1px; }
+.what .left.bad { color: var(--bad); }
+.card.group > .name .badge { margin-left: var(--s1); font-weight: 400; line-height: 1.5; vertical-align: 1px; }
 .prog > .bar { margin: 5px 0; max-width: 318px; }
 /* Narrower than the popup's list: smaller squares, so the 32 columns still fit beside the numbers. */
 @container (max-width: 459px) {
@@ -164,10 +165,13 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .chunks i { border-radius: 2px; background: var(--bar); transition: background .3s; }
 .chunks i.on { background: var(--accent); }
 .chunks i.got { background: currentColor; }
+/* Partly written, no connection in it any more: the written share (--p, 0 to 1) in the colour that wrote it, never empty. */
+.chunks i.part { --p: 0; background: currentColor; opacity: calc(.3 + .55 * var(--p)); }
 /* A slow pulse whose low point rises with how far the square is (--f, 0 to 1, from the engine's mapFill). */
 .chunks i.now { --f: 0; background: currentColor; animation: fetching 2.4s ease-in-out infinite alternate; }
 @keyframes fetching { from { opacity: calc(.15 + .75 * var(--f)); } to { opacity: calc(.45 + .55 * var(--f)); } }
 .idle .chunks i.on, .idle .chunks i.got { background: var(--muted); opacity: .6; }
+.idle .chunks i.part { background: var(--muted); opacity: calc(.2 + .4 * var(--p)); }
 .idle .chunks i.now { background: var(--bar); animation: none; }
 
 button.icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0;

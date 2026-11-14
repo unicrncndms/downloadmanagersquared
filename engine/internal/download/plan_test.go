@@ -249,3 +249,32 @@ func TestMapFillSaysHowFarEachSquareBeingWrittenIs(t *testing.T) {
 		t.Fatal("a file of unknown size has a fill")
 	}
 }
+
+// A square with some of its bytes on disk says so, with who wrote them.
+func TestPartMapShowsPartlyWrittenSquares(t *testing.T) {
+	const size = 9600
+	// Squares are 100 bytes: 0 whole, 1 three quarters, 2 a tenth, 3 untouched (missing from 300).
+	missing := []Range{{125, size}}
+	landed := make([]uint8, mapCells)
+	landed[1], landed[2] = 1, 2
+	part, by := partMap(size, missing, landed, []string{"eth", "wifi"}, nil)
+	if len(part) != 2*mapCells {
+		t.Fatalf("len %d", len(part))
+	}
+	for i, want := range map[int]string{0: "0-", 1: "2a", 2: "0-", 3: "0-"} {
+		if got := part[2*i : 2*i+2]; got != want {
+			t.Errorf("square %d is %q, want %q", i, got, want)
+		}
+	}
+	if len(by) != 1 || by[0] != "eth" {
+		t.Errorf("by %v", by)
+	}
+	// Any written byte shows: one byte of a square is a tenth.
+	part, _ = partMap(size, []Range{{1, size}}, nil, nil, nil)
+	if part[0:2] != "1-" {
+		t.Errorf("one byte written: %q", part[0:2])
+	}
+	if p, _ := partMap(-1, nil, nil, nil, nil); p != "" {
+		t.Errorf("unknown size: %q", p)
+	}
+}

@@ -384,3 +384,47 @@ func fileMap(size int64, missing []Range, now []fetch, landed []uint8, writers [
 	}
 	return string(m), by
 }
+
+// partMap says how much of each square of fileMap is on disk, for the pages to
+// draw a square that is only partly written: two characters per square, a
+// digit 0-9 (tenths written, 1 at least once any byte is) and the letter of the
+// interface that wrote last into it ('-' when none is known). Complete and
+// untouched squares are "0-". It may add interfaces to by (up to ten, as
+// fileMap does). "" for a file of unknown size.
+func partMap(size int64, missing []Range, landed []uint8, writers []string, by []string) (string, []string) {
+	if size <= 0 {
+		return "", by
+	}
+	start := func(i int) int64 { return int64(i) * size / mapCells }
+	end := func(i int) int64 {
+		if i == mapCells-1 {
+			return size
+		}
+		return start(i + 1)
+	}
+	gap := make([]int64, mapCells) // bytes of each square still missing
+	for _, r := range missing {
+		for i := int(min(r.Start*mapCells/size, mapCells-1)); i < mapCells && start(i) < r.End; i++ {
+			gap[i] += max(0, min(r.End, end(i))-max(r.Start, start(i)))
+		}
+	}
+	out := make([]byte, 0, 2*mapCells)
+	for i := range mapCells {
+		n := end(i) - start(i)
+		d, who := byte('0'), byte('-')
+		if n > 0 && gap[i] > 0 && gap[i] < n {
+			d = byte('0' + min(9, max(1, (n-gap[i])*10/n)))
+			if i < len(landed) && landed[i] > 0 && int(landed[i]) <= len(writers) {
+				k := slices.Index(by, writers[landed[i]-1])
+				if k < 0 && len(by) < 10 {
+					by, k = append(by, writers[landed[i]-1]), len(by)
+				}
+				if k >= 0 {
+					who = byte('a' + k)
+				}
+			}
+		}
+		out = append(out, d, who)
+	}
+	return string(out), by
+}

@@ -41,4 +41,18 @@ function browserNames(exes) {
   return [...new Set((exes || []).map((p) => p.split(/[\\/]/).pop().replace(/\.exe$/i, "")).filter(Boolean).map((n) => n[0].toUpperCase() + n.slice(1)))];
 }
 
-if (typeof module !== "undefined") module.exports = { shortName, stripSpeed, unitField, sameFolder, canMoveFolder, browserNames };
+// partTiles reads a file map's d.mapPart: for each square, null when none of it
+// is written (or it is whole), else { n: tenths written, 1 to 9, who: the index
+// into mapBy of the connection that wrote it, -1 when not known }. A square
+// with any byte on disk is never drawn as empty (the squares that fill only
+// when whole would otherwise show 1.2 GB of 6.3 GB as three tiles).
+function partTiles(part, count) {
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const n = +((part || "")[2 * i] || 0), w = (part || "")[2 * i + 1] || "-";
+    out.push(n > 0 ? { n: Math.min(9, n), who: w >= "a" && w <= "j" ? w.charCodeAt(0) - 97 : -1 } : null);
+  }
+  return out;
+}
+
+if (typeof module !== "undefined") module.exports = { partTiles, shortName, stripSpeed, unitField, sameFolder, canMoveFolder, browserNames };

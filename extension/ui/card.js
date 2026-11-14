@@ -215,7 +215,8 @@ function paintTile(tile, t, place, label) {
 // chunkGrid is the file as squares, from the engine's map of it: "." missing,
 // a letter on disk and written by connection mapBy[a=0, b=1…], a digit being
 // fetched right now by mapBy[digit], each in that connection's colour; "#" on
-// disk from before this run, in the accent. The file shows the sum.
+// disk from before this run, in the accent. A square only partly written shows
+// how much (d.mapPart, see partTiles in lib/uirules.js). The file shows the sum.
 function chunkGrid(rows) {
   const root = el("div", { class: "chunks", role: "img", hidden: true });
   root.style.setProperty("--rows", rows);
@@ -227,7 +228,8 @@ function chunkGrid(rows) {
       root.hidden = !map;
       if (!map) return;
       const by = (d.mapBy || []).map((ifc) => ifaceHue(ifc, latest.state));
-      const sig = map + (d.mapFill || "") + by.join();
+      const part = partTiles(d.mapPart, map.length);
+      const sig = map + (d.mapFill || "") + (d.mapPart || "") + by.join();
       if (sig === shown) return;
       shown = sig;
       root.setAttribute("aria-label", `${Math.round(percent(d))}% downloaded`);
@@ -237,9 +239,11 @@ function chunkGrid(rows) {
       let cell = root.firstElementChild, i = 0;
       for (const c of map) {
         const got = c >= "a" && c <= "j";
-        const cls = c === "#" ? "on" : c === "." ? "" : got ? "got" : "now";
+        const p = part[i];
+        const cls = c === "#" ? "on" : c === "." ? (p ? "part" : "") : got ? "got" : "now";
         if (cell.className !== cls) cell.className = cls;
-        cell.style.color = cls === "now" ? by[+c] || "" : got ? by[c.charCodeAt(0) - 97] || "" : "";
+        cell.style.color = cls === "now" ? by[+c] || "" : got ? by[c.charCodeAt(0) - 97] || "" : cls === "part" ? (p.who >= 0 && by[p.who]) || "var(--accent)" : "";
+        if (cls === "part") cell.style.setProperty("--p", p.n / 9);
         if (cls === "now") cell.style.setProperty("--f", (+(d.mapFill || "")[i] || 0) / 9);
         cell = cell.nextElementSibling;
         i++;
