@@ -81,8 +81,8 @@ test("the add form sends the switch only when it differs from the default", () =
 });
 
 test("while unfinished, Extract into can be changed, with the move's warning and why one failed", () => {
-  const v = folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big", moveWarning: "Moving now re-downloads about 3.2 GiB" }), SETTINGS);
-  assert.deepEqual(v.move, { into: "D:\\x", moving: "", warning: "Moving now re-downloads about 3.2 GiB", error: "" });
+  const v = folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big", moveWarning: "Moving now re-downloads about 3.4 GB" }), SETTINGS);
+  assert.deepEqual(v.move, { into: "D:\\x", moving: "", warning: "Moving now re-downloads about 3.4 GB", error: "" });
   const failed = folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big", moveError: "Couldn't move: a file in it is in use" }), SETTINGS);
   assert.equal(failed.move.error, "Couldn't move: a file in it is in use");
   const pending = folderView(zip({ on: true, into: "D:\\x", out: "D:\\x\\big", moving: "E:\\y" }, { status: "paused" }), SETTINGS);

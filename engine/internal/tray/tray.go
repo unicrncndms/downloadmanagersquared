@@ -271,12 +271,7 @@ func Speed(bps float64, unit string) string {
 	if bps < 1 {
 		return "0 " + units[0]
 	}
-	i := 0
-	for bps >= 1000 && i < len(units)-1 {
-		bps /= 1000
-		i++
-	}
-	return fmt.Sprintf("%.1f %s", bps, units[i])
+	return download.Scaled(bps, units)
 }
 
 func Duration(sec float64) string {

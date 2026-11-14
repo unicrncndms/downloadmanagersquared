@@ -69,7 +69,7 @@ const FOLDER_DOWNLOADS = [
     { sha256: "a".repeat(64) }),
   zipDownload("f2", "dataset.zip", { on: true, into: "E:\\Data", out: "E:\\Data\\dataset", locked: true, why: "Some files are already extracted and their space freed, so this can't change any more", keep: "auto", keeping: "free", keepFixed: true, files: 412, of: 1280,
     extracted: 9e9, phase: "Waiting for the download", extractEta: 3150,
-    refetch: 3435973837, moveWarning: "Moving now re-downloads about 3.2 GiB",
+    refetch: 3435973837, moveWarning: "Moving now re-downloads about 3.4 GB",
     renamed: ["CON.txt → _CON.txt", "notes:v2.md → notes_v2.md"], note: "The server's checksum wasn't checked: the archive was extracted as it downloaded, so there was no whole file to check" },
     { note: "412 of 1,280 files extracted" }),
   zipDownload("f1", "big.zip", { on: true, files: 0, of: 0 }, { note: "choose a folder to extract into" }),

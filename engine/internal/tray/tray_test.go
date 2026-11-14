@@ -82,6 +82,8 @@ func TestSpeedInBytesOrBits(t *testing.T) {
 		{0, engine.SpeedBits, "0 bit/s"},
 		{1.5e6, engine.SpeedBits, "12.0 Mbit/s"},
 		{125e6, engine.SpeedBits, "1.0 Gbit/s"},
+		{150e6, engine.SpeedBytes, "150 MB/s"}, // no decimal from 100, like fmtSpeed
+		{12, engine.SpeedBytes, "12 B/s"},
 		{1e6, "", "1.0 MB/s"}, // an unknown unit is bytes
 	} {
 		if got := Speed(c.bps, c.unit); got != c.want {

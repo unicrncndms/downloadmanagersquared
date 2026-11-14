@@ -461,3 +461,11 @@ test("progress reads the same everywhere: done / size", () => {
   const { progressText, statusLine } = require("../lib/list.js");
   assert.equal(statusLine({ size: 2e6, done: 1e6, status: "paused" }).left, "50% · " + progressText(1e6, 2e6));
 });
+
+// The same samples as TestHumanMatchesTheListsRule in the engine's download package.
+test("fmtBytes: base 1000, a decimal under 100", () => {
+  const { fmtBytes } = require("../lib/list.js");
+  for (const [n, want] of [[0, "0 B"], [999, "999 B"], [1500, "1.5 KB"], [150e6, "150 MB"], [3435973837, "3.4 GB"], [-1, "?"]]) {
+    assert.equal(fmtBytes(n), want);
+  }
+});

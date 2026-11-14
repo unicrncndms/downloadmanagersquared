@@ -760,16 +760,8 @@ func (e *Engine) SetFolder(id string, on *bool, into, keep *string) error {
 	}
 	// The other parts of a split archive take the same: with another folder
 	// they would no longer be one Set. One that can't (it is complete) stays.
-	for _, m := range d.Mates()[1:] {
-		if on != nil {
-			m.SetFolder(*on)
-		}
-		if into != nil {
-			m.SetFolderInto(dir)
-		}
-		if keep != nil {
-			m.SetArchiveKeeping(*keep)
-		}
+	if err := d.ApplyToMates(on, into, keep); err != nil {
+		log.Printf("folder of %s: a part of its Set kept its own: %v", id, err)
 	}
 	return nil
 }

@@ -97,7 +97,7 @@ func TestARestartCostWarnsFrom1GiB(t *testing.T) {
 		t.Fatalf("under 1 GiB: %q", w)
 	}
 	w := RestartCost{Bytes: 3 << 30, Names: []string{"a.zip", "b.7z"}}.Warning("Updating now")
-	if want := "Updating now means downloading 3.0 GiB again (a.zip, b.7z), because their extraction can't continue after a restart."; w != want {
+	if want := "Updating now means downloading 3.2 GB again (a.zip, b.7z), because their extraction can't continue after a restart."; w != want {
 		t.Fatalf("got %q, want %q", w, want)
 	}
 }

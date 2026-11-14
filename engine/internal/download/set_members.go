@@ -1,6 +1,7 @@
 package download
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,6 +119,25 @@ func (d *Download) Mates() []*Download {
 		}
 	}
 	return out
+}
+
+// ApplyToMates gives the other parts of d's Set the switch, folder and archive
+// keeping d took (nil: unchanged), so the Set has one choice. A part that can't
+// (it is complete, or locked) stays; the errors come back joined for the log.
+func (d *Download) ApplyToMates(on *bool, into, keep *string) error {
+	var errs []error
+	for _, m := range d.Mates()[1:] {
+		if on != nil {
+			errs = append(errs, m.SetFolder(*on))
+		}
+		if into != nil {
+			errs = append(errs, m.SetFolderInto(*into))
+		}
+		if keep != nil {
+			errs = append(errs, m.SetArchiveKeeping(*keep))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // discard deletes the .part of a part removed with its files. The loop does

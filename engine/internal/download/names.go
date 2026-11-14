@@ -49,18 +49,29 @@ func shortErr(err error) string {
 	return s
 }
 
-// Human is n bytes as the UI shows a size: "1.5 GiB".
+// Human is n bytes as the pages show a size: "1.5 GB". Base 1000 and one
+// decimal under 100, the rule of fmtBytes in extension/lib/list.js.
 func Human(n int64) string { return human(n) }
 
 func human(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
+	if n < 0 {
+		return "?"
 	}
-	div, exp := int64(unit), 0
-	for m := n / unit; m >= unit; m /= unit {
-		div *= unit
-		exp++
+	return Scaled(float64(n), []string{"B", "KB", "MB", "GB", "TB"})
+}
+
+// Scaled is n in the first of units that keeps it under 1000 (each unit 1000
+// of the one before), with a decimal when it is a multiple and under 100: the
+// shared rule of fmtBytes and fmtSpeed in extension/lib/list.js.
+func Scaled(n float64, units []string) string {
+	i := 0
+	for n >= 1000 && i < len(units)-1 {
+		n /= 1000
+		i++
 	}
-	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+	dec := 0
+	if i > 0 && n < 100 {
+		dec = 1
+	}
+	return fmt.Sprintf("%.*f %s", dec, n, units[i])
 }

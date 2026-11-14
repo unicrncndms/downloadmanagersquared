@@ -234,7 +234,7 @@ func TestTheRedownloadWarningShowsTheFreedBytesOfTheEntryUnderWay(t *testing.T) 
 		t.Fatalf("warns of %d bytes, want %d (freed of the large Entry)", got, want)
 	}
 	s := Present(Summary{Status: StatusRunning, Probed: true, RangeOK: true, Folder: &FolderSummary{On: true, Into: into, Out: "x", Refetch: 3435973837}})
-	if s.Folder.MoveWarning != "Moving now re-downloads about 3.2 GiB" {
+	if s.Folder.MoveWarning != "Moving now re-downloads about 3.4 GB" {
 		t.Fatalf("warning %q", s.Folder.MoveWarning)
 	}
 	if Present(Summary{Status: StatusRunning, Folder: &FolderSummary{On: true, Into: into, Out: "x"}}).Folder.MoveWarning != "" {
