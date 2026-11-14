@@ -166,7 +166,7 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .chunks i.on { background: var(--accent); }
 .chunks i.got { background: currentColor; }
 /* Partly written, no connection in it any more: the written share (--p, 0 to 1) in the colour that wrote it, never empty. */
-.chunks i.part { --p: 0; background: currentColor; opacity: calc(.3 + .55 * var(--p)); }
+.chunks i.part { --p: 0; background: currentColor; opacity: calc(.3 + .65 * var(--p)); } /* the pulse of a front with the same share averages about this */
 /* A slow pulse whose low point rises with how far the square is (--f, 0 to 1, from the engine's mapFill). */
 .chunks i.now { --f: 0; background: currentColor; animation: fetching 2.4s ease-in-out infinite alternate; }
 @keyframes fetching { from { opacity: calc(.15 + .75 * var(--f)); } to { opacity: calc(.45 + .55 * var(--f)); } }

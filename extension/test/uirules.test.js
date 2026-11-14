@@ -56,3 +56,12 @@ test("a square with written bytes is never drawn empty (partTiles)", () => {
   assert.deepEqual(partTiles("5-", 1), [{ n: 5, who: -1 }]);
   assert.deepEqual(partTiles(undefined, 2), [null, null]); // an engine that sends none
 });
+
+test("a pulsing front shows what is written of its square, so it matches the tile it leaves (frontFill)", () => {
+  const { frontFill } = require("../lib/uirules.js");
+  // The front is 90% through the square, but a chunk began inside it: only 5 tenths are on disk.
+  assert.equal(frontFill("8", { n: 5, who: 0 }, true), 5 / 9);
+  assert.equal(frontFill("8", null, true), 0);
+  assert.equal(frontFill("3", null, false), 3 / 9); // an engine without mapPart
+  assert.equal(frontFill(undefined, null, false), 0);
+});

@@ -278,3 +278,20 @@ func TestPartMapShowsPartlyWrittenSquares(t *testing.T) {
 		t.Errorf("unknown size: %q", p)
 	}
 }
+
+// A chunk that begins inside a square leaves the square's start missing: the
+// front there is nine tenths through the square (mapFill) while only four
+// tenths of it are on disk (partMap), which is what the pages must show.
+func TestPartMapOfASquareAChunkBeginsIn(t *testing.T) {
+	const size = 9600 // squares of 100 bytes; square 12 is [1200, 1300)
+	// Chunk A ends at 1250, its front far behind at 100; chunk B begins there and has written up to 1290.
+	missing := []Range{{100, 1250}, {1290, size}}
+	fill := mapFill(size, []fetch{{100, "a"}, {1290, "b"}})
+	part, _ := partMap(size, missing, nil, nil, nil)
+	if fill[12] != '9' {
+		t.Fatalf("front is %c tenths through square 12, want 9", fill[12])
+	}
+	if got := part[24:26]; got != "4-" {
+		t.Fatalf("square 12 has %q on disk, want 4 tenths", got)
+	}
+}

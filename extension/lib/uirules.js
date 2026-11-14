@@ -55,4 +55,14 @@ function partTiles(part, count) {
   return out;
 }
 
-if (typeof module !== "undefined") module.exports = { partTiles, shortName, stripSpeed, unitField, sameFolder, canMoveFolder, browserNames };
+// frontFill is how full a square with a connection writing in it pulses (0 to
+// 1): what is on disk of the whole square (part, from partTiles; null for none)
+// when the engine sends mapPart. The front's own progress (the mapFill digit)
+// counts from the square's start, so a square that starts with bytes still
+// missing (a chunk begins inside it) would look nearly full and then drop to
+// its real share when the front moves on.
+function frontFill(digit, part, hasPart) {
+  return hasPart ? (part ? part.n / 9 : 0) : (+digit || 0) / 9;
+}
+
+if (typeof module !== "undefined") module.exports = { frontFill, partTiles, shortName, stripSpeed, unitField, sameFolder, canMoveFolder, browserNames };

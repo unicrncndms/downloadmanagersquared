@@ -244,7 +244,7 @@ function chunkGrid(rows) {
         if (cell.className !== cls) cell.className = cls;
         cell.style.color = cls === "now" ? by[+c] || "" : got ? by[c.charCodeAt(0) - 97] || "" : cls === "part" ? (p.who >= 0 && by[p.who]) || "var(--accent)" : "";
         if (cls === "part") cell.style.setProperty("--p", p.n / 9);
-        if (cls === "now") cell.style.setProperty("--f", (+(d.mapFill || "")[i] || 0) / 9);
+        if (cls === "now") cell.style.setProperty("--f", frontFill((d.mapFill || "")[i], p, !!d.mapPart));
         cell = cell.nextElementSibling;
         i++;
       }
