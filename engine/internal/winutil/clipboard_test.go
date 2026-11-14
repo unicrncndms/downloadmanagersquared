@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestLinksFindsWebAndMagnetLinks(t *testing.T) {
-	text := "see https://a.example/f.zip and\r\nMAGNET:?xt=urn:btih:abc, http:// ftp://x/y notes http://b.example/g"
-	want := []string{"https://a.example/f.zip", "MAGNET:?xt=urn:btih:abc,", "http://b.example/g"}
+func TestLinksFindsWebMagnetAndFileTransferLinks(t *testing.T) {
+	text := "see https://a.example/f.zip and\r\nMAGNET:?xt=urn:btih:abc, http:// ftp://x/y sftp://h/z ftps://h/w notes http://b.example/g"
+	want := []string{"https://a.example/f.zip", "MAGNET:?xt=urn:btih:abc,", "ftp://x/y", "sftp://h/z", "ftps://h/w", "http://b.example/g"}
 	if got := Links(text); !slices.Equal(got, want) {
 		t.Errorf("Links = %q, want %q", got, want)
 	}
