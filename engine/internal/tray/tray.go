@@ -120,7 +120,11 @@ func tooltip(head string, rows []string) string {
 		t += "\n" + r
 	}
 	if u := utf16.Encode([]rune(t)); len(u) > 127 { // the head alone is too long
-		t = string(utf16.Decode(u[:127]))
+		n := 127
+		if utf16.IsSurrogate(rune(u[n-1])) && u[n-1] < 0xDC00 {
+			n-- // do not split a surrogate pair
+		}
+		t = string(utf16.Decode(u[:n]))
 	}
 	return t
 }

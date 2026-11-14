@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/engine"
@@ -116,12 +117,15 @@ func TestTheIconSaysDownloadingOrNeedsYou(t *testing.T) {
 
 func TestTooltipKeepsWholeRowsWithinWindowsLimit(t *testing.T) {
 	head := "DMS²  Downloading"
-	long := strings.Repeat("é", 60)
+	long := strings.Repeat("é", 120)
 	got := tooltip(head, []string{"Wi-Fi · 5 MB/s", long, "last"})
 	if got != head+"\nWi-Fi · 5 MB/s" {
 		t.Errorf("tooltip = %q, want the head and the first row only", got)
 	}
 	if n := len(utf16.Encode([]rune(tooltip(strings.Repeat("😀", 100), nil)))); n > 127 {
 		t.Errorf("a long head is %d units", n)
+	}
+	if strings.ContainsRune(tooltip(strings.Repeat("😀", 100), nil), utf8.RuneError) {
+		t.Error("a long head ends in a lone high surrogate")
 	}
 }
