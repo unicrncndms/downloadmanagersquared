@@ -319,3 +319,87 @@ func TestPrivateIPv6TargetsAreRefused(t *testing.T) {
 		t.Errorf("dialed %v, want %v", p.dialed, want)
 	}
 }
+
+// The 6to4 and Teredo prefixes carry an IPv4 address too: a private one is
+// refused, a public one is dialled.
+func TestSixToFourAndTeredoTargetsCheckTheirIPv4(t *testing.T) {
+	p := &fakePath{ipv6: true}
+	s := listen(t, p)
+	for _, target := range []string{"2002:7f00:1::", "2001::80ff:fffe", "::7f00:1", "fec0::1"} {
+		if code := connect(t, s, target); code != repNotAllowed {
+			t.Errorf("%s: reply %d, want %d (not allowed)", target, code, repNotAllowed)
+		}
+	}
+	if len(p.dialed) != 0 {
+		t.Fatalf("dialed %v", p.dialed)
+	}
+	for _, target := range []string{"2002:5db8:d70e::", "2001::a247:28f1"} { // 93.184.215.14 in each
+		if code := connect(t, s, target); code != repSucceeded {
+			t.Errorf("%s: reply %d, want success", target, code)
+		}
+	}
+}
+
+// Close ends a relay that is carrying traffic, not only the listener.
+func TestCloseEndsTheRelaysUnderWay(t *testing.T) {
+	p := &fakePath{}
+	s := listen(t, p)
+	c, err := net.Dial("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(s.Port())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	c.Write([]byte{5, 1, 0})
+	var m [2]byte
+	if _, err := io.ReadFull(c, m[:]); err != nil {
+		t.Fatal(err)
+	}
+	c.Write(binary.BigEndian.AppendUint16([]byte{5, 1, 0, 1, 93, 184, 215, 14}, 443))
+	var rep [10]byte
+	if _, err := io.ReadFull(c, rep[:]); err != nil || rep[1] != repSucceeded {
+		t.Fatalf("reply %v, error %v; want success", rep[1], err)
+	}
+	s.Close()
+	_, err = c.Read(make([]byte, 1))
+	var ne net.Error
+	if err == nil || errors.As(err, &ne) && ne.Timeout() {
+		t.Fatalf("relay still open after Close: %v", err)
+	}
+}
+
+func TestViaTakesItsRouteAtEachUse(t *testing.T) {
+	up := false
+	var dialed []string
+	p := Via(func() (Route, error) {
+		if !up {
+			return Route{}, errors.New("the path is down")
+		}
+		return Route{
+			Dial: func(_ context.Context, _, addr string) (net.Conn, error) {
+				dialed = append(dialed, addr)
+				return nil, nil
+			},
+			Lookup: func(_ context.Context, host string) ([]net.IP, error) {
+				return []net.IP{net.IPv4(93, 184, 215, 14)}, nil
+			},
+		}, nil
+	}, nil)
+	ctx := context.Background()
+	if _, err := p.Dial(ctx, "tcp", "93.184.215.14:443"); err == nil {
+		t.Fatal("dialed while the path is down")
+	}
+	if _, err := p.Lookup(ctx, "example.com"); err == nil {
+		t.Fatal("looked up while the path is down")
+	}
+	up = true
+	if _, err := p.Dial(ctx, "tcp", "93.184.215.14:443"); err != nil {
+		t.Fatal(err)
+	}
+	if ips, err := p.Lookup(ctx, "example.com"); err != nil || len(ips) != 1 {
+		t.Fatalf("lookup %v, %v; want one address", ips, err)
+	}
+	if !slices.Equal(dialed, []string{"93.184.215.14:443"}) {
+		t.Fatalf("dialed %v", dialed)
+	}
+}

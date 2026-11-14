@@ -43,6 +43,9 @@
       "background/util.js",
       "background/engine.js",
       "background/resolver.js",
+      "background/resolver-routing.js",
+      "background/resolver-timers.js",
+      "background/resolver-messages.js",
       "background/capture.js",
       "background/main.js"
     ]

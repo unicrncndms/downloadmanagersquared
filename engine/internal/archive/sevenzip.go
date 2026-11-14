@@ -174,7 +174,12 @@ var aesID = []byte{0x06, 0xf1, 0x07, 0x01}
 // build7z turns the list into Entries, one per block, with where each
 // block's bytes are: the sevenzip package keeps that to itself, so it is read
 // from its fields (TestSevenZipNeedAndReadUseOnlyTheHeadAndTail notices if they change).
-func build7z(zr *sevenzip.Reader, dirStart int64, password bool) (*Archive, error) {
+func build7z(zr *sevenzip.Reader, dirStart int64, password bool) (a *Archive, err error) {
+	defer func() {
+		if recover() != nil { // a field the library renamed: this archive fails, the engine stays up
+			a, err = nil, errNot7z
+		}
+	}()
 	v := reflect.ValueOf(zr).Elem()
 	start := v.FieldByName("start").Int()
 	si := v.FieldByName("si")
@@ -248,7 +253,7 @@ func build7z(zr *sevenzip.Reader, dirStart int64, password bool) (*Archive, erro
 	for i := range z.files {
 		z.files[i].Entry = named.Entries[i]
 	}
-	a := &Archive{DirStart: dirStart, Renamed: named.Renamed, Root: named.Root, Total: named.Total, z: z, encrypted: enc}
+	a = &Archive{DirStart: dirStart, Renamed: named.Renamed, Root: named.Root, Total: named.Total, z: z, encrypted: enc}
 	for i, e := range blocks {
 		fs := z.blocks[i]
 		if len(fs) == 0 {

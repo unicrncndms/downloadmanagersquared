@@ -19,6 +19,7 @@ async function recording(b, extra = {}) {
 }
 
 const engineCalls = (b, method) => b.engine.filter((c) => c.method === method).map((c) => c.params);
+const UI = { id: "dms@test", url: "moz-extension://x/ui/popup.html" }; // sender of an extension page
 const message = (b, job, msg) => b.fire("runtime.onMessage", { resolver: true, ...msg }, { tab: { id: job.tabId, url: PAGE } });
 
 test("every browser listener is registered before anything is awaited", () => {
@@ -279,7 +280,7 @@ test("after the user quits the engine from its tray, the extension doesn't start
   assert.equal(ports(), before);
   assert.equal(b.Engine.quit, true);
   assert.equal(b.Engine.lastError, "");
-  await b.fire("runtime.onMessage", { type: "startEngine" }, {})[0];
+  await b.fire("runtime.onMessage", { type: "startEngine" }, UI)[0];
   assert.equal(ports(), before + 1);
   assert.equal(b.Engine.quit, false);
 });
@@ -291,6 +292,27 @@ test("a lost engine it didn't quit is reconnected", async () => {
   b.fire("port.onDisconnect", {});
   await b.advance(2000);
   assert.equal(b.listeners["port.onMessage"].length, before + 1);
+});
+
+test("starting the engine during a pending retry opens one port, not two", async () => {
+  const b = load();
+  await b.settle();
+  const before = b.listeners["port.onMessage"].length;
+  b.fire("port.onDisconnect", {});
+  await b.fire("runtime.onMessage", { type: "startEngine" }, UI)[0];
+  await b.advance(60000);
+  assert.equal(b.listeners["port.onMessage"].length, before + 1);
+});
+
+test("privileged messages are taken from the extension's own pages only", async () => {
+  const b = load();
+  await b.settle();
+  b.connect();
+  const call = (sender) => b.fire("runtime.onMessage", { type: "call", method: "pause", params: {} }, sender)[0];
+  assert.equal(call({ id: "dms@test", tab: { id: 3 }, url: "https://evil.test/" }), undefined);
+  assert.equal(call({ id: "other@x", url: "moz-extension://x/ui/popup.html" }), undefined);
+  await call(UI);
+  assert.equal(engineCalls(b, "pause").length, 1);
 });
 
 test("the accent of Firefox's theme goes to the engine on connecting and when the theme changes, only when it differs", async () => {

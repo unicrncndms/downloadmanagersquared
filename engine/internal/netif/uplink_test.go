@@ -6,6 +6,7 @@ import (
 	"net"
 	"reflect"
 	"sort"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -177,5 +178,48 @@ func TestIPv6OnlyInterfacesGroupByTheirIPv6GatewaysMAC(t *testing.T) {
 	got := SameRouter(list)
 	if !reflect.DeepEqual(got, map[string][]string{"usb": {"wifi"}, "wifi": {"usb"}}) {
 		t.Fatalf("SameRouter = %v", got)
+	}
+}
+
+func TestAFailedMACLookupIsTriedAgainSoon(t *testing.T) {
+	ip, gw := net.IPv4(10, 74, 0, 2), net.IPv4(10, 74, 0, 1)
+	key := ip.String() + "|" + gw.String()
+	var answer string
+	var calls atomic.Int32
+	old := lookupMAC
+	lookupMAC = func(net.IP, net.IP, uint32) string { calls.Add(1); return answer }
+	t.Cleanup(func() { lookupMAC = old })
+	// settle waits until the background lookup has stored its result.
+	settle := func(want int32) {
+		t.Helper()
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			macs.Lock()
+			_, busy := macs.inflight[key]
+			macs.Unlock()
+			if !busy && calls.Load() == want {
+				return
+			}
+		}
+		t.Fatalf("lookup %d did not finish", want)
+	}
+
+	gatewayMAC(ip, gw, 1) // the gateway does not answer
+	settle(1)
+	if got := gatewayMAC(ip, gw, 1); got != "" || calls.Load() != 1 {
+		t.Fatalf("right after a failed lookup: MAC %q, %d lookups; want none new", got, calls.Load())
+	}
+
+	// Older than the retry time, the failure is looked up again instead of
+	// standing for the whole five-minute TTL.
+	macs.Lock()
+	e := macs.known[key]
+	e.at = e.at.Add(-macRetry - time.Second)
+	macs.known[key] = e
+	macs.Unlock()
+	answer = "aa:bb:cc:dd:ee:ff"
+	gatewayMAC(ip, gw, 1)
+	settle(2)
+	if got := gatewayMAC(ip, gw, 1); got != answer {
+		t.Fatalf("MAC %q after the retry, want %q", got, answer)
 	}
 }

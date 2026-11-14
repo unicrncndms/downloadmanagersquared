@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { linesNote, finishedVerdict, moveBefore, statusLine, problemLinks, viaLinks, viaLine, seedLine, bulkActions, addSubmits, finished, finishedSummary, badgeOf } = require("../lib/list.js");
+const { linesNote, finishedVerdict, moveBefore, statusLine, problemLinks, viaLinks, seedLine, bulkActions, addSubmits, finished, finishedSummary, badgeOf, seenAfter } = require("../lib/list.js");
 
 // The engine's section for a status; a test of what needs the user says "needs".
 const SECTION = { running: "active", verifying: "active", metadata: "active", checking: "active", seeding: "seeding", queued: "queued",
@@ -42,20 +42,6 @@ test("only interfaces with a problem show on the card", () => {
   } });
   assert.deepEqual(problemLinks(d).sort(), ["retry", "vpn", "wifi"]);
   assert.deepEqual(problemLinks(dl("b", "completed", { links: { x: { tone: "bad" } } })), []);
-});
-
-test("a running card says which interfaces it uses and how many connections each", () => {
-  const names = { eth: "Ethernet", wifi: "Wi-Fi", vpn: "VPN" };
-  const nameOf = (id) => names[id];
-  const d = dl("a", "running", { links: {
-    wifi: { conns: 2, speed: 4.4e6 }, eth: { conns: 4, speed: 7.1e6 }, vpn: { conns: 0, label: "Failed" },
-  } });
-  // Busiest first; one not connected isn't listed.
-  assert.equal(viaLine(d, nameOf), "via Ethernet 4 requests · Wi-Fi 2 requests");
-  const t = dl("t", "seeding", { kind: "torrent", links: { eth: { conns: 3 }, wifi: { conns: 1 } } });
-  assert.equal(viaLine(t, nameOf), "via Ethernet 3 peers · Wi-Fi 1 peer");
-  assert.equal(viaLine(dl("p", "paused", { links: { eth: { conns: 4 } } }), nameOf), "");
-  assert.equal(viaLine(dl("q", "running", { links: {} }), nameOf), "");
 });
 
 test("seeding says how far it is to the ratio target", () => {
@@ -362,6 +348,21 @@ test("badgeOf: ! for a download that needs you or failed, else the running count
   assert.equal(badgeOf([{ status: "running" }, { status: "failed", section: "needs" }]).text, "!");
 });
 
+test("badgeOf: a failure the list has shown no longer keeps the !, a new one does", () => {
+  const failed = { id: "old", status: "failed", section: "needs" };
+  const running = { id: "r", status: "running" };
+  let seen = seenAfter([failed, running], new Set(), false);
+  assert.equal(badgeOf([failed, running], seen).text, "!");
+  seen = seenAfter([failed, running], seen, true);
+  assert.deepEqual(badgeOf([failed, running], seen), { text: "1", color: "#2563eb" });
+  const fresh = { id: "new", status: "failed", section: "needs" };
+  assert.equal(badgeOf([failed, fresh], seen).text, "!");
+  // It runs again: its seen mark goes, so a later failure shows again.
+  seen = seenAfter([{ ...failed, status: "running", section: "" }], seen, false);
+  assert.equal(seen.has("old"), false);
+  assert.equal(badgeOf([failed], seen).text, "!");
+});
+
 test("fmtSpeed, in bytes or bits, and the limit conversions", () => {
   const { fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit } = require("../lib/list.js");
   assert.equal(fmtSpeed(1.5e6, "MBps"), "1.5 MB/s");
@@ -387,8 +388,11 @@ test("linesNote: one line hints a second, shared router promises no speed", () =
   const sep = linesNote([w, { id: "eth", name: "Ethernet" }]);
   assert.match(sep.text, /look separate/);
   assert.equal(sep.check, true);
+  assert.equal(sep.shared, false);
   const same = linesNote([{ ...w, sameRouter: ["Ethernet"] }, { id: "eth", name: "Ethernet", sameRouter: ["Wi-Fi"] }]);
   assert.match(same.text, /Ethernet and Wi-Fi share one line and will not add speed/);
+  assert.equal(same.shared, true);
+  assert.equal(linesNote([w]).shared, false);
 });
 
 test("finishedVerdict: smallest share added, shared router no gain, nothing when unknown", () => {
@@ -442,4 +446,17 @@ test("a running download held by a limit says so; Start now runs a queued one", 
   assert.match(statusLine({ status: "running", speed: 5e6, eta: 10, size: 10, done: 1, limitedBy: "Wi-Fi's limit", limitedTo: 5e6 }).sub, /^limited to .* by Wi-Fi's limit$/);
   const s = { downloads: [{ id: "a", status: "queued" }] };
   assert.equal(predict(s, "startNow", { id: "a" }).downloads[0].status, "running");
+});
+
+test("a search word naming an inherited property is not a state word", () => {
+  const { matchesSearch } = require("../lib/list.js");
+  const d = { filename: "other.zip", status: "running", section: "active" };
+  assert.equal(matchesSearch(d, "is:constructor"), false); // plain text now, not a filter that passes everything
+  assert.equal(matchesSearch(d, "is:toString"), false);
+  assert.equal(matchesSearch(d, "is:running"), true);
+});
+
+test("progress reads the same everywhere: done / size", () => {
+  const { progressText, statusLine } = require("../lib/list.js");
+  assert.equal(statusLine({ size: 2e6, done: 1e6, status: "paused" }).left, "50% · " + progressText(1e6, 2e6));
 });

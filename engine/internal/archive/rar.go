@@ -217,6 +217,11 @@ func (x *Extractor) extractRar(ctx context.Context, missing []Range) (Result, er
 // checked by the decoder and put in place. bad is why its bytes are wrong.
 func (x *Extractor) decodeRar(ctx context.Context, _ int) (bad string, err error) {
 	s := x.z.rar
+	defer func() {
+		if bad != "" || err != nil {
+			x.fl.wait(0) // files already handed over finish before the caller goes on
+		}
+	}()
 	var rr interface {
 		io.Reader
 		Next() (*rardecode.FileHeader, error)

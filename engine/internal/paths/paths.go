@@ -37,14 +37,6 @@ type Result struct {
 	Wait  bool // VPN only and no tunnel is up: the download must not run
 }
 
-// Main is the main path, "" when there is none.
-func (r Result) Main() string {
-	if len(r.Paths) == 0 {
-		return ""
-	}
-	return r.Paths[0]
-}
-
 // For decides the paths a download in mode m may use. The main path is the
 // main interface, or under VPN only its tunnel, else the first tunnel up.
 func For(m Mode, s Snapshot) Result {

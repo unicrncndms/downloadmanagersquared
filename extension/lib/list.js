@@ -46,6 +46,11 @@ function percent(d) {
   return d.size > 0 ? Math.min(100, (d.done / d.size) * 100) : 0;
 }
 
+// "12 MB / 80 MB": how much of how much.
+function progressText(done, size) {
+  return `${fmtBytes(done)} / ${fmtBytes(size)}`;
+}
+
 // The list's sections, in the order they are listed. The engine puts each
 // download in one (its "section", see Present in the engine); the headings are
 // ours. Folded sections are saved by heading, so the words must not change.
@@ -83,7 +88,7 @@ function rowNums(d) {
   if (finished(d) || (d.status === "queued" && !d.done)) return { main: d.size > 0 ? fmtBytes(d.size) : "", sub: "" };
   if (d.status === "seeding") return { main: "", sub: "" }; // its line says what it uploads
   if (d.status === "running") return { main: fmtSpeed(d.speed), sub: [pct, `${fmtETA(d.eta)} left`].filter(Boolean).join(" · ") };
-  return { main: pct || (d.done > 0 ? fmtBytes(d.done) : ""), sub: d.size > 0 ? `${fmtBytes(d.done)} / ${fmtBytes(d.size)}` : "" };
+  return { main: pct || (d.done > 0 ? fmtBytes(d.done) : ""), sub: d.size > 0 ? progressText(d.done, d.size) : "" };
 }
 
 // groupView is a group card's lines: the engine's summary of its files, with
@@ -92,7 +97,7 @@ function groupView(g) {
   const unit = g.parts ? "parts" : "files";
   const files = g.done === g.count ? `${g.count} ${unit}` : `${g.done} of ${g.count} ${unit} done`;
   const percent = g.size > 0 ? Math.min(100, (g.got / g.size) * 100) : 0;
-  let left = (g.size > 0 ? `${Math.round(percent)}% · ${fmtBytes(g.got)} / ${fmtBytes(g.size)}` : fmtBytes(g.got)) + ` · ${files}`;
+  let left = (g.size > 0 ? `${Math.round(percent)}% · ${progressText(g.got, g.size)}` : fmtBytes(g.got)) + ` · ${files}`;
   if (g.speed > 0 && g.eta > 0) left += ` · ${fmtETA(g.eta)} left`;
   return {
     left, right: g.speed > 0 ? `↓ ${fmtSpeed(g.speed)}` : "", speed: g.speed, percent,
@@ -207,7 +212,7 @@ function predict(state, method, p) {
 // all when there is one.
 function statusLine(d) {
   let left = "";
-  if (d.size > 0) left = `${Math.round(percent(d))}% · ${fmtBytes(d.done)} / ${fmtBytes(d.size)}`;
+  if (d.size > 0) left = `${Math.round(percent(d))}% · ${progressText(d.done, d.size)}`;
   else if (d.done > 0) left = fmtBytes(d.done);
   const right = d.status === "running" ? `↓ ${fmtSpeed(d.speed)} · ${fmtETA(d.eta)} left` : "";
   const f = d.kind !== "torrent" && d.folder;
@@ -227,20 +232,6 @@ function problemLinks(d) {
     const l = d.links[id];
     return !!l.error || !!l.canRetry || l.tone === "warn" || l.tone === "bad";
   });
-}
-
-// viaLine is a short line of the interfaces a running download uses, busiest
-// first, with each one's connections (peers for a torrent): "via Ethernet 4
-// requests · Wi-Fi 2 requests". "" when it isn't running or nothing is connected. nameOf gives
-// an interface's name.
-function viaLine(d, nameOf, order) {
-  const torrent = d.kind === "torrent";
-  const used = viaLinks(d, order);
-  if (!used.length) return "";
-  return "via " + used.map((id) => {
-    const n = d.links[id].conns;
-    return `${nameOf(id)} ${torrent ? `${n} peer${n === 1 ? "" : "s"}` : `${n} request${n === 1 ? "" : "s"}`}`;
-  }).join(" · ");
 }
 
 // viaLinks are the interfaces a running download uses, in the order of
@@ -279,14 +270,18 @@ function andList(names) {
 // Interfaces that look like two lines but add no bandwidth: one warning per
 // group behind the same router (the engine's sameRouter, by gateway MAC).
 // Never a reason to turn one off: the user decides.
-function routerWarnings(interfaces) {
+function routerGroups(interfaces) {
   const groups = new Map();
   for (const i of interfaces || []) {
     if (i.tunnel || !(i.sameRouter || []).length) continue;
     const names = [i.name, ...i.sameRouter].sort();
     groups.set(names.join("\n"), names);
   }
-  return [...groups.values()].map((names) =>
+  return [...groups.values()];
+}
+
+function routerWarnings(interfaces) {
+  return routerGroups(interfaces).map((names) =>
     `${andList(names)} go through the same router: together they are no faster than one of them.`);
 }
 
@@ -364,9 +359,10 @@ const STATE_WORDS = {
 // of them); with other words, both must hold.
 function matchesSearch(d, query) {
   const words = String(query || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const states = words.filter((w) => w.startsWith("is:") && STATE_WORDS[w.slice(3)]).map((w) => w.slice(3));
+  const isState = (w) => w.startsWith("is:") && Object.hasOwn(STATE_WORDS, w.slice(3));
+  const states = words.filter(isState).map((w) => w.slice(3));
   if (states.length && !states.some((s) => STATE_WORDS[s](d))) return false;
-  const q = words.filter((w) => !(w.startsWith("is:") && STATE_WORDS[w.slice(3)])).join(" ");
+  const q = words.filter((w) => !isState(w)).join(" ");
   if (!q) return true;
   let host = "";
   try { host = new URL(d.url).hostname; } catch { /* a magnet link has none */ }
@@ -442,13 +438,13 @@ function finishedSummary(d, nameOf) {
 // linesNote is what the empty list says of the lines found (ready interfaces):
 // how many, and whether they look separate. `add` asks for the second-line hint
 // (one line), `check` offers Check lines (several lines that look separate).
-// Lines behind one router say so and promise no speed.
+// Lines behind one router say so and promise no speed (shared: true).
 function linesNote(ready) {
   const names = ready.map((i) => i.name);
-  if (names.length < 2) return { text: "One line found. A second line (USB tether, hotspot) is what adds speed.", add: true, check: false };
-  const same = routerWarnings(ready);
-  if (same.length) return { text: `${names.length} lines found. ${same.join(" ").replace(/go through the same router: together they are no faster than one of them\./g, "share one line and will not add speed.")}`, add: false, check: true };
-  return { text: `${names.length} lines found, they look separate (${andList(names)}).`, add: false, check: true };
+  if (names.length < 2) return { text: "One line found. A second line (USB tether, hotspot) is what adds speed.", add: true, check: false, shared: false };
+  const same = routerGroups(ready);
+  if (same.length) return { text: `${names.length} lines found. ${same.map((g) => `${andList(g)} share one line and will not add speed.`).join(" ")}`, add: false, check: true, shared: true };
+  return { text: `${names.length} lines found, they look separate (${andList(names)}).`, add: false, check: true, shared: false };
 }
 
 // finishedVerdict is one factual line after a multi-connection download: two
@@ -467,12 +463,27 @@ function finishedVerdict(d, interfaces, nameOf) {
 }
 
 // badgeOf is the toolbar button's badge for the engine's downloads: "!" on a
-// warning colour while one needs the user or failed, else how many run.
-function badgeOf(downloads) {
+// warning colour while one needs the user or failed and the list has not
+// shown it yet (seen: a Set of ids), else how many run.
+function badgeOf(downloads, seen = new Set()) {
   const ds = downloads || [];
-  if (ds.some((d) => d.section === "needs" || d.status === "failed")) return { text: "!", color: "#d97706" };
+  if (needsYou(ds).some((d) => !seen.has(d.id))) return { text: "!", color: "#d97706" };
   const n = ds.filter((d) => d.status === "running").length;
   return { text: n ? String(n) : "", color: "#2563eb" };
+}
+
+// needsYou are the downloads that wait for the user or failed.
+function needsYou(downloads) {
+  return (downloads || []).filter((d) => d.section === "needs" || d.status === "failed");
+}
+
+// seenAfter is the seen Set after a state update: ids that still need the user
+// stay seen; an id leaves once its download runs again or is gone. With opened
+// (the list was just opened), every download that needs the user is seen.
+function seenAfter(downloads, seen, opened) {
+  const need = needsYou(downloads).map((d) => d.id);
+  const out = new Set(need.filter((id) => seen.has(id) || opened));
+  return out;
 }
 
 // fileFolders groups a torrent's files by their top folder, in order of first
@@ -497,5 +508,5 @@ function pickTotal(sizes, ticked) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { fileFolders, pickTotal, addSubmits, linesNote, finishedVerdict, finishedSummary, badgeOf, addLines, addView, addFileCheck, matchesSearch, errorSource, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
+  module.exports = { fileFolders, pickTotal, addSubmits, linesNote, finishedVerdict, finishedSummary, badgeOf, seenAfter, addLines, addView, addFileCheck, matchesSearch, errorSource, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, progressText, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, seedLine, bulkActions, routerWarnings, routerGroups, lineResults, familyText, ipv6Hints };
 }

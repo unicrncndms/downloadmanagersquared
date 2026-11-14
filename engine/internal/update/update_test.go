@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -87,6 +88,22 @@ func TestFetch(t *testing.T) {
 	for _, p := range []string{"/badtag", "/elsewhere", "/limited"} {
 		if _, _, err := Fetch(ctx, srv.Client(), srv.URL+p); err == nil {
 			t.Errorf("%s: want an error", p)
+		}
+	}
+}
+
+func TestLoadRefusesAReleaseFetchWouldNotHaveAccepted(t *testing.T) {
+	for _, saved := range []string{
+		`{"checked":"2026-11-07T12:00:00Z","latest":"0.9.0","url":"https://evil.example/x"}`,
+		`{"checked":"2026-11-07T12:00:00Z","latest":"0.9.0","url":"javascript:alert(1)"}`,
+		`{"checked":"2026-11-07T12:00:00Z","latest":"soon","url":"https://github.com/o/r/releases/tag/vsoon"}`,
+	} {
+		path := filepath.Join(t.TempDir(), "update.json")
+		if err := os.WriteFile(path, []byte(saved), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := Load(path); got != (State{}) {
+			t.Errorf("Load(%s) = %+v, want a zero state", saved, got)
 		}
 	}
 }

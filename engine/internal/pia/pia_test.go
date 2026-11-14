@@ -82,6 +82,17 @@ func TestLoginGivesATokenAndAWrongPasswordSaysSo(t *testing.T) {
 	}
 }
 
+func TestAPageThatIsNotALoginReplyIsNotARefusal(t *testing.T) {
+	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "<html>Sign in to the hotspot</html>")
+	}))
+	defer web.Close()
+	_, err := API{TokenURL: web.URL}.Token(t.Context(), http.DefaultClient, "p0123456", "right")
+	if err == nil || errors.Is(err, ErrLogin) {
+		t.Fatalf("a 200 page gave %v, want an error that is not a refused login", err)
+	}
+}
+
 func TestServerListIgnoresTheSignature(t *testing.T) {
 	f := newFakePIA(t)
 	regions, err := f.api.Regions(t.Context(), http.DefaultClient)
@@ -161,6 +172,24 @@ func TestAddKeyRefusesAServerWithoutPIAsCertificate(t *testing.T) {
 func TestDefaultAPIHasPIAsCA(t *testing.T) {
 	if Default.CA == nil || Default.KeyPort != 1337 || !strings.HasPrefix(Default.TokenURL, "https://www.privateinternetaccess.com/") {
 		t.Fatalf("default API %+v", Default)
+	}
+}
+
+func TestASignatureWithABadPortOrNoExpiryIsRefused(t *testing.T) {
+	for _, body := range []string{`{"port":70000,"expires_at":"2030-01-01T00:00:00Z"}`, `{"port":47123}`} {
+		payload := base64.StdEncoding.EncodeToString([]byte(body))
+		pf := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(map[string]string{"status": "OK", "payload": payload, "signature": "SIG"})
+		}))
+		ca := x509.NewCertPool()
+		ca.AddCert(pf.Certificate())
+		_, port, _ := net.SplitHostPort(pf.Listener.Addr().String())
+		api := API{CA: ca, PFPort: atoi(port)}
+		_, err := api.Signature(t.Context(), dial, Server{IP: "127.0.0.1", CN: "example.com"}, "TOKEN")
+		pf.Close()
+		if err == nil {
+			t.Fatalf("a signature with payload %s was accepted", body)
+		}
 	}
 }
 

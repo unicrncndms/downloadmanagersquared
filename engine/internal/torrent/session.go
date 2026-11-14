@@ -747,7 +747,8 @@ func (s *Session) peersByIface(at *atorrent.Torrent) map[string]ifacePeers {
 	return out
 }
 
-// Close stops every torrent and closes every socket.
+// Close closes the client and every socket. It does not stop torrents: the
+// caller stops them first (the engine's queue does), as each one's run ends with its context.
 func (s *Session) Close() {
 	s.setMu.Lock()
 	defer s.setMu.Unlock()

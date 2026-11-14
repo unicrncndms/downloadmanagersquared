@@ -62,7 +62,9 @@ func ParseConf(text string) (Config, error) {
 	var section string
 	var haveKey, havePeer, haveAddr bool
 	sc := bufio.NewScanner(strings.NewReader(text))
+	n := 0
 	for sc.Scan() {
+		n++
 		line := strings.TrimSpace(sc.Text())
 		if i := strings.IndexAny(line, "#;"); i >= 0 {
 			line = strings.TrimSpace(line[:i])
@@ -82,7 +84,7 @@ func ParseConf(text string) (Config, error) {
 		}
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
-			return Config{}, fmt.Errorf("can't read %q", line)
+			return Config{}, fmt.Errorf("line %d: no = sign", n) // the line may hold a key, so not its text
 		}
 		k, v = strings.ToLower(strings.TrimSpace(k)), strings.TrimSpace(v)
 		if section == "interface" && amneziaKeys[k] {
@@ -116,6 +118,9 @@ func ParseConf(text string) (Config, error) {
 			}
 		case "interface.mtu":
 			cfg.MTU, err = strconv.Atoi(v)
+			if err == nil && (cfg.MTU < 576 || cfg.MTU > 9000) {
+				err = fmt.Errorf("%d is outside 576 to 9000", cfg.MTU)
+			}
 		case "peer.publickey":
 			cfg.PublicKey, err = parseKey(v)
 		case "peer.presharedkey":
@@ -204,8 +209,8 @@ type Tunnel struct {
 // Start brings a tunnel up. listen opens the UDP socket its encrypted packets
 // go through, an IPv6 one for an IPv6 endpoint; lookup resolves the
 // endpoint's host name, outside the tunnel (nil if the endpoint is an
-// address), and its first address is used.
-func Start(cfg Config, listen func(v6 bool) (net.PacketConn, error), lookup func(ctx context.Context, host string) ([]net.IP, error)) (*Tunnel, error) {
+// address), and its first address is used. ctx cancels that lookup.
+func Start(ctx context.Context, cfg Config, listen func(v6 bool) (net.PacketConn, error), lookup func(ctx context.Context, host string) ([]net.IP, error)) (*Tunnel, error) {
 	if len(cfg.DNS) == 0 {
 		return nil, ErrNoDNS
 	}
@@ -217,8 +222,8 @@ func Start(cfg Config, listen func(v6 bool) (net.PacketConn, error), lookup func
 			if lookup == nil {
 				return nil, fmt.Errorf("can't resolve the endpoint %s", host)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			ips, lerr := lookup(ctx, host)
+			lctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			ips, lerr := lookup(lctx, host)
 			cancel()
 			if lerr != nil || len(ips) == 0 {
 				return nil, fmt.Errorf("resolving the endpoint %s: %v", host, lerr)

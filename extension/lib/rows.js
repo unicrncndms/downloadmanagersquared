@@ -11,7 +11,7 @@ const listLib = typeof module !== "undefined" ? require("./list.js")
 // Newest first within a section, except the queued: those in the order they will start.
 function sortDownloads(downloads) {
   return downloads.map((d, i) => ({ d, i }))
-    .sort((a, b) => listLib.group(a.d) - listLib.group(b.d) || (listLib.group(a.d) === 3 ? a.i - b.i : b.i - a.i))
+    .sort((a, b) => listLib.group(a.d) - listLib.group(b.d) || (listLib.group(a.d) === listLib.SECTION_KEYS.indexOf("queued") ? a.i - b.i : b.i - a.i))
     .map((x) => x.d);
 }
 

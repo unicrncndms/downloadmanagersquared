@@ -150,3 +150,29 @@ func TestTookWaitsForTheDownloadLimit(t *testing.T) {
 		t.Fatal("Took ignored a cancelled context")
 	}
 }
+
+func TestClosingAShapedConnWakesAPausedWrite(t *testing.T) {
+	addr := serve(t, 0)
+	c, err := net.Dial("tcp4", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewShaper()
+	s.SetLimits(1<<10, 0) // 1 KB/s: the second 32 KB chunk waits about 32 s
+	sc := s.Conn(c)
+	errc := make(chan error, 1)
+	go func() {
+		_, err := sc.Write(make([]byte, 64<<10))
+		errc <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // let the Write reach its wait
+	sc.Close()
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Fatal("Write returned no error after Close")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Write still paused a second after Close")
+	}
+}

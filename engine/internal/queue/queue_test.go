@@ -299,3 +299,48 @@ func TestStartNowStillWaitsForATunnelUnderVPNOnly(t *testing.T) {
 		t.Fatalf("tunnel up: a %v, b %v; want both running beside the limit of 1", a.running, b.running)
 	}
 }
+
+// removing is a seeding entry the user removes after Schedule's snapshot was
+// taken, between its Rejoins check and its start.
+type removing struct {
+	*fake
+	q *Queue
+}
+
+func (r *removing) Rejoins() bool {
+	done := make(chan struct{})
+	go func() { r.q.Remove(r.id, false); close(done) }()
+	<-done
+	return r.fake.Rejoins()
+}
+
+func TestAnEntryRemovedDuringScheduleIsNotStarted(t *testing.T) {
+	seed := queued(true)
+	seed.status, seed.rejoins = "seeding", true
+	q := New(t.TempDir(), nil)
+	q.Add(&removing{fake: seed, q: q})
+	q.Schedule(1, lo)
+	if seed.running {
+		t.Fatal("a removed torrent was started by Schedule")
+	}
+}
+
+func TestAFailedStateWriteIsTriedAgain(t *testing.T) {
+	dir := t.TempDir()
+	q := New(dir, nil)
+	d := queued(false)
+	q.Add(d)
+	// A file where the state directory goes makes the first write fail.
+	blocker := filepath.Join(dir, "downloads")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	q.Save()
+	if err := os.Remove(blocker); err != nil {
+		t.Fatal(err)
+	}
+	q.Save()
+	if _, err := os.Stat(filepath.Join(dir, "downloads", d.id+".json")); err != nil {
+		t.Fatalf("state not saved after the write failed once: %v", err)
+	}
+}

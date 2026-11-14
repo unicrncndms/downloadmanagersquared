@@ -30,16 +30,16 @@
     </div>
     <form id="addBox" hidden>
       <textarea id="addUrl" rows="2" aria-label="Links to add, one per line" placeholder="File link, landing page, magnet or .torrent link (one per line)" required spellcheck="false"></textarea>
-      <input type="url" id="addPage" aria-label="Landing page" placeholder="Landing page (optional, for every link)" hidden>
-      <select id="addVpn" title="Whether this download goes through the VPN" hidden>
-        <option value="">As in settings</option>
-        <option value="off">Off</option>
-        <option value="alongside">VPN and direct</option>
-        <option value="vpn">VPN only</option>
-      </select>
       <details id="addOptions">
         <summary>Options</summary>
         <div class="add-opts">
+          <label hidden>Landing page <input type="url" id="addPage" placeholder="optional, for every link"></label>
+          <label hidden>VPN <select id="addVpn" title="Whether this download goes through the VPN">
+            <option value="">As in settings</option>
+            <option value="off">Off</option>
+            <option value="alongside">VPN and direct</option>
+            <option value="vpn">VPN only</option>
+          </select></label>
           <label id="addNameRow">File name <input type="text" id="addName" placeholder="as the server names it" spellcheck="false"></label>
           <label id="addSumRow">Checksum <input type="text" id="addSum" placeholder="SHA-256 or MD5, to check the file" spellcheck="false" autocomplete="off"></label>
         </div>
@@ -62,6 +62,7 @@
   <script src="../lib/version.js"></script>
   <script src="../lib/folder.js"></script>
   <script src="../lib/list.js"></script>
+  <script src="../lib/uirules.js"></script>
   <script src="../lib/rows.js"></script>
   <script src="../lib/accent.js"></script>
   <script src="../lib/iface.js"></script>
@@ -69,6 +70,9 @@
   <script src="host.js"></script>
   <script src="common.js"></script>
   <script src="menu.js"></script>
+  <script src="card-details.js"></script>
+  <script src="card-pick.js"></script>
+  <script src="card-links.js"></script>
   <script src="card.js"></script>
   <script src="popup.js"></script>
 </body>

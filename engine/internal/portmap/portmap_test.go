@@ -184,6 +184,36 @@ func TestUPnPMapsWhenNATPMPIsMissing(t *testing.T) {
 	}
 }
 
+func TestUPnPAsksOnlyTheGatewayAndItsOwnScheme(t *testing.T) {
+	for _, loc := range []string{"http://127.0.0.2/desc.xml", "ftp://127.0.0.1/desc.xml"} {
+		ssdp := listenUDP(t)
+		go func() {
+			buf := make([]byte, 2048)
+			for {
+				_, from, err := ssdp.ReadFrom(buf)
+				if err != nil {
+					return
+				}
+				ssdp.WriteTo([]byte("HTTP/1.1 200 OK\r\nST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\nLOCATION: "+loc+"\r\n\r\n"), from)
+			}
+		}()
+		lo := net.IPv4(127, 0, 0, 1)
+		gw := Gateway{
+			IP:       lo,
+			Local:    lo,
+			Listen:   func() (net.PacketConn, error) { return net.ListenPacket("udp4", "127.0.0.1:0") },
+			HTTP:     http.DefaultClient,
+			ssdpPort: port(ssdp.LocalAddr()),
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		loc2, err := discover(ctx, gw)
+		cancel()
+		if err == nil {
+			t.Fatalf("a device answering with %s was taken for the router, at %s", loc, loc2)
+		}
+	}
+}
+
 func TestNoRouterSupportIsAnError(t *testing.T) {
 	r := newRouter(t, false, false)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

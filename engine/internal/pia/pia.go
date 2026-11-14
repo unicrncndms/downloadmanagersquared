@@ -83,12 +83,14 @@ func (a API) Token(ctx context.Context, c *http.Client, user, pass string) (stri
 	var r struct {
 		Token string `json:"token"`
 	}
-	json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&r)
+	derr := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&r)
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		return "", ErrLogin
 	case resp.StatusCode != http.StatusOK:
 		return "", fmt.Errorf("PIA login answered %s", resp.Status)
+	case derr != nil: // a captive portal or a cut-off reply is not a refused login
+		return "", fmt.Errorf("reading PIA's login reply: %w", derr)
 	case r.Token == "":
 		return "", ErrLogin
 	}
@@ -197,7 +199,6 @@ type Key struct {
 	Message    string   `json:"message"`
 	ServerKey  string   `json:"server_key"`
 	ServerPort int      `json:"server_port"`
-	ServerIP   string   `json:"server_ip"`
 	ServerVIP  string   `json:"server_vip"` // the server inside the tunnel, for port forwarding
 	PeerIP     string   `json:"peer_ip"`
 	DNS        []string `json:"dns_servers"`
@@ -226,7 +227,7 @@ func (a API) AddKey(ctx context.Context, dial Dial, srv Server, token, pub strin
 	if err := a.get(ctx, a.client(dial, srv.IP, srv.CN), u.String(), &k); err != nil {
 		return Key{}, err
 	}
-	if k.ServerKey == "" || k.PeerIP == "" || k.ServerPort == 0 {
+	if k.ServerKey == "" || k.PeerIP == "" || k.ServerPort < 1 || k.ServerPort > 65535 {
 		return Key{}, errors.New("PIA's server sent an incomplete key reply")
 	}
 	return k, nil
@@ -308,8 +309,11 @@ func (a API) Signature(ctx context.Context, dial Dial, gw Server, token string) 
 		Port    int       `json:"port"`
 		Expires time.Time `json:"expires_at"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.Port <= 0 {
-		return Signature{}, fmt.Errorf("reading PIA's port payload: %v", err)
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return Signature{}, fmt.Errorf("reading PIA's port payload: %w", err)
+	}
+	if p.Port < 1 || p.Port > 65535 || p.Expires.IsZero() {
+		return Signature{}, errors.New("PIA's port payload has no usable port or expiry")
 	}
 	return Signature{Payload: r.Payload, Signature: r.Signature, Port: p.Port, Expires: p.Expires}, nil
 }

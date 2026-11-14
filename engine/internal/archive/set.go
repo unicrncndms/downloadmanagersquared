@@ -16,8 +16,12 @@ func SplitSizes(front []byte, partSize int64) ([]int64, error) {
 		return nil, errNot7z
 	}
 	le := binary.LittleEndian
-	total := sevenStartLen + int64(le.Uint64(front[12:])) + int64(le.Uint64(front[20:]))
-	if partSize <= 0 || total < sevenStartLen || total > 1<<50 {
+	next, hdr := le.Uint64(front[12:]), le.Uint64(front[20:])
+	if next > 1<<50 || hdr > 1<<50 {
+		return nil, errNot7z
+	}
+	total := sevenStartLen + int64(next) + int64(hdr)
+	if partSize <= 0 || total > 1<<50 {
 		return nil, errNot7z
 	}
 	var sizes []int64

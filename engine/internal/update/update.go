@@ -28,13 +28,22 @@ type State struct {
 	URL     string    `json:"url,omitempty"`    // its release page
 }
 
-// Load reads the saved state; a missing or broken file is a zero State.
+// Load reads the saved state; a missing or broken file, or a release Fetch
+// would not have accepted, is a zero State.
 func Load(path string) State {
 	var s State
-	if b, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(b, &s)
+	if b, err := os.ReadFile(path); err == nil && json.Unmarshal(b, &s) == nil && s.valid() {
+		return s
 	}
-	return s
+	return State{}
+}
+
+// valid is whether a saved release is one Fetch would have accepted.
+func (s State) valid() bool {
+	if s.Latest == "" && s.URL == "" {
+		return true
+	}
+	return Release(s.Latest) && strings.HasPrefix(s.URL, "https://github.com/")
 }
 
 // Save writes the state.

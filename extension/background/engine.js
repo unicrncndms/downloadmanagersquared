@@ -19,12 +19,14 @@ const Engine = {
   // start connects again after the user quit the engine, which starts it.
   start() {
     if (this.port) return;
+    clearTimeout(this.retryTimer); // a retry already pending would open a second port
     this.quit = false;
     this.retryDelay = 2000;
     this.connect();
   },
 
   connect() {
+    if (this.port) return;
     const port = browser.runtime.connectNative("downloadmanagersquared");
     this.port = port;
     port.onMessage.addListener((msg) => this.onMessage(msg));
@@ -35,7 +37,7 @@ const Engine = {
       this.notInstalled = /no such native application/i.test(msg);
       this.setConnected(false, this.quit ? "" : msg || this.lastError || "engine disconnected");
       if (this.quit) return;
-      setTimeout(() => this.connect(), this.retryDelay);
+      this.retryTimer = setTimeout(() => this.connect(), this.retryDelay);
       this.retryDelay = Math.min(this.retryDelay * 2, 30000);
     };
     port.onDisconnect.addListener((p) => lost((p.error && p.error.message) || ""));

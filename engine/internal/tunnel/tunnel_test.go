@@ -58,7 +58,7 @@ AllowedIPs = 10.9.0.2/32
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err = Start(srvCfg, listenLoopback(&serverSent), nil)
+	server, err = Start(context.Background(), srvCfg, listenLoopback(&serverSent), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ PersistentKeepalive = 25
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err = Start(cliCfg, listenLoopback(sent), nil)
+	client, err = Start(context.Background(), cliCfg, listenLoopback(sent), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestTunnelWithoutAServerIsDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sent atomic.Int64
-	tun, err := Start(cfg, listenLoopback(&sent), nil)
+	tun, err := Start(context.Background(), cfg, listenLoopback(&sent), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,6 +201,29 @@ func TestBadConfIsRefused(t *testing.T) {
 		if _, err := ParseConf(conf); err == nil {
 			t.Errorf("accepted %q", conf)
 		}
+	}
+}
+
+func TestAnMTUOutsideItsRangeIsRefused(t *testing.T) {
+	key, _, _ := GenerateKey()
+	_, pub, _ := GenerateKey()
+	for _, mtu := range []string{"0", "-5", "70000"} {
+		conf := fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.8.0.2/32\nDNS = 10.8.0.1\nMTU = %s\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 1.2.3.4:51820\n", key, mtu, pub)
+		if _, err := ParseConf(conf); err == nil {
+			t.Errorf("MTU %s was accepted", mtu)
+		}
+	}
+}
+
+func TestAConfLineWithoutEqualsDoesNotEchoItsKey(t *testing.T) {
+	key, _, _ := GenerateKey()
+	key = strings.TrimRight(key, "=") // the padding is an "=", which would split the line
+	_, err := ParseConf("[Interface]\nPrivateKey " + key + "\n")
+	if err == nil || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("got %v, want an error naming line 2", err)
+	}
+	if strings.Contains(err.Error(), key) {
+		t.Fatalf("the error holds the private key: %v", err)
 	}
 }
 
@@ -239,7 +262,7 @@ func TestTunnelWithoutDNSDoesntStart(t *testing.T) {
 	_, pub, _ := GenerateKey()
 	cfg, _ := ParseConf(fmt.Sprintf("[Interface]\nPrivateKey = %s\nAddress = 10.8.0.2/32\nDNS = 10.8.0.1\n[Peer]\nPublicKey = %s\nEndpoint = 127.0.0.1:9\n", key, pub))
 	cfg.DNS = nil
-	if tn, err := Start(cfg, listenLoopback(&atomic.Int64{}), nil); !errors.Is(err, ErrNoDNS) {
+	if tn, err := Start(context.Background(), cfg, listenLoopback(&atomic.Int64{}), nil); !errors.Is(err, ErrNoDNS) {
 		if tn != nil {
 			tn.Close()
 		}

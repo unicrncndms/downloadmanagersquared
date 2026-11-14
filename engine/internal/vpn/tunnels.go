@@ -174,8 +174,8 @@ func (t *Tunnels) Wait() { t.jobs.Wait() }
 // Close takes every tunnel and proxy down. Work still running finds its tunnel
 // gone and drops its result.
 func (t *Tunnels) Close() {
-	t.cancel()
 	t.mu.Lock()
+	t.cancel() // under mu: an add checks t.ctx under mu, so none lands after this snapshot
 	ids := make([]string, 0, len(t.tunnels))
 	for id := range t.tunnels {
 		ids = append(ids, id)
@@ -203,29 +203,24 @@ func (t *Tunnels) addEntry(ifaceID string, prov provider, cfg tunnel.Config, err
 		return lerr
 	}
 	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.ctx.Err() != nil { // closed: nothing may be left running
+		srv.Close()
+		return errors.New("the VPN tunnels are closed")
+	}
 	t.tunnels[ifaceID] = &entry{id: ifaceID, prov: prov, cfg: cfg, socks: srv, err: err}
-	t.mu.Unlock()
 	return nil
 }
 
 // socksPath sends a resolve's connections through an interface's tunnel.
 func (t *Tunnels) socksPath(ifaceID string) socks.Path {
-	return socks.Path{
-		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			u, ok := t.Up(ifaceID)
-			if !ok {
-				return nil, errNotUp
-			}
-			return u.Dial(ctx, network, addr)
-		},
-		Lookup: func(ctx context.Context, host string) ([]net.IP, error) {
-			u, ok := t.Up(ifaceID)
-			if !ok {
-				return nil, errNotUp
-			}
-			return u.LookupIP(ctx, host)
-		},
-	}
+	return socks.Via(func() (socks.Route, error) {
+		u, ok := t.Up(ifaceID)
+		if !ok {
+			return socks.Route{}, errNotUp
+		}
+		return socks.Route{Dial: u.Dial, Lookup: u.LookupIP}, nil
+	}, nil)
 }
 
 func (t *Tunnels) removeEntry(ifaceID string) {
@@ -289,7 +284,7 @@ func (t *Tunnels) startTunnel(te *entry, b *netif.Binding) {
 	cfg, newFw, err := te.prov.config(t.ctx, te, b)
 	var tn *tunnel.Tunnel
 	if err == nil {
-		tn, err = tunnel.Start(cfg, func(v6 bool) (net.PacketConn, error) {
+		tn, err = tunnel.Start(t.ctx, cfg, func(v6 bool) (net.PacketConn, error) {
 			if v6 {
 				return b.ListenPacket6(0) // an IPv6 endpoint, over the interface's IPv6
 			}

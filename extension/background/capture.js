@@ -41,10 +41,11 @@ const Capture = {
       const h = tab.openerTabId !== undefined && this.history.get(tab.openerTabId);
       if (h) this.history.set(tab.id, h.slice());
     });
-    browser.storage.local.get(["stepBacks", "pagesById"]).then((s) => {
+    // handOff waits for it: a read finishing late would replace the pages it just recorded.
+    this.stored = browser.storage.local.get(["stepBacks", "pagesById"]).then((s) => {
       this.stepBacks = s.stepBacks || {};
       this.pagesById = s.pagesById || {};
-    });
+    }).catch(() => {});
 
     browser.contextMenus.create({ id: "dms-link", title: "Download with DMS²", contexts: ["link"] });
     // The page item means something only on a file's own address or a learned site: Firefox asks
@@ -73,7 +74,7 @@ const Capture = {
 
   // Whether "Download this page's file" can mean something on this page.
   pageMenuFits(url) {
-    return !!url && (fileLikeUrl(url) || (isHttp(url) && hostOf(url) in Resolver.recipes));
+    return pageMenuFits(url, Resolver.recipes);
   },
 
   onHeaders(d, cookie = SentCookies.take(d.requestId)) { // dropped whatever happens to the response
@@ -162,6 +163,7 @@ const Capture = {
   // cookie: the header the browser sent with the download's request; without
   // a request (context menu, browser downloads) the container's cookies.
   async handOff({ url, pageUrl, pages, filename, cookieStoreId, cookie, tabId, closeBlankTab, torrent, metalink }) {
+    await this.stored;
     pages = pages || (pageUrl ? [pageUrl] : []);
     if (pageUrl === undefined) pageUrl = this.landingPage(pages);
     const referer = pages[pages.length - 1] || pageUrl;
@@ -175,9 +177,12 @@ const Capture = {
       }
     } catch (e) {
       // Don't lose the download: give it back to Firefox.
-      notify("DMS² couldn't take this download", `${e.message}. Firefox will download it instead.`);
       this.bypass.add(url);
-      browser.downloads.download({ url, filename: filename || undefined, cookieStoreId }).catch(() => {});
+      // A server-chosen filename Firefox rejects must not lose the download: retry without it.
+      browser.downloads.download({ url, filename: filename || undefined, cookieStoreId })
+        .catch((err) => { if (!filename) throw err; return browser.downloads.download({ url, cookieStoreId }); })
+        .then(() => notify("DMS² couldn't take this download", `${e.message}. Firefox will download it instead.`),
+          () => { this.bypass.delete(url); notify("DMS² couldn't take this download", `${e.message}. Firefox couldn't download it either.`); });
     }
     if (closeBlankTab && tabId >= 0) {
       const tab = await browser.tabs.get(tabId).catch(() => null);

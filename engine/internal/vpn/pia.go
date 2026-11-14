@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"downloadmanagersquared/engine/internal/atomicfile"
@@ -32,6 +33,7 @@ type piaProvider struct {
 	region  string            // the one the user picked, "" = the lowest latency
 	acct    *account          // nil: not signed in
 	servers map[*entry]string // the server each tunnel holds, kept apart from the others'
+	logins  sync.Mutex        // one login at a time, so starts that come together share its token
 }
 
 // account is a PIA login and what it has learned.
@@ -128,7 +130,7 @@ func (p *piaProvider) addWanted() {
 			continue
 		}
 		t.mu.Lock()
-		if t.tunnels[id] == nil {
+		if t.tunnels[id] == nil && t.ctx.Err() == nil { // not after Close
 			t.tunnels[id] = &entry{id: id, prov: p, socks: srv}
 			srv = nil
 		}
@@ -384,6 +386,34 @@ func (f *piaForwarder) bind(now time.Time, a *account, regionID string) error {
 	return lastErr
 }
 
+// login gets a token for a's login, unless a concurrent start has just got one:
+// the token is kept on the account before the lock is released.
+func (p *piaProvider) login(ctx context.Context, a *account, b *netif.Binding, login piaLogin) (string, time.Time, error) {
+	p.logins.Lock()
+	defer p.logins.Unlock()
+	t := p.t
+	t.mu.Lock()
+	token, tokenAt := a.token, a.tokenAt
+	t.mu.Unlock()
+	if token != "" && time.Since(tokenAt) <= piaTokenLife {
+		return token, tokenAt, nil
+	}
+	tok, err := p.api.Token(ctx, b.HTTPClient(), login.User, login.Pass)
+	now := time.Now()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if errors.Is(err, pia.ErrLogin) && p.acct == a {
+		a.refused, a.err = true, "PIA refused the username or password. Enter them again in settings."
+	}
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if p.acct == a {
+		a.token, a.tokenAt = tok, now
+	}
+	return tok, now, nil
+}
+
 // session is a valid token and the region to use, logging in and reading
 // the server list when needed.
 func (p *piaProvider) session(ctx context.Context, a *account, regionID string, b *netif.Binding) (string, pia.Region, error) {
@@ -395,16 +425,10 @@ func (p *piaProvider) session(ctx context.Context, a *account, regionID string, 
 	t.mu.Unlock()
 	now := time.Now()
 	if token == "" || now.Sub(tokenAt) > piaTokenLife {
-		tok, err := p.api.Token(ctx, b.HTTPClient(), login.User, login.Pass)
-		t.mu.Lock()
-		if errors.Is(err, pia.ErrLogin) && p.acct == a {
-			a.refused, a.err = true, "PIA refused the username or password. Enter them again in settings."
-		}
-		t.mu.Unlock()
-		if err != nil {
+		var err error
+		if token, tokenAt, err = p.login(ctx, a, b, login); err != nil {
 			return "", pia.Region{}, err
 		}
-		token, tokenAt = tok, now
 	}
 	if regions == nil || now.Sub(regionsAt) > piaRegionsLife {
 		r, err := p.api.Regions(ctx, b.HTTPClient())

@@ -27,7 +27,7 @@ After a crash, an unfinished Entry is extracted again from its start, and any of
 
 - Downloads in this mode fetch front to back. The first chunk claimed covers the archive's tail, so the central directory arrives first.
 - A new connection takes a chunk of about 10 seconds of its own speed (`stride`, `plan.go`), at least `minSplit` (4 MB). The rest of the file stays free for the next connection. The cut moves onto an Entry boundary when one is within `minSplit`.
-- The 3-second steal rule for slow connections is unchanged.
+- The steal rule for slow connections is unchanged in kind; since 2026-11-14 a connection with no work takes over after 1.5 s, each side at least 1 MiB (`minSteal`, `minTake`, `plan.go`).
 - Nothing slows the download when extraction falls behind. The only brake on disk use is the free-space pause below.
 - The 10-second stride is a heuristic. It bounds waiting bytes by time, not by size. See Consequences.
 

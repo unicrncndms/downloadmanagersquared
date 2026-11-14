@@ -45,6 +45,8 @@ addEventListener("focusin", sideInfo);
 
 // A link that leaves DMS²: Host opens it (a new tab, or the default browser).
 function link(url, text) {
+  // Only https leaves DMS²: anything else (from a tampered state) is shown as text.
+  if (!/^https:\/\//.test(url)) return el("span", {}, text);
   return el("a", { href: url, onclick: (e) => { e.preventDefault(); Host.openUrl(url); } }, text);
 }
 
@@ -99,16 +101,7 @@ function el(tag, attrs, ...children) {
   return e;
 }
 
-// The progress line: the numbers, then the engine's note (or the note alone
-// while the size is unknown).
-function progressText(d) {
-  const nums = d.size > 0 ? `${fmtBytes(d.done)} of ${fmtBytes(d.size)} (${percent(d).toFixed(1)}%)`
-    : d.done > 0 ? fmtBytes(d.done) : "";
-  return [nums, d.note].filter(Boolean).join(" · ");
-}
-
 // Whether torrent peers can connect in through an interface.
-const INCOMING_TEXT = { reachable: "reachable", forwarded: "port forwarded", outgoing: "outgoing only" };
 const INCOMING_TITLE = {
   reachable: "Torrent peers can connect in through this connection",
   forwarded: "The port you set for this VPN tunnel (not checked)",

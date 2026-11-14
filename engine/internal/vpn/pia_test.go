@@ -96,6 +96,38 @@ func TestAnUnreadablePIALoginIsSetAside(t *testing.T) {
 	}
 }
 
+func TestInterfacesStartingTogetherShareOneLogin(t *testing.T) {
+	f := vpntest.NewPIA(t, false, 1)
+	r := piaRig(t, f, "lo", "wifi", "eth")
+	r.tick(time.Now())
+	if err := r.SetPIA("p0123456", "right"); err != nil {
+		t.Fatal(err)
+	}
+	r.waitUp(t, "lo", "wifi", "eth")
+	if n := f.Logins.Load(); n != 1 {
+		t.Fatalf("%d logins for three interfaces starting together, want 1", n)
+	}
+}
+
+func TestNoPIATunnelIsAddedAfterClose(t *testing.T) {
+	f := vpntest.NewPIA(t, false, 1)
+	r := piaRig(t, f)
+	r.tick(time.Now())
+	if err := r.SetPIA("p0123456", "right"); err != nil {
+		t.Fatal(err)
+	}
+	r.waitUp(t)
+	r.Close()
+	r.Tick(time.Now(), r.ifaces) // a Tick that comes after Close must not make a tunnel (and its listener) again
+	r.Wait()
+	r.mu.Lock()
+	n := len(r.tunnels)
+	r.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d tunnels after Close, want none", n)
+	}
+}
+
 func TestRefusedPIALoginWaitsForTheUser(t *testing.T) {
 	f := vpntest.NewPIA(t, false, 1)
 	r := piaRig(t, f)

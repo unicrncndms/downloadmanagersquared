@@ -41,26 +41,6 @@ document.addEventListener("keydown", (e) => {
   if (more) more.focus();
 });
 
-// pressable lets a name that opens and closes something work by keyboard:
-// focusable, announced as a button, Enter and Space click it. on false
-// makes it plain text again.
-function pressable(node, on, expanded) {
-  if (!on) {
-    for (const a of ["tabindex", "role", "aria-expanded"]) node.removeAttribute(a);
-    return;
-  }
-  node.setAttribute("tabindex", "0");
-  node.setAttribute("role", "button");
-  node.setAttribute("aria-expanded", String(!!expanded));
-  if (node.dataset.pressable) return;
-  node.dataset.pressable = "1";
-  node.addEventListener("keydown", (e) => {
-    if (node.getAttribute("role") !== "button" || (e.key !== "Enter" && e.key !== " ")) return;
-    e.preventDefault();
-    node.click();
-  });
-}
-
 // Small line icons, drawn in the text colour.
 const ICONS = {
   pause: "M5 3v10M11 3v10",
@@ -72,7 +52,6 @@ const ICONS = {
   down: "M8 3v10M4 9l4 4 4-4",
   chevron: "M4 6l4 4 4-4",
   check: "M3.5 8.5l3 3 6-7",
-  alert: "M8 4v5M8 12v.01",
   link: "M7 9a2.5 2.5 0 0 0 3.5 0l2-2a2.5 2.5 0 0 0-3.5-3.5l-.5.5M9 7a2.5 2.5 0 0 0-3.5 0l-2 2a2.5 2.5 0 0 0 3.5 3.5l.5-.5",
   box: "M2.5 5L8 2.5 13.5 5v6L8 13.5 2.5 11zM2.5 5L8 7.5 13.5 5M8 7.5v6",
   copy: "M5.5 5.5h7.5v8H5.5zM3 10.5V2.5h7.5",
@@ -92,6 +71,56 @@ function icon(name) {
 }
 function iconButton(name, title, onclick) {
   return el("button", { class: "icon", title, "aria-label": title, onclick }, icon(name));
+}
+
+// menuButton is the "⋯" button of a menu: it opens it, or closes it when it is
+// open. getMenu gives the menu (a line builds its menu when first used).
+function menuButton(getMenu) {
+  return iconButton("more", "More", (e) => {
+    e.stopPropagation();
+    const m = getMenu();
+    const was = !m.hidden;
+    closeMenu();
+    if (!was) showMenu(m, e.currentTarget);
+  });
+}
+
+// menuItem is an entry of a menu: it closes the menu, then does go.
+function menuItem(label, go) {
+  return el("button", { onclick: () => { closeMenu(); go(); } }, label);
+}
+
+// fileItems are the menu's Show in folder and Copy link for download id;
+// getUrl gives its link as last shown.
+function fileItems(id, getUrl) {
+  return {
+    folder: menuItem("Show in folder", () => act("showInFolder", { id })),
+    copy: menuItem("Copy link", () => copyLink(getUrl())),
+  };
+}
+
+// confirmRow is the question a card asks inline (a popup can't show confirm
+// dialogs) before something that can't be undone: the question, the buttons
+// that answer it, and a Cancel. Hidden until asked; ask.text is the question
+// text node's element, for a question that changes.
+function confirmRow(question, ...buttons) {
+  const text = el("span", { class: "muted" }, question);
+  const ask = el("div", { class: "actions ask", hidden: true }, text, ...buttons,
+    el("button", { class: "small", onclick: () => { ask.hidden = true; } }, "Cancel"));
+  ask.text = text;
+  return ask;
+}
+
+// editable switches a value (facts) to its form and back: the function it
+// returns takes true for the form (after fill puts the current values in the
+// boxes) and false for the values. editBtn is hidden while the form shows.
+function editable(facts, form, editBtn, fill) {
+  return (on) => {
+    if (on) fill();
+    form.hidden = !on;
+    facts.hidden = on;
+    editBtn.hidden = on;
+  };
 }
 
 // fresh rebuilds node's children only when what they show (sig) changed:

@@ -11,6 +11,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -203,13 +204,9 @@ func discover(ctx context.Context, gw Gateway) (string, error) {
 	}
 	pc.SetReadDeadline(deadline)
 	buf := make([]byte, 2048)
-	var other string
 	for {
 		n, _, err := pc.ReadFrom(buf)
 		if err != nil {
-			if other != "" {
-				return other, nil
-			}
 			return "", errors.New("no UPnP router answered")
 		}
 		resp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(buf[:n])), nil)
@@ -221,12 +218,9 @@ func discover(ctx context.Context, gw Gateway) (string, error) {
 		if err != nil || loc == "" {
 			continue
 		}
-		// Another device on the network may answer too; prefer this interface's router.
-		if net.ParseIP(u.Hostname()).Equal(gw.IP) {
+		// Another device on the network may answer too: only this interface's router is asked.
+		if (u.Scheme == "http" || u.Scheme == "https") && net.ParseIP(u.Hostname()).Equal(gw.IP) {
 			return loc, nil
-		}
-		if other == "" {
-			other = loc
 		}
 	}
 }
@@ -284,7 +278,7 @@ func addPortMapping(ctx context.Context, gw Gateway, ctl, service, proto string,
 	p := strconv.Itoa(port)
 	body := `<?xml version="1.0"?>` +
 		`<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>` +
-		`<u:AddPortMapping xmlns:u="` + service + `">` +
+		`<u:AddPortMapping xmlns:u="` + html.EscapeString(service) + `">` + // the router's text, escaped for the attribute
 		`<NewRemoteHost></NewRemoteHost><NewExternalPort>` + p + `</NewExternalPort><NewProtocol>` + proto + `</NewProtocol>` +
 		`<NewInternalPort>` + p + `</NewInternalPort><NewInternalClient>` + gw.Local.String() + `</NewInternalClient>` +
 		`<NewEnabled>1</NewEnabled><NewPortMappingDescription>DMS2</NewPortMappingDescription>` +

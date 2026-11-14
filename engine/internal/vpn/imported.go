@@ -16,6 +16,7 @@ import (
 	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/tunnel"
+	"downloadmanagersquared/engine/internal/winutil"
 )
 
 // imported is the provider of tunnels whose WireGuard .conf the user imported.
@@ -142,7 +143,8 @@ func (t *Tunnels) AdoptForwardedPort(ifaceID string, port int) {
 	}
 }
 
-// load reads the saved configs. One that can't be read is set aside.
+// load reads the saved configs. One that can't be read is set aside. A plain
+// one, saved before configs were encrypted, is sealed again.
 func (p *imported) load() []Problem {
 	var problems []Problem
 	files, _ := filepath.Glob(filepath.Join(p.t.dir, "tunnels", "*.conf"))
@@ -152,6 +154,15 @@ func (p *imported) load() []Problem {
 			continue
 		}
 		b, err := os.ReadFile(f)
+		plain := false
+		if err == nil {
+			var d []byte
+			if d, err = winutil.Unprotect(b); err == nil {
+				b = d
+			} else { // not sealed: a config saved as plain text, or one another user saved (unreadable below)
+				plain, err = true, nil
+			}
+		}
 		if err == nil {
 			_, err = tunnel.ParseConf(string(b))
 		}
@@ -160,6 +171,11 @@ func (p *imported) load() []Problem {
 			setAside(f)
 			problems = append(problems, Problem{Iface: string(id), Err: err})
 			continue
+		}
+		if plain {
+			if err := p.saveConf(string(id), string(b)); err != nil {
+				log.Printf("tunnel for %s: can't seal its config, left as it was: %v", id, err)
+			}
 		}
 		if err := p.set(string(id), string(b), false); err != nil {
 			log.Printf("tunnel for %s: %v", id, err)
@@ -183,11 +199,21 @@ func (p *imported) set(ifaceID, conf string, save bool) error {
 		return err
 	}
 	if save {
-		if err := atomicfile.Write(p.file(ifaceID), []byte(conf), 0o600); err != nil {
+		if err := p.saveConf(ifaceID, conf); err != nil {
 			return err
 		}
 	}
 	return p.t.addEntry(ifaceID, p, cfg, cantRun)
+}
+
+// saveConf writes an interface's config sealed with DPAPI: its private keys
+// are never written readable (ADR 0005).
+func (p *imported) saveConf(ifaceID, conf string) error {
+	sealed, err := winutil.Protect([]byte(conf))
+	if err != nil {
+		return err
+	}
+	return atomicfile.Write(p.file(ifaceID), sealed, 0o600)
 }
 
 // withKey is the name of another interface whose imported config has the same

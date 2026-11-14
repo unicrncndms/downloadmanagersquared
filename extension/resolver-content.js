@@ -109,7 +109,7 @@
     const now = pending && Date.now() - pendingSince >= CAPTCHA_GRACE;
     if (now !== captcha) {
       captcha = now;
-      browser.runtime.sendMessage({ resolver: true, type: now ? "captcha" : "captchaDone" });
+      browser.runtime.sendMessage({ resolver: true, type: now ? "captcha" : "captchaDone" }).catch(() => {}); // background not listening
     }
   }
   watchCaptcha();
@@ -134,7 +134,7 @@
       if (run !== replaying) return;
     }
     if (!el) {
-      browser.runtime.sendMessage({ resolver: true, type: "notFound", index });
+      browser.runtime.sendMessage({ resolver: true, type: "notFound", index }).catch(() => {}); // background not listening
       return;
     }
     el.scrollIntoView({ block: "center" });
@@ -143,14 +143,14 @@
       if (run !== replaying) return;
       if (!el.isConnected && !(el = find(step))) return replay(step, index, next, budget - (Date.now() - start));
     }
-    browser.runtime.sendMessage({ resolver: true, type: "clicked", index });
+    browser.runtime.sendMessage({ resolver: true, type: "clicked", index }).catch(() => {}); // background not listening
     el.click();
     if (!next) return;
     const clicked = Date.now();
     while (Date.now() - clicked < EFFECT_WAIT && run === replaying) {
       await sleep(200);
       if (find(next)) {
-        browser.runtime.sendMessage({ resolver: true, type: "effect", kind: "nextStep", index });
+        browser.runtime.sendMessage({ resolver: true, type: "effect", kind: "nextStep", index }).catch(() => {}); // background not listening
         return;
       }
     }
@@ -200,14 +200,14 @@
       bar.append(back);
     }
     const skip = el("button", "Skip this connection");
-    skip.addEventListener("click", () => browser.runtime.sendMessage({ resolver: true, type: "skip" }));
+    skip.addEventListener("click", () => browser.runtime.sendMessage({ resolver: true, type: "skip" }).catch(() => {}));
     bar.append(skip, more);
     root.append(style, bar);
     document.documentElement.appendChild(host);
     document.addEventListener("click", (e) => {
       // Clicks on the captcha are yours alone; they must not become steps to replay.
       if (!e.isTrusted || e.target.closest("#dms-resolver-bar") || e.target.closest(CAPTCHA)) return;
-      browser.runtime.sendMessage({ resolver: true, type: "recorded", step: describe(e.target) });
+      browser.runtime.sendMessage({ resolver: true, type: "recorded", step: describe(e.target) }).catch(() => {}); // background not listening
     }, true);
   }
 

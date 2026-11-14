@@ -3,6 +3,9 @@
 // The browser.* seams the background scripts share. The pure rules they use
 // are in lib/.
 
+// For a promise nobody waits on: its failure is logged, not an unhandled rejection.
+const quiet = (p) => Promise.resolve(p).catch((e) => console.error(e));
+
 // Cancels a browser download and removes it from the list.
 async function discardDownload(id) {
   try {

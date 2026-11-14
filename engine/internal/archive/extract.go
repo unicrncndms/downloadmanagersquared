@@ -616,7 +616,7 @@ func copyEntry(ctx context.Context, e Entry, src io.Reader, out *os.File) (bad s
 	}
 	// One byte more than it should have shows a size that's too big, without
 	// writing more than that.
-	src = io.LimitReader(src, e.Size+1)
+	src = io.LimitReader(src, min(e.Size, math.MaxInt64-1)+1)
 	sum := crc32.NewIEEE()
 	w := bufio.NewWriterSize(io.MultiWriter(out, sum), 256<<10)
 	buf := make([]byte, 256<<10)

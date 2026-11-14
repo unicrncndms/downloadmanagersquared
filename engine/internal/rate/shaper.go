@@ -26,9 +26,18 @@ func (s *Shaper) Under(p *Shaper) *Shaper {
 
 // Took waits until n bytes received fit the download limits, or ctx ends.
 func (s *Shaper) Took(ctx context.Context, n int) error {
+	return s.wait(ctx, pickDown, n)
+}
+
+func pickUp(t *Shaper) *xrate.Limiter   { return t.up }
+func pickDown(t *Shaper) *xrate.Limiter { return t.down }
+
+// wait takes n bytes from the limiters pick finds in s and its parents, or
+// returns the error once ctx ends.
+func (s *Shaper) wait(ctx context.Context, pick func(*Shaper) *xrate.Limiter, n int) error {
 	for ; n > 0; n -= shaperBurst {
 		for t := s; t != nil; t = t.parent {
-			if err := t.down.WaitN(ctx, min(n, shaperBurst)); err != nil {
+			if err := pick(t).WaitN(ctx, min(n, shaperBurst)); err != nil {
 				return err
 			}
 		}
@@ -68,28 +77,24 @@ func (s *Shaper) Limits() (up, down int64) {
 }
 
 // Conn counts c against the limits.
-func (s *Shaper) Conn(c net.Conn) net.Conn { return &shapedConn{Conn: c, s: s} }
+func (s *Shaper) Conn(c net.Conn) net.Conn {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &shapedConn{Conn: c, s: s, ctx: ctx, cancel: cancel}
+}
 
 // PacketConn counts pc's datagrams against the limits.
 func (s *Shaper) PacketConn(pc net.PacketConn) net.PacketConn {
-	return &shapedPacketConn{PacketConn: pc, s: s}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &shapedPacketConn{PacketConn: pc, s: s, ctx: ctx, cancel: cancel}
 }
 
-func (s *Shaper) waitUp(n int) {
-	for t := s; t != nil && n > 0; t = t.parent {
-		t.up.WaitN(context.Background(), min(n, shaperBurst))
-	}
-}
-
-func (s *Shaper) waitDown(n int) {
-	for t := s; t != nil && n > 0; t = t.parent {
-		t.down.WaitN(context.Background(), min(n, shaperBurst))
-	}
-}
-
+// A shaped connection's waits end when it is closed, so a paused Read or
+// Write does not hold on past Close.
 type shapedConn struct {
 	net.Conn
-	s *Shaper
+	s      *Shaper
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func (c *shapedConn) Read(p []byte) (int, error) {
@@ -97,7 +102,7 @@ func (c *shapedConn) Read(p []byte) (int, error) {
 		p = p[:shaperBurst]
 	}
 	n, err := c.Conn.Read(p)
-	c.s.waitDown(n)
+	c.s.wait(c.ctx, pickDown, n) // the bytes are read already; a closed wait only skips the pause
 	return n, err
 }
 
@@ -105,7 +110,9 @@ func (c *shapedConn) Write(p []byte) (int, error) {
 	written := 0
 	for len(p) > 0 {
 		chunk := p[:min(len(p), shaperBurst)]
-		c.s.waitUp(len(chunk))
+		if err := c.s.wait(c.ctx, pickUp, len(chunk)); err != nil {
+			return written, err
+		}
 		n, err := c.Conn.Write(chunk)
 		written += n
 		if err != nil {
@@ -116,18 +123,32 @@ func (c *shapedConn) Write(p []byte) (int, error) {
 	return written, nil
 }
 
+func (c *shapedConn) Close() error {
+	c.cancel()
+	return c.Conn.Close()
+}
+
 type shapedPacketConn struct {
 	net.PacketConn
-	s *Shaper
+	s      *Shaper
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func (c *shapedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	n, addr, err := c.PacketConn.ReadFrom(p)
-	c.s.waitDown(n)
+	c.s.wait(c.ctx, pickDown, n) // as in shapedConn.Read
 	return n, addr, err
 }
 
 func (c *shapedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
-	c.s.waitUp(len(p))
+	if err := c.s.wait(c.ctx, pickUp, len(p)); err != nil {
+		return 0, err
+	}
 	return c.PacketConn.WriteTo(p, addr)
+}
+
+func (c *shapedPacketConn) Close() error {
+	c.cancel()
+	return c.PacketConn.Close()
 }

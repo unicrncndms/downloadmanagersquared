@@ -122,6 +122,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .badge.ok { color: var(--ok); }
 .badge.warn { color: var(--warn); }
 .badge.bad { color: var(--bad); }
+.bad { color: var(--bad); }
 .badge.dim { color: var(--muted); background: transparent; border: 1px solid var(--line); }
 /* A status: a square in its tone, then the word. */
 /* The word in neutral ink, unless it warns; the square carries the tone. */
@@ -135,6 +136,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 /* The Downloads window's header is the same two lines on both pages, at
    every width: neither line wraps, so it never changes height. */
 :root { --win-row1: 30px; --win-row2: 30px; --win-gap: 8px; --win-pad: 12px 24px 10px; }
+.engine-window header { grid-template-rows: var(--win-row1) var(--win-row2); gap: var(--win-gap) 16px; padding: var(--win-pad); }
 
 /* The Downloads window's tabs between the downloads and the settings. */
 .tabs { display: inline-flex; gap: var(--s1); }

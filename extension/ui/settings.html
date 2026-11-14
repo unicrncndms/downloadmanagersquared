@@ -23,7 +23,6 @@
       <a href="#torrents" data-page="settings">Torrents</a>
       <a href="#sites" data-page="settings">Sites</a>
       <a href="#appearance" data-page="settings">Appearance</a>
-      <a href="#startup" data-page="settings">Startup</a>
       <a href="#about" data-page="settings">About</a>
     </nav>
     <input type="search" id="find" placeholder="Find a setting" aria-label="Find a setting">
@@ -45,7 +44,7 @@
             <span><input type="checkbox" id="sIPv6"></span></div>
           <div class="setting"><span>Connection list
             <span class="info" tabindex="0" data-tip="DMS² notices new and lost connections by itself every few seconds; Refresh looks now. The test asks a public STUN server (stun.cloudflare.com) through each connection which public IP it comes from. Two with the same IP share one line to the internet. Only sent when you click."></span></span>
-            <span class="buttons"><button id="refreshIfaces">Refresh</button><button id="checkLines">Test whether these are separate lines</button></span></div>
+            <span class="buttons"><button id="refreshIfaces">Refresh</button><button id="checkLines">Test if they are separate lines</button></span></div>
         </div>
         <div id="lineResult" class="uplink" hidden></div>
       </div>
@@ -129,6 +128,8 @@
             <span><input type="checkbox" id="sNotify" data-setting></span></div>
           <div class="setting"><label for="sAwake">Keep the PC awake while downloading</label>
             <span><input type="checkbox" id="sAwake" data-setting></span></div>
+          <div class="setting"><label for="sAuto">Start with Windows</label>
+            <span><input type="checkbox" id="sAuto"></span></div>
         </div>
       </div>
 
@@ -139,9 +140,9 @@
             <select id="sSpeedUnit" data-setting></select></div>
           <div class="setting"><label for="sDownLimit">Download limit, all connections (<span class="speedUnit">MB/s</span>)
             <span class="info" tabindex="0" data-tip="Caps everything DMS² receives, on top of each connection's own limit. Empty: none."></span></label>
-            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sDownLimit" placeholder="none" data-setting> <span class="speedUnit muted">MB/s</span></div>
+            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sDownLimit" placeholder="none" data-setting></div>
           <div class="setting"><label for="sUpLimit">Upload limit, all connections (<span class="speedUnit">MB/s</span>)</label>
-            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sUpLimit" placeholder="none" data-setting> <span class="speedUnit muted">MB/s</span></div>
+            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sUpLimit" placeholder="none" data-setting></div>
         </div>
       </div>
 
@@ -211,14 +212,6 @@
       </div>
     </section>
 
-    <section id="startup" class="panel">
-      <h2 class="mk">Startup</h2>
-      <div class="fields">
-        <div class="setting"><label for="sAuto">Start with Windows</label>
-          <span><input type="checkbox" id="sAuto"></span></div>
-      </div>
-    </section>
-
     <section id="about" class="panel">
       <h2 class="mk">About</h2>
       <div class="fields">
@@ -226,11 +219,11 @@
         <div class="setting"><span>Help</span>
           <span class="buttons"><button id="openLog">Open log</button><button id="openData">Open data folder</button>
             <a href="#" data-guide="">Guide</a><a href="#" data-releases>Release notes</a></span></div>
-        <div class="setting"><span>Settings on this page</span>
+        <div class="setting"><span>Saving and speed, seed ratio and appearance</span>
           <span><button id="restoreAsk">Restore defaults…</button></span></div>
       </div>
       <div id="restoreBox" class="row-actions" role="alert" hidden>
-        <span>Put the settings on this page back to their defaults? Your connections, the VPN and learned sites are not changed.</span>
+        <span>Put Saving and speed (the download folder and the never-take-over sites too), the seed ratio and Appearance back to their defaults? The torrent port, your connections, the VPN and learned sites stay as they are.</span>
         <button class="primary" id="restoreYes">Restore defaults</button>
         <button id="restoreNo">Cancel</button>
       </div>
@@ -240,6 +233,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="../lib/folder.js"></script>
   <script src="../lib/list.js"></script>
+  <script src="../lib/uirules.js"></script>
   <script src="../lib/accent.js"></script>
   <script src="../lib/iface.js"></script>
   <script src="../lib/rpc.js"></script>

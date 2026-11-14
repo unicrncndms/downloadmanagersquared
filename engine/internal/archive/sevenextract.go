@@ -347,6 +347,11 @@ func (x *Extractor) stopBlock() {
 // decodeBlock decompresses block i into its files, each checked against its
 // size and CRC32 and put in place. bad is why its bytes are wrong.
 func (x *Extractor) decodeBlock(ctx context.Context, i int) (bad string, err error) {
+	defer func() {
+		if bad != "" || err != nil {
+			x.fl.wait(i) // files already handed over finish before the caller goes on
+		}
+	}()
 	for _, k := range x.a.z.blocks[i] {
 		f := x.a.z.files[k]
 		rc, err := x.z.zr.File[f.index].Open()

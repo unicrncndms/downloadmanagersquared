@@ -55,6 +55,10 @@ type Queue struct {
 	// would write its file back.
 	saveMu sync.Mutex
 
+	// startMu orders Schedule's starts against Remove taking an entry out of
+	// byID: once Remove has, Schedule no longer starts that entry.
+	startMu sync.Mutex
+
 	mu    sync.Mutex
 	byID  map[string]Entry
 	order []string
@@ -217,17 +221,34 @@ func (q *Queue) StartNow(id string) error {
 
 func (q *Queue) orderPath() string { return filepath.Join(q.dir, "order.json") }
 
+// startIfListed starts e unless Remove has taken it out of the queue: a
+// Schedule snapshot can still hold an entry being removed.
+func (q *Queue) startIfListed(e Entry) {
+	q.startMu.Lock()
+	defer q.startMu.Unlock()
+	q.mu.Lock()
+	_, listed := q.byID[e.ID()]
+	q.mu.Unlock()
+	if listed {
+		e.Start()
+	}
+}
+
 // Remove discards an entry and its saved state.
 func (q *Queue) Remove(id string, deleteFiles bool) error {
 	e, err := q.Get(id)
 	if err != nil {
 		return err
 	}
+	q.startMu.Lock()
+	q.mu.Lock()
+	delete(q.byID, id)
+	q.mu.Unlock()
+	q.startMu.Unlock()
 	e.Discard(deleteFiles)
 	q.saveMu.Lock()
 	defer q.saveMu.Unlock()
 	q.mu.Lock()
-	delete(q.byID, id)
 	delete(q.dirty, id)
 	q.order = slices.DeleteFunc(q.order, func(x string) bool { return x == id })
 	q.mu.Unlock()
@@ -306,7 +327,7 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 				continue
 			}
 			if e.Status() == download.StatusQueued {
-				e.Start()
+				q.startIfListed(e)
 				continue
 			}
 			q.mu.Lock() // it stopped: its next run takes a slot like any
@@ -322,7 +343,7 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 				holding = append(holding, e)
 			}
 		case e.Rejoins():
-			e.Start()
+			q.startIfListed(e)
 		case held[e.ID()]:
 		case e.Status() == download.StatusQueued && e.Yields():
 			yielding = append(yielding, e)
@@ -352,7 +373,7 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 			downloading = downloading[:len(downloading)-1]
 			running--
 		}
-		e.Start()
+		q.startIfListed(e)
 		if e.Running() { // a torrent still to be chosen only fetches its files
 			running++
 		}
@@ -383,6 +404,7 @@ func (q *Queue) Save() {
 		_, st := e.Saved()
 		if err := atomicfile.WriteJSON(q.statePath(e), st); err != nil {
 			log.Printf("saving %s: %v", e.ID(), err)
+			q.MarkDirty(e.ID()) // the next Save tries again
 		}
 	}
 }

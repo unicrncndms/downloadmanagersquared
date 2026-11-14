@@ -209,20 +209,6 @@ function dropOn(from, target) {
   for (const id of group) if (id !== before) act("move", { id, before });
 }
 
-// shortName fits a connection's name into the popup's strip: its first word,
-// cut to three letters when long ("Ethernet" Eth, "Wi-Fi" stays).
-function shortName(name) {
-  const w = String(name).split(/\s+/)[0];
-  return w.length > 6 ? w.slice(0, 3) : w;
-}
-
-// stripSpeed is a speed in the chosen unit with no unit shown, short enough
-// for the strip: 4.4, 87, and from 1000 on 1.2G. The first chip names the unit.
-function stripSpeed(bps) {
-  const mb = speedToUnit(bps);
-  return mb >= 1000 ? (mb / 1000).toFixed(1) + "G" : mb.toFixed(mb < 100 ? 1 : 0);
-}
-
 // The connections in the header: each one's colour, name and speed now. One
 // that carries nothing while downloads run shows a hollow square and "idle":
 // a dead line is seen without its colour.
@@ -310,11 +296,13 @@ const zipLine = (url) => addFolderChoice(url, latest.settings).show;
 $("addUrl").addEventListener("input", () => {
   // The landing page and the VPN once a link they apply to is in the box.
   const v = addView($("addUrl").value);
-  $("addPage").hidden = !v.page;
-  $("addVpn").hidden = !v.vpn;
+  const single = v.count + v.bad <= 1; // a name and a checksum belong to one link
+  $("addPage").parentElement.hidden = !v.page;
+  $("addVpn").parentElement.hidden = !v.vpn;
+  $("addNameRow").hidden = $("addSumRow").hidden = !single;
   $("addVpn").options[0].textContent = `As in settings (${VPN_TEXT[latest.settings.vpnHttp] || "Off"})`;
   $("addGo").textContent = v.label;
-  $("addOptions").hidden = v.count + v.bad > 1; // a name and a checksum belong to one link
+  $("addOptions").hidden = !(single || v.page || v.vpn);
   $("addDup").hidden = true;
   $("addUrl").rows = Math.min(5, Math.max(2, $("addUrl").value.split(/\n/).length)); // grows with the links, to five lines
   $("addHint").textContent = v.bad ? `${plural(v.bad, "line")} that isn't a link will stay in the box.` : v.count ? "" : "Paste links here, or anywhere on the list with Ctrl+V.";
@@ -522,8 +510,6 @@ function renderDownloads(state) {
   if (news.texts.length) $("announce").textContent = news.texts.join(". ");
   const query = $("search").value;
   const res = listRows(state, { query, folded, selected, opened: detail.id });
-  const seen = new Set();
-  const seenGroups = new Set();
   for (const id of selected) if (!res.selected.has(id)) selected.delete(id);
   if (res.openedGone) {
     detail.id = "";
@@ -540,12 +526,9 @@ function renderDownloads(state) {
     for (const row of s.rows) {
       let c;
       if (row.d) {
-        seen.add(row.d.id);
         c = cardFor(row.d.id);
         c.update(row.d, row.form);
       } else {
-        seenGroups.add(row.group);
-        for (const i of row.items) seen.add(i.d.id);
         c = groupCards.get(row.group);
         if (!c) groupCards.set(row.group, c = makeGroupCard(row.group));
         c.update(row);
@@ -554,8 +537,11 @@ function renderDownloads(state) {
       if (!s.folded) want.push(c.root);
     }
   }
-  for (const id of cards.keys()) if (!seen.has(id)) cards.delete(id);
-  for (const id of groupCards.keys()) if (!seenGroups.has(id)) groupCards.delete(id);
+  // A controller goes with its download, not with the search: what the search hides keeps its card.
+  const have = new Set(all.map((d) => d.id));
+  const haveGroups = new Set(all.map((d) => d.group));
+  for (const id of cards.keys()) if (!have.has(id)) cards.delete(id);
+  for (const id of groupCards.keys()) if (!haveGroups.has(id)) groupCards.delete(id);
   renderSelBar();
   const emptyText = `No downloads match “${query.trim()}”.`;
   if (!all.length) want.push(welcome(state, (latest.settings || {}).thresholdBytes));
@@ -597,7 +583,7 @@ function welcome(state, threshold) {
   [3, 4, 20, 19, 35].forEach((k, n) => { if (ready.length) f.children[k].style.background = ifaceHue(ready[n % ready.length].id, state); });
   const feat = (name, text) => [el("span", { class: "st-tile seed" }, icon(name)), el("span", {}, text)];
   welcomeNode = el("div", { class: "void", role: "status" }, f,
-    el("div", { class: "big" }, ready.length > 1 && !note.text.includes("share one line") ? `${ready.length} connections ready to fill one file together.` : "Ready for your first download."),
+    el("div", { class: "big" }, ready.length > 1 && !note.shared ? `${ready.length} connections ready to fill one file together.` : "Ready for your first download."),
     el("div", { class: "muted lines-note" }, note.text, " ",
       note.add ? el("a", { href: "#", onclick: (e) => { e.preventDefault(); Host.openSettings("#connections"); if (!document.body.classList.contains("windowed")) window.close(); } }, "Add a second line…") : null,
       note.check ? el("button", { class: "linklike", onclick: async (e) => {
@@ -607,11 +593,11 @@ function welcome(state, threshold) {
           const r = lineResults(await call("checkLines", {}));
           b.replaceWith(...[...r.lines, ...r.warnings].map((t) => el("div", {}, t)));
         } catch (err) { b.disabled = false; toast(err.message, true); }
-      } }, "Check lines") : null),
+      } }, "Test if they are separate lines") : null),
     el("div", { class: "go" }, el("button", { class: "primary", onclick: () => openAdd(true) }, "+ Add a link"),
       el("span", { class: "muted" }, "or ", el("kbd", {}, "Ctrl"), "+", el("kbd", {}, "V"), " anywhere here")),
     el("div", { class: "feats" },
-      feat("down", `Firefox downloads over ${fmtBytes(threshold || 100e6)} come here by themselves`),
+      feat("down", `Your browser's downloads over ${fmtBytes(threshold || 100e6)} come here by themselves`),
       feat("link", "Magnet links, .torrent and Metalink work too"),
       feat("box", ".zip, .7z and .rar can be extracted while they download")));
   return welcomeNode;
@@ -634,7 +620,7 @@ function renderVersion(m) {
   if (!clash) return;
   $("versionWarn").replaceChildren(...(olderSide(m.engineVersion, ext) === "engine"
     ? [`The engine (v${m.engineVersion}) is older than the extension (v${ext}), so they may not work together. Install the new engine from `, link(RELEASES_URL, "the release page"), "."]
-    : [`The extension (v${ext}) is older than the engine (v${m.engineVersion}), so they may not work together. Update it in Firefox: Add-ons and themes, Extensions, then Check for Updates.`]));
+    : [`The extension (v${ext}) is older than the engine (v${m.engineVersion}), so they may not work together. Update it in your browser's extensions page (Check for Updates).`]));
 }
 
 // The note under the header: once after an upgrade "Updated to vX: what's new"
@@ -721,7 +707,7 @@ function render(m) {
       : m.quit && Host.startEngine
       ? el("div", { class: "offline calm" }, field(true),
         el("div", { class: "big" }, "DMS² was quit from its tray icon."),
-        el("div", {}, "Firefox handles downloads itself until it runs again."),
+        el("div", {}, "Your browser handles downloads itself until it runs again."),
         el("div", { class: "actions" }, el("button", { class: "primary", onclick: () => Host.startEngine() }, "Start DMS²")))
       : el("div", { class: "offline", role: "alert" }, field(true),
         el("div", { class: "big" }, "The download engine isn't reachable."),

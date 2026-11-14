@@ -12,7 +12,7 @@ Both halves are MIT-licensed and live in one repository: `extension/` (this add-
 
 ## Proxy use
 
-- `proxy.onRequest` affects only requests from the add-on's own containers, named `DMS² · <connection>`. Every other request gets `{type: "direct"}`, which leaves the user's own proxy settings in charge (`background/resolver.js`, `proxyFor`).
+- `proxy.onRequest` affects only requests from the add-on's own containers, named `DMS² · <connection>`. Every other request gets `{type: "direct"}`, which leaves the user's own proxy settings in charge (`background/resolver-routing.js`, `proxyFor`).
 - A container request goes to `{type: "socks", host: "127.0.0.1", port: <the engine's port for that connection>, proxyDNS: true}`. The engine opens one SOCKS5 listener per connection, on loopback only.
 - **No proxy authentication.** The add-on sends no credentials and handles no `onAuthRequired`. The engine accepts a connection only from a process of the same Windows user, and connects only to public internet addresses (never private, loopback, link-local or CGNAT), so a container page can't reach the user's LAN.
 - **No requests of its own.** The add-on makes no `fetch`, `XMLHttpRequest` or WebSocket requests. Container traffic is only what the opened site loads.

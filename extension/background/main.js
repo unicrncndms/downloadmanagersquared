@@ -14,17 +14,27 @@ browser.runtime.onConnect.addListener((port) => {
     autostart: Engine.autostart,
     recipes: Resolver.recipes,
   });
+  // The downloads list shows what needs the user: that clears the "!" for it.
+  if (String(port.sender && port.sender.url || "").endsWith("/popup.html")) {
+    seen = seenAfter(Engine.state && Engine.state.downloads, seen, true);
+    paintBadge(Engine.state && Engine.state.downloads);
+  }
   send();
   const offs = ["state", "settings", "connection"].map((ev) => Engine.on(ev, send));
   port.onDisconnect.addListener(() => offs.forEach((off) => off()));
 });
 
+// Only this extension's own pages (ui/) may ask for these; content scripts run in web pages.
+const fromUi = (sender) => !!sender && sender.id === browser.runtime.id && String(sender.url || "").startsWith(browser.runtime.getURL("ui/"));
+const PRIVILEGED = new Set(["call", "startEngine", "forgetRecipe", "openSettings"]);
+
 browser.runtime.onMessage.addListener((msg, sender) => {
   if (!msg || msg.resolver) return undefined;
+  if (PRIVILEGED.has(msg.type) && !fromUi(sender)) return undefined;
   if (msg.type === "magnet") return Capture.takeMagnet(msg.url, sender.tab);
   if (msg.type === "call") {
     const p = Engine.call(msg.method, msg.params);
-    if (msg.method === "setAutostart") p.then(() => { Engine.autostart = msg.params.on; });
+    if (msg.method === "setAutostart") p.then(() => { Engine.autostart = msg.params.on; }, () => {}); // the caller gets the rejection
     return p;
   }
   if (msg.type === "startEngine") return Engine.start();
@@ -33,14 +43,20 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   return undefined;
 });
 
-// The toolbar button shows what is running, or "!" when a download needs you; it follows the engine, so it outlives the popup.
+// The toolbar button shows what is running, or "!" when a download needs you and the list has not shown it; it follows the engine, so it outlives the popup.
 let badge = "";
-Engine.on("state", (st) => {
-  const b = badgeOf(st && st.downloads);
+let seen = new Set(); // ids that need the user and that the downloads list has shown (in memory: the background page is persistent)
+function paintBadge(downloads) {
+  const b = badgeOf(downloads, seen);
   if (b.text + b.color === badge) return;
   badge = b.text + b.color;
   browser.browserAction.setBadgeBackgroundColor({ color: b.color });
   browser.browserAction.setBadgeText({ text: b.text });
+}
+Engine.on("state", (st) => {
+  const ds = st && st.downloads;
+  seen = seenAfter(ds, seen, false);
+  paintBadge(ds);
 });
 Engine.on("connection", ({ connected }) => { if (!connected) { badge = ""; browser.browserAction.setBadgeText({ text: "" }); } });
 

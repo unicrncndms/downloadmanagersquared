@@ -16,6 +16,9 @@ const OpenEnd = 1 << 62
 // their downloads are known (Parts.Grow): the decompressor waits for them.
 // A RAR of one part that isn't a volume reads the same way.
 func ReadVolumes(p *Parts, password string) (*Archive, error) {
+	if p.Len() == 0 {
+		return nil, errNotRar
+	}
 	first := p.Span(0).End
 	r := io.NewSectionReader(p, 0, first)
 	v := rarVersion(r)

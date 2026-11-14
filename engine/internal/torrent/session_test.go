@@ -932,3 +932,15 @@ func TestFilesCanBeTickedAfterTheChoice(t *testing.T) {
 		}
 	}
 }
+
+func TestDiskPathsRefusePathsOutsideTheSaveFolder(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "save")
+	info := &metainfo.Info{Name: "pack", Files: []metainfo.FileInfo{
+		{Path: []string{"ok.bin"}},
+		{Path: []string{"..", "..", "x.docx"}},
+	}}
+	got := diskPaths(dir, info)
+	if got[0] != filepath.Join(dir, "pack", "ok.bin") || got[1] != "" {
+		t.Fatalf("diskPaths = %q", got)
+	}
+}

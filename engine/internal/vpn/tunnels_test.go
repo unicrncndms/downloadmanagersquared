@@ -18,6 +18,7 @@ import (
 	"downloadmanagersquared/engine/internal/rate"
 	"downloadmanagersquared/engine/internal/tunnel"
 	"downloadmanagersquared/engine/internal/vpn/vpntest"
+	"downloadmanagersquared/engine/internal/winutil"
 )
 
 // rig is Tunnels over loopback interfaces, ticked by hand.
@@ -281,6 +282,42 @@ func TestAnUnreadableSavedConfIsSetAside(t *testing.T) {
 	}
 	if len(r.Status(time.Now())) != 0 {
 		t.Fatal("an unreadable config was loaded")
+	}
+}
+
+func TestAnImportedConfIsSavedSealedAndAPlainOneIsSealedOnLoad(t *testing.T) {
+	r := newRig(t, Options{})
+	priv, pub, _ := tunnel.GenerateKey()
+	srv := vpntest.NewServer(t, pub)
+	if err := r.Import("lo", srv.Conf(priv)); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(r.imported.file("lo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(saved, []byte(priv)) {
+		t.Fatal("the saved config holds its private key in plain text")
+	}
+	if _, err := winutil.Unprotect(saved); err != nil {
+		t.Fatalf("the saved config is not sealed: %v", err)
+	}
+	if p := r.open(t); len(p) != 0 || len(r.Status(time.Now())) != 1 {
+		t.Fatalf("a sealed config did not load: problems %v", p)
+	}
+
+	// A config saved before encryption loads, and is sealed again.
+	plain := srv.Conf(priv)
+	os.WriteFile(r.imported.file("lo"), []byte(plain), 0o600)
+	if p := r.open(t); len(p) != 0 || len(r.Status(time.Now())) != 1 {
+		t.Fatalf("a plain config did not load: problems %v", p)
+	}
+	saved, _ = os.ReadFile(r.imported.file("lo"))
+	if bytes.Contains(saved, []byte(priv)) {
+		t.Fatal("a plain config was not sealed on load")
+	}
+	if got, err := winutil.Unprotect(saved); err != nil || string(got) != plain {
+		t.Fatalf("the re-sealed config is %q, %v", got, err)
 	}
 }
 

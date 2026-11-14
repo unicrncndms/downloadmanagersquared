@@ -89,7 +89,9 @@ func Build(m Mode, s Snapshot, src Source) []Path {
 
 // Open is one path by its ID. A tunnel's functions are bound to its stack as
 // it is now (a restart is a new Gen); an interface's look up its binding on
-// each call, so a new address or a lost interface shows at once.
+// each call, so a new address or a lost interface shows at once. Its HTTP
+// clients are the binding's as it is at the call: a download keeps its
+// client, and one whose address went away fails and starts again on a new one.
 func Open(src Source, id string) (Path, error) {
 	base, tun := IfaceOf(id)
 	f := src.Iface(base)

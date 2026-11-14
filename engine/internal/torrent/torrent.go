@@ -293,7 +293,10 @@ func (t *Torrent) run(ctx context.Context) {
 	if t.hasData(at) && t.mustVerify(at) {
 		t.verified.Store(true)
 		go at.VerifyDataContext(ctx)
-		time.Sleep(50 * time.Millisecond) // let it queue the first pieces
+		select { // let it queue the first pieces
+		case <-time.After(50 * time.Millisecond):
+		case <-ctx.Done():
+		}
 	}
 	if !t.poll(ctx, at, func() bool { return !checking(at) }) {
 		return
@@ -353,7 +356,7 @@ const (
 func (t *Torrent) announceDHT(ctx context.Context, at *atorrent.Torrent) {
 	for {
 		for _, ds := range t.s.dhtServers() {
-			if private(at) {
+			if private(at) || ctx.Err() != nil {
 				break
 			}
 			done, stop, err := at.AnnounceToDht(ds)
@@ -473,18 +476,10 @@ func (t *Torrent) Choose(files []bool, dir string) error {
 		t.mu.Unlock()
 		return fmt.Errorf("got a choice for %d files, the torrent has %d", len(files), len(all))
 	}
-	var skip []int
-	var size int64
-	for i, on := range files {
-		if on {
-			size += all[i].Length
-		} else {
-			skip = append(skip, i)
-		}
-	}
-	if len(skip) == len(files) {
+	skip, size, err := choice(all, files)
+	if err != nil {
 		t.mu.Unlock()
-		return errors.New("choose at least one file")
+		return err
 	}
 	if dir != "" {
 		t.st.Dir = dir
@@ -494,6 +489,24 @@ func (t *Torrent) Choose(files []bool, dir string) error {
 	t.mu.Unlock()
 	t.changed()
 	return nil
+}
+
+// choice turns the ticked files into the indexes to skip and the size wanted.
+func choice(all []metainfo.FileInfo, files []bool) (skip []int, size int64, err error) {
+	if len(files) != len(all) {
+		return nil, 0, fmt.Errorf("got a choice for %d files, the torrent has %d", len(files), len(all))
+	}
+	for i, on := range files {
+		if on {
+			size += all[i].Length
+		} else {
+			skip = append(skip, i)
+		}
+	}
+	if len(skip) == len(files) {
+		return nil, 0, errors.New("choose at least one file")
+	}
+	return skip, size, nil
 }
 
 // applySkip tells the swarm which files to fetch.
@@ -520,21 +533,9 @@ func (t *Torrent) SetFiles(files []bool) error {
 	if err != nil {
 		return err
 	}
-	all := info.UpvertedFiles()
-	if len(files) != len(all) {
-		return fmt.Errorf("got a choice for %d files, the torrent has %d", len(files), len(all))
-	}
-	var skip []int
-	var size int64
-	for i, on := range files {
-		if on {
-			size += all[i].Length
-		} else {
-			skip = append(skip, i)
-		}
-	}
-	if len(skip) == len(files) {
-		return errors.New("choose at least one file")
+	skip, size, err := choice(info.UpvertedFiles(), files)
+	if err != nil {
+		return err
 	}
 	t.st.Skip, t.st.Size = skip, size
 	// Only while downloading: before that, run applies the choice itself.
@@ -680,6 +681,9 @@ func (t *Torrent) Discard(deleteFiles bool) {
 		return
 	}
 	for i, p := range diskPaths(dir, info) {
+		if p == "" {
+			continue
+		}
 		os.Remove(p + ".part") // a file waits under .part until complete
 		if !slices.Contains(skip, i) {
 			os.Remove(p) // a skipped file of that name was never the torrent's
@@ -692,6 +696,8 @@ func (t *Torrent) Discard(deleteFiles bool) {
 
 // diskPaths are where the file storage keeps the torrent's files under dir,
 // in the torrent's order: dir/name for one file, dir/name/path for several.
+// A path that would leave dir (peers choose them) is "": the storage refuses
+// to open it, and Discard must not delete it.
 func diskPaths(dir string, info *metainfo.Info) []string {
 	var out []string
 	for _, f := range info.UpvertedFiles() {
@@ -699,7 +705,11 @@ func diskPaths(dir string, info *metainfo.Info) []string {
 		if n := info.BestName(); n != metainfo.NoName {
 			parts = append(parts, n)
 		}
-		out = append(out, filepath.Join(append(parts, f.BestPath()...)...))
+		p := filepath.Join(append(parts, f.BestPath()...)...)
+		if rel, err := filepath.Rel(dir, p); err != nil || !filepath.IsLocal(rel) {
+			p = ""
+		}
+		out = append(out, p)
 	}
 	return out
 }

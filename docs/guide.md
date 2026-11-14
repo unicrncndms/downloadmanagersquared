@@ -35,7 +35,6 @@ A download's **Details → Checks → Edit** takes a SHA-256 or MD5. DMS² check
 - **Connections:** turn each on or off, set its parallel requests (4) and speed limit, and choose the main connection, used alone for servers that can't split a file. VPN adapters start off. *Enable IPv6 (experimental)* (off) uses IPv6 too; each connection shows a badge with what it has: IPv4, IPv6 or IPv4 + IPv6.
 - **Downloads:** takeover size (100 MB), save folder, downloads at once (1), Download as folder for new archives (off), a split archive's parts at once (off), keep the archive (Automatic).
 - **Torrents:** seed ratio (1).
-- **Startup:** start with Windows.
 - **Learned sites:** the clicks remembered per site. *Forget* makes DMS² ask again.
 
 ### VPN

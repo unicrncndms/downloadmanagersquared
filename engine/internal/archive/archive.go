@@ -211,7 +211,7 @@ func readZip(r io.ReaderAt, size int64) (*Archive, error) {
 	}
 
 	br := bufio.NewReaderSize(io.NewSectionReader(r, t.dirStart, t.dirSize), 64<<10)
-	entries := make([]Entry, 0, t.count)
+	entries := make([]Entry, 0, min(t.count, 4096)) // not the claimed count: it is not yet read
 	for range t.count {
 		e, err := readCentral(br, t.base, starts)
 		if err != nil {
@@ -573,6 +573,9 @@ func (a *Archive) check() error {
 	dirs := map[string]bool{}
 	for i := range a.Entries {
 		e := &a.Entries[i]
+		if e.Dir && e.Stored == "" {
+			continue // the output folder itself
+		}
 		name, changed, err := cleanName(e.Stored)
 		if err != nil {
 			return err

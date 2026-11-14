@@ -101,7 +101,7 @@ function ifaceRow(i, tun, settings) {
   const conns = el("input", { type: "number", min: 1, max: 32, value: i.connections, "aria-label": `Requests at once: ${i.name}` });
   conns.addEventListener("change", () => set({ connections: Number(conns.value) }));
   const limit = (bps, key, title) => {
-    const input = el("input", { type: "text", inputmode: "decimal", pattern: DECIMAL, class: "dec", placeholder: "–", title: title + " (empty: none)", "aria-label": `${title} in ${speedUnitLabel()}: ${i.name}`, value: bps ? +speedToUnit(bps).toFixed(3) : "" });
+    const input = el("input", { type: "text", inputmode: "decimal", pattern: DECIMAL, class: "dec", placeholder: "–", title: title + " (empty: none)", "aria-label": `${title} in ${speedUnitLabel()}: ${i.name}`, value: unitField(bps) });
     input.addEventListener("change", () => input.reportValidity() && set({ [key]: speedFromUnit(dec(input.value) || 0) }));
     return input;
   };
@@ -186,7 +186,10 @@ function renderIfaces(state, settings) {
     const dflt = ifaces.find((i) => i.isDefault);
     $("mainSelect").replaceChildren(
       el("option", { value: "" }, dflt ? `Automatic (Windows' choice: ${dflt.name})` : "Automatic (Windows' choice)"),
-      ...ifaces.map((i) => el("option", { value: i.id }, i.name)));
+      // Only a connection that is on and present can be main (the engine ignores any other);
+      // the saved choice stays shown, marked, when it is not one.
+      ...ifaces.filter((i) => (i.present && i.enabled) || i.id === settings.mainInterface)
+        .map((i) => el("option", { value: i.id }, i.present && i.enabled ? i.name : `${i.name} (${i.present ? "off" : "not connected"})`)));
     $("mainSelect").value = settings.mainInterface || "";
   }
   // Speeds change every second: only the numbers, not the rows.
@@ -213,8 +216,8 @@ const FIELDS = {
   sDir: ["saveDir", (s) => s.saveDir, (v) => v.trim()],
   sThreshold: ["thresholdBytes", (s) => +(s.thresholdBytes / MB).toFixed(3), (v) => Math.max(MB, Math.round(dec(v) * MB))],
   sParallel: ["maxParallel", (s) => s.maxParallel, Number],
-  sDownLimit: ["downloadLimit", (s) => (s.downloadLimit ? +speedToUnit(s.downloadLimit).toFixed(3) : ""), (v) => speedFromUnit(dec(v) || 0)],
-  sUpLimit: ["uploadLimit", (s) => (s.uploadLimit ? +speedToUnit(s.uploadLimit).toFixed(3) : ""), (v) => speedFromUnit(dec(v) || 0)],
+  sDownLimit: ["downloadLimit", (s) => unitField(s.downloadLimit), (v) => speedFromUnit(dec(v) || 0)],
+  sUpLimit: ["uploadLimit", (s) => unitField(s.uploadLimit), (v) => speedFromUnit(dec(v) || 0)],
   sSpeedUnit: ["speedUnit", (s) => (s.speedUnit === "Mbps" ? "Mbps" : "MBps"), String],
   sConns: ["defaultConnections", (s) => s.defaultConnections, Number],
   sEta: ["etaWindowSec", (s) => s.etaWindowSec, Number],
@@ -226,6 +229,9 @@ const FIELDS = {
   sVpnTorrent: ["vpnTorrent", (s) => s.vpnTorrent, String],
   sKeep: ["archiveKeeping", (s) => s.archiveKeeping || "auto", String],
 };
+
+// The checkboxes: the setting each one holds, and whether it is on when the engine sends none.
+const CHECKS = { sFolder: ["folderDefault", false], sParts: ["partsParallel", false], sNotify: ["notifyDone", true], sAwake: ["keepAwake", true] };
 
 // The download folder is checked by the engine: what it refuses is said at the field.
 function dirError(text) {
@@ -250,12 +256,9 @@ for (const [id, [key, , parse]] of Object.entries(FIELDS).filter(([id]) => id !=
 }
 $("sVpnHttp").addEventListener("change", () => { $("vpnOnlyWarn").hidden = $("sVpnHttp").value !== "vpn"; });
 $("sAuto").addEventListener("change", () => act("setAutostart", { on: $("sAuto").checked }, "Saved"));
-$("sFolder").addEventListener("change", () => act("setSettings", { folderDefault: $("sFolder").checked }, "Saved"));
-$("sNotify").addEventListener("change", () => act("setSettings", { notifyDone: $("sNotify").checked }, "Saved"));
-$("sAwake").addEventListener("change", () => act("setSettings", { keepAwake: $("sAwake").checked }, "Saved"));
+for (const [id, [key]] of Object.entries(CHECKS)) $(id).addEventListener("change", () => act("setSettings", { [key]: $(id).checked }, "Saved"));
 // The engine shows Windows' folder picker and saves the choice; the field follows the settings it sends.
 $("sBrowse").addEventListener("click", () => act("pickSaveFolder", {}));
-$("sParts").addEventListener("change", () => act("setSettings", { partsParallel: $("sParts").checked }, "Saved"));
 $("sIPv6").addEventListener("change", () => act("setSettings", { ipv6: $("sIPv6").checked }, $("sIPv6").checked ? "IPv6 on" : "IPv6 off"));
 
 // The accent: Follow the browser's theme, a preset, or any color (lib/accent.js).
@@ -279,10 +282,7 @@ function fillSettings(s) {
   for (const [id, [, show]] of Object.entries(FIELDS)) {
     if (document.activeElement !== $(id)) $(id).value = show(s);
   }
-  $("sFolder").checked = !!s.folderDefault;
-  $("sParts").checked = !!s.partsParallel;
-  $("sNotify").checked = s.notifyDone !== false; // on unless the engine says off
-  $("sAwake").checked = s.keepAwake !== false; // on unless the engine says off
+  for (const [id, [key, on]] of Object.entries(CHECKS)) $(id).checked = on ? s[key] !== false : !!s[key];
   $("sIPv6").checked = !!s.ipv6;
   for (const e of document.querySelectorAll(".speedUnit")) e.textContent = speedUnitLabel();
 }
@@ -369,7 +369,7 @@ function renderRecipes(recipes) {
     if (box.childElementCount) return;
     box.replaceChildren(el("div", { class: "muted" }, "Learned sites are kept in your browser, where they are learned and used. Open DMS² settings in the browser to see or forget them."));
     call("extensionBrowsers", {}).then((exes) => {
-      const names = [...new Set((exes || []).map((p) => p.split(/[\\/]/).pop().replace(/\.exe$/i, "")).filter(Boolean).map((n) => n[0].toUpperCase() + n.slice(1)))];
+      const names = browserNames(exes);
       if (names.length) box.replaceChildren(el("div", { class: "muted" }, `Learned sites are kept in ${names.join(" and ")}, where they are learned and used. Open DMS² settings there to see or forget them.`));
     }).catch(() => {});
     return;

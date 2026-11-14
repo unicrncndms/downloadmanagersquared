@@ -49,7 +49,7 @@ const Resolver = {
     browser.tabs.onCreated.addListener((tab) => this.onTabCreated(tab));
     browser.windows.onRemoved.addListener((wid) => this.onWindowRemoved(wid));
     browser.runtime.onMessage.addListener((msg, sender) => this.onContentMessage(msg, sender));
-    Engine.on("resolve", (r) => this.ready.then(() => this.request(r)));
+    Engine.on("resolve", (r) => this.ready.then(() => this.request(r)).catch((e) => console.error(e)));
     this.ready = this.load();
     return this.ready;
   },
@@ -79,10 +79,8 @@ const Resolver = {
       const store = (s.containers || {})[job.iface];
       if (store && job.mode !== "waiting") keep[job.iface] = store;
     }
-    const kept = new Set(Object.values(keep));
-    const stale = new Set(Object.values(s.containers || {}).filter((c) => !kept.has(c)));
     const all = await browser.contextualIdentities.query({}).catch(() => []);
-    for (const c of all) if (c.name.startsWith(this.PREFIX) && !kept.has(c.cookieStoreId)) stale.add(c.cookieStoreId);
+    const stale = staleContainers(s.containers, Object.values(keep), all, this.PREFIX);
     for (const store of stale) await browser.contextualIdentities.remove(store).catch(() => {});
     this.containers = { ...keep, ...this.containers };
     this.saveContainers();
@@ -98,76 +96,6 @@ const Resolver = {
       this.saving = false;
       this.session.set({ resolverJobs: [...this.jobs.values()] }).catch(() => {});
     });
-  },
-
-  reindex() {
-    this.ifaceByStore = {};
-    for (const [iface, store] of Object.entries(this.containers)) this.ifaceByStore[store] = iface;
-  },
-
-  saveContainers() {
-    this.reindex();
-    browser.storage.local.set({ containers: this.containers });
-  },
-
-  async ensureContainer(iface, name) {
-    if (this.containers[iface]) return this.containers[iface];
-    if (!this.creating.has(iface)) {
-      const color = this.COLORS[Object.keys(this.containers).length % this.COLORS.length];
-      this.creating.set(iface, browser.contextualIdentities
-        .create({ name: `${this.PREFIX}${name || iface}`, color, icon: "circle" })
-        .then((c) => {
-          this.containers[iface] = c.cookieStoreId;
-          this.saveContainers();
-          return c.cookieStoreId;
-        })
-        .finally(() => this.creating.delete(iface)));
-    }
-    return this.creating.get(iface);
-  },
-
-  // The engine's proxy port for an interface, 0 if it has none to use now.
-  // Both the proxy and the cancel listener decide by this.
-  portFor(iface) {
-    return containerPort(iface, Engine.connected, Engine.state && Engine.state.interfaces);
-  },
-
-  // Which resolver job a request, download or tab belongs to, from what it
-  // carries ({ tabId, windowId, cookieStoreId }): its tab (or the tab that
-  // opened it), its window, then, in Firefox only, its container. Returns
-  // { job, iface } (job null: a DMS² container with no resolve running), or
-  // null when it is the user's own. Proxying and capture both decide by this.
-  ownerOf({ tabId, windowId, cookieStoreId } = {}) {
-    const byTab = tabId >= 0 ? this.tabJobs.get(tabId) : undefined;
-    if (byTab) return { job: byTab, iface: byTab.iface };
-    if (windowId !== undefined && windowId !== null) {
-      for (const j of this.jobs.values()) if (j.windowId === windowId) return { job: j, iface: j.iface };
-    }
-    const iface = cookieStoreId ? this.ifaceByStore[cookieStoreId] : undefined;
-    if (!iface) return null;
-    let job = null;
-    for (const j of this.jobs.values()) {
-      if (j.iface === iface && !j.done && (j.mode === "replay" || j.mode === "record")) job = j;
-    }
-    return { job, iface };
-  },
-
-  proxyFor(d) {
-    if (!this.loaded) return this.ready.then(() => this.proxyFor(d));
-    const owner = this.ownerOf(d);
-    // The user's own: {type: "direct"}, which leaves their own proxy in
-    // charge. It must never become null: only null forces a request direct,
-    // past the user's proxy.
-    if (!owner) return { type: "direct" };
-    // Fail closed: a resolver page must never leave through the wrong
-    // connection. Port 1 is a second fence behind the cancel listener.
-    return { type: "socks", host: "127.0.0.1", port: this.portFor(owner.iface) || 1, proxyDNS: true };
-  },
-
-  cancelUnrouted(d) {
-    if (!this.loaded) return this.ready.then(() => this.cancelUnrouted(d));
-    const owner = this.ownerOf(d);
-    return owner && !this.portFor(owner.iface) ? { cancel: true } : {};
   },
 
   request(r) {
@@ -197,23 +125,17 @@ const Resolver = {
       activity: 0,      // while a person is needed: the last click, page load or captcha change
     };
     this.jobs.set(key, job);
-    this.startOrQueue(job);
+    quiet(this.startOrQueue(job));
     this.save();
   },
 
   startOrQueue(job) {
-    if (this.recipes[job.host]) {
-      // A learn job always records; with a recipe there already, it has nothing to do.
-      if (job.learn) return this.endLearn(job);
-      return this.launch(job, "replay");
-    }
-    // First visit to this site: one job records the clicks, the others wait and replay them.
-    const recorder = [...this.jobs.values()].find((j) => j !== job && j.host === job.host && j.mode === "record");
-    if (recorder) {
-      job.mode = "waiting";
+    const choice = startChoice(job, !!this.recipes[job.host], this.jobs.values());
+    if (choice === "waiting") {
+      job.mode = "waiting"; // first visit to this site: one job records the clicks, the others wait and replay them
       return;
     }
-    return this.launch(job, "record");
+    return choice === "endLearn" ? this.endLearn(job) : this.launch(job, choice);
   },
 
   // Without an explicit size Firefox gives these windows odd shapes (very wide and
@@ -257,6 +179,7 @@ const Resolver = {
     } catch (e) {
       return this.fail(job, "could not open the page: " + e.message);
     }
+    if (!win.tabs || !win.tabs[0]) return this.fail(job, "could not open the page");
     job.windowId = win.id;
     job.tabId = win.tabs[0].id;
     this.addTab(job, job.tabId);
@@ -306,46 +229,6 @@ const Resolver = {
       return;
     }
     this.switchToRecord(job, index, why);
-  },
-
-  // In ms, call this[action](job, ...args): a deadline in the job's data, so
-  // it holds across a restart of the background (see recheck).
-  setTimer(job, name, ms, action, ...args) {
-    job.deadlines[name] = { at: Date.now() + ms, action, args };
-    this.schedule();
-  },
-
-  clearTimer(job, name) {
-    delete job.deadlines[name];
-    this.schedule();
-  },
-
-  clearTimers(job) {
-    job.deadlines = {};
-    this.schedule();
-  },
-
-  // One timeout, for the nearest deadline of any job. Losing it loses
-  // nothing: load() rechecks.
-  schedule() {
-    clearTimeout(this.wake);
-    let next = Infinity;
-    for (const j of this.jobs.values()) for (const d of Object.values(j.deadlines)) next = Math.min(next, d.at);
-    if (next < Infinity) this.wake = setTimeout(() => this.recheck(), Math.max(0, next - Date.now()));
-    this.save();
-  },
-
-  // Runs what is due.
-  recheck() {
-    const now = Date.now();
-    for (const job of [...this.jobs.values()]) {
-      for (const [name, d] of Object.entries(job.deadlines)) {
-        if (job.done || d.at > now || job.deadlines[name] !== d) continue;
-        delete job.deadlines[name];
-        this[d.action](job, ...d.args);
-      }
-    }
-    this.schedule();
   },
 
   steps(job) {
@@ -522,56 +405,6 @@ const Resolver = {
     this.touch(job);
   },
 
-  onContentMessage(msg, sender) {
-    if (!sender.tab || !msg || !msg.resolver) return;
-    const job = this.tabJobs.get(sender.tab.id);
-    if (!job || job.done) return;
-    const steps = this.steps(job);
-    switch (msg.type) {
-      case "clicked": {
-        if (job.mode !== "replay") return;
-        const prev = job.clicked && job.clicked.index === msg.index ? job.clicked : null;
-        job.clicked = { index: msg.index, at: Date.now(), clicks: prev ? prev.clicks + 1 : 1, effects: {}, mark: prev ? prev.mark : job.mark };
-        job.lastClick = job.clicked.at;
-        this.setTimer(job, "effect", EFFECT_WAIT, "judgeClick");
-        break;
-      }
-      case "effect":
-        if (job.clicked && job.clicked.index === msg.index) this.clickEffect(job, msg.kind);
-        break;
-      case "notFound":
-        if (job.mode !== "replay") return;
-        // A remembered click may have been optional (e.g. a banner): try skipping it once.
-        if (!job.skipped && msg.index + 1 < steps.length) {
-          job.skipped = true;
-          job.step = msg.index + 1;
-          this.sendStep(job);
-        } else {
-          this.budgetOut(job, msg.index, budget(steps[msg.index].wait), "Couldn't find the button to click");
-        }
-        break;
-      case "captcha":
-        this.captchaShown(job);
-        break;
-      case "captchaDone":
-        if (job.captcha) this.captchaDone(job);
-        break;
-      case "skip": // the same as closing the window
-        if (job.windowId !== null) browser.windows.remove(job.windowId).catch(() => {});
-        break;
-      case "recorded":
-        if (job.mode !== "record") return;
-        // The page of your first click is the real landing page: you may have had
-        // to navigate there yourself if the page DMS² opened was the wrong one.
-        if (job.recordFrom === 0 && job.recorded.length === 0) job.startUrl = sender.tab.url;
-        job.recorded.push({ ...msg.step, wait: Date.now() - job.mark });
-        job.mark = job.lastClick = Date.now();
-        this.touch(job);
-        break;
-    }
-    this.save();
-  },
-
   // Called by Capture for responses ownerOf gives a job: the download the
   // site starts is the link. Downloads in a finished job's tab go nowhere.
   onHeaders(d, cookie, owner) {
@@ -580,13 +413,13 @@ const Resolver = {
     const size = responseSize(h, d.statusCode);
     if (!isAttachment(h) && size >= 0 && size < (1 << 20)) return {};
     if (!owner.job) return {};
-    this.finish(owner.job, d.url, cookie);
+    quiet(this.finish(owner.job, d.url, cookie));
     return { cancel: true };
   },
 
   async onDownload(item, owner) {
     await discardDownload(item.id);
-    if (owner.job) this.finish(owner.job, item.finalUrl || item.url);
+    if (owner.job) await quiet(this.finish(owner.job, item.finalUrl || item.url));
   },
 
   // cookie: the header sent with the download's request, if one passed by.
@@ -679,7 +512,7 @@ const Resolver = {
       browser.contextualIdentities.remove(store).catch(() => {});
     }
     for (const j of [...this.jobs.values()]) {
-      if (j.mode === "waiting" && j.host === job.host) this.startOrQueue(j);
+      if (j.mode === "waiting" && j.host === job.host) quiet(this.startOrQueue(j));
     }
     this.save();
   },

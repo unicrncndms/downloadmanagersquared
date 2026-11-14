@@ -180,3 +180,10 @@ function neverCaptured(sites, ...urls) {
 }
 
 if (typeof module !== "undefined") Object.assign(module.exports, { neverCaptured });
+
+// Whether "Download this page's file" can mean something on this page: its
+// address looks like a file's, or its host is one with a learned recipe.
+function pageMenuFits(url, recipes) {
+  return !!url && (fileLikeUrl(url) || (isHttp(url) && hostOf(url) in recipes));
+}
+if (typeof module !== "undefined") Object.assign(module.exports, { pageMenuFits });

@@ -4,6 +4,7 @@ package vpntest
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
@@ -59,7 +60,7 @@ func newServer(t testing.TB, clientPub, network, addr string) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := tunnel.Start(cfg, func(bool) (net.PacketConn, error) { return net.ListenPacket(network, addr) }, nil)
+	srv, err := tunnel.Start(context.Background(), cfg, func(bool) (net.PacketConn, error) { return net.ListenPacket(network, addr) }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
