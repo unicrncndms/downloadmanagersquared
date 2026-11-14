@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -60,6 +61,7 @@ type State struct {
 	URL         string           `json:"url"`
 	PageURL     string           `json:"pageUrl,omitempty"`
 	Cookie      Secret           `json:"cookie,omitempty"`
+	Login       Secret           `json:"login,omitempty"` // FTP: "user:password" from the link, which is saved and shown without it
 	Referer     string           `json:"referer,omitempty"`
 	Limit       int64            `json:"limit,omitempty"` // download speed cap, bytes per second; 0 = none
 	UserAgent   string           `json:"userAgent,omitempty"`
@@ -104,6 +106,8 @@ type Iface struct {
 	// chunks keep to the family its probe got; nil without IPv6.
 	ByFamily map[string]*http.Client
 	Conns    int
+	// Dial opens this path's connections, as Client does for HTTP; FTP uses it.
+	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // clientFor is the client for link l's requests: its family's, else Client.

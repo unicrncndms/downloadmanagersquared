@@ -355,7 +355,7 @@ func (e *Engine) Paths(m paths.Mode) []download.Iface {
 	defer e.mu.Unlock()
 	var out []download.Iface
 	for _, p := range paths.Build(m, e.pathSnapshotLocked(), pathSource{e}) {
-		out = append(out, download.Iface{ID: p.ID, Client: p.Client, ByFamily: p.ByFamily, Conns: p.Conns})
+		out = append(out, download.Iface{ID: p.ID, Client: p.Client, ByFamily: p.ByFamily, Conns: p.Conns, Dial: p.Dial})
 	}
 	return out
 }

@@ -67,6 +67,7 @@ Then download a file of 100 MB or more as usual, or use *Download with DMS²* on
 
 - **Takes over your browser's downloads.** Download as usual: files over 100 MB, magnet links, `.torrent` and Metalink (`.meta4`) files go to DMS² by themselves.
 - **Torrents** over all connections too.
+- **FTP and FTPS.** Paste an `ftp://` or `ftps://` link into Add download (or click one on a page): it downloads over every connection like any file, anonymously unless the link carries a login. The password is kept encrypted and never shown. Plain `ftp://` is unencrypted.
 - **Mirrors.** A Metalink, or a server that names mirrors with a checksum, lets each connection fetch from its own mirror, so one slow mirror doesn't hold back the rest. A mirror serving another file is dropped.
 - **Checksums.** Paste a SHA-256 or MD5, and the file is checked when it finishes.
 - **A queue you control.** Drag downloads into order or use the arrows. Drop a waiting download on a running one to take its place.

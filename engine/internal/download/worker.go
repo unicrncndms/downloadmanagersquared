@@ -19,6 +19,7 @@ type worker struct {
 	d       *Download
 	iface   string
 	client  *http.Client
+	dial    dialFunc // FTP's connections
 	link    Link
 	ir      *ifaceRun
 	cancel  context.CancelFunc
@@ -41,7 +42,7 @@ func (d *Download) claimLocked(ifaceID string) *segment {
 
 func (d *Download) spawnLocked(ctx context.Context, ifc Iface, l Link, seg *segment) {
 	wctx, cancel := context.WithCancel(ctx)
-	w := &worker{d: d, iface: ifc.ID, client: ifc.clientFor(l), link: l, ir: d.ifRun(ifc.ID), cancel: cancel}
+	w := &worker{d: d, iface: ifc.ID, client: ifc.clientFor(l), dial: ifc.Dial, link: l, ir: d.ifRun(ifc.ID), cancel: cancel}
 	seg.owner = w
 	d.workers[w] = struct{}{}
 	w.ir.active++
@@ -172,7 +173,7 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 	d := w.d
 	d.mu.Lock()
 	start, end, ranged := seg.pos, seg.end, d.plan.splittable
-	size, ver := d.st.Size, d.st.Version
+	size, ver, login := d.st.Size, d.st.Version, string(d.st.Login)
 	if d.mirrorLocked(w.link.URL) != nil {
 		ver = w.link.Version // each mirror's server has its own ETag and dates
 	}
@@ -192,39 +193,21 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 	stall := time.AfterFunc(stallTimeout, cancel)
 	defer stall.Stop()
 
-	req, err := newRequest(rctx, w.link, d.st.UserAgent)
-	if err != nil {
-		return &fetchError{kind: kindRange, msg: err.Error()}
+	var body io.ReadCloser
+	var err error
+	if IsFTP(w.link.URL) {
+		body, err = w.openFTP(rctx, start, end, ranged, size, ver, login)
+	} else {
+		body, err = w.openHTTP(rctx, start, end, ranged, size, ver)
 	}
-	if ranged {
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end-1))
-	}
-	resp, err := w.client.Do(req)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if ranged {
-		// Before anything else: data from another version must never reach the file.
-		if fe := changedError(resp, size, ver); fe != nil {
-			return fe
-		}
-	}
-	if fe := statusError(resp); fe != nil {
-		return fe
-	}
-	if ranged {
-		if resp.StatusCode != http.StatusPartialContent {
-			return &fetchError{kind: kindRange, msg: "server ignored the range request (" + resp.Status + ")"}
-		}
-		if cs, _, ok := parseContentRange(resp.Header.Get("Content-Range")); !ok || cs != start {
-			return &fetchError{kind: kindRange, msg: "server sent the wrong part of the file"}
-		}
-	}
+	defer body.Close()
 
 	ir := w.ir
 	for {
-		n, rerr := io.ReadFull(stallReader{resp.Body, stall}, buf)
+		n, rerr := io.ReadFull(stallReader{body, stall}, buf)
 		if n > 0 {
 			stall.Reset(stallTimeout)
 			d.mu.Lock()
@@ -280,6 +263,44 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 			return rerr
 		}
 	}
+}
+
+// openHTTP sends the range request for a chunk and checks the answer is the
+// right part of the right file; the body is what to read.
+func (w *worker) openHTTP(rctx context.Context, start, end int64, ranged bool, size int64, ver Version) (io.ReadCloser, error) {
+	req, err := newRequest(rctx, w.link, w.d.st.UserAgent)
+	if err != nil {
+		return nil, &fetchError{kind: kindRange, msg: err.Error()}
+	}
+	if ranged {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end-1))
+	}
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if ranged {
+		// Before anything else: data from another version must never reach the file.
+		if fe := changedError(resp, size, ver); fe != nil {
+			resp.Body.Close()
+			return nil, fe
+		}
+	}
+	if fe := statusError(resp); fe != nil {
+		resp.Body.Close()
+		return nil, fe
+	}
+	if ranged {
+		if resp.StatusCode != http.StatusPartialContent {
+			resp.Body.Close()
+			return nil, &fetchError{kind: kindRange, msg: "server ignored the range request (" + resp.Status + ")"}
+		}
+		if cs, _, ok := parseContentRange(resp.Header.Get("Content-Range")); !ok || cs != start {
+			resp.Body.Close()
+			return nil, &fetchError{kind: kindRange, msg: "server sent the wrong part of the file"}
+		}
+	}
+	return resp.Body, nil
 }
 
 // stallReader restarts the stall timer on every read that brings data, so a

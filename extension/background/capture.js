@@ -201,6 +201,17 @@ const Capture = {
     }
   },
 
+  // An ftp:// or ftps:// link clicked in a page: Firefox can't open it, the engine can.
+  async takeFtp(url) {
+    if (!/^ftps?:/i.test(url)) return;
+    try {
+      await Engine.call("add", { url });
+      notify("Added to DMS²", "The FTP download is in the DMS² downloads list.");
+    } catch (e) {
+      notify("DMS² couldn't take this FTP link", e.message);
+    }
+  },
+
   // A torrent waits for its files to be chosen, so show the add step.
   torrentAdded() {
     notify("Torrent added to DMS²", "Choose its files in the DMS² downloads list.");

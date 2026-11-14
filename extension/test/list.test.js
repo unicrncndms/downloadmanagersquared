@@ -295,6 +295,9 @@ test("a row's two numbers", () => {
 
 test("the Add box offers what applies to the links in it", () => {
   const { addView } = require("../lib/list.js");
+  const { plainFtpNote } = require("../lib/list.js");
+  assert.match(plainFtpNote("ftp://bob:pw@h.example/a.iso"), /unencrypted/);
+  assert.equal(plainFtpNote("ftp://h.example/a.iso\nftps://bob:pw@h.example/a.iso\nhttps://u:p@x/y"), "");
   assert.deepEqual(addView(""), { count: 0, bad: 0, page: false, vpn: false, label: "Add" });
   assert.deepEqual(addView("magnet:?xt=urn:btih:2da0"), { count: 1, bad: 0, page: false, vpn: true, label: "Add" });
   assert.deepEqual(addView("https://a.example/x.iso\nnot a link\n\nmagnet:?xt=urn:btih:1"), { count: 2, bad: 1, page: true, vpn: true, label: "Add 2 downloads" });

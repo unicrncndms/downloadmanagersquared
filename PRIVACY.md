@@ -18,7 +18,7 @@ Pages DMS² opens to fetch a link run in a temporary container that only reaches
 
 ## What the engine keeps
 
-In `%APPDATA%\downloadmanagersquared\`: your settings, the download list (with the URLs, landing pages and, until each download completes, its cookies, encrypted with Windows so only your user can read them; cookies an older version saved readable are encrypted as soon as the engine starts, and a download file that can't be read is set aside as `….broken` without its cookies), torrents, the log (no URLs), imported WireGuard configs, the password you typed for an encrypted archive (encrypted with Windows, and only until that archive is extracted), and a PIA login if you use one, encrypted with Windows so only your user can read it. Uninstalling can delete all of it; your downloaded files are always kept.
+In `%APPDATA%\downloadmanagersquared\`: your settings, the download list (with the URLs, landing pages and, until each download completes, its cookies, encrypted with Windows so only your user can read them; cookies an older version saved readable are encrypted as soon as the engine starts, and a download file that can't be read is set aside as `….broken` without its cookies), torrents, the log (no URLs), imported WireGuard configs, the login of an `ftp://user:password@…` link (encrypted with Windows, only until that download completes; the link itself is saved without it), the password you typed for an encrypted archive (encrypted with Windows, and only until that archive is extracted), and a PIA login if you use one, encrypted with Windows so only your user can read it. Uninstalling can delete all of it; your downloaded files are always kept.
 
 ## Other users of the PC
 
@@ -56,4 +56,4 @@ The extension asks for these permissions:
 | `storage` | Keeping the learned sites and containers in this browser |
 | `contextMenus` | The *Download with DMS²* entries on links and pages |
 | `notifications` | Telling you when a download is taken over or can't be, and when a site needs your clicks or a captcha |
-| `<all_urls>` | Seeing downloads, magnet links and landing pages on any site |
+| `<all_urls>` | Seeing downloads, magnet and ftp:// links and landing pages on any site |

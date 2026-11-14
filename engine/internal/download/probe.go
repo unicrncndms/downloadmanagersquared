@@ -1,6 +1,7 @@
 package download
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log"
@@ -29,6 +30,8 @@ type probeResult struct {
 	wait    time.Duration // how long a busy server asked us to stay away
 	dups    []string      // mirrors the server named (Link: rel=duplicate)
 	family  string        // "IPv4" or "IPv6": what the answer came over
+	msg     string        // FTP: the server's refusal, shown in place of "HTTP <status>"
+	fail    string        // the link can never work (an untrusted certificate, a folder): given up at once
 }
 
 // busy: the server pushed back. That says nothing about the link itself.
@@ -210,7 +213,16 @@ func statusError(resp *http.Response) *fetchError {
 }
 
 func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
-	res, err := probeLink(ctx, ifc.Client, l, d.st.UserAgent)
+	var res probeResult
+	var err error
+	if IsFTP(l.URL) {
+		d.mu.Lock()
+		login := string(d.st.Login)
+		d.mu.Unlock()
+		res, err = probeFTP(ctx, ifc.Dial, l, login)
+	} else {
+		res, err = probeLink(ctx, ifc.Client, l, d.st.UserAgent)
+	}
 	usable := map[string]Iface{}
 	all := d.env.Paths(d.VPN())
 	for _, u := range all {
@@ -250,10 +262,14 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 		return
 	}
 	log.Printf("download %s probe via %s: HTTP %d, size %d, ranges %v, page %v", d.st.ID, ifaceID, r.status, r.size, r.rangeOK, r.isPage)
+	if r.fail != "" {
+		l.fail(r.fail)
+		return
+	}
 	if r.busy() {
 		now := time.Now()
 		d.ifRun(ifaceID).backoff.pushedBack(now, r.wait)
-		l.serverBusy(now, r.wait, fmt.Sprintf("server busy: HTTP %d", r.status))
+		l.serverBusy(now, r.wait, cmp.Or(r.msg, fmt.Sprintf("server busy: HTTP %d", r.status)))
 		return
 	}
 	if r.rejected() {
@@ -274,7 +290,7 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 		return
 	}
 	if r.status >= 400 {
-		l.httpError(time.Now(), fmt.Sprintf("HTTP %d", r.status))
+		l.httpError(time.Now(), cmp.Or(r.msg, fmt.Sprintf("HTTP %d", r.status)))
 		return
 	}
 	if why := d.mirrorMismatchLocked(r); mirror && why != "" {

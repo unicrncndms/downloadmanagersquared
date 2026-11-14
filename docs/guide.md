@@ -26,6 +26,10 @@ Switch it on with the box when adding an archive link, with the switch on a down
 - **Keeping the archive:** by default (*Automatic*) the archive is kept until it is extracted when the drive has room for it, so an update, reboot or crash while extracting downloads nothing again; on a nearly full drive its space is freed as it extracts. Details can set it per download: *Free while extracting*, *Keep until extracted*, or *Keep the archive* to have the archive file too ([ADR 0007](adr/0007-keeping-the-archive-for-interruption-recovery.md)).
 - There is no whole archive to check at the end, so a checksum you entered turns the mode off.
 
+### FTP and FTPS
+
+Paste an `ftp://` or `ftps://` link into **Add download**; a link clicked on a page is taken too, as Firefox no longer opens them. The server's `SIZE` and `MDTM` give the size and version, and each connection logs in on its own and fetches a part with `REST` and `RETR`, over the connections you switched on (and the VPN, as set). Login is anonymous unless the link has one (`ftp://name:password@host/file`): the password is kept encrypted with Windows and is not shown or logged. A server that allows only one login at a time, or does not support `REST`, is downloaded over one connection. `ftp://` sends the password and the file unencrypted; `ftps://` is encrypted, with a certificate that must be trusted (port 990 is implicit TLS, any other port asks for it with `AUTH TLS`). The data connection always goes to the address the server was reached at, whatever it names in its passive reply.
+
 ### Checksums
 
 A download's **Details → Checks → Edit** takes a SHA-256 or MD5. DMS² checks the file when it finishes (or right away if it already has), and a download that doesn't match is kept as `.dms.part` instead of finishing. Files from Google Cloud Storage (and sites served from it) carry their MD5, which is checked the same way when you haven't entered one.

@@ -37,7 +37,7 @@ One interface's working access to the file: a URL plus the cookie and referer it
 _Avoid_: URL (when the cookie and referer matter)
 
 **Probe**:
-The first request over a link, which learns the file's size and whether it supports ranges, and catches a mismatch.
+The first request over a link (for an FTP link: login, `SIZE`, `MDTM` and a `REST` try), which learns the file's size and whether it supports ranges, and catches a mismatch.
 _Avoid_: Check, test request
 
 **Mismatch**:

@@ -414,6 +414,13 @@ function addSubmits(e, text) {
 // addView is what the Add box shows for the text in it: how many links, and
 // which choices apply to them. A landing page only to links to web pages or
 // files (not a magnet), the VPN to any link.
+// plainFtpNote: the warning for an ftp:// link with a password in it, which
+// FTP sends unencrypted; "" when none of the links has one.
+function plainFtpNote(text) {
+  const bad = addLines(text).urls.some(({ url }) => /^ftp:\/\/[^/?#]*:[^/?#]*@/i.test(url));
+  return bad ? "An ftp:// link sends its password and the file unencrypted. Use ftps:// if the server has it." : "";
+}
+
 function addView(text) {
   const { urls, bad } = addLines(text);
   const web = urls.some((u) => /^https?:/i.test(u.url));
@@ -510,5 +517,5 @@ function pickTotal(sizes, ticked) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { fileFolders, pickTotal, addSubmits, linesNote, finishedVerdict, finishedSummary, badgeOf, seenAfter, addLines, addView, addFileCheck, matchesSearch, errorSource, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, progressText, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, seedLine, bulkActions, routerWarnings, routerGroups, lineResults, familyText, ipv6Hints };
+  module.exports = { fileFolders, pickTotal, addSubmits, linesNote, finishedVerdict, finishedSummary, badgeOf, seenAfter, addLines, addView, plainFtpNote, addFileCheck, matchesSearch, errorSource, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, progressText, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, seedLine, bulkActions, routerWarnings, routerGroups, lineResults, familyText, ipv6Hints };
 }

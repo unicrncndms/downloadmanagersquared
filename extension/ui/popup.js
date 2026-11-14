@@ -305,7 +305,7 @@ $("addUrl").addEventListener("input", () => {
   $("addOptions").hidden = !(single || v.page || v.vpn);
   $("addDup").hidden = true;
   $("addUrl").rows = Math.min(5, Math.max(2, $("addUrl").value.split(/\n/).length)); // grows with the links, to five lines
-  $("addHint").textContent = v.bad ? `${plural(v.bad, "line")} that isn't a link will stay in the box.` : v.count ? "" : "Paste links here, or anywhere on the list with Ctrl+V.";
+  $("addHint").textContent = plainFtpNote($("addUrl").value) || (v.bad ? `${plural(v.bad, "line")} that isn't a link will stay in the box.` : v.count ? "" : "Paste links here, or anywhere on the list with Ctrl+V.");
   const c = addFolderChoice("", latest.settings);
   const show = addLines($("addUrl").value).urls.some((u) => zipLine(u.url));
   if (show === !$("addFolderRow").hidden) return; // leave a box the user ticked alone

@@ -78,8 +78,15 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		}
 		return id, nil
 	}
-	if !strings.HasPrefix(r.URL, "http://") && !strings.HasPrefix(r.URL, "https://") {
-		return "", errors.New("only http, https and magnet links are supported")
+	ftp := download.IsFTP(r.URL)
+	var login download.Secret
+	if ftp {
+		// The password is kept encrypted apart from the link, which is saved and shown without it.
+		if r.URL, login, err = download.SplitLogin(r.URL); err != nil {
+			return "", err
+		}
+	} else if !strings.HasPrefix(r.URL, "http://") && !strings.HasPrefix(r.URL, "https://") {
+		return "", errors.New("only http, https, ftp, ftps and magnet links are supported")
 	}
 	if r.UserAgent == "" {
 		// Some servers drop clients with Go's default user agent: use the browser's.
@@ -90,10 +97,10 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	if r.UserAgent == "" {
 		r.UserAgent = defaultUserAgent
 	}
-	if r.Torrent || isTorrentURL(r.URL) {
+	if !ftp && (r.Torrent || isTorrentURL(r.URL)) {
 		return e.addTorrentURL(r)
 	}
-	if r.Metalink || isMetalinkURL(r.URL) {
+	if !ftp && (r.Metalink || isMetalinkURL(r.URL)) {
 		return e.addMetalinkURL(r)
 	}
 	sha, md, err := download.ParseChecksum(r.Checksum)
@@ -104,7 +111,7 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	st := download.State{
 		VPN: paths.ParseMode(r.VPN, e.settings.VPNHTTP),
 		ID:  newID(), URL: r.URL, PageURL: strings.TrimSpace(r.PageURL),
-		Cookie: download.Secret(r.Cookie), Referer: r.Referer, UserAgent: r.UserAgent, Browser: r.Browser,
+		Cookie: download.Secret(r.Cookie), Login: login, Referer: r.Referer, UserAgent: r.UserAgent, Browser: r.Browser,
 		CookieStore: r.CookieStore, Dir: cmp.Or(r.Dir, e.settings.SaveDir), Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(), SHA256: sha, MD5: md,
 	}
