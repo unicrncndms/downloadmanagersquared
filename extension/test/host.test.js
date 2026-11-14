@@ -236,13 +236,16 @@ test("a subscriber that throws is reported to the engine's log, not lost in the 
   assert.match(logged[0], /accentCSS is not defined/);
 });
 
-// The window carries the extension's lib folder whole (build.ps1), and the
-// pages load ../lib/X: every script they name must exist there.
-test("every script a page loads exists", () => {
+// The window carries the extension's ui and lib folders whole (build.ps1), and the
+// pages load ../lib/X: every script they name must exist in one of those two.
+test("every script a page loads exists in a folder build.ps1 copies", () => {
   const ui = path.join(__dirname, "../ui");
+  const lib = path.join(__dirname, "../lib");
   for (const page of fs.readdirSync(ui).filter((n) => n.endsWith(".html"))) {
     for (const [, src] of fs.readFileSync(path.join(ui, page), "utf8").matchAll(/<script src="([^"]+)"/g)) {
-      assert.ok(fs.existsSync(path.join(ui, src)), `${page} loads ${src}`);
+      const file = path.join(ui, src);
+      const copied = [ui, lib].some((d) => file.startsWith(d + path.sep));
+      assert.ok(copied && fs.existsSync(file), `${page} loads ${src}`);
     }
   }
 });

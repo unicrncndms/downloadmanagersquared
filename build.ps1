@@ -4,6 +4,12 @@
 param([string]$Version, [string]$Repo)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+
+# The pages' releases links (ui\common.js) name the repo. Applied to every copy of it that ships.
+function Set-PageRepo($file) {
+    $js = (Get-Content -Raw -Encoding UTF8 $file) -replace 'github\.com/[^/"]+/[^/"]+/releases', "github.com/$Repo/releases"
+    [IO.File]::WriteAllText($file, $js, (New-Object Text.UTF8Encoding $false))
+}
 $dist = Join-Path $root 'dist'
 New-Item -ItemType Directory -Force $dist | Out-Null
 
@@ -46,6 +52,7 @@ try {
     Copy-Item (Join-Path $root 'extension\lib') $pages -Recurse
     New-Item -ItemType Directory -Force (Join-Path $pages 'icons') | Out-Null
     Copy-Item (Join-Path $root 'extension\icons\icon.svg') (Join-Path $pages 'icons')
+    if ($Repo) { Set-PageRepo (Join-Path $pages 'ui\common.js') }
     & $go build -trimpath -ldflags "-H windowsgui -s -w $ldflags" -o "$dist\dms-engine.exe" ./cmd/dms-engine
     if ($LASTEXITCODE) { throw 'building dms-engine failed' }
 } finally {
@@ -75,11 +82,7 @@ if ($Repo) {
     $manifest = $manifest -replace '("id":\s*"downloadmanagersquared@dms",)', "`$1`n      `"update_url`": `"https://github.com/$Repo/releases/latest/download/updates.json`","
 }
 [IO.File]::WriteAllText((Join-Path $stage 'manifest.json'), $manifest, (New-Object Text.UTF8Encoding $false))
-if ($Repo) {
-    $common = Join-Path $stage 'ui\common.js'
-    $js = (Get-Content -Raw -Encoding UTF8 $common) -replace 'github\.com/[^/"]+/[^/"]+/releases', "github.com/$Repo/releases"
-    [IO.File]::WriteAllText($common, $js, (New-Object Text.UTF8Encoding $false))
-}
+if ($Repo) { Set-PageRepo (Join-Path $stage 'ui\common.js') }
 
 # Zip with forward slashes (Compress-Archive writes backslashes, which AMO rejects).
 # Windows' own bsdtar: Git's GNU tar, often earlier on PATH, can't write zips.
