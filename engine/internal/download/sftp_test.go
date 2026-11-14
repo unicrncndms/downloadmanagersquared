@@ -139,7 +139,9 @@ func (f *fakeSSH) url(user string) string {
 }
 
 // path is the file's path as an SFTP URL carries it: absolute, and with a drive letter on Windows ("/C:/...").
-func (f *fakeSSH) path() string { return "/" + strings.TrimPrefix(filepath.ToSlash(filepath.Join(f.dir, "big.bin")), "/") }
+func (f *fakeSSH) path() string {
+	return "/" + strings.TrimPrefix(filepath.ToSlash(filepath.Join(f.dir, "big.bin")), "/")
+}
 func (f *fakeSSH) trust(t *testing.T) {
 	t.Helper()
 	if err := SFTP.TrustHostKey(f.hostPort(), f.hostKey.PublicKey().Marshal()); err != nil {

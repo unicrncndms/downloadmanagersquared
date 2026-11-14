@@ -87,7 +87,6 @@ var (
 	pGdipSetPenEndCap     = gdiplus.NewProc("GdipSetPenEndCap")
 	pGdipFillPath         = gdiplus.NewProc("GdipFillPath")
 	pGdipDrawPath         = gdiplus.NewProc("GdipDrawPath")
-	pGdipFillEllipse      = gdiplus.NewProc("GdipFillEllipse")
 	pGdipDrawLines        = gdiplus.NewProc("GdipDrawLines")
 )
 

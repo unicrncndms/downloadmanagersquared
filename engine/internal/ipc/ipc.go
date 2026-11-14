@@ -118,7 +118,7 @@ func Serve(ln net.Listener, h Handler) {
 	for {
 		c, err := ln.Accept()
 		if err != nil {
-			if errors.Is(err, net.ErrClosed) || errors.Is(err, winio.ErrPipeListenerClosed) {
+			if errors.Is(err, net.ErrClosed) {
 				return
 			}
 			log.Printf("ipc: accepting a client: %v", err)

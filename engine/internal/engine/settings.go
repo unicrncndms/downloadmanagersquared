@@ -365,9 +365,11 @@ func cleanHosts(in []string) []string {
 // accept a new file.
 func checkSaveDir(dir string) error {
 	if strings.TrimSpace(dir) == "" {
+		//lint:ignore ST1005 shown to the user as is
 		return errors.New("Enter a folder")
 	}
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		//lint:ignore ST1005 as above
 		return errors.New("That folder does not exist")
 	}
 	f, err := os.CreateTemp(dir, ".dms-write-test-*")

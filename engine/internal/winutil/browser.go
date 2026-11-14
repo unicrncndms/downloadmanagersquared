@@ -58,6 +58,7 @@ func OpenBrowser(exe, url string) error {
 // startFirefox starts Firefox as "start firefox" would find it (its App Paths
 // entry), with url if not "". No shell is involved: a URL is never a command line.
 func startFirefox(url string) error {
+	//lint:ignore ST1005 shown to the user as is
 	err := errors.New("Firefox is not registered")
 	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
 		exe := RegString(root, `Software\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe`, "")

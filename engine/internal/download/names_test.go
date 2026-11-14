@@ -2,7 +2,6 @@ package download
 
 import "testing"
 
-
 // The same samples as "fmtBytes" in extension/test/list.test.js: the engine's
 // text and the pages show a size the same way.
 func TestHumanMatchesTheListsRule(t *testing.T) {

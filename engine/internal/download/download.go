@@ -61,7 +61,7 @@ type State struct {
 	URL         string           `json:"url"`
 	PageURL     string           `json:"pageUrl,omitempty"`
 	Cookie      Secret           `json:"cookie,omitempty"`
-	Login       Secret           `json:"login,omitempty"` // FTP: "user:password" from the link, which is saved and shown without it
+	Login       Secret           `json:"login,omitempty"`   // FTP: "user:password" from the link, which is saved and shown without it
 	HostAsk     *HostKeyAsk      `json:"hostAsk,omitempty"` // SFTP: an unknown server key waiting for the user's trust
 	Referer     string           `json:"referer,omitempty"`
 	Limit       int64            `json:"limit,omitempty"` // download speed cap, bytes per second; 0 = none
@@ -88,7 +88,7 @@ type State struct {
 	Remaining   []Range          `json:"remaining,omitempty"`
 	Added       time.Time        `json:"added"`
 	Finished    time.Time        `json:"finished,omitzero"`
-	Active      float64          `json:"active,omitempty"` // seconds spent running, not queued or paused: the finished average speed is over this
+	Active      float64          `json:"active,omitempty"`    // seconds spent running, not queued or paused: the finished average speed is over this
 	Folder      *Folder          `json:"folder,omitempty"`    // Download as folder; nil when never asked for
 	Mirrors     []Mirror         `json:"mirrors,omitempty"`   // the file's sources, URL among them; nil for one source
 	MetaSize    int64            `json:"metaSize,omitempty"`  // the size a Metalink gives; every mirror must match it
@@ -384,7 +384,7 @@ func (d *Download) Path() string {
 }
 
 func (d *Download) run(ctx context.Context) {
-	d.relocate(ctx) // a move asked for: before anything is open
+	d.relocate(ctx)                           // a move asked for: before anything is open
 	lctx, stopLoop := context.WithCancel(ctx) // for what the loop starts; ctx itself still serves complete
 	err := d.loop(lctx)
 	stopLoop()
