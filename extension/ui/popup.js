@@ -619,8 +619,8 @@ function renderVersion(m) {
   $("versionWarn").hidden = !clash;
   if (!clash) return;
   $("versionWarn").replaceChildren(...(olderSide(m.engineVersion, ext) === "engine"
-    ? [`The engine (v${m.engineVersion}) is older than the extension (v${ext}), so they may not work together. Install the new engine from `, link(RELEASES_URL, "the release page"), "."]
-    : [`The extension (v${ext}) is older than the engine (v${m.engineVersion}), so they may not work together. Update it in your browser's extensions page (Check for Updates).`]));
+    ? [`The engine (v${m.engineVersion}) is older than the extension (v${ext}), so they may not work together. Download the new engine: `, link(ENGINE_ZIP_URL, "downloadmanagersquared-windows.zip"), ", extract it and run dms-engine.exe."]
+    : [`The extension (v${ext}) is older than the engine (v${m.engineVersion}), so they may not work together. Update it in Firefox: about:addons, then Check for Updates.`]));
 }
 
 // The note under the header: once after an upgrade "Updated to vX: what's new"
@@ -702,8 +702,7 @@ function render(m) {
     $("list").replaceChildren(m.notInstalled
       ? el("div", { class: "offline" }, field(true),
         el("div", { class: "big" }, "The download engine isn't installed."),
-        el("div", {}, "DMS² needs its engine on this PC. Download the zip from the ", link(RELEASES_URL, "release page"),
-          " and run dms-engine.exe (extracting it is optional)."))
+        el("div", {}, "DMS² needs its engine on this PC. ", el("a", { href: "welcome.html", target: "_blank" }, "Get it in two steps"), "."))
       : m.quit && Host.startEngine
       ? el("div", { class: "offline calm" }, field(true),
         el("div", { class: "big" }, "DMS² was quit from its tray icon."),

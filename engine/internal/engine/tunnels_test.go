@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -266,7 +267,7 @@ func TestTorrentFileTakesTheVPNChoiceWithItsFiles(t *testing.T) {
 	ib, _ := bencode.Marshal(info)
 	var buf bytes.Buffer
 	(&metainfo.MetaInfo{InfoBytes: ib}).Write(&buf)
-	id, err := e.addTorrentFile(buf.Bytes(), "")
+	id, err := e.addLocalFile(AddRequest{File: base64.StdEncoding.EncodeToString(buf.Bytes()), FileName: "t.torrent"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -45,12 +45,14 @@ type Engine struct {
 	ln  net.Listener
 	// One torrent session per VPN mode: a session's sockets are only the paths
 	// its mode allows, so a VPN-only torrent has no bare socket to leak through.
-	sessions map[paths.Mode]*torrent.Session
-	queue    *queue.Queue
-	setsMu   sync.Mutex
-	sets     map[string]*download.Set // split archives, by key
-	tails    map[string]string        // the id of the part each set had start first last tick, for its end (syncSets)
+	sessions  map[paths.Mode]*torrent.Session
+	queue     *queue.Queue
+	setsMu    sync.Mutex
+	sets      map[string]*download.Set // split archives, by key
+	groupSaid map[string]bool          // groups whose end has been notified (Finished); under mu
+	tails     map[string]string        // the id of the part each set had start first last tick, for its end (syncSets)
 
+	refreshMu sync.Mutex // one interface refresh at a time (listInterfaces)
 	mu        sync.Mutex
 	settings  Settings
 	ifaces    map[string]*ifaceEntry
@@ -89,6 +91,9 @@ type Engine struct {
 	pieces  storage.PieceCompletion // the torrents' pieces complete, kept between runs; nil if it can't be opened
 
 	quit     chan struct{}
+	ctx      context.Context // ends with Shutdown: what waits on a router or the network stops with it
+	stop     context.CancelFunc
+	maps     sync.WaitGroup // mapPorts, for Shutdown
 	quitOnce sync.Once
 	running  atomic.Bool   // Run was called
 	keeping  atomic.Value  // the archiveKeeping setting, a string, for ArchiveKeeping
@@ -165,24 +170,28 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	if broken {
 		notify("Settings reset", "Settings couldn't be read and were reset; the old file is settings.json.broken.", nil)
 	}
+	ctx, stop := context.WithCancel(context.Background())
 	e := &Engine{
 		dir: dir,
 		upd: update.Load(filepath.Join(dir, "update.json")),
 		pickFolder: func(owner uintptr, start, title string) (string, bool) {
 			return winutil.PickFolder(windows.Handle(owner), start, title)
 		},
-		ln:       ln,
-		settings: settings,
-		ifaces:   map[string]*ifaceEntry{},
-		global:   rate.NewShaper(),
-		clients:  map[*ipc.Conn]*client{},
-		resolves: map[string]resolveReq{},
-		learning: map[string]*ipc.Conn{},
-		started:  map[string]time.Time{},
-		mapPort:  portmap.Map,
-		quit:     make(chan struct{}),
-		ran:      make(chan struct{}),
-		quitReq:  make(chan struct{}),
+		ln:        ln,
+		settings:  settings,
+		ifaces:    map[string]*ifaceEntry{},
+		global:    rate.NewShaper(),
+		clients:   map[*ipc.Conn]*client{},
+		resolves:  map[string]resolveReq{},
+		groupSaid: map[string]bool{},
+		learning:  map[string]*ipc.Conn{},
+		started:   map[string]time.Time{},
+		mapPort:   portmap.Map,
+		quit:      make(chan struct{}),
+		ctx:       ctx,
+		stop:      stop,
+		ran:       make(chan struct{}),
+		quitReq:   make(chan struct{}),
 	}
 	e.keepingNow()
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
@@ -248,7 +257,11 @@ func (e *Engine) Run() {
 	if e.ln != nil {
 		go ipc.Serve(e.ln, e)
 	}
-	go e.mapPorts()
+	e.maps.Add(1)
+	go func() {
+		defer e.maps.Done()
+		e.mapPorts()
+	}()
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	last := time.Now()
@@ -261,11 +274,12 @@ func (e *Engine) Run() {
 		case now := <-t.C:
 			n++
 			if n%10 == 0 {
-				e.refreshInterfaces()
+				e.refreshInterfaces() // which also does the next two
+			} else {
+				e.tickVPN(now)
+				e.syncTorrentIfaces()
 			}
-			e.tickVPN(now)
 			e.checkUpdate(now)
-			e.syncTorrentIfaces()
 			e.syncSets()
 			e.schedule()
 			e.queue.Save()
@@ -294,11 +308,13 @@ func (e *Engine) QuitByUser() { e.broadcast("quit", nil) }
 func (e *Engine) Shutdown() {
 	e.quitOnce.Do(func() {
 		close(e.quit)
+		e.stop()
 		if e.running.Load() {
 			// A tick under way would start downloads again after they are
 			// stopped, and use the sessions after they are closed.
 			<-e.ran
 		}
+		e.maps.Wait()
 		e.setsMu.Lock()
 		for _, s := range e.sets {
 			s.Stop() // first: what they freed is saved with the parts
@@ -318,6 +334,9 @@ func (e *Engine) Shutdown() {
 		e.mu.Lock()
 		for _, ent := range e.ifaces {
 			ent.socks.Close()
+			if ent.binding != nil {
+				ent.binding.Close()
+			}
 		}
 		e.mu.Unlock()
 		markStopped(e.dir) // last: everything is saved
@@ -395,7 +414,67 @@ func (e *Engine) Changed(d *download.Download) { e.queue.MarkDirty(d.ID()) }
 
 func (e *Engine) Save(d *download.Download) error { return e.queue.SaveNow(d.ID()) }
 
-func (e *Engine) Finished(d *download.Download) { e.notifyFinished(d.Summary(), d.Path()) }
+// Finished says a download ended. The files of one group (a Metalink's, a
+// split archive's parts) say so once, when the last of them has ended: a
+// balloon per part would queue up for minutes.
+func (e *Engine) Finished(d *download.Download) {
+	s := d.Summary()
+	if s.Group == "" {
+		e.notifyFinished(s, d.Path())
+		return
+	}
+	var group []download.Summary
+	for _, j := range e.queue.List() {
+		if o, ok := j.(*download.Download); ok {
+			if os := o.Summary(); os.Group == s.Group {
+				group = append(group, os)
+			}
+		}
+	}
+	title, msg, ok := groupNotice(group)
+	e.mu.Lock()
+	if e.groupSaid == nil {
+		e.groupSaid = map[string]bool{}
+	}
+	said := e.groupSaid[s.Group]
+	if ok {
+		e.groupSaid[s.Group] = true // two parts ending together: the second finds it said
+	} else {
+		delete(e.groupSaid, s.Group) // a part is going again: the next end says so too
+	}
+	on := e.settings.NotifyDone
+	e.mu.Unlock()
+	switch {
+	case !ok || said:
+	case len(group) < 2:
+		e.notifyFinished(s, d.Path())
+	case on:
+		notify(title, msg, func() { winutil.ShowInFolder(d.Path()) })
+	}
+}
+
+// groupNotice is the balloon for a group's files once all of them have ended:
+// "" and false while one still goes, waits or is paused.
+func groupNotice(group []download.Summary) (title, msg string, ok bool) {
+	failed := 0
+	for _, s := range group {
+		switch s.Status {
+		case download.StatusCompleted:
+		case download.StatusFailed:
+			failed++
+		default:
+			return "", "", false
+		}
+	}
+	name := group[0].GroupName
+	if name == "" {
+		name = group[0].Filename
+	}
+	if failed == 0 {
+		return "Downloads complete", fmt.Sprintf("%s: %d files complete", name, len(group)), true
+	}
+	return "Downloads finished with errors", fmt.Sprintf("%s: %d of %d files complete, %d failed", name, len(group)-failed, len(group), failed), true
+}
 
 // notify shows a tray balloon, running click when it is clicked; tests switch it off.
 var notify = winutil.NotifyClick
@@ -406,7 +485,6 @@ var (
 	recycleFile = winutil.Recycle
 )
 
-// notifyFinished says a download ended; a click on a finished one shows it in its folder.
 // markTorrent writes the Mark of the Web on every file under path, the
 // torrent's file or folder. No URL: a torrent's files come from peers.
 func markTorrent(id, path string) {
@@ -440,6 +518,7 @@ func finishNotice(s download.Summary, on bool) (title, msg string, ok bool) {
 	return "Download failed", s.Filename + ": " + s.Error, true
 }
 
+// notifyFinished says a download ended; a click on a finished one shows it in its folder.
 func (e *Engine) notifyFinished(s download.Summary, path string) {
 	e.mu.Lock()
 	on := e.settings.NotifyDone
@@ -530,6 +609,15 @@ func (e *Engine) chooseTorrentVPN(id, vpn string) (*torrent.Torrent, error) {
 	return nt, nil
 }
 
+// pickerOwnerLocked is the Downloads window a folder picker opens over, 0 when
+// it has none.
+func (e *Engine) pickerOwnerLocked() uintptr {
+	if h, ok := e.window.(windowHandle); ok {
+		return h.Handle()
+	}
+	return 0
+}
+
 // PickFolder shows the folder picker for a download's folder to extract into,
 // over the Downloads window when it is open, and sets the folder chosen; once
 // one is set, choosing another moves what is extracted there. It
@@ -551,11 +639,7 @@ func (e *Engine) PickFolder(id string) error {
 	if f.Into != "" {
 		start = f.Into // a move: from where it is
 	}
-	var owner uintptr
-	if h, ok := e.window.(windowHandle); ok {
-		owner = h.Handle()
-	}
-	pick := e.pickFolder
+	owner, pick := e.pickerOwnerLocked(), e.pickFolder
 	e.mu.Unlock()
 	name := st.Filename
 	if name == "" {
@@ -594,11 +678,7 @@ func (e *Engine) SetDir(id, dir string) error {
 // start; ok is false when it was cancelled.
 func (e *Engine) pickFrom(start, title string) (dir string, ok bool) {
 	e.mu.Lock()
-	var owner uintptr
-	if h, isWin := e.window.(windowHandle); isWin {
-		owner = h.Handle()
-	}
-	pick := e.pickFolder
+	owner, pick := e.pickerOwnerLocked(), e.pickFolder
 	e.mu.Unlock()
 	return pick(owner, start, title)
 }
@@ -642,11 +722,7 @@ func (e *Engine) PickDir(id string) error {
 func (e *Engine) PickSaveFolder() {
 	e.mu.Lock()
 	start := e.settings.SaveDir
-	var owner uintptr
-	if h, ok := e.window.(windowHandle); ok {
-		owner = h.Handle()
-	}
-	pick := e.pickFolder
+	owner, pick := e.pickerOwnerLocked(), e.pickFolder
 	e.mu.Unlock()
 	go func() {
 		if dir, ok := pick(owner, start, "Choose the download folder"); ok {

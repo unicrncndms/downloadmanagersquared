@@ -19,9 +19,11 @@ browser.runtime.onConnect.addListener((port) => {
     seen = seenAfter(Engine.state && Engine.state.downloads, seen, true);
     paintBadge(Engine.state && Engine.state.downloads);
   }
+  const welcome = String(port.sender && port.sender.url || "").endsWith("/welcome.html");
+  if (welcome) Engine.fast(true);
   send();
   const offs = ["state", "settings", "connection"].map((ev) => Engine.on(ev, send));
-  port.onDisconnect.addListener(() => offs.forEach((off) => off()));
+  port.onDisconnect.addListener(() => { offs.forEach((off) => off()); if (welcome) Engine.fast(false); });
 });
 
 // Only this extension's own pages (ui/) may ask for these; content scripts run in web pages.

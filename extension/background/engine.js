@@ -14,6 +14,7 @@ const Engine = {
   rpc: rpcClient((m) => Engine.port.postMessage(m), (f, ms) => setTimeout(f, ms)),
   listeners: new Map(),
   retryDelay: 2000,
+  retryCap: 30000,     // 3 s while the welcome page waits for the engine (fast)
   quit: false,         // the user quit the engine from its tray: don't start it again by reconnecting
 
   // start connects again after the user quit the engine, which starts it.
@@ -23,6 +24,15 @@ const Engine = {
     this.quit = false;
     this.retryDelay = 2000;
     this.connect();
+  },
+
+  // fast(true) retries within seconds, for as long as the welcome page is open.
+  fast(on) {
+    this.retryCap = on ? 3000 : 30000;
+    if (!on || this.port || this.quit) return;
+    clearTimeout(this.retryTimer);
+    this.retryDelay = Math.min(this.retryDelay, this.retryCap);
+    this.retryTimer = setTimeout(() => this.connect(), 1000);
   },
 
   connect() {
@@ -38,10 +48,10 @@ const Engine = {
       this.setConnected(false, this.quit ? "" : msg || this.lastError || "engine disconnected");
       if (this.quit) return;
       this.retryTimer = setTimeout(() => this.connect(), this.retryDelay);
-      this.retryDelay = Math.min(this.retryDelay * 2, 30000);
+      this.retryDelay = Math.min(this.retryDelay * 2, this.retryCap);
     };
     port.onDisconnect.addListener((p) => lost((p.error && p.error.message) || ""));
-    this.call("hello", { userAgent: navigator.userAgent })
+    this.call("hello", { userAgent: navigator.userAgent, version: browser.runtime.getManifest().version })
       .then((h) => {
         this.settings = h.settings;
         this.state = h.state;

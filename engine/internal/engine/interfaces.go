@@ -43,20 +43,32 @@ const (
 )
 
 func (e *Engine) refreshInterfaces() {
+	if !e.listInterfaces() {
+		return
+	}
+	e.tickVPN(time.Now())
+	e.syncTorrentIfaces()
+}
+
+// listInterfaces reads the adapters and applies the list, as one step at a
+// time: two overlapping refreshes would otherwise apply the older list over the
+// newer. It says whether it could.
+func (e *Engine) listInterfaces() bool {
+	e.refreshMu.Lock()
+	defer e.refreshMu.Unlock()
 	e.mu.Lock()
 	ipv6 := e.settings.IPv6
 	e.mu.Unlock()
 	list, ipv6Only, err := netif.List(ipv6)
 	if err != nil {
 		log.Printf("listing interfaces: %v", err)
-		return
+		return false
 	}
 	e.mu.Lock()
 	e.ipv6Only = ipv6Only
 	e.refreshInterfacesLocked(list)
 	e.mu.Unlock()
-	e.tickVPN(time.Now())
-	e.syncTorrentIfaces()
+	return true
 }
 
 func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
@@ -210,7 +222,7 @@ func (e *Engine) refreshPortMaps(now time.Time) {
 	}
 	e.mu.Unlock()
 	for _, j := range jobs {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(e.ctx, 20*time.Second)
 		err := e.mapPort(ctx, j.gw, port, portLease)
 		cancel()
 		if err != nil {
@@ -262,26 +274,13 @@ func (e *Engine) openPath(id string) (paths.Path, error) {
 
 // socksPath is a path as a resolve's SOCKS proxy sends its connections out.
 func (e *Engine) socksPath(id string) socks.Path {
-	return socks.Path{
-		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			p, err := e.openPath(id)
-			if err != nil {
-				return nil, err
-			}
-			return p.Dial(ctx, network, addr)
-		},
-		Lookup: func(ctx context.Context, host string) ([]net.IP, error) {
-			p, err := e.openPath(id)
-			if err != nil {
-				return nil, err
-			}
-			return p.LookupIP(ctx, host)
-		},
-		IPv6: func() bool {
-			p, err := e.openPath(id)
-			return err == nil && p.IPv6()
-		},
-	}
+	return socks.Via(func() (socks.Route, error) {
+		p, err := e.openPath(id)
+		return socks.Route{Dial: p.Dial, Lookup: p.LookupIP}, err
+	}, func() bool {
+		p, err := e.openPath(id)
+		return err == nil && p.IPv6()
+	})
 }
 
 func (e *Engine) bindingOf(id string) (*netif.Binding, error) {
@@ -308,8 +307,14 @@ func (e *Engine) torrentIfacesFor(m paths.Mode) []torrent.Iface {
 	defer e.mu.Unlock()
 	var ifs []torrent.Iface
 	for _, p := range paths.Build(m, e.pathSnapshotLocked(), pathSource{e}) {
+		port := p.Port // a tunnel's forwarded port
+		if port == 0 && m != paths.Alongside {
+			// Named here, not left to the session's port, so the sockets are
+			// opened again on the new port when the setting changes.
+			port = e.settings.TorrentPort
+		}
 		ifs = append(ifs, torrent.Iface{
-			ID: p.ID, Gen: p.Gen, Port: p.Port, Upload: p.Upload,
+			ID: p.ID, Gen: p.Gen, Port: port, Upload: p.Upload,
 			Dial: p.Dial, ListenPacket: p.ListenPacket, LookupIP: p.LookupIP, Listen: p.Listen,
 			ListenPacket6: p.ListenPacket6, Listen6: p.Listen6,
 		})

@@ -45,15 +45,18 @@ func answer(t *testing.T, r *bufio.Reader) response {
 	return resp
 }
 
-func TestAnOversizedLineIsDroppedAndTheConnectionCarriesOn(t *testing.T) {
+func TestAnOversizedLineIsRefusedAndTheConnectionCarriesOn(t *testing.T) {
 	c, r := served(t)
 	go func() {
 		huge := bytes.Repeat([]byte("x"), MaxMessage+1)
 		c.Write(append([]byte(`{"id":1,"method":"`), huge...))
 		c.Write([]byte("\"}\n" + `{"id":2,"method":"ok"}` + "\n"))
 	}()
+	if resp := answer(t, r); resp.ID != 1 || resp.Error != "message too long" {
+		t.Fatalf("got %+v, want the oversized request refused by id", resp)
+	}
 	if resp := answer(t, r); resp.ID != 2 || resp.Result != "ok" {
-		t.Fatalf("got %+v, want only the request after the oversized one answered", resp)
+		t.Fatalf("got %+v, want the request after the oversized one answered", resp)
 	}
 }
 

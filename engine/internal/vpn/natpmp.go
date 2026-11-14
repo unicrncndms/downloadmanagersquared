@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"time"
 
+	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/portmap"
 	"downloadmanagersquared/engine/internal/tunnel"
 )
@@ -143,10 +144,8 @@ func pmpGateways(cfg tunnel.Config, ok func(netip.Addr) bool) []net.IP {
 	return out
 }
 
-var cgnat = netip.MustParsePrefix("100.64.0.0/10")
-
 // privateGateway: 10/8, 172.16/12, 192.168/16, or carrier-grade NAT's 100.64/10
 // (where some VPNs put their tunnel networks).
 func privateGateway(addr netip.Addr) bool {
-	return addr.IsPrivate() || cgnat.Contains(addr)
+	return addr.IsPrivate() || netif.CGNAT.Contains(addr)
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -234,7 +235,7 @@ func TestAddedTorrentFileGoesStraightToTheChoice(t *testing.T) {
 	var buf bytes.Buffer
 	(&metainfo.MetaInfo{InfoBytes: ib}).Write(&buf)
 
-	id, err := e.addTorrentFile(buf.Bytes(), "")
+	id, err := e.addLocalFile(AddRequest{File: base64.StdEncoding.EncodeToString(buf.Bytes()), FileName: "t.torrent"})
 	if err != nil {
 		t.Fatal(err)
 	}

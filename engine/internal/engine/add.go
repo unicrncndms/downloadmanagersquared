@@ -158,6 +158,19 @@ func (e *Engine) addLocalFile(r AddRequest) (string, error) {
 	return "", errors.New("only .torrent, .meta4 and .metalink files can be added")
 }
 
+// AddUnlessKnown adds r like Add, but a link already in the list is not added
+// again: it answers that download's id with known true. Anything that adds
+// links the user did not look at one by one (the tray's clipboard) uses it.
+func (e *Engine) AddUnlessKnown(r AddRequest) (id string, known bool, err error) {
+	if r.File == "" {
+		if id := e.findURL(r.URL); id != "" {
+			return id, true, nil
+		}
+	}
+	id, err = e.Add(r)
+	return id, false, err
+}
+
 // findURL is the id of the download added from link url, or "" when none.
 func (e *Engine) findURL(url string) string {
 	url = strings.TrimSpace(url)
@@ -293,14 +306,6 @@ func (e *Engine) addMetalink(b []byte, r AddRequest, m paths.Mode) (string, erro
 	}
 	log.Printf("added Metalink: %d downloads", len(ids))
 	return ids[0], nil
-}
-
-func (e *Engine) addTorrentFile(b []byte, vpn string) (string, error) {
-	magnet, info, err := torrent.ParseFile(b)
-	if err != nil {
-		return "", err
-	}
-	return e.addTorrent(torrent.State{Magnet: magnet, Info: info}, vpn)
 }
 
 // addTorrent adds a torrent that waits for the user's choice of files, under

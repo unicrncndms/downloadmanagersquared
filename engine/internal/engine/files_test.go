@@ -276,6 +276,24 @@ func TestACompletedDownloadKeepsNoCookie(t *testing.T) {
 	}
 }
 
+func TestGroupNoticeWaitsForTheLastPartAndCountsFailures(t *testing.T) {
+	part := func(st download.Status) download.Summary {
+		return download.Summary{Filename: "v.part1.rar", GroupName: "v.rar", Status: st}
+	}
+	if _, _, ok := groupNotice([]download.Summary{part(download.StatusCompleted), part(download.StatusRunning)}); ok {
+		t.Error("said while a part still runs")
+	}
+	if _, _, ok := groupNotice([]download.Summary{part(download.StatusCompleted), part(download.StatusPaused)}); ok {
+		t.Error("said while a part is paused")
+	}
+	if title, msg, ok := groupNotice([]download.Summary{part(download.StatusCompleted), part(download.StatusCompleted)}); !ok || title != "Downloads complete" || msg != "v.rar: 2 files complete" {
+		t.Errorf("all done: %q %q %v", title, msg, ok)
+	}
+	if title, msg, ok := groupNotice([]download.Summary{part(download.StatusCompleted), part(download.StatusFailed)}); !ok || title != "Downloads finished with errors" || msg != "v.rar: 1 of 2 files complete, 1 failed" {
+		t.Errorf("one failed: %q %q %v", title, msg, ok)
+	}
+}
+
 func TestFinishNoticeSaysWhatEndedAndRespectsTheSetting(t *testing.T) {
 	done := download.Summary{Filename: "a.zip", Status: download.StatusCompleted}
 	failed := download.Summary{Filename: "b.zip", Status: download.StatusFailed, Error: "disk full"}

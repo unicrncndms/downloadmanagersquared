@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -41,9 +42,11 @@ func main() {
 		browser = ""
 	}
 
+	// Both relays write to Firefox: one write per frame, one writer at a time.
+	out := &lockedWriter{w: os.Stdout}
 	done := make(chan struct{}, 2)
-	go func() { relayIn(os.Stdin, conn, browser); done <- struct{}{} }()
-	go func() { relayOut(conn, os.Stdout); done <- struct{}{} }()
+	go func() { relayIn(os.Stdin, conn, out, browser); done <- struct{}{} }()
+	go func() { relayOut(conn, out); done <- struct{}{} }()
 	<-done
 }
 
@@ -52,12 +55,15 @@ func main() {
 const maxToFirefox = 1 << 20
 
 // relayIn passes Firefox's messages to the engine as JSON lines, until either
-// side closes. Messages that aren't JSON, or are longer than the engine
-// reads, are skipped.
-func relayIn(from io.Reader, to io.Writer, browser string) {
+// side closes. Messages that aren't JSON are skipped; one longer than the
+// engine reads is answered to Firefox (reply) with an error, if its id shows.
+func relayIn(from io.Reader, to io.Writer, reply io.Writer, browser string) {
 	for {
 		msg, err := readFrame(from, ipc.MaxMessage-1) // -1: the newline
 		if errors.Is(err, errTooLong) {
+			if id := ipc.LineID(msg); id != nil {
+				writeFrame(reply, ipc.TooLongReply(id))
+			}
 			continue
 		}
 		if err != nil {
@@ -116,11 +122,10 @@ func method(msg []byte) string {
 	return req.Method
 }
 
-// withBrowser adds the browser's exe to the extension's hello.
+// withBrowser adds the browser's exe to the extension's hello. The exe is only
+// ever the host's own finding: with none, any the extension sent is dropped,
+// since the engine starts the browser that exe names.
 func withBrowser(msg []byte, exe string) []byte {
-	if exe == "" {
-		return msg
-	}
 	var req struct {
 		ID     json.RawMessage            `json:"id"`
 		Method string                     `json:"method"`
@@ -129,10 +134,17 @@ func withBrowser(msg []byte, exe string) []byte {
 	if json.Unmarshal(msg, &req) != nil || req.Method != "hello" {
 		return msg
 	}
-	if req.Params == nil {
-		req.Params = map[string]json.RawMessage{}
+	if exe == "" {
+		if _, sent := req.Params["browser"]; !sent {
+			return msg
+		}
+		delete(req.Params, "browser")
+	} else {
+		if req.Params == nil {
+			req.Params = map[string]json.RawMessage{}
+		}
+		req.Params["browser"], _ = json.Marshal(exe)
 	}
-	req.Params["browser"], _ = json.Marshal(exe)
 	b, err := json.Marshal(req)
 	if err != nil {
 		return msg
@@ -172,17 +184,22 @@ func startEngine() error {
 var errTooLong = errors.New("message too long")
 
 // readFrame reads one length-prefixed message of at most max bytes. A longer
-// one is read past, so the next can follow, and gives errTooLong.
+// one is read past, so the next can follow, and gives errTooLong with its
+// first bytes.
 func readFrame(r io.Reader, max int) ([]byte, error) {
 	var n uint32
 	if err := binary.Read(r, binary.LittleEndian, &n); err != nil {
 		return nil, err
 	}
 	if int64(n) > int64(max) {
-		if _, err := io.CopyN(io.Discard, r, int64(n)); err != nil {
+		head := make([]byte, min(int64(n), 256))
+		if _, err := io.ReadFull(r, head); err != nil {
 			return nil, err
 		}
-		return nil, errTooLong
+		if _, err := io.CopyN(io.Discard, r, int64(n)-int64(len(head))); err != nil {
+			return nil, err
+		}
+		return head, errTooLong
 	}
 	buf := make([]byte, n)
 	_, err := io.ReadFull(r, buf)
@@ -193,13 +210,21 @@ func writeFrame(w io.Writer, msg []byte) error {
 	if len(msg) == 0 {
 		return nil
 	}
-	var hdr [4]byte
-	binary.LittleEndian.PutUint32(hdr[:], uint32(len(msg)))
-	if _, err := w.Write(hdr[:]); err != nil {
-		return err
-	}
-	_, err := w.Write(msg)
+	b := binary.LittleEndian.AppendUint32(make([]byte, 0, 4+len(msg)), uint32(len(msg)))
+	_, err := w.Write(append(b, msg...))
 	return err
+}
+
+// lockedWriter makes each Write whole when two goroutines share the writer.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
 
 func mustJSON(v any) []byte {

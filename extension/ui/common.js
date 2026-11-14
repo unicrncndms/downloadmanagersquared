@@ -53,6 +53,9 @@ function link(url, text) {
 // Where the engine and the extension are released (build.ps1 -Repo sets the repo).
 const RELEASES_URL = "https://github.com/unicrncndms/downloadmanagersquared/releases/latest";
 
+// The engine zip as one stable asset of the latest release: a download, not the release page.
+const ENGINE_ZIP_URL = RELEASES_URL + "/download/downloadmanagersquared-windows.zip";
+
 // The guide, in the same repository (docs/guide.md); a section is added as #heading.
 const GUIDE_URL = RELEASES_URL.replace(/\/releases\/latest$/, "/blob/main/docs/guide.md");
 

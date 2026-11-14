@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 
@@ -29,6 +30,9 @@ func TestHelloCarriesTheBrowser(t *testing.T) {
 			t.Fatalf("%s became %s", msg, b)
 		}
 	}
+	if b := withBrowser([]byte(`{"id":5,"method":"hello","params":{"userAgent":"UA","browser":"C:/evil.exe"}}`), ""); strings.Contains(string(b), "evil") {
+		t.Fatalf("a browser the extension sent got through: %s", b)
+	}
 	if b := withBrowser([]byte(`{"id":4,"method":"hello"}`), exe); json.Unmarshal(b, &got) != nil || got.Params["browser"] != exe {
 		t.Fatalf("a hello without params became %s", b)
 	}
@@ -45,7 +49,7 @@ func TestAnOversizedFrameFromFirefoxIsSkipped(t *testing.T) {
 	in.Write(frame(bytes.Repeat([]byte("x"), ipc.MaxMessage+1)))
 	in.Write([]byte{0xff, 0xff, 0xff, 0xff}) // claims 4 GB, then ends
 	var out bytes.Buffer
-	relayIn(bytes.NewReader(append(frame([]byte(`{"id":1,"method":"ok"}`)), in.Bytes()...)), &out, "")
+	relayIn(bytes.NewReader(append(frame([]byte(`{"id":1,"method":"ok"}`)), in.Bytes()...)), &out, io.Discard, "")
 	if got := out.String(); got != "{\"id\":1,\"method\":\"ok\"}\n" {
 		t.Fatalf("relayed %q", got)
 	}
@@ -55,9 +59,18 @@ func TestAnOversizedFrameFromFirefoxIsSkipped(t *testing.T) {
 	in.Write(frame(bytes.Repeat([]byte("x"), ipc.MaxMessage+1)))
 	in.Write(frame([]byte("not json")))
 	in.Write(frame([]byte(`{"id":2,"method":"ok"}`)))
-	relayIn(&in, &out, "")
+	relayIn(&in, &out, io.Discard, "")
 	if got := out.String(); got != "{\"id\":2,\"method\":\"ok\"}\n" {
 		t.Fatalf("relayed %q, want only the valid message after the oversized one", got)
+	}
+}
+
+func TestAnOversizedFrameIsAnsweredToFirefoxByItsId(t *testing.T) {
+	var in, out, reply bytes.Buffer
+	in.Write(frame(append([]byte(`{"id":7,"method":"add","params":"`), bytes.Repeat([]byte("x"), ipc.MaxMessage)...)))
+	relayIn(&in, &out, &reply, "")
+	if out.Len() != 0 || !bytes.Equal(reply.Bytes(), frame([]byte(`{"id":7,"error":"message too long"}`))) {
+		t.Fatalf("relayed %q, replied %q", out.Bytes(), reply.Bytes())
 	}
 }
 
@@ -84,7 +97,7 @@ func TestPickFolderLetsTheEngineComeToTheFront(t *testing.T) {
 	var in bytes.Buffer
 	in.Write(frame([]byte(`{"id":1,"method":"list"}`)))
 	in.Write(frame([]byte(`{"id":2,"method":"pickFolder","params":{"id":"x"}}`)))
-	relayIn(&in, &out, "")
+	relayIn(&in, &out, io.Discard, "")
 	// Once, and before the request reached the engine.
 	if len(allowed) != 1 || allowed[0] != "{\"id\":1,\"method\":\"list\"}\n" {
 		t.Fatalf("allowed %q", allowed)

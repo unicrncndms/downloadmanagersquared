@@ -180,7 +180,7 @@
           <span class="info" tabindex="0" data-tip="A finished torrent keeps uploading until it has sent this many times its size. 0 stops as soon as it's done."></span></label>
           <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sRatio" required data-setting></div>
         <div class="setting"><label for="sTorrentPort">Port for incoming peers
-          <span class="info" tabindex="0" data-tip="Where torrent peers connect in, on every connection. Set it to the port you forward on your router. Takes effect when DMS² restarts."></span></label>
+          <span class="info" tabindex="0" data-tip="Where torrent peers connect in, on every connection. Set it to the port you forward on your router. Takes effect at once: running torrents reconnect on the new port."></span></label>
           <input type="number" id="sTorrentPort" min="1024" max="65535" required data-setting></div>
         <div class="setting"><span>Upload limits</span>
           <span><a href="#connections">Set per connection</a>, under Options on the Connections page</span></div>

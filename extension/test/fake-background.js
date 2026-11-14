@@ -52,6 +52,7 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
     runtime: {
       id: "dms@test",
       getURL: (p) => "moz-extension://x/" + p,
+      getManifest: () => ({ version: "0.0.0" }),
       connectNative: () => ({ onMessage: ev("port.onMessage"), onDisconnect: ev("port.onDisconnect"), postMessage() {}, disconnect() {} }),
       onMessage: ev("runtime.onMessage"),
       onConnect: ev("runtime.onConnect"),

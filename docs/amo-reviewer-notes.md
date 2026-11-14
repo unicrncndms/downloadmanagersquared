@@ -58,3 +58,7 @@ All three are required: `browsingActivity` (pages that led to a download), `webs
 3. Download any file larger than the threshold (lower it in the settings page to test with a small one). The engine takes it over and the popup shows it running.
 
 Without the engine, the popup says "Engine not installed" and the add-on does nothing else.
+
+## Required native app and the welcome page
+
+The add-on needs the free Windows engine from GitHub, and the AMO listing text says so up front (it does nothing without it). On first install only (`runtime.onInstalled`, reason `install`) it opens its own page `ui/welcome.html`. The page explains the engine and has one button that opens the stable asset URL of the latest release zip in a tab, so the browser downloads it. The add-on never runs or installs the file: the user opens it. The page loads no remote code. While it is open, the background retries the native connection every few seconds, so the page can say "Connected"; the popup's "Engine not installed" state links to the same page. Nothing else nags.

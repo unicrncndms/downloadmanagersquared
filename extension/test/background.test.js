@@ -387,3 +387,14 @@ test("install opens the welcome page once; an update opens nothing", () => {
   b.fire("runtime.onInstalled", { reason: "install" });
   assert.equal(welcome().length, 1);
 });
+
+test("a welcome page's ui port makes the engine retry within seconds, and its close restores the backoff", () => {
+  const b = load();
+  const e = b.Engine;
+  e.port = null; e.quit = false; e.retryDelay = 30000;
+  e.fast(true);
+  assert.equal(e.retryCap, 3000);
+  assert.equal(e.retryDelay, 3000);
+  e.fast(false);
+  assert.equal(e.retryCap, 30000);
+});

@@ -5,6 +5,7 @@ package netif
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strings"
@@ -245,6 +246,10 @@ func PublicIPv4(ip net.IP) bool {
 	if ip == nil || ip[0] == 0 || ip[0] >= 224 {
 		return false
 	}
-	cgnat := net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
-	return !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !cgnat.Contains(ip)
+	a, _ := netip.AddrFromSlice(ip)
+	return !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !CGNAT.Contains(a)
 }
+
+// CGNAT is the shared address space of carrier-grade NAT, where some VPNs also
+// put their tunnel networks: private to the line, not reachable from outside.
+var CGNAT = netip.MustParsePrefix("100.64.0.0/10")

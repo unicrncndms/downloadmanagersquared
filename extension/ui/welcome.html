@@ -14,12 +14,29 @@
     p, li { line-height: 1.5; }
     ul { padding-left: 20px; }
     .muted { color: var(--muted); }
+    .engine { border: 1px solid var(--border, currentColor); border-radius: 8px; padding: var(--s3) var(--s4); margin: var(--s3) 0; }
+    .engine h2 { margin-top: 0; }
+    .engine ol { padding-left: 20px; }
   </style>
 </head>
 <body>
   <main>
     <h1>Welcome to DMS²</h1>
     <p>DMS² downloads large files over all your network connections at once. This page opens once, after install.</p>
+
+    <section class="engine" id="engine">
+      <h2>First, the engine</h2>
+      <p>DMS² is two parts: this extension and a small Windows app, the engine. The engine does the downloading, because an extension can't use several network connections at once. Without it this extension does nothing.</p>
+      <ol>
+        <li><button class="primary" id="get">Download the engine</button> <span class="muted">(a zip from GitHub)</span></li>
+        <li>Open the zip and run <code>dms-engine.exe</code>. Windows SmartScreen warns because the program isn't code-signed: choose <strong>More info</strong>, then <strong>Run anyway</strong>.</li>
+        <li>Follow its setup. This page notices when the engine connects.</li>
+      </ol>
+    </section>
+    <section class="engine" id="ready" hidden>
+      <h2>Connected, you're set</h2>
+      <p>The engine is running. <a href="settings.html#connections">Check your connections</a>, or use the DMS² button on the toolbar.</p>
+    </section>
 
     <h2>What DMS² takes over</h2>
     <p>Download as usual. Large files (100 MB or more by default), magnet links, <code>.torrent</code> and Metalink (<code>.meta4</code>) files go to DMS² by themselves. For any other link, use <em>Download with DMS²</em> on its menu.</p>
@@ -37,5 +54,9 @@
       <li>A second connection (another network, a phone, a VPN) is what adds speed. <a href="settings.html#connections">Check your connections</a>.</li>
     </ul>
   </main>
+  <script src="../lib/version.js"></script>
+  <script src="host.js"></script>
+  <script src="common.js"></script>
+  <script src="welcome.js"></script>
 </body>
 </html>

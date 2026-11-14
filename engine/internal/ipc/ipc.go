@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"regexp"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -110,15 +111,30 @@ func Listen() (net.Listener, error) {
 	})
 }
 
+// Serve takes clients until the listener is closed. Another error is logged
+// and tried again; a listener that fails this many times in a row is given up on.
 func Serve(ln net.Listener, h Handler) {
+	failed := 0
 	for {
 		c, err := ln.Accept()
 		if err != nil {
-			return
+			if errors.Is(err, net.ErrClosed) || errors.Is(err, winio.ErrPipeListenerClosed) {
+				return
+			}
+			log.Printf("ipc: accepting a client: %v", err)
+			if failed++; failed >= maxAcceptFailures {
+				log.Printf("ipc: giving up on the pipe")
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
+		failed = 0
 		go serveConn(NewConn(c), h)
 	}
 }
+
+const maxAcceptFailures = 20
 
 // ServeConn serves one client already connected, e.g. the far end of the
 // Downloads window's in-memory pipe, the same as one on the named pipe. It
@@ -130,10 +146,15 @@ func serveConn(c *Conn, h Handler) {
 	h.Connected(c)
 	defer h.Disconnected(c)
 	r := bufio.NewReaderSize(c.c, 64<<10)
+	inflight := make(chan struct{}, maxInflight)
 	for {
 		line, err := ReadLine(r, MaxMessage)
 		if errors.Is(err, ErrTooLong) {
-			log.Printf("ipc: dropped a message over %d bytes", MaxMessage)
+			// Answered, so the caller doesn't wait for its id forever.
+			log.Printf("ipc: refused a message over %d bytes", MaxMessage)
+			if id := LineID(line); id != nil {
+				c.WriteRaw(append(TooLongReply(id), '\n'))
+			}
 			continue
 		}
 		if err != nil {
@@ -143,7 +164,9 @@ func serveConn(c *Conn, h Handler) {
 		if json.Unmarshal(line, &req) != nil {
 			continue
 		}
+		inflight <- struct{}{} // a flood waits here instead of starting a goroutine per line
 		go func() {
+			defer func() { <-inflight }()
 			resp := response{ID: req.ID}
 			defer func() { c.send(resp) }()
 			defer func() {
@@ -166,12 +189,35 @@ func serveConn(c *Conn, h Handler) {
 // the engine's memory without bound.
 const MaxMessage = 4 << 20
 
+// maxInflight is how many calls one client may have running at once.
+const maxInflight = 64
+
 // ErrTooLong is ReadLine's answer to a line over its limit. The line has been
-// read past, so the next one can follow.
+// read past, so the next one can follow; the bytes returned with it are the
+// line's start, enough for LineID.
 var ErrTooLong = errors.New("line too long")
 
+const headLen = 256
+
+var idPrefix = regexp.MustCompile(`^\s*\{\s*"id"\s*:\s*(-?\d+)`)
+
+// LineID is the id of a request whose line starts {"id":N, as the extension
+// writes it; nil if the start has none.
+func LineID(head []byte) json.RawMessage {
+	if m := idPrefix.FindSubmatch(head); m != nil {
+		return json.RawMessage(m[1])
+	}
+	return nil
+}
+
+// TooLongReply is the error reply to the request with this id.
+func TooLongReply(id json.RawMessage) []byte {
+	return []byte(`{"id":` + string(id) + `,"error":"message too long"}`)
+}
+
 // ReadLine reads one newline-terminated line of at most max bytes, newline
-// included. A longer line is skipped up to its newline and gives ErrTooLong.
+// included. A longer line is skipped up to its newline and gives ErrTooLong
+// with its first bytes.
 func ReadLine(r *bufio.Reader, max int) ([]byte, error) {
 	var line []byte
 	tooLong := false
@@ -179,7 +225,11 @@ func ReadLine(r *bufio.Reader, max int) ([]byte, error) {
 		chunk, err := r.ReadSlice('\n')
 		if !tooLong {
 			if len(line)+len(chunk) > max {
-				tooLong, line = true, nil
+				tooLong = true
+				line = append(line, chunk...)
+				if len(line) > headLen {
+					line = line[:headLen]
+				}
 			} else {
 				line = append(line, chunk...)
 			}
@@ -190,7 +240,7 @@ func ReadLine(r *bufio.Reader, max int) ([]byte, error) {
 		case err != nil:
 			return nil, err
 		case tooLong:
-			return nil, ErrTooLong
+			return line, ErrTooLong
 		default:
 			return line, nil
 		}
