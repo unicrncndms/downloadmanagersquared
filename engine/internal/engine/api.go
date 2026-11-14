@@ -76,6 +76,10 @@ type passwordParams struct {
 	Password string `json:"password"`
 }
 
+type sftpHostParams struct {
+	Host string `json:"host"`
+}
+
 type sftpLoginParams struct {
 	Host string `json:"host"`
 	User string `json:"user"`
@@ -363,6 +367,8 @@ var methods = map[string]handler{
 		return d.TrustHostKey()
 	}),
 	"sftpLogins": bare(func(e *Engine) (any, error) { return download.SFTP.Logins(), nil }),
+	"sftpHostKeys": bare(func(e *Engine) (any, error) { return download.SFTP.HostKeys(), nil }),
+	"forgetSftpHostKey": ack(func(e *Engine, p sftpHostParams) error { return download.SFTP.ForgetHostKey(p.Host) }),
 	"removeSftpLogin": ack(func(e *Engine, p sftpLoginParams) error { return download.SFTP.RemoveLogin(p.Host, p.User) }),
 	"setArchivePassword": ack(func(e *Engine, p passwordParams) error {
 		d, err := e.get(p.ID)

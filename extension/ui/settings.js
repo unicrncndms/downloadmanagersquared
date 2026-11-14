@@ -559,15 +559,28 @@ function renderAbout(m) {
 if (Host.openDownloads) $("sThresholdText").textContent = "Take over downloads above (MB)";
 
 // The SFTP logins kept on this PC, per host and user: listed without their secret, removable.
+function sftpTable(box, list, none, cells, forget) {
+  box.replaceChildren(list.length ? el("div", { class: "conn-scroll" }, el("table", { class: "recipes" }, el("tbody", {}, list.map((x) => el("tr", {},
+    ...cells(x).map((c, i) => el("td", i ? { class: "muted" } : {}, c)), el("td", {}, el("button", { class: "small", onclick: forget(x) }, forget.label))))))) : el("span", { class: "muted" }, none));
+}
 async function loadSftpLogins() {
   try {
     const list = await call("sftpLogins", {});
-    $("sftpLogins").replaceChildren(...(list.length ? list : [null]).map((l) => !l ? el("span", { class: "muted" }, "None saved.") :
-      el("div", { class: "row" }, el("span", { class: "grow" }, `${l.user}@${l.host}`, el("span", { class: "muted" }, l.key ? " (key file)" : " (password)")),
-        el("button", { class: "small", onclick: async () => { await act("removeSftpLogin", { host: l.host, user: l.user }, "Login removed"); loadSftpLogins(); } }, "Remove"))));
+    sftpTable($("sftpLogins"), list, "None saved.", (l) => [`${l.user}@${l.host}`, l.key ? "key file" : "password"],
+      Object.assign((l) => async () => { await act("removeSftpLogin", { host: l.host, user: l.user }, "Login removed"); loadSftpLogins(); }, { label: "Remove" }));
   } catch { /* the engine is not there yet; the list is empty */ }
 }
 loadSftpLogins();
+
+// The server keys trusted on first use, by fingerprint; forgetting one makes the next link ask again.
+async function loadSftpKeys() {
+  try {
+    const list = await call("sftpHostKeys", {});
+    sftpTable($("sftpKeys"), list, "None yet. A server is trusted when you press Trust on its download.", (k) => [k.host, k.fingerprint],
+      Object.assign((k) => async () => { await act("forgetSftpHostKey", { host: k.host }, "Key forgotten"); loadSftpKeys(); }, { label: "Forget" }));
+  } catch { /* the engine is not there yet; the list is empty */ }
+}
+loadSftpKeys();
 
 // --- wiring ---
 

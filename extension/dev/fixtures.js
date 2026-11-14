@@ -199,10 +199,25 @@ const FIXTURES = {
   notInstalled: { connected: false, notInstalled: true, error: "No such native application downloadmanagersquared", state: null, settings: null, recipes: {} },
   otherVersion: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.4.1" },
   stress: STRESS,
+  // SFTP: a server key waiting for Trust, a changed key, the saved logins and trusted keys in Settings.
+  sftp: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
+    sftpLogins: [{ host: "files.example.com:22", user: "bob", key: false }, { host: "backup.example.org:2222", user: "alice", key: true }],
+    sftpHostKeys: [{ host: "backup.example.org:2222", fingerprint: "SHA256:Zk3uQ0m1c2Yw0q8bq1m7Wk9o0JrJd2yq5G8Ew4T3t6A" }, { host: "files.example.com:22", fingerprint: "SHA256:Xv8dH2n5cR7LpQ1bT0aYw3sKfE9uJm4oZ6iN1gB2hCk" }],
+    state: { ...STATE, downloads: [
+      { ...DOWNLOADS[1], id: "k1", kind: "sftp", url: "sftp://files.example.com/data/dataset.tar", filename: "dataset.tar", status: "paused", speed: 0, eta: -1, done: 0, map: "",
+        label: "Trust the server's key?", tone: "warn", actions: { remove: true }, partialFile: false, links: {},
+        hostKey: { host: "files.example.com:22", fingerprint: "SHA256:Xv8dH2n5cR7LpQ1bT0aYw3sKfE9uJm4oZ6iN1gB2hCk" } },
+      { ...DOWNLOADS[1], id: "k2", kind: "sftp", url: "sftp://backup.example.org:2222/backup.7z", filename: "backup.7z", status: "failed", speed: 0, eta: -1, label: "Failed", tone: "bad",
+        actions: { remove: true, retry: true }, links: { eth: { status: "failed", conns: 0, speed: 0, tone: "bad",
+          label: "Failed: WARNING: the host key of backup.example.org:2222 changed (trusted SHA256:Zk3uQ0m1c2Yw0q8bq1m7Wk9o0JrJd2yq5G8Ew4T3t6A, server now sends SHA256:Qq1wE2rT3yU4iO5pA6sD7fG8hJ9kL0zX1cV2bN3mM4o). Not logging in: someone may be intercepting the connection, or the server was reinstalled. Only if you are sure, forget the trusted key under Settings > SFTP logins; the next link asks again." } } },
+    ] } },
   // The Downloads window: no recipes or user agent here, and the versions always match.
   window: { connected: true, state: STATE, settings: { ...SETTINGS, vpnProvider: "pia" }, autostart: true, recipes: null, engineVersion: "0.3.0",
     host: { version: "0.3.0", userAgent: null, recipesHere: false, openDownloads: true } },
 };
+
+// The Downloads window with the SFTP states.
+FIXTURES.windowSftp = { ...FIXTURES.sftp, recipes: null, host: { version: "0.3.0", userAgent: null, recipesHere: false, openDownloads: true } };
 
 // What the real engine adds to every download and to each group of them (Present
 // and Groups in engine/internal/download): the section, whether the label is plain, and the group summaries.

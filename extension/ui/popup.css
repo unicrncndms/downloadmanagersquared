@@ -290,7 +290,7 @@ button.icon[aria-expanded] svg { transition: transform .15s; }
 .offline details { font-size: 12px; color: var(--muted); max-width: 360px; }
 kbd { font: inherit; font-size: 11px; padding: 0 var(--s1); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; background: var(--panel); }
 /* A connection's state in Details: the word in its tone, no box. */
-.conns .badge { padding: 0; background: transparent; font-weight: 500; white-space: normal; }
+.conns .badge { padding: 0; background: transparent; font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
 .conns .badge.dim { border: 0; }
 
 /* A group's parts: no status tile (the group's row has it), so the name and

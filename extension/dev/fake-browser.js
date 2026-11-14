@@ -38,6 +38,7 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
     // A fixture's `files` answers torrentFiles, by download id; its `lines` checkLines.
     call: (method, params) => record({ call: method, params })
       .then(() => method === "setSettings" ? applySettings(params) : method === "setInterface" ? applyInterface(params) : method === "torrentFiles" ? (window.fixture().files || {})[params.id] || []
+        : method === "sftpHostKeys" || method === "sftpLogins" ? (window.fixture()[method] || [])
         : method === "checkLines" ? window.fixture().lines || []
         : method === "downloadLog" ? (window.fixture().logs || {})[params.id] || [] : undefined),
     subscribe(fn) {

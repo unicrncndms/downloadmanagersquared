@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // SFTP is the store SFTP downloads use; the engine sets it at start. Tests set their own.
@@ -106,6 +108,37 @@ func (s *SFTPStore) HostKey(host string) []byte {
 	defer s.mu.Unlock()
 	b, _ := base64.StdEncoding.DecodeString(s.data.HostKeys[host])
 	return b
+}
+
+// TrustedKey is a trusted host key as Settings lists it: its fingerprint, never the key.
+type TrustedKey struct {
+	Host        string `json:"host"` // host:port
+	Fingerprint string `json:"fingerprint"`
+}
+
+// HostKeys lists the trusted host keys.
+func (s *SFTPStore) HostKeys() []TrustedKey {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []TrustedKey{}
+	for h, k := range s.data.HostKeys {
+		b, _ := base64.StdEncoding.DecodeString(k)
+		pk, err := ssh.ParsePublicKey(b)
+		if err != nil {
+			pk = nil
+		}
+		out = append(out, TrustedKey{Host: h, Fingerprint: fingerprint(pk)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	return out
+}
+
+// ForgetHostKey removes the trusted key of host:port: the next link asks again.
+func (s *SFTPStore) ForgetHostKey(host string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.data.HostKeys, host)
+	return s.saveLocked()
 }
 
 func (s *SFTPStore) TrustHostKey(host string, key []byte) error {

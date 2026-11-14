@@ -327,3 +327,20 @@ func TestSFTPStoreSealsLoginsAndRemovesThem(t *testing.T) {
 		t.Error("login not removed")
 	}
 }
+
+func TestSFTPStoreListsAndForgetsHostKeys(t *testing.T) {
+	useSFTPStore(t)
+	k, _ := newSigner(t)
+	SFTP.TrustHostKey("b.example:22", k.PublicKey().Marshal())
+	SFTP.TrustHostKey("a.example:2222", k.PublicKey().Marshal())
+	l := SFTP.HostKeys()
+	if len(l) != 2 || l[0].Host != "a.example:2222" || l[0].Fingerprint != fingerprint(k.PublicKey()) {
+		t.Fatalf("listed %+v", l)
+	}
+	if err := SFTP.ForgetHostKey("a.example:2222"); err != nil || len(SFTP.HostKey("a.example:2222")) != 0 || len(SFTP.HostKeys()) != 1 {
+		t.Fatalf("not forgotten: %v", err)
+	}
+	if again := OpenSFTPStore(SFTP.path); len(again.HostKeys()) != 1 {
+		t.Fatal("forgetting was not saved")
+	}
+}

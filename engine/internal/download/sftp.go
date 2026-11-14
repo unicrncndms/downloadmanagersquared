@@ -42,7 +42,7 @@ type hostKeyError struct {
 
 func (e *hostKeyError) Error() string {
 	if e.changed != "" {
-		return fmt.Sprintf("WARNING: the host key of %s changed (trusted %s, server now sends %s). Not logging in: someone may be intercepting the connection, or the server was reinstalled. Remove the saved key in Settings only if you are sure.", e.ask.Host, e.changed, e.ask.Fingerprint)
+		return fmt.Sprintf("WARNING: the host key of %s changed (trusted %s, server now sends %s). Not logging in: someone may be intercepting the connection, or the server was reinstalled. Only if you are sure, forget the trusted key under Settings > SFTP logins; the next link asks again.", e.ask.Host, e.changed, e.ask.Fingerprint)
 	}
 	return fmt.Sprintf("unknown host key %s for %s: trust it?", e.ask.Fingerprint, e.ask.Host)
 }
