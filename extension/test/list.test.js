@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { linesNote, finishedVerdict, moveBefore, statusLine, problemLinks, viaLinks, viaLine, seedLine, bulkActions, finished, finishedSummary, badgeOf } = require("../lib/list.js");
+const { linesNote, finishedVerdict, moveBefore, statusLine, problemLinks, viaLinks, viaLine, seedLine, bulkActions, addSubmits, finished, finishedSummary, badgeOf } = require("../lib/list.js");
 
 // The engine's section for a status; a test of what needs the user says "needs".
 const SECTION = { running: "active", verifying: "active", metadata: "active", checking: "active", seeding: "seeding", queued: "queued",
@@ -321,6 +321,18 @@ test("a row's status tile says its section: what needs you, at work, seeding, qu
   assert.deepEqual(kinds, ["need:alert", "run:down", "seed:up", ":", ":pause", "done:check"]);
 });
 
+test("a torrent's file step is a neutral pick tile, not an alert", () => {
+  const { tileOf } = require("../lib/list.js");
+  assert.deepEqual(tileOf(dl("a", "choosing", { section: "needs" })), { kind: "pick", icon: "folder" });
+});
+
+test("torrent files group by top folder only when there are several, and the ticked total is worded", () => {
+  const { fileFolders, pickTotal } = require("../lib/list.js");
+  assert.deepEqual(fileFolders(["a.txt", "d/b", "d/c"]), [{ name: "", items: [0, 1, 2] }]);
+  assert.deepEqual(fileFolders(["a.txt", "d/b", "e/c", "d/f"]), [{ name: "", items: [0] }, { name: "d", items: [1, 3] }, { name: "e", items: [2] }]);
+  assert.equal(pickTotal([1024, 2048, 4096], [true, false, true]), "2 of 3 files · 5.1 KB");
+});
+
 test("time left counts days past two days", () => {
   const { fmtETA } = require("../lib/list.js");
   assert.equal(fmtETA(3 * 3600 + 5 * 60), "3h 05m");
@@ -385,4 +397,49 @@ test("finishedVerdict: smallest share added, shared router no gain, nothing when
   assert.equal(finishedVerdict(d, [], nameOf), "Wi-Fi added 38%");
   assert.equal(finishedVerdict(d, [{ id: "eth", sameRouter: ["Wi-Fi"] }], nameOf), "Ethernet and Wi-Fi share one line: no gain");
   assert.equal(finishedVerdict({ links: { eth: { bytes: 5 } } }, [], nameOf), "");
+});
+
+test("Enter adds from a one-line Add box, Ctrl+Enter from any", () => {
+  const key = (o) => ({ key: "Enter", ...o });
+  assert.equal(addSubmits(key({}), "https://a.test/x"), true);
+  assert.equal(addSubmits(key({}), "https://a.test/x\nhttps://a.test/y"), false);
+  assert.equal(addSubmits(key({ ctrlKey: true }), "https://a.test/x\nhttps://a.test/y"), true);
+  assert.equal(addSubmits(key({ shiftKey: true }), "https://a.test/x"), false);
+  assert.equal(addSubmits({ key: "a" }, "x"), false);
+});
+
+test("is:failed, is:paused, is:queued, is:running and is:done filter by state", () => {
+  const { matchesSearch } = require("../lib/list.js");
+  const failed = dl("f", "failed", { filename: "a.iso", section: "needs" });
+  const done = dl("d", "completed", { filename: "b.iso", section: "done" });
+  const run = dl("r", "running", { filename: "c.iso", section: "active" });
+  assert.ok(matchesSearch(failed, "is:failed") && !matchesSearch(done, "is:failed") && !matchesSearch(run, "IS:FAILED"));
+  assert.ok(matchesSearch(done, "is:done") && matchesSearch(run, "is:running"));
+  assert.ok(matchesSearch(failed, "is:failed is:done") && matchesSearch(done, "is:failed is:done")); // any of them
+  assert.ok(matchesSearch(failed, "is:failed a.iso") && !matchesSearch(failed, "is:failed b.iso")); // with words, both
+  assert.ok(matchesSearch(done, "is:nonsense") === false && matchesSearch(dl("x", "queued", { filename: "is:nonsense" }), "is:nonsense")); // not a state: plain text
+});
+
+test("a row's error leads with the connection it belongs to", () => {
+  const { errorSource } = require("../lib/list.js");
+  const links = { a: { error: "" }, b: { error: "the server answered 403" } };
+  assert.equal(errorSource({ error: "the server answered 403", links }), "b");
+  assert.equal(errorSource({ error: "Failed: all links", links }), "b"); // the only one with an error
+  assert.equal(errorSource({ error: "x", links: { a: { error: "p" }, b: { error: "q" } } }), "");
+  assert.equal(errorSource({ error: "x" }), "");
+});
+
+test("addFileCheck takes small torrent and Metalink files only", () => {
+  const { addFileCheck } = require("../lib/list.js");
+  assert.equal(addFileCheck("a.TORRENT", 5000), "");
+  assert.equal(addFileCheck("a.meta4", 700000), "");
+  assert.match(addFileCheck("a.meta4", 700001), /too big/);
+  assert.match(addFileCheck("a.zip", 10), /only \.torrent/);
+});
+
+test("a running download held by a limit says so; Start now runs a queued one", () => {
+  const { statusLine, predict } = require("../lib/list.js");
+  assert.match(statusLine({ status: "running", speed: 5e6, eta: 10, size: 10, done: 1, limitedBy: "Wi-Fi's limit", limitedTo: 5e6 }).sub, /^limited to .* by Wi-Fi's limit$/);
+  const s = { downloads: [{ id: "a", status: "queued" }] };
+  assert.equal(predict(s, "startNow", { id: "a" }).downloads[0].status, "running");
 });

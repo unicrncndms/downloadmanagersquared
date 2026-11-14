@@ -77,10 +77,10 @@ func (e *Engine) resolveReqLocked(id, ifaceID, pageURL, browser string) resolveR
 	req := resolveReq{ID: id, Iface: ifaceID, PageURL: pageURL, Browser: browser}
 	if base, tun := paths.IfaceOf(ifaceID); tun {
 		if st, ok := e.tunnelStatus(base); ok && e.ifaces[base] != nil {
-			req.IfaceName, req.SocksPort = "VPN via "+e.ifaces[base].info.Name, st.SocksPort
+			req.IfaceName, req.SocksPort = "VPN via "+e.nameLocked(base, e.ifaces[base].info.Name), st.SocksPort
 		}
 	} else if ent := e.ifaces[ifaceID]; ent != nil {
-		req.IfaceName, req.SocksPort = ent.info.Name, ent.socks.Port()
+		req.IfaceName, req.SocksPort = e.nameLocked(ifaceID, ent.info.Name), ent.socks.Port()
 	}
 	return req
 }

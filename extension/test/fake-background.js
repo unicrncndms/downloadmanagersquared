@@ -55,6 +55,7 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
       connectNative: () => ({ onMessage: ev("port.onMessage"), onDisconnect: ev("port.onDisconnect"), postMessage() {}, disconnect() {} }),
       onMessage: ev("runtime.onMessage"),
       onConnect: ev("runtime.onConnect"),
+      onInstalled: ev("runtime.onInstalled"),
     },
     storage: { local: storageArea(shared.local), session: session ? storageArea(shared.session) : undefined },
     proxy: { onRequest: ev("proxy.onRequest"), onError: ev("proxy.onError") },
@@ -70,6 +71,7 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
     notifications: { create: rec("notifications.create") },
     theme: { getCurrent: rec("theme.getCurrent", () => shared.theme || { colors: null }), onUpdated: ev("theme.onUpdated") },
     contextMenus: { create: rec("contextMenus.create"), onClicked: ev("contextMenus.onClicked") },
+    menus: { onShown: ev("menus.onShown"), update: rec("menus.update"), refresh: rec("menus.refresh") },
     contextualIdentities: {
       create: rec("contextualIdentities.create", (o) => {
         const c = { ...o, cookieStoreId: "firefox-container-" + id() };

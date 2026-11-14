@@ -9,7 +9,7 @@ Download a file of 100 MB or more as usual, or use *Download with DMS²* on a li
 
 ### Sites with a link per IP
 
-The first time, a window opens with a blue bar. Click through the site until the download starts. DMS² remembers those clicks and repeats them by itself for each connection from then on.
+The first time, a window opens with a bar at the top ("DMS² is watching"). Click through the site until the download starts. DMS² remembers those clicks and repeats them by itself for each connection from then on.
 
 These windows start without cookies, so sites that need you logged in can't be clicked through. Many file hosts limit free downloads per IP address, and their terms may not allow getting around that. Following each host's terms is up to you.
 
@@ -40,7 +40,7 @@ A download's **Details → Checks → Edit** takes a SHA-256 or MD5. DMS² check
 
 ### VPN
 
-Each connection can get its own WireGuard tunnel, for downloads, torrents or both. Choose whether they use the bare connections, the tunnels too, or only the tunnels.
+Each connection can get its own WireGuard tunnel, for downloads, torrents or both. Choose **Off** (the connections without a tunnel only), **VPN and direct** (the tunnels too) or **VPN only** (the tunnels only).
 
 - **Private Internet Access:** sign in, and every connection without its own `.conf` gets a tunnel.
 - **Other providers:** import a `.conf` per connection. It must be plain WireGuard with an IPv4 address and an IPv4 DNS server (`DNS =`; IPv6 ones aren't used), one config per connection (a separate device or key at your provider). Obfuscated AmneziaWG configs don't work. If the provider forwards ports by NAT-PMP (Proton VPN on P2P servers, with NAT-PMP on when you make the config), DMS² gets a port for torrents by itself (not yet tested with Proton's servers). For a fixed port from your provider's panel (AirVPN), type it in the **Port** box next to the `.conf`.

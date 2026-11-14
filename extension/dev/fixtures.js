@@ -54,6 +54,8 @@ const DOWNLOADS = [
     inSwarm: true, label: "Seeding", tone: "ok", note: "complete", actions: { pause: true, showInFolder: true, remove: true }, partialFile: false,
     links: { eth: { status: "ready", conns: 3, label: "Seeding", tone: "ok" }, wifi: { status: "ready", conns: 2, label: "Seeding", tone: "ok" } }, added: "2026-11-03T18:00:00Z" },
 ];
+// How far each square being fetched is (the engine's mapFill), spread so the pulse shows its range.
+for (const d of DOWNLOADS) if (d.map) d.mapFill = [...d.map].map((c, i) => (c >= "0" && c <= "9" ? String((i * 7) % 10) : "0")).join("");
 
 // Download as folder: waiting for a folder, extracting (locked), and unavailable.
 const zipDownload = (id, filename, folder, extra) => ({

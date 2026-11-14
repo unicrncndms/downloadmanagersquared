@@ -34,6 +34,9 @@ var (
 	pLoadCursor            = user32.NewProc("LoadCursorW")
 	pSetThreadDpiAwareness = user32.NewProc("SetThreadDpiAwarenessContext")
 	pGetDpiForSystem       = user32.NewProc("GetDpiForSystem")
+	pGetWindowRect         = user32.NewProc("GetWindowRect")
+	pIsZoomed              = user32.NewProc("IsZoomed")
+	pEnumDisplayMonitors   = user32.NewProc("EnumDisplayMonitors")
 	pGetCurrentThreadID    = kernel32.NewProc("GetCurrentThreadId")
 	pOleInitialize         = windows.NewLazySystemDLL("ole32.dll").NewProc("OleInitialize")
 )
@@ -42,6 +45,7 @@ const (
 	className          = "DMSDownloadsWindow"
 	wsOverlappedWindow = 0x00CF0000
 	swShow             = 5
+	swMaximize         = 3
 	swRestore          = 9
 
 	wmDestroy       = 0x0002
@@ -132,8 +136,10 @@ func wndProc(hwnd, m, wp uintptr, lp unsafe.Pointer) uintptr {
 	switch m {
 	case wmSize:
 		v.chromium.Resize()
+		v.noteNormal()
 	case wmMove, wmMoving:
 		v.chromium.NotifyParentWindowPositionChanged()
+		v.noteNormal()
 	case wmActivate:
 		if wp&0xFFFF != 0 { // not WA_INACTIVE: the page gets the keyboard
 			v.chromium.Focus()
@@ -141,6 +147,7 @@ func wndProc(hwnd, m, wp uintptr, lp unsafe.Pointer) uintptr {
 	case wmSettingChange: // maybe light or dark mode changed; the page follows by itself
 		matchTitleBar(hwnd)
 	case wmClose:
+		v.savePlacement()
 		pDestroyWindow.Call(hwnd)
 		return 0
 	case wmDestroy:
@@ -188,4 +195,40 @@ func matchTitleBar(hwnd uintptr) {
 	} else {
 		winutil.SetTitleBar(hwnd, false, lightPanel, lightText)
 	}
+}
+
+// noteNormal remembers the window's rectangle while it is neither maximised nor
+// minimised, so closing from either still saves where it normally sits.
+func (v *view) noteNormal() {
+	if z, _, _ := pIsZoomed.Call(v.hwnd); z != 0 {
+		return
+	}
+	if i, _, _ := pIsIconic.Call(v.hwnd); i != 0 {
+		return
+	}
+	var r rect
+	if ok, _, _ := pGetWindowRect.Call(v.hwnd, uintptr(unsafe.Pointer(&r))); ok != 0 {
+		v.normal = r
+	}
+}
+
+func (v *view) savePlacement() {
+	r := v.normal
+	z, _, _ := pIsZoomed.Call(v.hwnd)
+	savePlacement(v.dir, placement{int(r.left), int(r.top), int(r.right - r.left), int(r.bottom - r.top), z != 0})
+}
+
+// workAreas are the monitors' work areas, in screen pixels.
+func workAreas() []rect {
+	var out []rect
+	cb := windows.NewCallback(func(mon, dc, _ uintptr, _ uintptr) uintptr {
+		mi := monitorInfo{}
+		mi.size = uint32(unsafe.Sizeof(mi))
+		if r, _, _ := pGetMonitorInfo.Call(mon, uintptr(unsafe.Pointer(&mi))); r != 0 {
+			out = append(out, mi.work)
+		}
+		return 1
+	})
+	pEnumDisplayMonitors.Call(0, 0, cb, 0)
+	return out
 }

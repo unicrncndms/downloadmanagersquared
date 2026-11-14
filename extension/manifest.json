@@ -25,6 +25,7 @@
     "tabs",
     "storage",
     "contextMenus",
+    "menus",
     "notifications",
     "theme",
     "<all_urls>"
@@ -55,11 +56,19 @@
     }
   ],
   "browser_action": {
-    "default_title": "downloadmanagersquared",
+    "default_title": "DMS²",
     "default_popup": "ui/popup.html",
-    "default_icon": "icons/icon.svg"
+    "default_icon": { "16": "icons/icon.svg", "32": "icons/icon.svg" }
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Alt+Shift+D" },
+      "description": "Open the DMS² downloads list"
+    }
   },
   "icons": {
+    "16": "icons/icon.svg",
+    "32": "icons/icon.svg",
     "48": "icons/icon.svg",
     "96": "icons/icon.svg"
   }

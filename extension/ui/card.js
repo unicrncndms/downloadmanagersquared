@@ -34,7 +34,7 @@ function makeLine(id) {
   const size = el("b", { class: "num" });
   const more = iconButton("chevron", "Details", () => showDetail(id));
   const show = iconButton("folder", "Show in folder", () => act("showInFolder", { id }));
-  const drop = iconButton("close", "Remove from list (files stay)", () => act("remove", { id, deleteFile: false }, "Removed from list"));
+  const drop = iconButton("close", "Remove from list (files stay)", () => removeWithUndo([id]));
   // The ⋯ menu is built when first used: thousands of lines stay cheap.
   let menu = null, fin = null, cur = null;
   const dots = iconButton("more", "More", (e) => {
@@ -114,7 +114,7 @@ function folderControl(start) {
     try {
       const r = await call("browseFolder", { start: dir || saveDir() });
       if (r && r.dir) pick(r.dir);
-    } catch (e) { toast(e.message); }
+    } catch (e) { toast(e.message, true); }
   } : null);
   paint();
   const root = el("div", {}, el("div", { class: "row" }, el("span", { class: "muted" }, "Save to"), path, change.button), change.box);
@@ -237,20 +237,22 @@ function chunkGrid(rows) {
       root.hidden = !map;
       if (!map) return;
       const by = (d.mapBy || []).map((ifc) => ifaceHue(ifc, latest.state));
-      const sig = map + by.join();
+      const sig = map + (d.mapFill || "") + by.join();
       if (sig === shown) return;
       shown = sig;
       root.setAttribute("aria-label", `${Math.round(percent(d))}% downloaded`);
       root.style.setProperty("--cols", Math.ceil(map.length / rows));
       while (root.children.length < map.length) root.append(el("i"));
       while (root.children.length > map.length) root.lastChild.remove();
-      let cell = root.firstElementChild;
+      let cell = root.firstElementChild, i = 0;
       for (const c of map) {
         const got = c >= "a" && c <= "j";
         const cls = c === "#" ? "on" : c === "." ? "" : got ? "got" : "now";
         if (cell.className !== cls) cell.className = cls;
         cell.style.color = cls === "now" ? by[+c] || "" : got ? by[c.charCodeAt(0) - 97] || "" : "";
+        if (cls === "now") cell.style.setProperty("--f", (+(d.mapFill || "")[i] || 0) / 9);
         cell = cell.nextElementSibling;
+        i++;
       }
     },
   };
@@ -264,12 +266,13 @@ function makeCard(id) {
   let d = null; // the download as last shown
 
   const num = el("span", { class: "n st-tile", role: "img" }); // what it does now, or its place in the queue
+  const grip = el("span", { class: "grip", title: "Drag onto another queued download to move it", hidden: true }, icon("grip"));
   let queuePlace = 0;
   const name = el("span", { class: "name", title: "" });
   const status = el("span", { class: "badge st" });
   const vpn = el("span", { class: "badge dim" });
   const showDone = iconButton("folder", "Show in folder", () => act("showInFolder", { id }));
-  const dropDone = iconButton("close", "Remove from list (files stay)", () => act("remove", { id, deleteFile: false }, "Removed from list"));
+  const dropDone = iconButton("close", "Remove from list (files stay)", () => removeWithUndo([id]));
 
   const grid = chunkGrid(3);
   const fill = el("div");
@@ -282,15 +285,17 @@ function makeCard(id) {
   const pause = iconButton("pause", "Pause", () => act("pause", { id }));
   const resume = iconButton("play", "Resume", () => act("resume", { id }));
   // A queued download moves one place with these, or by dragging it onto another queued one.
-  const moveUp = iconButton("up", "Start earlier", () => moveDownload(id, "up"));
-  const moveDown = iconButton("down", "Start later", () => moveDownload(id, "down"));
+  const moveUp = iconButton("up", "Move up", () => moveDownload(id, "up"));
+  const moveDown = iconButton("down", "Move down", () => moveDownload(id, "down"));
   // The "⋯" menu: Show in folder, Copy link, Remove….
   const menuFolder = el("button", { onclick: () => { closeMenu(); act("showInFolder", { id }); } }, "Show in folder");
   const menuCopy = el("button", { onclick: () => { closeMenu(); copyLink(d && d.url); } }, "Copy link");
   const menuRemove = el("button", { onclick: () => { closeMenu(); removeDownload(id, ask); } }, "Remove…");
   // A queued download moves with these, or by dragging it onto another queued one.
-  const menuNext = el("button", { onclick: () => { closeMenu(); moveDownload(id, "first"); } }, "Start next");
-  const menuLast = el("button", { onclick: () => { closeMenu(); moveDownload(id, "last"); } }, "Start last");
+  const menuNext = el("button", { onclick: () => { closeMenu(); moveDownload(id, "first"); } }, "Move to top");
+  const menuLast = el("button", { onclick: () => { closeMenu(); moveDownload(id, "last"); } }, "Move to bottom");
+  // Starts at once, whatever Downloads at once says.
+  const menuNow = el("button", { onclick: () => { closeMenu(); act("startNow", { id }); } }, "Start now");
   // Record the site's clicks: the site has no recipe yet, so a link that
   // expires later would need someone at the browser. Recording now, while
   // someone is here, lets DMS² renew it alone. Only an offer: nothing records
@@ -299,7 +304,7 @@ function makeCard(id) {
   const menuRecord = el("button", { onclick: () => { closeMenu(); record(); } }, "Record the site's clicks…");
   const menuAsFile = el("button", { onclick: () => { closeMenu(); fold.asFile(); } }, "Download as a file instead");
   const fin = doneActions(id);
-  const menu = el("div", { class: "menu", hidden: true }, menuNext, menuLast, fin.open, menuFolder, menuCopy, fin.again, menuRecord, menuAsFile, menuRemove, fin.del);
+  const menu = el("div", { class: "menu", hidden: true }, menuNow, menuNext, menuLast, fin.open, menuFolder, menuCopy, fin.again, menuRecord, menuAsFile, menuRemove, fin.del);
   const more = iconButton("more", "More", (e) => {
     e.stopPropagation();
     const was = !menu.hidden;
@@ -352,10 +357,12 @@ function makeCard(id) {
   const limitIn = el("input", { type: "number", min: 0, step: "any", placeholder: "none", id: "limit-" + id,
     onchange: () => act("setLimit", { id, limit: speedFromUnit(Number(limitIn.value) || 0) }, "Saved") });
   const limitLabel = el("label", { for: "limit-" + id, class: "muted" });
-  const limitRow = el("div", { class: "row" }, limitLabel, limitIn);
+  const limitUnit = el("span", { class: "muted" }); // the unit in the field itself
+  const limitRow = el("div", { class: "row" }, limitLabel, limitIn, limitUnit);
   // Each connection's share of the speed, as a bar of its colour.
   const share = el("div", { class: "share", "aria-hidden": "true" });
-  const connSection = section("Connections", share, allConns, limitRow);
+  const legend = el("p", { class: "muted" });
+  const connSection = section("Connections", share, allConns, legend, limitRow);
 
   const foldExtracting = el("div", {}, "Extracting as a folder");
   // Extract into, while unfinished: Change… moves what is extracted (the
@@ -380,26 +387,61 @@ function makeCard(id) {
   const dirMove = el("div", { hidden: true },
     el("div", { class: "row" }, el("span", { class: "muted" }, "Save folder"), dirPath, dirChange.button),
     dirChange.box);
+  // Files of a torrent, in Details: tick or untick what to download, with the
+  // progress of each. Asked for while Details is open, like the activity.
+  const tfList = el("div", { class: "files" });
+  const tfNote = el("p", { class: "muted", style: "margin: 0 0 var(--s2)" });
+  const filesSection = section("Files", tfNote, tfList);
+  filesSection.hidden = true;
+  let tfAt = 0, tfSig = "", tfRows = [];
+  async function loadTorrentFiles() {
+    if (Date.now() - tfAt < 2000) return;
+    tfAt = Date.now();
+    let files = [];
+    try { files = await call("torrentFiles", { id }); } catch { return; }
+    filesSection.hidden = !files.length;
+    const sig = JSON.stringify(files.map((f) => [f.path, f.size, f.selected]));
+    const canEdit = d.status !== "seeding" && !finished(d); // a finished torrent keeps what it has
+    if (sig !== tfSig) {
+      tfSig = sig;
+      const boxes = files.map((f) => el("input", { type: "checkbox", checked: f.selected, disabled: !canEdit }));
+      boxes.forEach((b) => b.addEventListener("change", async () => {
+        try { await call("setTorrentFiles", { id, files: boxes.map((x) => x.checked) }); } catch (e) { b.checked = !b.checked; toast(e.message, true); }
+        tfAt = 0;
+      }));
+      tfRows = files.map((f, i) => el("span", { class: "muted num" }));
+      tfList.replaceChildren(...files.map((f, i) => el("label", {}, boxes[i], el("span", { class: "path" }, f.path), tfRows[i])));
+    }
+    files.forEach((f, i) => { tfRows[i].textContent = `${fmtBytes(f.size)}${f.selected && f.size > 0 ? ` · ${Math.round(((f.done || 0) / f.size) * 100)}%` : ""}`; });
+    tfNote.textContent = canEdit ? "Tick a file to download it, untick to stop fetching it." : "";
+  }
   const summaryLine = el("p", { class: "muted num", style: "margin: 0 0 var(--s2)" });
   const fileSection = section("File", summaryLine, dirMove, fileFacts);
   // Mirrors: each source of the file, who uses it, and why one was dropped.
   const mirrorList = el("div", { class: "conns mirrors num" });
   const mirrorSection = section("Mirrors", mirrorList);
 
-  // Checks: the landing page and checksums as values, Edit for boxes.
-  const checkFacts = el("dl", { class: "facts" });
-  const page = el("input", { type: "url" });
+  // Source (the link and the landing page) and Checksum (SHA-256, MD5): values, Edit for boxes.
+  const sourceFacts = el("dl", { class: "facts" });
+  const page = el("input", { type: "url", placeholder: "The page you started from, or a fresh link to the file" });
   const sha = el("input", { type: "text", class: "mono", placeholder: "64 hex characters (optional)", spellcheck: "false" });
   const md5 = el("input", { type: "text", class: "mono", placeholder: "32 hex characters (optional)", spellcheck: "false" });
-  const checkForm = el("div", { class: "form", hidden: true },
+  const sourceForm = el("div", { class: "form", hidden: true },
     el("label", {}, "Landing page"), page,
+    el("div", { class: "actions" },
+      el("button", { class: "small primary", onclick: saveSource }, "Save"),
+      el("button", { class: "small", onclick: () => editSource(false) }, "Cancel")));
+  const sourceEdit = el("button", { class: "small", onclick: () => editSource(true) }, "Edit");
+  const sourceSection = section("Source", sourceFacts, sourceEdit, sourceForm);
+  const sumFacts = el("dl", { class: "facts" });
+  const sumForm = el("div", { class: "form", hidden: true },
     el("label", {}, "SHA-256"), sha,
     el("label", {}, "MD5"), md5,
     el("div", { class: "actions" },
-      el("button", { class: "small primary", onclick: saveChecks }, "Save"),
-      el("button", { class: "small", onclick: () => editChecks(false) }, "Cancel")));
-  const checkEdit = el("button", { class: "small", onclick: () => editChecks(true) }, "Edit");
-  const checkSection = section("Checks", checkFacts, checkEdit, checkForm);
+      el("button", { class: "small primary", onclick: saveSums }, "Save"),
+      el("button", { class: "small", onclick: () => editSums(false) }, "Cancel")));
+  const sumEdit = el("button", { class: "small", onclick: () => editSums(true) }, "Edit");
+  const checkSection = section("Checksum", sumFacts, sumEdit, sumForm);
 
   // Activity: the engine's log of this download, newest first, asked for
   // while Details is open (it stays out of the state sent every second).
@@ -411,7 +453,7 @@ function makeCard(id) {
       await navigator.clipboard.writeText(activity.join("\n"));
       toast("Activity copied");
     } catch {
-      toast("Couldn't copy the activity");
+      toast("Couldn't copy the activity", true);
     }
   } }, "Copy");
   const activitySection = section("Activity", activityList, activityCopy);
@@ -422,7 +464,9 @@ function makeCard(id) {
     let events = [];
     try { events = await call("downloadLog", { id }); } catch { return; }
     activity = logLines(events, (ifc) => ifaceName(ifc, latest.state, latest.settings));
-    activityList.replaceChildren(...activity.map((line) => el("li", {}, line)));
+    activityCopy.hidden = false;
+    // The time leads each line, quietly: it is the first 19 characters (lib/list.js logLines).
+    activityList.replaceChildren(...activity.map((line) => el("li", {}, el("span", { class: "muted" }, line.slice(0, 19)), line.slice(19))));
     activitySection.hidden = !activity.length;
   }
 
@@ -433,7 +477,7 @@ function makeCard(id) {
   const bigLeft = el("span", { class: "muted" });
   const bigNums = el("div", { class: "read num" }, bigSpeed, bigLeft);
   const details = el("details", { ontoggle: () => { activityAt = 0; if (d) update(d); } },
-    el("summary", {}, "Details"), bigGrid.root, bigNums, connSection, recordSection, mirrorSection, foldSection, fileSection, checkSection, activitySection);
+    el("summary", {}, "Details"), bigGrid.root, bigNums, connSection, recordSection, mirrorSection, foldSection, filesSection, fileSection, sourceSection, checkSection, activitySection);
   function syncDetail() {
     const on = detail.id === id;
     if (on && details.parentNode !== detail.body) {
@@ -449,9 +493,15 @@ function makeCard(id) {
     openDetails.setAttribute("aria-expanded", String(on));
   }
 
-  const extras = [extract.bar, extract.line, cardConns, pick, fold.row, fold.pass, fold.ask, ask];
+  // A link that needs its landing page: a button on the row; Details opens only when it is clicked.
+  const needsPageBtn = el("button", { class: "small", hidden: true, onclick: () => {
+    showDetail(id);
+    editSource(true);
+    page.focus();
+  } }, "Needs the page");
+  const extras = [extract.bar, extract.line, cardConns, needsPageBtn, pick, fold.row, fold.pass, fold.ask, ask];
   // The name and its connections share the first line: the connections never squeeze the squares.
-  const root = el("div", { class: "card", tabindex: "-1", "data-id": id }, num, el("span", { class: "title" }, name, mini), tools, prog, nums, line, ...extras, fin.ask);
+  const root = el("div", { class: "card", tabindex: "-1", "data-id": id }, num, el("span", { class: "title" }, grip, name, mini), tools, prog, nums, line, ...extras, fin.ask);
   const queued = () => d && d.status === "queued";
   const takes = () => d && (d.status === "queued" || d.status === "running"); // a drop: its place, or its slot
   root.addEventListener("dragstart", (e) => {
@@ -472,22 +522,28 @@ function makeCard(id) {
     dropOn(from, id);
   });
 
-  let shownPageHint = false;
-
-  function editChecks(on) {
+  function editSource(on) {
+    if (on) page.value = d.pageUrl || "";
+    sourceForm.hidden = !on;
+    sourceFacts.hidden = on;
+    sourceEdit.hidden = on;
+  }
+  async function saveSource() {
+    await act("setPageUrl", { id, pageUrl: page.value }, "Saved");
+    editSource(false);
+  }
+  function editSums(on) {
     if (on) {
-      page.value = d.pageUrl || "";
       sha.value = d.sha256 || "";
       md5.value = d.md5 || "";
     }
-    checkForm.hidden = !on;
-    checkFacts.hidden = on;
-    checkEdit.hidden = on;
+    sumForm.hidden = !on;
+    sumFacts.hidden = on;
+    sumEdit.hidden = on;
   }
-  async function saveChecks() {
-    await act("setPageUrl", { id, pageUrl: page.value });
+  async function saveSums() {
     await act("setHashes", { id, sha256: sha.value, md5: md5.value }, "Saved");
-    editChecks(false);
+    editSums(false);
   }
 
   let lineSig = ""; // the finished line as last drawn
@@ -533,7 +589,17 @@ function makeCard(id) {
     bigSpeed.textContent = details.open ? nm.main : "";
     bigLeft.textContent = details.open ? [s.left, d.status === "running" ? `${fmtETA(d.eta)} left` : ""].filter(Boolean).join(" · ") : "";
     const up = seedLine(d, latest.settings);
-    left.textContent = s.error ? s.error : choosing && nFiles ? `${plural(nFiles, "file")} · ${fmtBytes(d.filesSize || 0)}` : seeding ? up : "";
+    const errIfc = s.error ? errorSource(d) : "";
+    const leftText = s.error ? s.error : choosing && nFiles ? `${plural(nFiles, "file")} · ${fmtBytes(d.filesSize || 0)}` : seeding ? up : "";
+    const leftSig = [leftText, errIfc && ifaceName(errIfc, latest.state, latest.settings), errIfc && ifaceHue(errIfc, latest.state)].join("|");
+    if (left.dataset.sig !== leftSig) {
+      left.dataset.sig = leftSig;
+      if (errIfc) { // the error leads with its connection's dot and name
+        const dot = el("i", { class: "dot" });
+        dot.style.color = ifaceHue(errIfc, latest.state);
+        left.replaceChildren(dot, ifaceName(errIfc, latest.state, latest.settings) + ": " + leftText);
+      } else left.textContent = leftText;
+    }
     left.classList.toggle("bad", !!s.error);
     left.hidden = !left.textContent;
     // Queued on one line: its number and its section say that it waits.
@@ -557,26 +623,32 @@ function makeCard(id) {
     fresh(mini, viaSig, () => used.map((ifc) => {
       const tile = el("span", { class: "ctile", role: "img", "aria-label": says(ifc), title: says(ifc) }, el("span", {}, String(d.links[ifc].conns)));
       tile.style.color = ifaceHue(ifc, latest.state);
-      return el("span", { class: held(ifc) ? "held" : "" }, tile, held(ifc) ? el("b", {}, "busy") : null);
+      if (held(ifc)) tile.classList.add("busy"); // a ring instead of a fill
+      return el("span", {}, tile);
     }));
     line.hidden = done || (slim && left.hidden && vpn.hidden);
     extract.update(extractView([d]));
 
     const can = d.actions || {};
     pause.hidden = !can.pause;
+    pause.title = pause.ariaLabel = seeding ? "Stop seeding" : "Pause";
     resume.hidden = !can.resume;
     menuFolder.hidden = !can.showInFolder;
     menuRemove.hidden = !can.remove; // a torrent being added has its own Cancel
+    menuRemove.textContent = d.partialFile ? "Remove…" : "Remove"; // the dots only where a question follows
+    grip.hidden = !queued();
     menuCopy.hidden = !d.url;
     menuRecord.hidden = recordSection.hidden = !can.recordRecipe;
-    menuNext.hidden = menuLast.hidden = !queued();
+    menuNow.hidden = menuNext.hidden = menuLast.hidden = !queued();
     const all = (latest.state && latest.state.downloads) || [];
     // At an end of the queue an arrow keeps its place, unseen, so pause and ⋯ line up from row to row.
     moveUp.hidden = moveDown.hidden = !queued();
     moveUp.style.visibility = queued() && moveBefore(all, id, "up") === null ? "hidden" : "";
     moveDown.style.visibility = queued() && moveBefore(all, id, "down") === null ? "hidden" : "";
     limitRow.hidden = torrent;
+    legend.textContent = `The number on a connection's tile is how many ${torrent ? "peers" : "requests"} it has open. A ring around it means the server is holding it back.`;
     limitLabel.textContent = `Speed limit (${speedUnitLabel()})`;
+    limitUnit.textContent = speedUnitLabel();
     if (document.activeElement !== limitIn) limitIn.value = d.limit ? +speedToUnit(d.limit).toFixed(3) : "";
     root.draggable = queued();
     more.parentElement.hidden = choosing;
@@ -628,21 +700,9 @@ function makeCard(id) {
     connSection.hidden = done || !ids.length;
 
     if (done) for (const n of extras) n.hidden = true;
-    if (!details.open) {
-      // Point straight at the field that fixes it, unless Details shows another download.
-      const needsPage = ids.some((ifc) => d.links[ifc].status === "needs-page");
-      if (needsPage && !shownPageHint && !torrent && !detail.id) {
-        showDetail(id, true);
-        syncDetail();
-        editChecks(true);
-        // A fresh link to the file works here too: the browser fetches it like a page.
-        page.placeholder = "The page you started from, or a fresh link to the file";
-        page.focus();
-        shownPageHint = true;
-      }
-      if (!needsPage) shownPageHint = false;
-      if (!details.open) return; // the rest is only drawn while Details is open
-    }
+    // A button on the row, never a sheet opening by itself: the user may be typing in the search.
+    needsPageBtn.hidden = done || torrent || !ids.some((ifc) => d.links[ifc].status === "needs-page");
+    if (!details.open) return; // the rest is only drawn while Details is open
     renderLinks(allConns, allRows, ids);
     const fast = ids.filter((ifc) => d.links[ifc].speed > 0);
     fresh(share, fast.map((ifc) => [ifc, Math.round(d.links[ifc].speed / 1e5), ifaceHue(ifc, latest.state)]), () => fast.map((ifc) => {
@@ -666,14 +726,12 @@ function makeCard(id) {
       ["Magnet link", d.url],
     ] : [
       ["Save folder", movable || d.folder && d.folder.on ? "" : d.dir], // a folder's place is under Folder; a movable one has Change…
-      ["Original link", d.url],
     ];
-    // A link stays on one line, cut short; all of it shows on hover, and the
-    // ⋯ menu copies it.
+    // A link stays on one line, cut short; all of it shows on hover. Links and the folder have a copy button, and an open one where they can be opened.
     fresh(fileFacts, [facts, !!can.showInFolder], () => facts.filter(([, v]) => v).flatMap(([k, v]) =>
-      [el("dt", {}, k), k === "Save folder" && can.showInFolder
-        ? el("dd", {}, el("button", { class: "linklike", title: "Open this folder", onclick: () => act("showInFolder", { id }) }, v))
-        : el("dd", k.endsWith("link") ? { class: "mono one-line", title: v } : { class: k === "Info hash" ? "mono" : "" }, v)]));
+      [el("dt", {}, k), k === "Save folder" ? linkCell(v, "folder", can.showInFolder && (() => act("showInFolder", { id })), false)
+        : k.endsWith("link") ? linkCell(v, "link", null)
+        : el("dd", { class: k === "Info hash" ? "mono" : "" }, v)]));
     const nameOfIfc = (ifc) => ifaceName(ifc, latest.state, latest.settings);
     summaryLine.textContent = done ? [finishedSummary(d, nameOfIfc), finishedVerdict(d, latest.state && latest.state.interfaces, nameOfIfc)].filter(Boolean).join(" · ") : "";
     summaryLine.hidden = !summaryLine.textContent;
@@ -687,14 +745,25 @@ function makeCard(id) {
       m.dropped ? el("div", { class: "why" }, m.dropped) : null,
     ].filter(Boolean)));
 
-    if (torrent) activitySection.hidden = true;
-    else loadActivity();
+    if (torrent) {
+      // Torrents keep no log: say so instead of showing nothing.
+      activitySection.hidden = false;
+      activityList.replaceChildren(el("li", { class: "muted" }, "A torrent keeps no activity log. Its peers and what it has sent are under File."));
+      activityCopy.hidden = true;
+      if (details.open && !choosing) loadTorrentFiles();
+      else if (choosing) filesSection.hidden = true;
+    } else loadActivity();
 
-    checkSection.hidden = torrent;
-    if (!torrent && checkForm.hidden) {
-      const checks = [["Landing page", d.pageUrl], ["SHA-256", d.sha256], ["MD5", d.md5]];
-      fresh(checkFacts, checks, () => checks.flatMap(([k, v]) =>
-        [el("dt", {}, k), el("dd", !v ? { class: "muted" } : k === "Landing page" ? { class: "mono one-line", title: v } : { class: "mono" }, v || "none")]));
+    sourceSection.hidden = checkSection.hidden = torrent;
+    if (!torrent && sourceForm.hidden) {
+      const src = [["Link", d.url], ["Landing page", d.pageUrl]];
+      fresh(sourceFacts, src, () => src.flatMap(([k, v]) =>
+        [el("dt", {}, k), v ? linkCell(v, k === "Link" ? "link" : "page", /^https?:/i.test(v) ? () => Host.openUrl(v) : null) : el("dd", { class: "muted" }, "none")]));
+    }
+    if (!torrent && sumForm.hidden) {
+      const sums = [["SHA-256", d.sha256], ["MD5", d.md5]];
+      fresh(sumFacts, sums, () => sums.flatMap(([k, v]) =>
+        [el("dt", {}, k), el("dd", !v ? { class: "muted" } : { class: "mono" }, v || "none")]));
     }
   }
 
@@ -722,7 +791,7 @@ function makeCard(id) {
       });
       fresh(r.state, [l.tone, l.label, l.resolved, l.family], () => [
         el("span", { class: "badge " + (l.tone || "dim") }, l.label),
-        l.resolved ? el("span", { class: "muted" }, " own link") : null,
+        l.resolved ? el("span", { class: "muted", title: "This connection got its own link from the site" }, " own link") : null,
         l.family ? el("span", { class: "muted", title: "The address family this connection fetches the file over" }, " " + l.family) : null,
       ].filter(Boolean));
       r.info.textContent = !l.conns ? "" : torrent ? plural(l.conns, "peer") : plural(l.conns, "request");
@@ -743,16 +812,16 @@ function makeCard(id) {
     let files = [];
     if (d.fileCount) {
       const step = picking;
-      try { files = await call("torrentFiles", { id }); } catch (e) { return toast(e.message); }
+      try { files = await call("torrentFiles", { id }); } catch (e) { return toast(e.message, true); }
       if (picking !== step) return; // a newer render took over meanwhile
     }
     // Before the torrent first meets peers: suggest a VPN, or stay on this connection.
     const vpnChoice = d.askVpn ? el("div", { class: "vpnask" },
       el("div", {}, el("b", {}, "Join the swarm through a VPN?"), " Every peer sees the address you join from."),
       el("label", {}, el("input", { type: "radio", name: "vpn-" + id, value: "vpn", checked: hasVpn(), disabled: !hasVpn() }),
-        hasVpn() ? " Use the VPN (recommended)" : " Use a VPN: none is set up yet ",
+        hasVpn() ? " VPN only (recommended)" : " VPN only: none is set up yet ",
         hasVpn() ? null : el("a", { href: "#", onclick: (e) => { e.preventDefault(); Host.openSettings("#pia"); } }, "Set one up")),
-      el("label", {}, el("input", { type: "radio", name: "vpn-" + id, value: "off", checked: !hasVpn() }), " Stay on the current connection")) : ""; // not null: replaceChildren would print "null"
+      el("label", {}, el("input", { type: "radio", name: "vpn-" + id, value: "off", checked: !hasVpn() }), " Off (stay on the current connection)")) : ""; // not null: replaceChildren would print "null"
     const vpnValue = () => (pick.querySelector(`input[name="vpn-${id}"]:checked`) || {}).value;
     if (!files.length) { // a magnet link: the question comes before fetching the files
       pick.replaceChildren(vpnChoice, el("div", { class: "actions" },
@@ -762,9 +831,28 @@ function makeCard(id) {
     }
     const boxes = files.map((f) => el("input", { type: "checkbox", checked: f.selected }));
     const dir = folderControl(d.dir);
+    const total = el("span", { class: "muted num" });
+    const sizes = files.map((f) => f.size);
+    const count = () => { total.textContent = pickTotal(sizes, boxes.map((b) => b.checked)); };
+    boxes.forEach((b) => b.addEventListener("change", count));
+    count();
+    const row = (i) => el("label", {}, boxes[i], el("span", { class: "path" }, files[i].path), el("span", { class: "muted num" }, fmtBytes(sizes[i])));
+    const tick = (idx, on) => idx.forEach((i) => { boxes[i].checked = on; boxes[i].dispatchEvent(new Event("change")); }); // each box tells its folder and the total
+    const groups = fileFolders(files.map((f) => f.path));
+    const list = groups.length === 1 ? groups[0].items.map(row) : groups.map((g) => {
+      if (!g.name) return g.items.map(row);
+      const all = el("input", { type: "checkbox", checked: g.items.every((i) => boxes[i].checked), "aria-label": "Every file in " + g.name,
+        onclick: (e) => { e.stopPropagation(); tick(g.items, e.target.checked); } });
+      // The folder's own box follows its files.
+      g.items.forEach((i) => boxes[i].addEventListener("change", () => { all.checked = g.items.every((j) => boxes[j].checked); }));
+      return el("details", {}, el("summary", {}, all, el("span", { class: "path" }, g.name + "/"), el("span", { class: "muted num" }, plural(g.items.length, "file"))),
+        el("div", {}, g.items.map(row)));
+    });
     pick.replaceChildren(vpnChoice,
-      el("div", { class: "files" }, files.map((f, i) => el("label", {},
-        boxes[i], el("span", { class: "path" }, f.path), el("span", { class: "muted num" }, fmtBytes(f.size))))),
+      files.length > 1 ? el("div", { class: "bulk" },
+        el("button", { class: "small", onclick: () => tick(files.map((_, i) => i), true) }, "Select all"),
+        el("button", { class: "small", onclick: () => tick(files.map((_, i) => i), false) }, "Select none"), total) : "",
+      el("div", { class: "files" }, list),
       dir.root,
       files.length > 1 ? el("div", { class: "muted" }, "In a folder named after the torrent") : "",
       el("div", { class: "actions" },
@@ -783,7 +871,7 @@ function makeGroupCard(gid) {
   const ids = () => (g ? g.items.map((i) => i.d.id) : []);
   const each = async (method, params, okText, pick) => {
     // All at once: a pause answers only once its connections have closed.
-    await Promise.all(g.items.map((i) => i.d).filter((d) => !pick || pick(d)).map((d) => call(method, { id: d.id, ...params }).catch((e) => toast(e.message))));
+    await Promise.all(g.items.map((i) => i.d).filter((d) => !pick || pick(d)).map((d) => call(method, { id: d.id, ...params }).catch((e) => toast(e.message, true))));
     if (okText) toast(okText);
   };
 
@@ -849,6 +937,7 @@ function makeGroupCard(gid) {
     fold.update(fv);
     keep.update(fv && fv.keep);
     menuAsFile.hidden = !fold.declinable(fv);
+    menuRemove.textContent = v.partialFile ? "Remove all…" : "Remove all";
     menuRetry.hidden = !parts || g.summary.finished || !ds.some((d) => d.folder && d.folder.on);
     status.textContent = v.label;
     status.className = "badge st " + v.tone;
@@ -918,17 +1007,26 @@ function moveDownload(id, target) {
 function removeDownload(id, ask) {
   const d = (latest.state.downloads || []).find((x) => x.id === id);
   if (!d) return;
-  if (!d.partialFile) return act("remove", { id, deleteFile: false }, "Removed from list (files kept)");
+  if (!d.partialFile) return removeWithUndo([id]);
   ask.hidden = false;
   ask.querySelector("[data-keep]").focus(); // keeping is the default; deleting takes a deliberate click
 }
 
-async function copyLink(url) {
+async function copyLink(url, what = "link") {
   if (!url) return;
   try {
     await navigator.clipboard.writeText(url);
-    toast("Link copied");
+    toast(what === "link" ? "Link copied" : `Copied the ${what}`);
   } catch {
-    toast("Couldn't copy the link");
+    toast(`Couldn't copy the ${what}`, true);
   }
+}
+
+// linkCell is a value in Details' facts that can be copied: its text (one line,
+// all of it on hover), a copy button and, given open, one that opens it.
+function linkCell(v, what, open, mono = true) {
+  return el("dd", { class: "linkrow" },
+    el("span", { class: (mono ? "mono " : "") + "one-line", title: v }, v),
+    iconButton("copy", `Copy the ${what}`, () => copyLink(v, what)),
+    open ? iconButton("open", `Open the ${what}`, open) : null);
 }

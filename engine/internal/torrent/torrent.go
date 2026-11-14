@@ -298,10 +298,10 @@ func (t *Torrent) run(ctx context.Context) {
 	if !t.poll(ctx, at, func() bool { return !checking(at) }) {
 		return
 	}
-	t.mu.Lock()
-	skip := t.st.Skip
-	t.mu.Unlock()
-	complete := func() bool {
+	complete := func() bool { // reads the choice afresh: SetFiles may change it while this runs
+		t.mu.Lock()
+		skip := t.st.Skip
+		t.mu.Unlock()
 		done, size := wanted(at, skip)
 		return done == size
 	}
@@ -309,13 +309,9 @@ func (t *Torrent) run(ctx context.Context) {
 		if !t.update(at, func() { t.st.Status = download.StatusRunning }) {
 			return
 		}
-		for i, f := range at.Files() {
-			if slices.Contains(skip, i) {
-				f.SetPriority(atorrent.PiecePriorityNone)
-			} else {
-				f.Download()
-			}
-		}
+		t.mu.Lock()
+		applySkip(at, t.st.Skip)
+		t.mu.Unlock()
 		if !t.poll(ctx, at, complete) {
 			return
 		}
@@ -500,6 +496,62 @@ func (t *Torrent) Choose(files []bool, dir string) error {
 	return nil
 }
 
+// applySkip tells the swarm which files to fetch.
+func applySkip(at *atorrent.Torrent, skip []int) {
+	for i, f := range at.Files() {
+		if slices.Contains(skip, i) {
+			f.SetPriority(atorrent.PiecePriorityNone)
+		} else {
+			f.Download()
+		}
+	}
+}
+
+// SetFiles changes which files to download (one flag per file) after the
+// choice was made, also while the torrent runs. Once the whole download is
+// done it is refused: a finished torrent seeds what it has.
+func (t *Torrent) SetFiles(files []bool) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.st.Status == StatusChoosing || !t.st.Finished.IsZero() {
+		return errors.New("the files of this torrent can't be changed now")
+	}
+	info, err := t.infoLocked()
+	if err != nil {
+		return err
+	}
+	all := info.UpvertedFiles()
+	if len(files) != len(all) {
+		return fmt.Errorf("got a choice for %d files, the torrent has %d", len(files), len(all))
+	}
+	var skip []int
+	var size int64
+	for i, on := range files {
+		if on {
+			size += all[i].Length
+		} else {
+			skip = append(skip, i)
+		}
+	}
+	if len(skip) == len(files) {
+		return errors.New("choose at least one file")
+	}
+	t.st.Skip, t.st.Size = skip, size
+	// Only while downloading: before that, run applies the choice itself.
+	if t.t != nil && t.t.Info() != nil && t.st.Status == download.StatusRunning {
+		applySkip(t.t, skip)
+	}
+	go t.changed()
+	return nil
+}
+
+// Files lists the files with how much of each is done.
+func (t *Torrent) Files() []download.FileSummary {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.filesLocked()
+}
+
 // infoLocked parses the kept info dict.
 func (t *Torrent) infoLocked() (*metainfo.Info, error) {
 	if t.info == nil {
@@ -527,7 +579,11 @@ func (t *Torrent) filesLocked() []download.FileSummary {
 		if info.IsDir() {
 			p = strings.Join(f.BestPath(), "/")
 		}
-		out = append(out, download.FileSummary{Path: p, Size: f.Length, Selected: !slices.Contains(t.st.Skip, i)})
+		fs := download.FileSummary{Path: p, Size: f.Length, Selected: !slices.Contains(t.st.Skip, i)}
+		if t.t != nil && t.t.Info() != nil && i < len(t.t.Files()) {
+			fs.Done = t.t.Files()[i].BytesCompleted()
+		}
+		out = append(out, fs)
 	}
 	return out
 }

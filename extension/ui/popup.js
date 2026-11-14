@@ -102,6 +102,19 @@ $("list").addEventListener("keydown", (e) => {
   } else return;
   e.preventDefault();
 });
+// Ctrl+A selects every row, Ctrl+F or "/" goes to the search, Ctrl+N opens the Add box.
+// In a field, Ctrl+A and "/" stay the field's own.
+document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || openMenu || e.altKey) return;
+  const inField = e.target.closest && e.target.closest("input, textarea, select, [contenteditable]");
+  const ctrl = (e.ctrlKey || e.metaKey) && !e.shiftKey;
+  const k = e.key.toLowerCase();
+  if (ctrl && k === "n") openAdd(true);
+  else if (ctrl && k === "f" || !ctrl && !e.ctrlKey && e.key === "/" && !inField) { $("search").focus(); $("search").select(); }
+  else if (ctrl && k === "a" && !inField) { for (const id of shown.flat()) selected.add(id); removing = false; if (latest.state) renderDownloads(latest.state); }
+  else return;
+  e.preventDefault();
+});
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || e.defaultPrevented || openMenu) return;
   if (detail.id) closeDetail();
@@ -111,7 +124,7 @@ document.addEventListener("keydown", (e) => {
 // each sends one request for every selected download that pick takes, at once.
 async function each(method, params, pick, okText) {
   const ds = picked().filter(pick || (() => true));
-  await Promise.all(ds.map((d) => call(method, { id: d.id, ...params }).catch((err) => toast(err.message))));
+  await Promise.all(ds.map((d) => call(method, { id: d.id, ...params }).catch((err) => toast(err.message, true))));
   if (okText && ds.length) toast(okText);
 }
 function removeSelected() {
@@ -119,8 +132,43 @@ function removeSelected() {
   if (!ds.length) return;
   if (ds.some((d) => d.partialFile) && !removing) { removing = true; return renderSelBar(); }
   removing = false;
-  each("remove", { deleteFile: false }, null, `${plural(ds.length, "download")} removed from the list (files kept)`);
+  removeWithUndo(ds.map((d) => d.id));
 }
+
+// removeWithUndo takes the downloads off the list at once and says so with an
+// Undo; the engine is asked to remove them (files kept) when the note ends.
+// Closing the popup first counts as keeping the removal. Undo only brings the
+// rows back: until then the engine still has them.
+const hiding = new Set();
+let undoing = null; // { ids, timer, node }
+function removeWithUndo(ids) {
+  if (undoing) flushUndo();
+  const text = ids.length === 1 ? "Removed from the list (file kept)" : `${plural(ids.length, "download")} removed from the list (files kept)`;
+  for (const id of ids) hiding.add(id);
+  const node = el("div", { class: "toast show undo", role: "status" }, text,
+    el("button", { class: "small", onclick: () => {
+      for (const id of ids) hiding.delete(id);
+      endUndo();
+      if (latest.state) renderDownloads(latest.state);
+    } }, "Undo"));
+  document.body.append(node);
+  undoing = { ids, node, timer: setTimeout(flushUndo, 8000) };
+  if (latest.state) renderDownloads(latest.state);
+}
+function endUndo() {
+  if (!undoing) return;
+  clearTimeout(undoing.timer);
+  undoing.node.remove();
+  undoing = null;
+}
+function flushUndo() {
+  if (!undoing) return;
+  const { ids } = undoing;
+  endUndo();
+  Promise.all(ids.map((id) => call("remove", { id, deleteFile: false }).catch((err) => toast(err.message, true))))
+    .finally(() => { for (const id of ids) hiding.delete(id); });
+}
+addEventListener("pagehide", flushUndo);
 // The selected queued downloads start next, in the order they are listed.
 function startNext() {
   for (const d of picked().filter((x) => x.status === "queued").reverse()) moveDownload(d.id, "first");
@@ -129,12 +177,12 @@ function startNext() {
 function renderSelBar() {
   const bar = $("selBar");
   const ds = picked();
-  bar.hidden = ds.length < 2 && !removing;
+  bar.hidden = !ds.length && !removing;
   if (bar.hidden) return;
   const can = (k) => ds.some((d) => d.actions && d.actions[k]);
   const button = (label, go, cls) => el("button", { class: "small " + (cls || ""), onclick: go }, label);
   const clear = iconButton("close", "Clear the selection", () => { selected.clear(); removing = false; renderDownloads(latest.state); });
-  fresh(bar, [ds.length, removing, can("pause"), can("resume"), ds.some((d) => d.status === "queued")], () => (removing ? [
+  fresh(bar, [ds.length, removing, can("pause"), can("resume"), ds.some((d) => d.status === "queued"), ds.some((d) => d.partialFile)], () => (removing ? [
     el("span", { class: "grow" }, `Remove ${plural(ds.length, "download")}?`),
     button("Keep files", () => { removing = false; each("remove", { deleteFile: false }, null, "Removed from the list (files kept)"); }, "primary"),
     button("Delete unfinished files", () => { removing = false; each("remove", { deleteFile: true }, null, "Removed, unfinished files deleted"); }, "danger"),
@@ -143,8 +191,8 @@ function renderSelBar() {
     el("span", { class: "grow" }, `${ds.length} selected`),
     can("pause") ? button("Pause", () => each("pause", {}, (d) => d.actions && d.actions.pause)) : null,
     can("resume") ? button("Resume", () => each("resume", {}, (d) => d.actions && d.actions.resume)) : null,
-    ds.some((d) => d.status === "queued") ? button("Start next", startNext) : null,
-    button("Remove…", removeSelected),
+    ds.some((d) => d.status === "queued") ? button("Move to top", startNext) : null,
+    button(ds.some((d) => d.partialFile) ? "Remove…" : "Remove", removeSelected),
     clear,
   ].filter(Boolean)));
 }
@@ -187,12 +235,14 @@ function renderStrip(s) {
   fresh($("strip"), ifs.map((i) => [i.id, i.name, Math.round((i.speed || 0) / 1e5), idle(i), busy.has(i.id), speedUnitLabel()]), () => ifs.map((i, n) => {
     const sq = el("i", { class: "dot" });
     sq.style.color = ifaceHue(i.id, s);
-    const said = idle(i) ? "idle" : fmtSpeed(i.speed || 0) + (busy.has(i.id) ? ", server busy" : "");
-    return el("button", { class: "chip" + (idle(i) ? " idle" : ""), title: `${i.name}: ${said}`, "aria-label": `${i.name}, ${said}. Open Connections`,
+    // Busy is a ring on the square, as a row's busy connection tile; the word stays in the label.
+    const isBusy = busy.has(i.id), isIdle = idle(i) && !isBusy;
+    const said = isIdle ? "idle" : fmtSpeed(i.speed || 0) + (isBusy ? ", server busy" : "");
+    return el("button", { class: "chip" + (isBusy ? " busy" : isIdle ? " idle" : ""), title: `${i.name}: ${said}`, "aria-label": `${i.name}, ${said}. Open Connections`,
       onclick: () => { Host.openSettings("#connections"); if (!document.body.classList.contains("windowed")) window.close(); } },
-      sq, el("span", { class: "nm" }, i.name), el("span", { class: "nm short" }, shortName(i.name)),
-      el("span", { class: "muted num" }, idle(i) ? "idle" : stripSpeed(i.speed || 0) + (n === 0 ? " " + speedUnitLabel() : "")),
-      busy.has(i.id) ? el("span", { class: "busy" }, "busy") : null);
+      sq, el("span", { class: "nm" }, i.name), el("span", { class: "nm short" }, i.windowsName && i.windowsName !== i.name ? i.name : shortName(i.name)),
+      el("span", { class: "muted num" }, isIdle ? "idle" : stripSpeed(i.speed || 0) + (n === 0 ? " " + speedUnitLabel() : "")),
+      isBusy ? el("span", { class: "busy" }, "busy") : null);
   }));
   fitStrip();
 }
@@ -235,6 +285,11 @@ function openAdd(on) {
 }
 $("toggleAdd").onclick = () => openAdd($("addBox").hidden);
 $("addBox").addEventListener("keydown", (e) => {
+  if (e.target === $("addUrl") && addSubmits(e, $("addUrl").value)) {
+    e.preventDefault();
+    $("addBox").requestSubmit();
+    return;
+  }
   if (e.key !== "Escape") return;
   e.preventDefault();
   openAdd(false);
@@ -257,7 +312,10 @@ $("addUrl").addEventListener("input", () => {
   const v = addView($("addUrl").value);
   $("addPage").hidden = !v.page;
   $("addVpn").hidden = !v.vpn;
+  $("addVpn").options[0].textContent = `As in settings (${VPN_TEXT[latest.settings.vpnHttp] || "Off"})`;
   $("addGo").textContent = v.label;
+  $("addOptions").hidden = v.count + v.bad > 1; // a name and a checksum belong to one link
+  $("addDup").hidden = true;
   $("addUrl").rows = Math.min(5, Math.max(2, $("addUrl").value.split(/\n/).length)); // grows with the links, to five lines
   $("addHint").textContent = v.bad ? `${plural(v.bad, "line")} that isn't a link will stay in the box.` : v.count ? "" : "Paste links here, or anywhere on the list with Ctrl+V.";
   const c = addFolderChoice("", latest.settings);
@@ -268,57 +326,150 @@ $("addUrl").addEventListener("input", () => {
 });
 // Several links, one per line: each is added as if alone. Lines that fail
 // stay in the box, so they can be fixed and added again.
+// A link already in the list is not added: the box asks (Show it, Add again).
+let addAgain = false; // set by "Add again": the links go in even if the list has them
 $("addBox").addEventListener("submit", async (e) => {
   e.preventDefault();
+  const again = addAgain;
+  addAgain = false;
+  $("addDup").hidden = true;
   const { urls, bad } = addLines($("addUrl").value);
   const many = urls.length + bad.length > 1;
   const failed = bad.map((b) => ({ ...b, error: "not a link" }));
+  const dups = [];
   for (const { line, url } of urls) {
-    const add = { url, pageUrl: $("addPage").value, vpn: $("addVpn").value };
+    const add = { url, pageUrl: $("addPage").value, vpn: $("addVpn").value, checkDup: !again };
+    if (!many && $("addName").value.trim()) add.filename = $("addName").value.trim();
+    if (!many && $("addSum").value.trim()) add.checksum = $("addSum").value.trim();
     if (Host.userAgent !== null) add.userAgent = Host.userAgent; // else the engine uses the browser's
     if (addDir.get()) add.dir = addDir.get(); // else the download folder
     const folder = addFolderParam(!$("addFolderRow").hidden && zipLine(url), $("addFolder").checked, latest.settings);
     if (folder !== undefined) add.folder = folder;
     try {
-      await call("add", add);
+      const r = await call("add", add);
+      if (r && r.duplicate) dups.push({ line, url, id: r.id });
     } catch (err) {
       failed.push({ line, url, error: err.message });
     }
   }
-  const added = urls.length + bad.length - failed.length;
-  if (failed.length) {
-    failed.sort((a, b) => a.line - b.line);
-    $("addUrl").value = failed.map((f) => f.url).join("\n");
-    const why = failed.map((f) => (many ? `Line ${f.line}: ${f.error}` : f.error)).join(" · ");
-    toast(added ? `${plural(added, "download")} added. ${why}` : why);
+  const added = urls.length + bad.length - failed.length - dups.length;
+  if (failed.length || dups.length) {
+    $("addUrl").value = [...failed, ...dups].sort((a, b) => a.line - b.line).map((f) => f.url).join("\n");
+    if (failed.length) {
+      const why = failed.map((f) => (many ? `Line ${f.line}: ${f.error}` : f.error)).join(" · ");
+      toast(added ? `${plural(added, "download")} added. ${why}` : why, true);
+    } else if (added) toast(`${plural(added, "download")} added`);
+    if (dups.length) showDup(dups);
     return;
   }
   toast(added === 1 ? "Added" : `${added} downloads added`);
   $("addUrl").value = "";
-  $("addPage").value = "";
+  $("addPage").value = $("addName").value = $("addSum").value = "";
   addDir.reset();
   $("addUrl").dispatchEvent(new Event("input"));
   openAdd(false);
 });
 
+function showDup(dups) {
+  const one = dups.length === 1;
+  $("addDup").replaceChildren(el("span", {}, one ? "Already in the list." : `${dups.length} links are already in the list.`),
+    one ? el("button", { type: "button", class: "small", onclick: () => {
+      openAdd(false);
+      showDetail(dups[0].id);
+      const c = cards.get(dups[0].id);
+      if (c) c.root.scrollIntoView({ block: "nearest" });
+    } }, "Show it") : null,
+    el("button", { type: "button", class: "small", onclick: () => { addAgain = true; $("addBox").requestSubmit(); } }, "Add again"));
+  $("addDup").hidden = false;
+}
+
+// Local .torrent and Metalink files: from the File button or dropped on the list.
+// Their bytes go to the engine as base64.
+async function addFiles(files) {
+  let added = 0, failed = false;
+  for (const f of files) {
+    try {
+      const why = addFileCheck(f.name, f.size);
+      if (why) throw new Error(why);
+      const file = await new Promise((ok, no) => {
+        const r = new FileReader();
+        r.onload = () => ok(String(r.result).split(",")[1]);
+        r.onerror = () => no(new Error(`${f.name} could not be read`));
+        r.readAsDataURL(f);
+      });
+      const add = { file, fileName: f.name, vpn: $("addVpn").value };
+      if (addDir.get()) add.dir = addDir.get();
+      await call("add", add);
+      added++;
+    } catch (err) {
+      failed = true;
+      toast(err.message, true);
+    }
+  }
+  if (added && !failed) toast(added === 1 ? "Added" : `${added} downloads added`);
+}
+$("addFileBtn").onclick = () => {
+  // Firefox closes the toolbar popup when a file dialog opens, so the popup hands over to a tab.
+  const inPopup = !document.body.classList.contains("windowed") && !new URLSearchParams(location.search).has("tab") && typeof browser !== "undefined";
+  if (!inPopup) return $("addFile").click();
+  Host.openUrl(new URL("popup.html?tab#addfile", location.href).href);
+  window.close();
+};
+if (location.hash === "#addfile") openAdd(true);
+$("addFile").onchange = () => { addFiles([...$("addFile").files]); $("addFile").value = ""; };
+// Dropped on the page: files are added, links go into the Add box. A row being dragged is the queue's own.
+const dropsHere = (e) => latest.state && !e.dataTransfer.types.includes(DRAG_TYPE)
+  && ["Files", "text/uri-list", "text/plain"].some((t) => e.dataTransfer.types.includes(t));
+document.addEventListener("dragover", (e) => {
+  if (!dropsHere(e)) return;
+  e.preventDefault();
+  document.body.classList.add("dropping");
+});
+document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dropping"); });
+document.addEventListener("drop", (e) => {
+  document.body.classList.remove("dropping");
+  if (!dropsHere(e)) return;
+  e.preventDefault();
+  if (e.dataTransfer.files.length) return addFiles([...e.dataTransfer.files]);
+  const text = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain")).replace(/^#.*$/gm, "").trim();
+  if (!addView(text).count) return;
+  const box = $("addUrl");
+  box.value = [box.value.trim(), text].filter(Boolean).join("\n");
+  openAdd(true);
+  box.dispatchEvent(new Event("input"));
+});
+
 // The list's sections (lib/rows.js): a heading with how many it
-// holds, which folds its rows away. Folded ones are remembered in this browser.
-const FOLDED = "dms.foldedSections";
-const folded = new Set((() => { try { return JSON.parse(localStorage.getItem(FOLDED)) || []; } catch { return []; } })());
+// holds, which folds its rows away. Folded ones are kept in the engine's settings (foldedSections), shared by the popup and the window.
+const folded = new Set();
+let foldWrites = 0; // while one is on its way the engine's older list isn't taken back
+function syncFolded(settings) {
+  if (foldWrites || !settings) return;
+  folded.clear();
+  for (const n of settings.foldedSections || []) folded.add(n);
+}
 const heads = new Map(); // section name -> { root, count, button }
 function sectionHead(name) {
   let h = heads.get(name);
   if (!h) {
     const button = el("button", { onclick: () => {
       folded.has(name) ? folded.delete(name) : folded.add(name);
-      try { localStorage.setItem(FOLDED, JSON.stringify([...folded])); } catch { /* until the page closes */ }
+      foldWrites++;
+      call("setSettings", { foldedSections: [...folded] }).catch(() => {}).finally(() => foldWrites--);
       renderDownloads(latest.state);
     } });
     button.className = name === "Needs you" ? "mk bad" : "mk";
-    h = { button, count: el("span", { class: "count num" }) };
+    h = { button, count: el("span", { class: "count num" }),
+      // How many run at once, a link to the setting.
+      limit: name === "Queue" ? el("a", { href: "#downloads", title: "Downloads at once, in the settings", onclick: (e) => {
+        e.preventDefault();
+        Host.openSettings("#downloads");
+        if (!document.body.classList.contains("windowed")) window.close();
+      } }) : null };
     button.append(name, h.count, icon("chevron"));
     h.root = el("h2", { class: "sec" }, button,
-      name === "Finished" ? el("a", { href: "#", onclick: (e) => { e.preventDefault(); clearFinished(); } }, "Clear finished") : null);
+      name === "Finished" ? el("a", { href: "#", onclick: (e) => { e.preventDefault(); clearFinished(); } }, "Clear finished") : null,
+      h.limit);
     heads.set(name, h);
   }
   h.button.setAttribute("aria-expanded", String(!folded.has(name)));
@@ -351,9 +502,8 @@ function arrange(list, want) {
 }
 
 async function clearFinished() {
-  const done = (latest.state.downloads || []).filter(finished);
-  await Promise.all(done.map((d) => call("remove", { id: d.id, deleteFile: false }).catch(() => {})));
-  toast(done.length === 1 ? "1 finished download cleared (files kept)" : `${done.length} finished downloads cleared (files kept)`);
+  const done = (latest.state.downloads || []).filter((d) => finished(d) && !hiding.has(d.id));
+  if (done.length) removeWithUndo(done.map((d) => d.id));
 }
 
 const groupCards = new Map(); // group id (a Metalink or a split archive) -> card controller
@@ -364,6 +514,7 @@ $("search").addEventListener("input", () => { if (latest.state) renderDownloads(
 let announced = null; // id -> status last seen, for the screen reader's news
 
 function renderDownloads(state) {
+  if (hiding.size) state = { ...state, downloads: (state.downloads || []).filter((d) => !hiding.has(d.id)) };
   const list = $("list");
   const all = state.downloads || [];
   const news = announcements(announced, all);
@@ -384,6 +535,7 @@ function renderDownloads(state) {
   for (const s of res.sections) {
     const head = sectionHead(s.name);
     head.count.textContent = s.count;
+    if (head.limit) head.limit.textContent = `${(latest.settings || {}).maxParallel || 1} at a time`;
     want.push(head.root);
     for (const row of s.rows) {
       let c;
@@ -454,7 +606,7 @@ function welcome(state, threshold) {
         try {
           const r = lineResults(await call("checkLines", {}));
           b.replaceWith(...[...r.lines, ...r.warnings].map((t) => el("div", {}, t)));
-        } catch (err) { b.disabled = false; toast(err.message); }
+        } catch (err) { b.disabled = false; toast(err.message, true); }
       } }, "Check lines") : null),
     el("div", { class: "go" }, el("button", { class: "primary", onclick: () => openAdd(true) }, "+ Add a link"),
       el("span", { class: "muted" }, "or ", el("kbd", {}, "Ctrl"), "+", el("kbd", {}, "V"), " anywhere here")),
@@ -473,35 +625,50 @@ function place(parent, node, index) {
   if (at !== node) parent.insertBefore(node, at || null);
 }
 
-// A line under the header when engine and extension may not work together.
+// A line under the header when engine and extension may not work together:
+// it says which is older and what to do for that one.
 function renderVersion(m) {
   const ext = Host.version;
   const clash = m.connected && versionsClash(m.engineVersion, ext);
   $("versionWarn").hidden = !clash;
-  if (clash) {
-    $("versionWarn").replaceChildren(`Engine v${m.engineVersion} and extension v${ext} may not work together: `,
-      link(RELEASES_URL, "update both"));
-  }
+  if (!clash) return;
+  $("versionWarn").replaceChildren(...(olderSide(m.engineVersion, ext) === "engine"
+    ? [`The engine (v${m.engineVersion}) is older than the extension (v${ext}), so they may not work together. Install the new engine from `, link(RELEASES_URL, "the release page"), "."]
+    : [`The extension (v${ext}) is older than the engine (v${m.engineVersion}), so they may not work together. Update it in Firefox: Add-ons and themes, Extensions, then Check for Updates.`]));
 }
 
-// A newer engine release, as the engine found it on GitHub (at most once a
-// day). Dismissed, it stays away until the next release; the choice is kept
-// in this browser only.
-const DISMISSED_UPDATE = "dms.dismissedUpdate";
-function dismissedUpdate() {
-  try { return localStorage.getItem(DISMISSED_UPDATE) || ""; } catch { return ""; }
-}
-function renderUpdate(u) {
+// The note under the header: once after an upgrade "Updated to vX: what's new"
+// (seenVersion), else a newer release as the engine found it on GitHub (at most
+// once a day). Closing either is kept in the engine's settings (seenVersion,
+// dismissedUpdate), so it stays closed in the popup and the window.
+const closedNotes = new Set(); // closed, though the engine hasn't said so yet
+let recordedSeen = "";
+function renderUpdate(m) {
   const note = $("updateNote");
-  const show = !!(u && u.version && u.version !== dismissedUpdate());
-  note.hidden = !show;
-  if (!show || note.dataset.version === u.version) return;
-  note.dataset.version = u.version;
-  note.replaceChildren(
-    el("span", {}, `DMS² v${u.version} is available: `, link(u.url, "see the release")),
-    iconButton("close", "Dismiss this update notice", () => {
-      try { localStorage.setItem(DISMISSED_UPDATE, u.version); } catch { /* shown again next time */ }
+  const s = m.settings;
+  const u = m.connected && m.state && m.state.update;
+  let want = null;
+  if (m.connected && s) {
+    const act = updateNote(s.seenVersion, m.engineVersion);
+    if (act === "record" && recordedSeen !== m.engineVersion) { // a first install has nothing to announce
+      recordedSeen = m.engineVersion;
+      call("setSettings", { seenVersion: m.engineVersion }).catch(() => {});
+    }
+    if (act === "show") {
+      want = { key: "seen" + m.engineVersion, text: [`Updated to v${m.engineVersion}: `, link(releaseNotesURL(RELEASES_URL, m.engineVersion), "what's new")], save: { seenVersion: m.engineVersion } };
+    } else if (u && u.version && u.version !== s.dismissedUpdate) {
+      want = { key: "new" + u.version, text: [`DMS² v${u.version} is available: `, link(u.url, "see the release")], save: { dismissedUpdate: u.version } };
+    }
+  }
+  if (want && closedNotes.has(want.key)) want = null;
+  note.hidden = !want;
+  if (!want || note.dataset.key === want.key) return;
+  note.dataset.key = want.key;
+  note.replaceChildren(el("span", {}, ...want.text),
+    iconButton("close", "Dismiss this note", () => {
+      closedNotes.add(want.key);
       note.hidden = true;
+      call("setSettings", want.save).catch(() => {});
     }));
 }
 
@@ -538,7 +705,8 @@ function render(m) {
   latest = m;
   renderConn(m);
   renderVersion(m);
-  renderUpdate(m.connected && m.state && m.state.update);
+  syncFolded(m.settings);
+  renderUpdate(m);
   // Connected, yet with an error: what is shown is out of date (see TOO_LONG in background/engine.js).
   $("staleWarn").hidden = !(m.connected && m.error);
   $("staleWarn").textContent = (m.connected && m.error) || "";
@@ -549,7 +717,7 @@ function render(m) {
       ? el("div", { class: "offline" }, field(true),
         el("div", { class: "big" }, "The download engine isn't installed."),
         el("div", {}, "DMS² needs its engine on this PC. Download the zip from the ", link(RELEASES_URL, "release page"),
-          ", extract it and run dms-engine.exe."))
+          " and run dms-engine.exe (extracting it is optional)."))
       : m.quit && Host.startEngine
       ? el("div", { class: "offline calm" }, field(true),
         el("div", { class: "big" }, "DMS² was quit from its tray icon."),
@@ -557,7 +725,7 @@ function render(m) {
         el("div", { class: "actions" }, el("button", { class: "primary", onclick: () => Host.startEngine() }, "Start DMS²")))
       : el("div", { class: "offline", role: "alert" }, field(true),
         el("div", { class: "big" }, "The download engine isn't reachable."),
-        el("div", {}, "Make sure DMS² is running in the tray, or run dms-engine.exe from the release zip again."),
+        el("div", {}, "Make sure DMS² is running in the tray. If it isn't, start it from the Start menu, or download it again from the ", link(RELEASES_URL, "release page"), "."),
         el("div", { class: "actions" },
           Host.startEngine ? el("button", { class: "primary", onclick: () => Host.startEngine() }, "Start DMS²") : null,
           el("button", { onclick: () => location.reload() }, "Check again")),
@@ -574,8 +742,8 @@ function render(m) {
     ? [el("b", {}, fmtSpeed(s.speed)), el("small", {}, `${fmtETA(s.eta)} left`)]
     : [el("small", {}, "Idle")]);
   const bulk = bulkActions(s.downloads || []);
-  $("pauseAll").hidden = !bulk.pauseAll;
-  $("resumeAll").hidden = !bulk.resumeAll;
+  $("pauseAll").disabled = !bulk.pauseAll; // a fixed pair: the toolbar keeps its width
+  $("resumeAll").disabled = !bulk.resumeAll;
   renderStrip(s);
   renderDownloads(s);
 }

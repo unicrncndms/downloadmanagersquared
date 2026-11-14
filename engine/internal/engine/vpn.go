@@ -43,11 +43,11 @@ func (e *Engine) tickVPN(now time.Time) {
 func (e *Engine) vpnIfacesLocked() []vpn.Iface {
 	var out []vpn.Iface
 	for id, ent := range e.ifaces {
-		out = append(out, vpn.Iface{ID: id, Name: ent.info.Name, Binding: ent.binding, Usable: ent.present && e.enabledLocked(ent)})
+		out = append(out, vpn.Iface{ID: id, Name: e.nameLocked(id, ent.info.Name), Binding: ent.binding, Usable: ent.present && e.enabledLocked(ent)})
 	}
 	for id, s := range e.settings.Interfaces {
 		if e.ifaces[id] == nil {
-			out = append(out, vpn.Iface{ID: id, Name: s.Name})
+			out = append(out, vpn.Iface{ID: id, Name: e.nameLocked(id, s.Name)})
 		}
 	}
 	return out
@@ -76,7 +76,7 @@ func (e *Engine) tunnelViewsLocked(tunnels []vpn.Status, speeds map[string]float
 		ent := e.ifaces[id]
 		name := id
 		if ent != nil {
-			name = ent.info.Name
+			name = e.nameLocked(id, ent.info.Name)
 		} else if s := e.settings.Interfaces[id]; s != nil && s.Name != "" {
 			name = s.Name
 		}

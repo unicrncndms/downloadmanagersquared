@@ -19,7 +19,8 @@ import (
 )
 
 type IfaceSettings struct {
-	Name          string `json:"name,omitempty"`    // last seen name, for display while absent
+	Name          string `json:"name,omitempty"`    // last seen Windows name, for display while absent
+	Label         string `json:"label,omitempty"`   // the name the user gave it; shown instead of Name
 	Enabled       *bool  `json:"enabled,omitempty"` // nil: default (on unless VPN)
 	Connections   int    `json:"connections,omitempty"`
 	Upload        *bool  `json:"upload,omitempty"`        // nil: default (on)
@@ -76,15 +77,18 @@ type Settings struct {
 	DownloadLimit      int64                     `json:"downloadLimit,omitempty"` // the same
 	ETAWindowSec       int                       `json:"etaWindowSec"`
 	DefaultConnections int                       `json:"defaultConnections"`
-	SeedRatio          float64                   `json:"seedRatio"`   // seed a torrent until uploaded/size reaches this; 0 = don't seed
-	TorrentPort        int                       `json:"torrentPort"` // where peers connect in, on every interface; picked once
-	VPNHTTP            paths.Mode                `json:"vpnHttp"`     // VPN mode an HTTP download gets unless chosen when added
-	VPNTorrent         paths.Mode                `json:"vpnTorrent"`  // the same for a torrent
-	PIARegion          string                    `json:"piaRegion"`   // "" = the lowest latency
-	VPNProvider        string                    `json:"vpnProvider"` // the settings page's provider choice: "", "conf" or "pia"
-	NotifyDone         bool                      `json:"notifyDone"`  // a balloon when a download finishes or fails
-	SpeedUnit          string                    `json:"speedUnit"`   // how speeds and limits are shown: SpeedBytes (MB/s) or SpeedBits (Mbit/s); stored limits are bytes per second either way
-	IPv6               bool                      `json:"ipv6"`        // Enable IPv6 (experimental); off: IPv4 only, no AAAA lookups, no IPv6 sockets
+	SeedRatio          float64                   `json:"seedRatio"`    // seed a torrent until uploaded/size reaches this; 0 = don't seed
+	TorrentPort        int                       `json:"torrentPort"`  // where peers connect in, on every interface; picked once
+	VPNHTTP            paths.Mode                `json:"vpnHttp"`      // VPN mode an HTTP download gets unless chosen when added
+	VPNTorrent         paths.Mode                `json:"vpnTorrent"`   // the same for a torrent
+	PIARegion          string                    `json:"piaRegion"`    // "" = the lowest latency
+	VPNProvider        string                    `json:"vpnProvider"`  // the settings page's provider choice: "", "conf" or "pia"
+	NotifyDone         bool                      `json:"notifyDone"`   // a balloon when a download finishes or fails
+	KeepAwake          bool                      `json:"keepAwake"`    // Windows stays awake while a download runs
+	SpeedUnit          string                    `json:"speedUnit"`    // how speeds and limits are shown: SpeedBytes (MB/s) or SpeedBits (Mbit/s); stored limits are bytes per second either way
+	IPv6               bool                      `json:"ipv6"`         // Enable IPv6 (experimental); off: IPv4 only, no AAAA lookups, no IPv6 sockets
+	NeverCapture       []string                  `json:"neverCapture"` // sites (host names) whose downloads the browser keeps; the extension checks it
+	Theme              string                    `json:"theme"`        // "" = follow the system, "light" or "dark"
 
 	// Download as folder
 	FolderDefault  bool     `json:"folderDefault"`        // new .zip, .7z and .rar downloads are one
@@ -97,6 +101,11 @@ type Settings struct {
 	// theme's as the extension last saw it, else the pages' own.
 	Accent      string `json:"accent,omitempty"`      // "" = follow Firefox
 	ThemeAccent string `json:"themeAccent,omitempty"` // "" = Firefox's theme has none
+
+	// What the downloads page remembers, shared by the popup and the window.
+	DismissedUpdate string   `json:"dismissedUpdate,omitempty"` // the release whose "is available" note was closed
+	SeenVersion     string   `json:"seenVersion,omitempty"`     // the engine version whose "Updated to" note was last closed
+	FoldedSections  []string `json:"foldedSections,omitempty"`  // list sections folded away
 }
 
 // clone is a copy that shares nothing with s, to read (and encode) after the
@@ -110,6 +119,8 @@ func (s Settings) clone() Settings {
 	}
 	s.Interfaces = ifs
 	s.FolderDirs = slices.Clone(s.FolderDirs)
+	s.NeverCapture = slices.Clone(s.NeverCapture)
+	s.FoldedSections = slices.Clone(s.FoldedSections)
 	return s
 }
 
@@ -180,8 +191,9 @@ func defaultSettings() Settings {
 		ArchiveKeeping:     download.KeepAuto,
 		SeedRatio:          1,
 		NotifyDone:         true,
+		KeepAwake:          true,
 		SpeedUnit:          SpeedBytes,
-		VPNHTTP:           paths.Off,
+		VPNHTTP:            paths.Off,
 		VPNTorrent:         paths.Off, // each new torrent asks first
 	}
 }
@@ -226,6 +238,10 @@ func (s *Settings) normalize() {
 			*c = ""
 		}
 	}
+	if s.Theme != "light" && s.Theme != "dark" {
+		s.Theme = ""
+	}
+	s.NeverCapture = cleanHosts(s.NeverCapture)
 	if s.TorrentPort < 1024 || s.TorrentPort > 65535 {
 		s.TorrentPort = pickTorrentPort(func() int { return 20000 + mrand.IntN(40000) })
 	}
@@ -317,4 +333,54 @@ func setAsideWithoutCookies(path string, b []byte) {
 	if err := os.Remove(path); err != nil {
 		log.Printf("setting aside %s: %v", path, err)
 	}
+}
+
+// cleanHosts is the sites as host names: lower case, without a scheme, path,
+// port or leading "www.", each once. Never nil, so it is stored as [].
+func cleanHosts(in []string) []string {
+	out := []string{}
+	for _, h := range in {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if _, rest, ok := strings.Cut(h, "://"); ok {
+			h = rest
+		}
+		h, _, _ = strings.Cut(h, "/")
+		h, _, _ = strings.Cut(h, ":")
+		h = strings.TrimPrefix(strings.Trim(h, "."), "www.")
+		if h != "" && !slices.Contains(out, h) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// checkSaveDir says why dir cannot be the download folder: it must exist and
+// accept a new file.
+func checkSaveDir(dir string) error {
+	if strings.TrimSpace(dir) == "" {
+		return errors.New("Enter a folder")
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return errors.New("That folder does not exist")
+	}
+	f, err := os.CreateTemp(dir, ".dms-write-test-*")
+	if err != nil {
+		return errors.New("DMS² cannot write to that folder")
+	}
+	f.Close()
+	os.Remove(f.Name())
+	return nil
+}
+
+// restored is s with the settings page's choices back at their defaults. Kept:
+// the connections, the main one, the VPN, IPv6, the torrent port and what the
+// downloads page remembers: they are not on that page, or were set up by hand.
+func (s Settings) restored() Settings {
+	d := defaultSettings()
+	d.Interfaces, d.MainInterface = s.Interfaces, s.MainInterface
+	d.VPNHTTP, d.VPNTorrent, d.VPNProvider, d.PIARegion = s.VPNHTTP, s.VPNTorrent, s.VPNProvider, s.PIARegion
+	d.IPv6, d.TorrentPort = s.IPv6, s.TorrentPort
+	d.ThemeAccent, d.DismissedUpdate, d.SeenVersion, d.FoldedSections = s.ThemeAccent, s.DismissedUpdate, s.SeenVersion, s.FoldedSections
+	d.FolderDir, d.FolderDirs = s.FolderDir, s.FolderDirs
+	return d
 }

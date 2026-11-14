@@ -104,3 +104,33 @@ func TestSetInterfaceColorIsValidated(t *testing.T) {
 		t.Fatal("two connections can't share a colour")
 	}
 }
+
+func TestLabelReplacesTheWindowsNameAndForgetDropsAnAbsentInterface(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	e.mu.Lock()
+	e.refreshInterfacesLocked([]netif.Interface{ifaceAt("eth", "Ethernet 3")})
+	e.mu.Unlock()
+	lbl := "  Office  "
+	e.setInterface(ifacePatch{ID: "eth", Label: &lbl})
+	if v := ifaceView(t, e, "eth"); v.Name != "Office" || v.WindowsName != "Ethernet 3" {
+		t.Fatalf("name = %q / %q, want Office / Ethernet 3", v.Name, v.WindowsName)
+	}
+	if err := e.forgetInterface("eth"); err == nil {
+		t.Fatal("forgot a connection that is in use")
+	}
+	e.mu.Lock()
+	e.refreshInterfacesLocked(nil) // it is gone
+	e.mu.Unlock()
+	if err := e.forgetInterface("eth"); err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.settings.Interfaces["eth"] != nil || e.ifaces["eth"] != nil {
+		t.Fatal("still remembered")
+	}
+}

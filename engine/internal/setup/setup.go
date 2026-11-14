@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -31,6 +32,17 @@ type Steps struct {
 	AddExtension func(winutil.Browser)    // opens the extension in that browser to add
 	GetFirefox   func()                   // opens Firefox's download page, when there is no browser for it
 	Uninstall    func()                   // removes the install again, when there is no browser for it
+	Version      string                   // shown in the footer
+	Connected    func() []string          // exes of the browsers whose extension has said hello to the installed engine; slow, runs off the window's thread
+	OpenFile     func()                   // opens the extension file, for a browser the window doesn't list
+	Remove       func(wipe bool) error    // uninstalling: removes the install (and the data, if wipe); off the window's thread
+	OpenAddons   func(winutil.Browser)    // uninstalling: opens the browser's add-ons page
+}
+
+// UninstallInfo is what the uninstall window tells the user.
+type UninstallInfo struct {
+	DataDir    string   // what "also delete settings" deletes
+	Unfinished []string // folders that hold unfinished downloads (.dms.part)
 }
 
 // Control IDs. IDOK and IDCANCEL are what Enter and Esc send.
@@ -44,9 +56,12 @@ const (
 	idAutostart  = 104
 	idGetFirefox = 105
 	idUninstall  = 106
+	idWipe       = 107
+	idOther      = 108
 	idBrowser    = 200 // + the browser's index
 
 	timerHover = 1
+	timerPoll  = 2
 
 	wmActivate = 0x0006
 )
@@ -64,12 +79,14 @@ const (
 	button kind = iota
 	primary
 	checkbox
+	link
 )
 
 // ctl is how to draw one of the window's buttons.
 type ctl struct {
 	kind    kind
 	checked bool
+	ok      bool // ticked: its text is in the ok colour
 	footer  bool // sits on the footer band
 }
 
@@ -107,6 +124,11 @@ var w struct {
 	installing                                bool
 	installErr                                chan error
 	installed                                 bool
+	removal                                   bool           // the uninstall window, not the setup window
+	close                                     windows.Handle // the finished page's Close button
+	connected                                 []string       // exes whose extension has said hello
+	polling                                   bool
+	hellos                                    chan []string
 	folderName                                string
 	dpi                                       int32
 }
@@ -119,6 +141,19 @@ func scaled(r rect) rect { return rect{px(r.left), px(r.top), px(r.right), px(r.
 // installed. defaults fills it in; the last part of defaults.Dir is the folder
 // Browse… adds to what the user picks. icon is ICO bytes holding one PNG image.
 func Run(defaults Choice, icon []byte, steps Steps) bool {
+	w.folderName = filepath.Base(defaults.Dir)
+	return run("DMS² setup", icon, steps, func() { choosePage(defaults) })
+}
+
+// RunUninstall shows the uninstall window and says whether it uninstalled.
+// The caller deletes the install's folder afterwards, as it holds the
+// running exe.
+func RunUninstall(icon []byte, steps Steps, info UninstallInfo) bool {
+	w.removal = true
+	return run("Uninstall DMS²", icon, steps, func() { uninstallPage(info) })
+}
+
+func run(title string, icon []byte, steps Steps, first func()) bool {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	modernControls()
@@ -132,7 +167,7 @@ func Run(defaults Choice, icon []byte, steps Steps) bool {
 			w.dpi = int32(d)
 		}
 	}
-	w.steps, w.folderName, w.installErr = steps, filepath.Base(defaults.Dir), make(chan error, 1)
+	w.steps, w.installErr, w.hellos = steps, make(chan error, 1), make(chan []string, 1)
 	w.ctls = map[windows.Handle]*ctl{}
 	w.fontBody, w.fontSmall = newFont(14, 400), newFont(13, 400)
 	w.fontLabel, w.fontTitle = newFont(13, 600), newFont(20, 600)
@@ -156,7 +191,7 @@ func Run(defaults Choice, icon []byte, steps Steps) bool {
 	ww, wh := r.right-r.left, r.bottom-r.top
 	sw, _, _ := pGetSystemMetrics.Call(0)
 	sh, _, _ := pGetSystemMetrics.Call(1)
-	main, _, _ := pCreateWindowEx.Call(wsExControlParent, uintptr(unsafe.Pointer(class.className)), str("Install downloadmanagersquared"),
+	main, _, _ := pCreateWindowEx.Call(wsExControlParent, uintptr(unsafe.Pointer(class.className)), str(title),
 		style, uintptr((int32(sw)-ww)/2), uintptr((int32(sh)-wh)/2), uintptr(ww), uintptr(wh), 0, 0, inst, 0)
 	if main == 0 {
 		return false
@@ -169,7 +204,7 @@ func Run(defaults Choice, icon []byte, steps Steps) bool {
 	if w.icon != 0 {
 		pSendMessage.Call(main, wmSetIcon, 1, uintptr(w.icon))
 	}
-	choosePage(defaults)
+	first()
 	pShowWindow.Call(main, 1) // SW_SHOWNORMAL
 	pSetForeground.Call(main)
 
@@ -190,16 +225,18 @@ func Run(defaults Choice, icon []byte, steps Steps) bool {
 
 // --- pages ---
 
+const adminNote = "If the folder needs administrator rights, Windows asks once, and shows “unknown publisher” because DMS² is not code-signed."
+
 // choosePage is the first page: where to install, and what else.
 func choosePage(d Choice) {
-	header("Install DMS²", "Downloads over all your connections at once.")
+	header("Install DMS²", "downloadmanagersquared: downloads over all your connections at once.")
 	addLabel(rect{pad, 100, width - pad, 120}, "Install folder", w.fontLabel, func() uint32 { return w.pal.text }, dtSingleLine)
 	w.dir = addField(rect{pad, 124, width - pad - 100, 156}, d.Dir, idDir, false)
 	addButton("Browse…", idBrowse, button, rect{width - pad - 92, 124, width - pad, 156})
 	w.note = len(w.labels)
 	addLabel(rect{pad, 162, width - pad, 196}, "", w.fontSmall, nil, dtWordBreak)
-	setNote("If the folder needs administrator rights, Windows asks for them once.", false)
-	y := int32(200)
+	setNote(adminNote, false)
+	y := int32(198)
 	for _, b := range []struct {
 		id   int
 		text string
@@ -209,9 +246,9 @@ func choosePage(d Choice) {
 		{idDesktop, "Add a shortcut on the desktop", d.Desktop},
 		{idAutostart, "Start with Windows (runs in the tray, next to the clock)", d.Autostart},
 	} {
-		h := addButton(b.text, b.id, checkbox, rect{pad - 2, y, width - pad, y + 28})
+		h := addButton(b.text, b.id, checkbox, rect{pad - 2, y, width - pad, y + 30})
 		w.ctls[h].checked = b.on
-		y += 30
+		y += 31
 	}
 	w.install = addButton("Install", idOK, primary, footerButton(1))
 	addButton("Cancel", idCancel, button, footerButton(0))
@@ -219,36 +256,43 @@ func choosePage(d Choice) {
 	pSendMessage.Call(uintptr(w.dir), emSetSel, 0, ^uintptr(0))
 }
 
-// maxBrowsers is how many browsers the finished page has room for.
-const maxBrowsers = 6
+// maxBrowsers is how many browsers the finished page has room for; the link
+// to the extension file covers the rest.
+const maxBrowsers = 4
 
-// donePage is the last page: the one step left, adding the extension to a
-// browser. Without a browser for it, it says so and offers Firefox or
-// uninstalling.
-func donePage() {
+// clearPage removes the page's controls, for the next page.
+func clearPage() {
 	for _, h := range w.children {
 		pDestroyWindow.Call(uintptr(h))
 	}
 	w.children, w.labels, w.fields, w.hover = nil, nil, nil, 0
 	w.ctls = map[windows.Handle]*ctl{}
+}
+
+// donePage is the last page: the one step left, adding the extension to a
+// browser. Without a browser for it, it says so and offers Firefox or
+// uninstalling.
+func donePage() {
+	clearPage()
 	w.done = true
 	w.browsers = w.steps.Browsers()
 	if len(w.browsers) > maxBrowsers {
 		w.browsers = w.browsers[:maxBrowsers]
 	}
 	text := func() uint32 { return w.pal.text }
-	header("DMS² is installed", "It runs in the tray, next to the clock.")
+	header("DMS² is installed", "It runs in the tray. If you do not see its icon, look behind the arrow next to the clock.")
 	var first windows.Handle
 	if len(w.browsers) == 0 {
 		addLabel(rect{pad, 100, width - pad, 160}, "DMS² works through Firefox or a browser based on it, such as LibreWolf, Waterfox or Floorp, "+
 			"and none is installed. Install one, then come back to this window.", w.fontBody, text, dtWordBreak)
 		first = addButton("Download Firefox", idGetFirefox, primary, rect{pad, 170, pad + 170, 202})
 		addButton("Uninstall DMS²", idUninstall, button, rect{pad + 178, 170, pad + 348, 202})
+		addButton("Other browser: open the extension file", idOther, link, rect{pad, 212, width - pad, 234})
 	} else {
-		addLabel(rect{pad, 100, width - pad, 140}, "One step left: add the DMS² extension to your browser. It takes over your downloads and shows them.",
+		addLabel(rect{pad, 100, width - pad, 138}, "One step left: add the DMS² extension to your browser. It takes over your downloads and shows them.",
 			w.fontBody, text, dtWordBreak)
 		const bw, gap = (width - 2*pad - 8) / 2, 8
-		y := int32(146)
+		y := int32(142)
 		for i, b := range w.browsers {
 			x := int32(pad + (i%2)*(bw+gap))
 			k := button
@@ -263,17 +307,122 @@ func donePage() {
 				y += 40
 			}
 		}
-		addLabel(rect{pad, y + 2, width - pad, y + 22}, "The browser asks once whether to add it.",
-			w.fontSmall, func() uint32 { return w.pal.muted }, dtSingleLine)
+		w.note = len(w.labels)
+		addLabel(rect{pad, y + 2, width - pad, y + 38}, "", w.fontSmall, nil, dtWordBreak)
+		setNote("The browser asks once whether to add it.", false)
+		addButton("Other browser: open the extension file", idOther, link, rect{pad, y + 40, width - pad, y + 62})
+		if w.steps.Connected != nil {
+			pSetTimer.Call(uintptr(w.main), timerPoll, 2000, 0)
+		}
 	}
-	addButton("Close", idCancel, button, footerButton(0))
+	w.close = addButton("Close", idCancel, button, footerButton(0))
 	invalidate(w.main)
 	pSetFocus.Call(uintptr(first))
+	tick()
+}
+
+// connectedTo is whether the extension in b has said hello. With one browser
+// listed, any hello is its: a Store install says another path.
+func connectedTo(b winutil.Browser) bool {
+	return len(w.connected) > 0 && len(w.browsers) == 1 || slices.ContainsFunc(w.connected, func(exe string) bool { return strings.EqualFold(exe, b.Exe) })
+}
+
+// tick marks the browsers whose extension has said hello, and then there is
+// nothing left to do: Close becomes Done, and the page says how to use it.
+func tick() {
+	any := false
+	for i, b := range w.browsers {
+		if h := byID(idBrowser + i); h != 0 && connectedTo(b) {
+			any = true
+			w.ctls[h].kind, w.ctls[h].ok = button, true
+			pSetWindowText.Call(uintptr(h), str("✓ Added to "+b.Name))
+			invalidate(h)
+		}
+	}
+	if any && w.close != 0 {
+		setNote("DMS² is connected. Download any large file, or right-click a link and choose “Download with DMS²”.", false)
+		w.ctls[w.close].kind = primary
+		pSetWindowText.Call(uintptr(w.close), str("Done"))
+		invalidate(w.close)
+	}
+}
+
+// uninstallPage is the whole uninstall question: what stays, what else to
+// delete.
+func uninstallPage(u UninstallInfo) {
+	header("Uninstall DMS²", "Downloaded files are kept.")
+	y := int32(100)
+	if len(u.Unfinished) > 0 {
+		list := u.Unfinished
+		more := ""
+		if len(list) > 2 {
+			list, more = list[:2], "\nand "+strconv.Itoa(len(u.Unfinished)-2)+" more"
+		}
+		addLabel(rect{pad, y, width - pad, y + 80}, "Unfinished downloads (.dms.part files) stay where they are, in:\n"+strings.Join(list, "\n")+more,
+			w.fontBody, func() uint32 { return w.pal.text }, dtWordBreak)
+		y += 84
+	}
+	h := addButton("Also delete settings, learned sites and VPN keys", idWipe, checkbox, rect{pad - 2, y, width - pad, y + 30})
+	w.note = len(w.labels)
+	addLabel(rect{pad, y + 32, width - pad, y + 68}, "", w.fontSmall, nil, dtWordBreak)
+	note := "They are in " + u.DataDir + "."
+	if len(u.Unfinished) > 0 {
+		note += " Unfinished downloads cannot be resumed without them."
+	}
+	setNote(note, false)
+	w.install = addButton("Uninstall", idOK, primary, footerButton(1))
+	addButton("Cancel", idCancel, button, footerButton(0))
+	pSetFocus.Call(uintptr(h))
+}
+
+// removedPage is the end of uninstalling: the extension is the browser's to
+// remove, so it names the browsers and opens their add-ons page.
+func removedPage(err error) {
+	clearPage()
+	w.done = true
+	w.browsers = w.steps.Browsers()
+	if len(w.browsers) > maxBrowsers {
+		w.browsers = w.browsers[:maxBrowsers]
+	}
+	sub := "Downloaded files are kept."
+	if err != nil {
+		sub = "Not everything could be removed: " + err.Error()
+	}
+	header("DMS² is uninstalled", sub)
+	if len(w.browsers) > 0 {
+		names := make([]string, len(w.browsers))
+		for i, b := range w.browsers {
+			names[i] = b.Name
+		}
+		addLabel(rect{pad, 100, width - pad, 138}, "The extension stays in "+strings.Join(names, ", ")+" until you remove it under Add-ons.",
+			w.fontBody, func() uint32 { return w.pal.text }, dtWordBreak)
+		const bw, gap = (width - 2*pad - 8) / 2, 8
+		y := int32(142)
+		for i, b := range w.browsers {
+			x := int32(pad + (i%2)*(bw+gap))
+			addButton("Open add-ons in "+b.Name, idBrowser+i, button, rect{x, y, x + bw, y + 32})
+			if i%2 == 1 {
+				y += 40
+			}
+		}
+	}
+	w.close = addButton("Close", idCancel, button, footerButton(0))
+	invalidate(w.main)
+	pSetFocus.Call(uintptr(w.close))
+}
+
+func footerLine() string {
+	v := "dev build"
+	if w.steps.Version != "" && w.steps.Version != "dev" {
+		v = "v" + w.steps.Version
+	}
+	return v + " · open source (MIT) · no account, no telemetry"
 }
 
 func header(title, sub string) {
 	addLabel(rect{68, 22, width - pad, 50}, title, w.fontTitle, func() uint32 { return w.pal.text }, dtSingleLine)
-	addLabel(rect{68, 50, width - pad, 72}, sub, w.fontBody, func() uint32 { return w.pal.muted }, dtSingleLine|dtEndEllipsis)
+	addLabel(rect{68, 50, width - pad, 94}, sub, w.fontBody, func() uint32 { return w.pal.muted }, dtWordBreak)
+	addLabel(rect{pad, height - footer + 14, pad + 252, height - 8}, footerLine(), w.fontSmall, func() uint32 { return w.pal.muted }, dtWordBreak)
 }
 
 // footerButton is the place of the i-th button from the right in the footer.
@@ -308,7 +457,7 @@ func child(class, text string, id int, style uint32, r rect) windows.Handle {
 
 func addButton(text string, id int, k kind, r rect) windows.Handle {
 	style := uint32(wsTabStop | bsOwnerDraw)
-	if k != checkbox || id == idStartMenu {
+	if k != checkbox || id == idStartMenu || id == idWipe {
 		style |= wsGroup
 	}
 	h := child("BUTTON", text, id, style, r)
@@ -338,8 +487,8 @@ func paint(c canvas) {
 	c.fill(rect{0, split, full.right, split + max(1, px(1))}, w.pal.line)
 
 	if w.done {
-		c.ellipse(float32(px(pad)), float32(px(26)), float32(px(32)), float32(px(32)), w.pal.ok)
-		c.check(float32(px(pad)), float32(px(26)), float32(px(32)), float32(px(3)), w.pal.panel,
+		c.roundRect(float32(px(pad)), float32(px(26)), float32(px(32)), float32(px(32)), float32(px(4)), w.pal.ok, 0, 0)
+		c.check(float32(px(pad)), float32(px(26)), float32(px(32)), float32(px(3)), w.pal.onAccent,
 			[3][2]float32{{0.28, 0.52}, {0.44, 0.67}, {0.72, 0.36}})
 	} else if w.icon != 0 {
 		pDrawIconEx.Call(uintptr(c.hdc), uintptr(px(pad)), uintptr(px(26)), uintptr(w.icon), uintptr(px(32)), uintptr(px(32)), 0, 0, 3 /* DI_NORMAL */)
@@ -354,7 +503,7 @@ func paint(c canvas) {
 		if windows.Handle(focus) == fl.edit {
 			stroke, sw = w.pal.accent, float32(px(2))
 		}
-		c.roundRect(float32(r.left), float32(r.top), float32(r.right-r.left), float32(r.bottom-r.top), float32(px(6)), w.pal.panel, stroke, sw)
+		c.roundRect(float32(r.left), float32(r.top), float32(r.right-r.left), float32(r.bottom-r.top), float32(px(4)), w.pal.panel, stroke, sw)
 	}
 }
 
@@ -370,7 +519,7 @@ func drawCtl(c canvas, d *drawItemStruct, k *ctl) {
 	pressed := d.itemState&odsSelected != 0
 	focused := d.itemState&odsFocus != 0 && d.itemState&odsNoFocusRect == 0
 	hover := w.hover == d.hwndItem && !disabled
-	radius, one := float32(px(6)), float32(max(1, px(1)))
+	radius, one := float32(px(4)), float32(max(1, px(1)))
 
 	switch k.kind {
 	case checkbox:
@@ -388,7 +537,7 @@ func drawCtl(c canvas, d *drawItemStruct, k *ctl) {
 				fill = shade(fill, 0.12)
 			}
 			c.roundRect(x, y, box, box, float32(px(4)), fill, 0, 0)
-			c.check(x, y, box, float32(px(2)), 0xffffff, [3][2]float32{{0.24, 0.52}, {0.42, 0.7}, {0.76, 0.3}})
+			c.check(x, y, box, float32(px(2)), w.pal.onAccent, [3][2]float32{{0.24, 0.52}, {0.42, 0.7}, {0.76, 0.3}})
 		default:
 			border := mix(w.pal.muted, w.pal.panel, 0.3)
 			if hover {
@@ -400,11 +549,22 @@ func drawCtl(c canvas, d *drawItemStruct, k *ctl) {
 		if disabled {
 			color = w.pal.muted
 		}
-		c.text(text(d.hwndItem), rect{px(32), 0, r.right, r.bottom}, w.fontBody, color, dtSingleLine|dtVCenter|dtEndEllipsis)
+		c.text(text(d.hwndItem), rect{px(32), int32(y) - px(1), r.right, r.bottom}, w.fontBody, color, dtWordBreak)
 		return
 
+	case link:
+		color := w.pal.accent
+		if hover {
+			color = shade(color, 0.12)
+		}
+		flags := uintptr(dtSingleLine | dtVCenter | dtEndEllipsis)
+		if focused {
+			c.roundRect(0, 0, wd, ht, radius, bg, w.pal.accent, float32(px(2)))
+		}
+		c.text(text(d.hwndItem), rect{px(2), 0, r.right, r.bottom}, w.fontBody, color, flags)
+
 	case primary:
-		fill, color := w.pal.accent, uint32(0xffffff)
+		fill, color := w.pal.accent, w.pal.onAccent
 		switch {
 		case disabled:
 			fill, color = w.pal.line, w.pal.muted
@@ -429,6 +589,9 @@ func drawCtl(c canvas, d *drawItemStruct, k *ctl) {
 			fill, border = w.pal.accentSoft, w.pal.accent
 		case hover:
 			border = w.pal.accent
+		}
+		if k.ok && !disabled {
+			color = w.pal.ok
 		}
 		sw := one
 		if focused {
@@ -502,6 +665,14 @@ func wndProc(hwnd windows.Handle, m uint32, wParam, lParam uintptr) uintptr {
 		}
 	case wmTimer:
 		switch wParam {
+		case timerPoll:
+			if w.done && !w.polling && w.steps.Connected != nil {
+				w.polling = true
+				go func() {
+					w.hellos <- w.steps.Connected()
+					pPostMessage.Call(uintptr(w.main), wmHello, 0, 0)
+				}()
+			}
 		case timerHover:
 			var pt [2]int32
 			pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
@@ -513,7 +684,7 @@ func wndProc(hwnd windows.Handle, m uint32, wParam, lParam uintptr) uintptr {
 		}
 		return 0
 	case wmActivate: // back from installing a browser, maybe
-		if wParam&0xffff != 0 && w.done && !slices.Equal(w.steps.Browsers(), w.browsers) {
+		if wParam&0xffff != 0 && w.done && !w.removal && !slices.Equal(w.steps.Browsers(), w.browsers) {
 			donePage()
 		}
 	case wmSettingChange: // maybe light or dark mode changed
@@ -524,6 +695,11 @@ func wndProc(hwnd windows.Handle, m uint32, wParam, lParam uintptr) uintptr {
 		}
 	case wmInstalled:
 		installDone()
+		return 0
+	case wmHello:
+		w.polling = false
+		w.connected = <-w.hellos
+		tick()
 		return 0
 	case wmClose:
 		if !w.installing {
@@ -546,19 +722,29 @@ func command(id int, code uint32) {
 		return
 	}
 	if i := id - idBrowser; i >= 0 && i < len(w.browsers) {
-		w.steps.AddExtension(w.browsers[i])
+		if w.removal {
+			w.steps.OpenAddons(w.browsers[i])
+		} else {
+			w.steps.AddExtension(w.browsers[i])
+		}
 		return
 	}
 	switch id {
 	case idBrowse:
 		browse()
-	case idStartMenu, idDesktop, idAutostart:
+	case idOther:
+		w.steps.OpenFile()
+	case idStartMenu, idDesktop, idAutostart, idWipe:
 		if h := byID(id); h != 0 {
 			w.ctls[h].checked = !w.ctls[h].checked
 			invalidate(h)
 		}
 	case idOK:
 		switch {
+		case w.removal && w.done:
+			pDestroyWindow.Call(uintptr(w.main))
+		case w.removal && !w.installing:
+			startRemove(checked(idWipe))
 		case w.done && len(w.browsers) > 0: // Enter: the first browser
 			w.steps.AddExtension(w.browsers[0])
 		case w.done:
@@ -612,9 +798,27 @@ func startInstall(c Choice) {
 		pEnableWindow.Call(uintptr(h), 0)
 	}
 	pSetWindowText.Call(uintptr(w.install), str("Installing…"))
-	setNote("Installing…", false)
+	if winutil.CanWrite(c.Dir) {
+		setNote("Installing… Cancel is off until the files are copied.", false)
+	} else {
+		setNote("Waiting for Windows… Approve its prompt to copy the files; Cancel is off until then.", false)
+	}
 	go func() {
 		w.installErr <- w.steps.Install(c)
+		pPostMessage.Call(uintptr(w.main), wmInstalled, 0, 0)
+	}()
+}
+
+// startRemove is startInstall for uninstalling.
+func startRemove(wipe bool) {
+	w.installing = true
+	for _, h := range w.children {
+		pEnableWindow.Call(uintptr(h), 0)
+	}
+	pSetWindowText.Call(uintptr(w.install), str("Uninstalling…"))
+	setNote("Uninstalling… Cancel is off until it is done.", false)
+	go func() {
+		w.installErr <- w.steps.Remove(wipe)
 		pPostMessage.Call(uintptr(w.main), wmInstalled, 0, 0)
 	}()
 }
@@ -623,6 +827,11 @@ func startInstall(c Choice) {
 // what went wrong.
 func installDone() {
 	w.installing = false
+	if w.removal { // a partly failed removal is still the end: the page says what is left
+		w.installed = true
+		removedPage(<-w.installErr)
+		return
+	}
 	if err := <-w.installErr; err != nil {
 		for _, h := range w.children {
 			pEnableWindow.Call(uintptr(h), 1)
@@ -651,7 +860,7 @@ func browse() {
 		p = filepath.Join(p, w.folderName)
 	}
 	pSetWindowText.Call(uintptr(w.dir), str(p))
-	setNote("If the folder needs administrator rights, Windows asks for them once.", false)
+	setNote(adminNote, false)
 }
 
 // existing is dir, or the nearest folder above it that exists.

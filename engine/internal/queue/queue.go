@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -59,6 +60,7 @@ type Queue struct {
 	order []string
 	dirty map[string]bool
 	held  map[string]bool // queued entries Schedule doesn't start (Hold); replaced whole, never changed
+	now   map[string]bool // entries started by hand (StartNow): they run beside the slots, not in them
 }
 
 // New is a queue saving under dir, holding loaded in the order they were
@@ -194,6 +196,25 @@ func (q *Queue) Hold(ids map[string]bool) {
 	q.mu.Unlock()
 }
 
+// StartNow starts the queued entry id at once, whatever the limit on how many
+// run: it runs beside the slots until it stops, and takes none from the others.
+func (q *Queue) StartNow(id string) error {
+	e, err := q.Get(id)
+	if err != nil {
+		return err
+	}
+	if e.Status() != download.StatusQueued || e.Running() {
+		return fmt.Errorf("only a queued download can start now")
+	}
+	q.mu.Lock()
+	if q.now == nil {
+		q.now = map[string]bool{}
+	}
+	q.now[id] = true
+	q.mu.Unlock()
+	return nil // the next Schedule starts it, after the VPN check
+}
+
 func (q *Queue) orderPath() string { return filepath.Join(q.dir, "order.json") }
 
 // Remove discards an entry and its saved state.
@@ -269,6 +290,7 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 	var holding []Entry                       // HTTP downloads holding a slot, oldest first
 	q.mu.Lock()
 	held := q.held
+	now := maps.Clone(q.now)
 	q.mu.Unlock()
 	for _, e := range q.List() {
 		if paths.For(e.VPN(), snap).Wait {
@@ -278,6 +300,18 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 			}
 		} else if e.WaitingForVPN() {
 			e.Resume() // a tunnel came up
+		}
+		if now[e.ID()] { // started by hand: it runs outside the count
+			if e.Running() {
+				continue
+			}
+			if e.Status() == download.StatusQueued {
+				e.Start()
+				continue
+			}
+			q.mu.Lock() // it stopped: its next run takes a slot like any
+			delete(q.now, e.ID())
+			q.mu.Unlock()
 		}
 		switch {
 		case e.Running():

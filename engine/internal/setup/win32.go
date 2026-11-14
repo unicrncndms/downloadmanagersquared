@@ -6,6 +6,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"downloadmanagersquared/engine/internal/mark"
 )
 
 // The Win32 the window needs, called directly.
@@ -84,6 +86,7 @@ const (
 	wmCtlColorEdit   = 0x0133
 	wmCtlColorStatic = 0x0138
 	wmInstalled      = 0x8000 + 1 // WM_APP+1: the install finished
+	wmHello          = 0x8000 + 2 // WM_APP+2: the engine answered which extensions have said hello
 	emSetSel         = 0x00B1
 	emSetMargins     = 0x00D3
 
@@ -179,16 +182,12 @@ func enabled(h windows.Handle) bool {
 	return r != 0
 }
 
-// iconHandle makes an icon of ICO bytes holding one PNG image.
+// iconHandle makes an icon from the nearest image of the ICO bytes.
 func iconHandle(ico []byte, size int32) windows.Handle {
-	if len(ico) < 22 {
+	img := mark.Pick(ico, int(size))
+	if len(img) == 0 {
 		return 0
 	}
-	off := int(uint32(ico[18]) | uint32(ico[19])<<8 | uint32(ico[20])<<16 | uint32(ico[21])<<24)
-	if off >= len(ico) {
-		return 0
-	}
-	img := ico[off:]
 	h, _, _ := pCreateIconFromRes.Call(uintptr(unsafe.Pointer(&img[0])), uintptr(len(img)), 1, 0x00030000, uintptr(size), uintptr(size), 0)
 	return windows.Handle(h)
 }

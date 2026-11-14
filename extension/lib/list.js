@@ -68,6 +68,7 @@ function group(d) {
 // and its icon. A queued one shows its place in the queue instead ("").
 function tileOf(d) {
   if (finished(d)) return { kind: "done", icon: "check" };
+  if (d.status === "choosing") return { kind: "pick", icon: "folder" }; // a first step, not a failure
   return [
     { kind: "need", icon: "alert" }, { kind: "run", icon: "down" }, { kind: "seed", icon: "up" },
     { kind: "", icon: "" }, { kind: "", icon: "pause" },
@@ -177,6 +178,7 @@ function predict(state, method, p) {
     case "resume": return map((d) => d === me && can("resume")(d), queued);
     case "pauseAll": return map(can("pause"), paused);
     case "resumeAll": return map(can("resume"), queued);
+    case "startNow": return map((d) => d === me && d.status === "queued", (d) => ({ ...d, status: "running", section: "active", label: "Downloading", plain: true, tone: "" }));
     case "remove": return me ? { ...state, downloads: ds.filter((d) => d !== me) } : state;
     case "setLimit": return map((d) => d === me, (d) => ({ ...d, limit: p.limit }));
     case "setFolder": {
@@ -212,7 +214,8 @@ function statusLine(d) {
   // A RAR's count of files is only known once it is done: until then, how many so far.
   const sub = f && f.on && f.into && f.of > 0 ? `${f.files.toLocaleString("en-US")} / ${f.of.toLocaleString("en-US")} files`
     : f && f.on && f.into && f.files > 0 ? `${f.files.toLocaleString("en-US")} files extracted`
-    : d.note && d.note !== "complete" ? d.note : "";
+    : d.note && d.note !== "complete" ? d.note
+    : d.status === "running" && d.limitedBy ? `limited to ${fmtSpeed(d.limitedTo)} by ${d.limitedBy}` : "";
   return { left, right, sub, error: d.error || "" };
 }
 
@@ -344,15 +347,38 @@ function logLines(events, nameOf) {
   });
 }
 
+// STATE_WORDS are the search words "is:failed" and the like: the state a
+// download has, whatever the section it sits in.
+const STATE_WORDS = {
+  failed: (d) => d.status === "failed",
+  paused: (d) => d.status === "paused",
+  queued: (d) => d.status === "queued",
+  running: (d) => d.status === "running",
+  done: (d) => finished(d),
+};
+
 // matchesSearch is the downloads list's filter box: the words typed, in any
 // case, found in the file name, the source link's host, the status badge or
-// the Metalink's name. An empty box matches everything.
+// the Metalink's name. An empty box matches everything. "is:failed", "is:paused",
+// "is:queued", "is:running" and "is:done" take a state instead (several: any
+// of them); with other words, both must hold.
 function matchesSearch(d, query) {
-  const q = String(query || "").trim().toLowerCase();
+  const words = String(query || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const states = words.filter((w) => w.startsWith("is:") && STATE_WORDS[w.slice(3)]).map((w) => w.slice(3));
+  if (states.length && !states.some((s) => STATE_WORDS[s](d))) return false;
+  const q = words.filter((w) => !(w.startsWith("is:") && STATE_WORDS[w.slice(3)])).join(" ");
   if (!q) return true;
   let host = "";
   try { host = new URL(d.url).hostname; } catch { /* a magnet link has none */ }
   return [d.filename, host, d.label, d.groupName].some((v) => v && String(v).toLowerCase().includes(q));
+}
+
+// errorSource is the connection a download's error belongs to, so the row can
+// lead with its dot and name: the one whose own error is the download's, else
+// the only one that has an error. "" when it can't say.
+function errorSource(d) {
+  const ids = Object.keys(d.links || {}).filter((id) => d.links[id].error);
+  return ids.find((id) => d.links[id].error === d.error) || (ids.length === 1 ? ids[0] : "");
 }
 
 // addLines splits Add download's box into one link per non-empty line, with
@@ -370,6 +396,23 @@ function addLines(text) {
     }
   });
   return { urls, bad };
+}
+
+// addFileCheck: why a local file can't be added, or "" when it can. The file
+// goes to the engine as base64 in one message, and Firefox takes 1 MB from an
+// extension to its host: 700 kB of file is 933 kB of base64.
+const MAX_ADD_FILE = 700000;
+function addFileCheck(name, size) {
+  if (!/\.(torrent|meta4|metalink)$/i.test(String(name))) return `${name}: only .torrent, .meta4 and .metalink files can be added`;
+  if (size > MAX_ADD_FILE) return `${name} is too big to add from here (over 700 kB). Put it on a web page and add its link instead.`;
+  return "";
+}
+
+// addSubmits: whether a key in the Add box adds the links. Ctrl+Enter always;
+// a plain Enter when the box holds one line (more lines: Enter is a new line).
+function addSubmits(e, text) {
+  if (e.key !== "Enter" || e.shiftKey || e.altKey || e.isComposing) return false;
+  return !!(e.ctrlKey || e.metaKey) || !/\n/.test(String(text || "").trim());
 }
 
 // addView is what the Add box shows for the text in it: how many links, and
@@ -432,6 +475,27 @@ function badgeOf(downloads) {
   return { text: n ? String(n) : "", color: "#2563eb" };
 }
 
+// fileFolders groups a torrent's files by their top folder, in order of first
+// appearance: [{ name, items: [file indexes] }], name "" for files at the top.
+// A torrent with no more than one such folder is not grouped (one entry, name "").
+function fileFolders(paths) {
+  const by = new Map();
+  paths.forEach((p, i) => {
+    const name = p.includes("/") ? p.slice(0, p.indexOf("/")) : "";
+    if (!by.has(name)) by.set(name, []);
+    by.get(name).push(i);
+  });
+  const named = [...by.keys()].filter(Boolean).length;
+  return named < 2 ? [{ name: "", items: paths.map((_, i) => i) }] : [...by].map(([name, items]) => ({ name, items }));
+}
+
+// pickTotal words what is ticked: "3 of 240 files · 1.2 GB".
+function pickTotal(sizes, ticked) {
+  let n = 0, bytes = 0;
+  sizes.forEach((s, i) => { if (ticked[i]) { n++; bytes += s; } });
+  return `${n} of ${sizes.length} files · ${fmtBytes(bytes)}`;
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { linesNote, finishedVerdict, finishedSummary, badgeOf, addLines, addView, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
+  module.exports = { fileFolders, pickTotal, addSubmits, linesNote, finishedVerdict, finishedSummary, badgeOf, addLines, addView, addFileCheck, matchesSearch, errorSource, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
 }

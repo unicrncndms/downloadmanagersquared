@@ -1,0 +1,300 @@
+<!doctype html>
+<!-- The Tiles direction: three ways to draw a download row and three headers, at popup width (480). Nothing here works.
+     ?m=rows or ?m=head shows one set. Shares ui.css: Rubik, the tokens, light and dark. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DMS² tiles mockups</title>
+<link rel="stylesheet" href="../ui/ui.css">
+<style>
+  body { margin: 0; padding: 24px; font-size: 13px; background: var(--bg); }
+  .mock > h1 { font-size: 20px; margin: 0 0 16px; }
+  .frames { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+  .v > h2 { font-size: 14px; margin: 0 0 2px; }
+  .v > p { margin: 0 0 8px; color: var(--muted); font-size: 12px; width: 480px; }
+  .frame { width: 480px; border: 1px solid var(--line); background: var(--bg); overflow: hidden; box-shadow: 0 10px 28px rgba(0, 0, 0, .14); }
+  .num { font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+  .warn { color: var(--warn); font-weight: 500; }
+  svg.i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .sq { display: inline-block; width: 9px; height: 9px; border-radius: 2px; background: currentColor; flex: none; }
+  .tb { width: 26px; height: 26px; padding: 0; display: inline-grid; place-items: center; border-radius: var(--r); flex: none; }
+  .tb.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .tb.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+  .tb.ghost:hover { border-color: var(--line); color: var(--text); }
+  kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; background: var(--panel); }
+
+  /* The file as squares. */
+  .grid { display: grid; grid-template: repeat(var(--rows, 3), auto) / repeat(var(--cols, 32), 1fr); grid-auto-flow: column; gap: var(--gap, 3px); }
+  .grid i { aspect-ratio: 1; border-radius: 2.5px; background: var(--bar); }
+  .grid i.got { background: currentColor; }
+  .grid i.now { background: currentColor; animation: pulse .9s ease-in-out infinite alternate; }
+  .grid.rest i.got { background: var(--muted); opacity: .6; }
+  @keyframes pulse { to { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .grid i.now { animation: none; } }
+
+  /* Status tile: what the download is doing, as a square with its icon or number. */
+  .st { width: 26px; height: 26px; border-radius: var(--r); display: grid; place-items: center; flex: none; }
+  .st.run { background: var(--accent); color: var(--on-accent); }
+  .st.idle { box-shadow: inset 0 0 0 2px var(--line); color: var(--muted); font-weight: 600; font-size: 12px; }
+  .st.seed { background: var(--accent-soft); color: var(--accent); }
+  .st.sm { width: 20px; height: 20px; font-size: 11px; }
+  .sec { display: flex; align-items: center; gap: 8px; margin: 12px 12px 6px; font-size: 12px; font-weight: 600; }
+  .mk { display: grid; grid-template-columns: 5px 5px; gap: 2px; }
+  .mk i { width: 5px; height: 5px; border-radius: 1px; background: var(--accent); }
+  .mk i:nth-child(n+3) { opacity: .35; }
+  .ct { min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--r); background: var(--bar); display: grid; place-items: center; font-size: 11px; font-weight: 500; }
+  .nm { font-weight: 500; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who { display: inline-flex; align-items: center; gap: 5px; }
+  /* A connection's mini tile: its colour, its count inside. */
+  .ct-tile { min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--r); background: currentColor; display: inline-grid; place-items: center; }
+  .ct-tile span { color: var(--on-accent); font-size: 11px; font-weight: 600; }
+
+  /* ---- Row 1: framed tile ---- */
+  .r1 { padding: 0 12px 8px; }
+  .r1 .row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 4px 10px; padding: 8px; margin-bottom: 6px;
+    border-radius: var(--r); background: var(--panel); border: 1px solid var(--line); }
+  .r1 .row .st { grid-row: span 2; }
+  .r1 .acts { display: flex; gap: 2px; }
+  .r1 .b2 { grid-column: 2 / -1; }
+  .r1 .foot { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 12px; }
+  .r1 .foot .right { margin-left: auto; font-weight: 600; }
+  .r1 .foot .right small { font-weight: 400; color: var(--muted); }
+  .r1 .row.one { align-items: center; padding: 5px 8px; }
+  .r1 .row.one .st { grid-row: auto; }
+
+  /* ---- Row 2: compact, no frame ---- */
+  .r2 { padding: 0 8px 8px; }
+  .r2 .row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; gap: 3px 10px; align-items: center; padding: 6px 4px; border-radius: var(--r); }
+  .r2 .row:hover { background: var(--panel); }
+  .r2 .row + .row { box-shadow: 0 -1px 0 var(--line); }
+  .r2 .row .grid { grid-column: 2 / 4; --rows: 2; --cols: 48; --gap: 2px; }
+  .r2 .row .sp { text-align: right; font-weight: 600; line-height: 1.2; }
+  .r2 .row .sp small { display: block; font-weight: 400; font-size: 11px; color: var(--muted); }
+  .r2 .row .acts { display: flex; }
+  .r2 .row .whos { display: flex; gap: 4px; align-items: center; }
+  .r2 .row .spd { grid-column: 4; grid-row: 2; }
+
+  /* ---- Row 3: one line of squares ---- */
+  .r3 { padding: 0 12px 8px; }
+  .r3 .row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 5px 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .r3 .row .st { grid-row: span 2; align-self: start; }
+  .r3 .l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .r3 .l1 .nm { flex: 1; }
+  .r3 .grid { --rows: 1; --cols: 40; --gap: 2px; }
+  .r3 .grid i { aspect-ratio: .6; border-radius: 2px; }
+  .r3 .sp { text-align: right; font-weight: 600; line-height: 1.2; grid-row: span 2; align-self: start; }
+  .r3 .sp small { display: block; font-weight: 400; font-size: 11px; color: var(--muted); }
+  .r3 .whos { display: flex; gap: 4px; }
+  .r3 .row.one .st { grid-row: auto; }
+
+  /* ---- Headers ---- */
+  .h { background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 14px 10px; }
+  .h .top { display: flex; align-items: center; gap: 8px; }
+  .logo { display: flex; align-items: center; gap: 2px; font-size: 16px; font-weight: 600; }
+  .logo .t2 { width: 20px; height: 20px; border-radius: var(--r); background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-size: 12px; margin-left: 2px; }
+  .tools { display: flex; gap: 6px; margin-top: 10px; }
+  .tools input { flex: 1; }
+  .sum { margin-left: auto; text-align: right; line-height: 1.1; }
+  .sum b { font-size: 18px; font-weight: 600; }
+  .sum small { display: block; font-size: 11px; color: var(--muted); }
+  /* H1: a tile per connection, its speed inside. */
+  .h1 .tiles { display: flex; gap: 6px; margin-left: auto; }
+  .h1 .tile { display: grid; grid-template-rows: 26px auto; justify-items: center; gap: 2px; font-size: 10px; color: var(--muted); }
+  .h1 .tile b { width: 28px; height: 26px; border-radius: var(--r); background: currentColor; display: grid; place-items: center; }
+  .h1 .tile b span { color: var(--on-accent); font-size: 11px; font-weight: 600; }
+  .h1 .tile.idle b { background: transparent; box-shadow: inset 0 0 0 2px currentColor; }
+  .h1 .tile.idle b span { color: inherit; }
+  .h1 .tile em { font-style: normal; color: var(--text); }
+  .h1 .sum { margin-left: 10px; }
+  /* H2: the connections as one bar of tiles, each as wide as its share. */
+  .h2 .sbar { display: flex; gap: 3px; margin-top: 10px; }
+  .h2 .seg { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 28px; padding: 0 8px; border-radius: var(--r);
+    background: currentColor; min-width: 0; }
+  .h2 .seg span { color: var(--on-accent); font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .h2 .seg b { color: var(--on-accent); font-size: 12px; font-weight: 600; }
+  .h2 .seg.idle { background: transparent; box-shadow: inset 0 0 0 2px currentColor; flex: none; }
+  .h2 .seg.idle span { color: var(--text); }
+  .h2 .seg .busy { background: var(--panel); color: var(--warn); border-radius: 3px; padding: 0 4px; font-size: 11px; font-weight: 600; }
+  /* H3: small tiles and names in a line, the sum big. */
+  .h3 .strip { display: flex; gap: 12px; margin-top: 8px; font-size: 12px; }
+  .h3 .strip > span { display: inline-flex; align-items: center; gap: 6px; }
+  .h3 .strip .t { width: 14px; height: 14px; border-radius: 3px; background: currentColor; }
+  .h3 .strip .idle .t { background: transparent; box-shadow: inset 0 0 0 2px currentColor; }
+  .h3 .strip em { font-style: normal; color: var(--text); }
+  .h3 .sum b { font-size: 22px; }
+</style>
+</head>
+<body>
+
+<section class="mock" id="rows">
+  <h1>Tiles · the download row</h1>
+  <div class="frames">
+    <div class="v">
+      <h2>1 · Framed tile</h2>
+      <p>Each download is a tile with a frame. Status tile left, 3 rows of squares, connections and speed under them. Clearest, tallest (about 84 px).</p>
+      <div class="frame r1">
+        <div class="sec"><span class="mk"><i></i><i></i><i></i><i></i></span>Downloading <span class="ct">2</span></div>
+        <div class="row">
+          <span class="st run" data-icon="down"></span><span class="nm">ubuntu-24.04.iso</span>
+          <span class="acts"><button class="tb ghost" data-icon="pause" title="Pause"></button><button class="tb ghost" data-icon="more" title="More"></button></span>
+          <div class="b2"><div class="grid" data-map="ubuntu" data-by="c0,c1"></div>
+            <div class="foot num"><span class="who"><i class="sq" style="color:var(--c0)"></i>Eth 4×</span><span class="who"><i class="sq" style="color:var(--c1)"></i>Wi‑Fi 2× <b class="warn">busy</b></span><span class="right">11.5 MB/s <small>39% · 5m 22s</small></span></div></div>
+        </div>
+        <div class="row">
+          <span class="st idle" data-icon="pause"></span><span class="nm">dataset-2026.tar</span>
+          <span class="acts"><button class="tb ghost" data-icon="play" title="Resume"></button><button class="tb ghost" data-icon="more" title="More"></button></span>
+          <div class="b2"><div class="grid rest" data-map="dataset" data-by="c0"></div><div class="foot num muted">Paused · 12% · 3.1 of 25 GB</div></div>
+        </div>
+        <div class="sec"><span class="mk"><i></i><i></i><i></i><i></i></span>Queue <span class="ct">2</span></div>
+        <div class="row one"><span class="st idle sm">1</span><span class="nm">holiday-video.rar</span><span class="acts"><span class="muted num" style="align-self:center;margin-right:6px">4.2 GB</span><button class="tb ghost" data-icon="more" title="More"></button></span></div>
+        <div class="row one"><span class="st idle sm">2</span><span class="nm">three.iso</span><span class="acts"><span class="muted num" style="align-self:center;margin-right:6px">6.1 GB</span><button class="tb ghost" data-icon="more" title="More"></button></span></div>
+      </div>
+    </div>
+
+    <div class="v">
+      <h2>2 · Compact tile</h2>
+      <p>No frame: rows split by a line. Small status tile, name, connection tiles with their counts inside, speed. Two long rows of squares. About 56 px.</p>
+      <div class="frame r2">
+        <div class="sec"><span class="mk"><i></i><i></i><i></i><i></i></span>Downloading <span class="ct">2</span></div>
+        <div class="row">
+          <span class="st run sm" data-icon="down"></span><span class="nm">ubuntu-24.04.iso</span>
+          <span class="whos num"><span class="ct-tile" style="color:var(--c0)" title="Ethernet, 4 connections"><span>4</span></span><span class="ct-tile" style="color:var(--c1)" title="Wi-Fi, 2 connections, server busy"><span>2</span></span><b class="warn" style="font-size:11px">busy</b></span>
+          <span class="acts"><button class="tb ghost" data-icon="pause" title="Pause"></button><button class="tb ghost" data-icon="more" title="More"></button></span>
+          <span></span><div class="grid" data-map="ubuntu" data-by="c0,c1"></div>
+          <span class="sp num spd">11.5 MB/s<small>39% · 5m 22s</small></span>
+        </div>
+        <div class="row">
+          <span class="st idle sm" data-icon="pause"></span><span class="nm">dataset-2026.tar</span><span></span>
+          <span class="acts"><button class="tb ghost" data-icon="play" title="Resume"></button><button class="tb ghost" data-icon="more" title="More"></button></span>
+          <span></span><div class="grid rest" data-map="dataset" data-by="c0"></div>
+          <span class="sp num spd muted" style="font-weight:400">Paused<small>12%</small></span>
+        </div>
+        <div class="sec"><span class="mk"><i></i><i></i><i></i><i></i></span>Queue <span class="ct">2</span></div>
+        <div class="row"><span class="st idle sm">1</span><span class="nm">holiday-video.rar</span><span class="muted num">4.2 GB</span><span class="acts"><button class="tb ghost" data-icon="more" title="More"></button></span></div>
+        <div class="row"><span class="st idle sm">2</span><span class="nm">three.iso</span><span class="muted num">6.1 GB</span><span class="acts"><button class="tb ghost" data-icon="more" title="More"></button></span></div>
+      </div>
+    </div>
+
+    <div class="v">
+      <h2>3 · One line of squares</h2>
+      <p>The file as a single line of tall squares under the name, like a ruler. Connection tiles beside the name, speed on the right. About 52 px.</p>
+      <div class="frame r3">
+        <div class="sec" style="margin-left:0"><span class="mk"><i></i><i></i><i></i><i></i></span>Downloading <span class="ct">2</span></div>
+        <div class="row">
+          <span class="st run" data-icon="down"></span>
+          <div class="l1"><span class="nm">ubuntu-24.04.iso</span><span class="whos"><span class="ct-tile" style="color:var(--c0)"><span>4</span></span><span class="ct-tile" style="color:var(--c1)"><span>2</span></span></span><b class="warn" style="font-size:11px">busy</b></div>
+          <span class="sp num">11.5 MB/s<small>39% · 5m 22s</small></span>
+          <div class="grid" data-map="ubuntu40" data-by="c0,c1"></div>
+        </div>
+        <div class="row">
+          <span class="st idle" data-icon="pause"></span>
+          <div class="l1"><span class="nm">dataset-2026.tar</span></div>
+          <span class="sp num muted" style="font-weight:400">Paused<small>12%</small></span>
+          <div class="grid rest" data-map="dataset40" data-by="c0"></div>
+        </div>
+        <div class="sec" style="margin-left:0"><span class="mk"><i></i><i></i><i></i><i></i></span>Queue <span class="ct">2</span></div>
+        <div class="row one"><span class="st idle sm">1</span><div class="l1"><span class="nm">holiday-video.rar</span></div><span class="muted num">4.2 GB</span></div>
+        <div class="row one"><span class="st idle sm">2</span><div class="l1"><span class="nm">three.iso</span></div><span class="muted num">6.1 GB</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mock" id="head" style="margin-top:40px">
+  <h1>Tiles · the header</h1>
+  <div class="frames">
+    <div class="v">
+      <h2>1 · Connection tiles</h2>
+      <p>A tile per connection with its speed inside, its name under it. The sum beside them.</p>
+      <div class="frame">
+        <div class="h h1">
+          <div class="top">
+            <span class="logo">DMS<span class="t2">2</span></span>
+            <div class="tiles num">
+              <span class="tile" style="color:var(--c0)"><b><span>7.1</span></b><em>Eth</em></span>
+              <span class="tile" style="color:var(--c1)"><b><span>4.4</span></b><em>Wi‑Fi <b class="warn" style="all:unset;color:var(--warn);font-weight:600">busy</b></em></span>
+              <span class="tile idle" style="color:var(--c2)"><b><span>–</span></b><em>VPN</em></span>
+            </div>
+            <div class="sum num"><b>11.5</b><small>MB/s · 5m 22s</small></div>
+          </div>
+          <div class="tools"><button class="tb primary" title="Add" data-icon="plus"></button><input placeholder="Search downloads"><button class="tb" title="Pause all" data-icon="pause"></button><button class="tb" title="Settings" data-icon="gear"></button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="v">
+      <h2>2 · Share bar of tiles</h2>
+      <p>The connections as one bar, each tile as wide as its share of the speed: the sum is drawn. Idle ones stay small and hollow.</p>
+      <div class="frame">
+        <div class="h h2">
+          <div class="top">
+            <span class="logo">DMS<span class="t2">2</span></span>
+            <div class="sum num"><b>11.5 MB/s</b><small>5m 22s left</small></div>
+            <button class="tb ghost" title="Settings" data-icon="gear"></button>
+          </div>
+          <div class="sbar num">
+            <span class="seg" style="color:var(--c0);flex:7.1"><span>Ethernet</span><b>7.1</b></span>
+            <span class="seg" style="color:var(--c1);flex:4.4"><span>Wi‑Fi <i class="busy" style="font-style:normal">busy</i></span><b>4.4</b></span>
+            <span class="seg idle" style="color:var(--c2)"><span>VPN idle</span></span>
+          </div>
+          <div class="tools"><button class="tb primary" title="Add" data-icon="plus"></button><input placeholder="Search downloads"><button class="tb" title="Pause all" data-icon="pause"></button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="v">
+      <h2>3 · Quiet line</h2>
+      <p>The sum big; the connections a line of small tiles with names and speeds, like today's strip.</p>
+      <div class="frame">
+        <div class="h h3">
+          <div class="top">
+            <span class="logo">DMS<span class="t2">2</span></span>
+            <div class="sum num"><b>11.5 MB/s</b><small>5m 22s left</small></div>
+            <button class="tb ghost" title="Settings" data-icon="gear"></button>
+          </div>
+          <div class="strip num">
+            <span style="color:var(--c0)"><i class="t"></i><em>Ethernet <span class="muted">7.1</span></em></span>
+            <span style="color:var(--c1)"><i class="t"></i><em>Wi‑Fi <span class="muted">4.4</span> <b class="warn">busy</b></em></span>
+            <span class="idle" style="color:var(--c2)"><i class="t"></i><em>VPN <span class="muted">idle</span></em></span>
+          </div>
+          <div class="tools"><button class="tb primary" title="Add" data-icon="plus"></button><input placeholder="Search downloads"><button class="tb" title="Pause all" data-icon="pause"></button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  // Same map format as the engine: letter on disk by connection a=0…, digit fetching now, "." missing.
+  const run = (on, now, off, who) => who.repeat(on) + now + ".".repeat(off);
+  const maps = {
+    ubuntu: run(9, "0", 6, "a") + run(7, "0", 8, "a") + run(8, "1", 7, "b") + run(5, "0", 10, "a") + run(6, "1", 9, "b") + run(2, "0", 13, "a"),
+    dataset: "a".repeat(12) + ".".repeat(84),
+    ubuntu40: run(4, "0", 2, "a") + run(3, "0", 3, "a") + run(3, "1", 3, "b") + run(2, "0", 4, "a") + run(2, "1", 4, "b") + run(1, "0", 4, "a"),
+    dataset40: "a".repeat(5) + ".".repeat(35),
+  };
+  for (const g of document.querySelectorAll(".grid")) {
+    const by = g.dataset.by.split(",");
+    for (const ch of maps[g.dataset.map]) {
+      const i = document.createElement("i");
+      if (ch >= "a" && ch <= "j") { i.className = "got"; i.style.color = `var(--${by[ch.charCodeAt(0) - 97]})`; }
+      else if (ch >= "0" && ch <= "9") { i.className = "now"; i.style.color = `var(--${by[+ch]})`; }
+      g.append(i);
+    }
+  }
+  const icons = {
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    pause: '<path d="M9 5v14M15 5v14"/>',
+    play: '<path d="M7 5l12 7-12 7z"/>',
+    more: '<circle cx="5" cy="12" r=".6"/><circle cx="12" cy="12" r=".6"/><circle cx="19" cy="12" r=".6"/>',
+    down: '<path d="M12 4v13M6 11l6 6 6-6M5 20h14"/>',
+  };
+  for (const e of document.querySelectorAll("[data-icon]")) e.innerHTML = `<svg class="i" viewBox="0 0 24 24">${icons[e.dataset.icon]}</svg>`;
+  const only = new URLSearchParams(location.search).get("m");
+  if (only) for (const s of document.querySelectorAll(".mock")) s.hidden = s.id !== only;
+</script>
+</body>
+</html>

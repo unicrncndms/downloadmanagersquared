@@ -324,7 +324,7 @@ func (l Layout) writeUninstallEntry(version string) error {
 	}
 	defer k.Close()
 	for name, v := range map[string]string{
-		"DisplayName":     "downloadmanagersquared (DMS²)",
+		"DisplayName":     "DMS²",
 		"DisplayVersion":  version,
 		"Publisher":       "downloadmanagersquared",
 		"DisplayIcon":     l.Engine(),

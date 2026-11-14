@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"downloadmanagersquared/engine/internal/download"
@@ -111,6 +112,16 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		return e.hello(c, p), nil
 	case "getState":
 		return e.Snapshot(), nil
+	case "extensionBrowsers": // the exes of the browsers whose extension has said hello; setup ticks them
+		e.mu.Lock()
+		out := []string{}
+		for _, cl := range e.clients {
+			if cl.extension && cl.browser != "" {
+				out = append(out, cl.browser)
+			}
+		}
+		e.mu.Unlock()
+		return out, nil
 	case "add":
 		p, err := decode[AddRequest](raw)
 		if err != nil {
@@ -124,8 +135,19 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			}
 		}
 		e.mu.Unlock()
+		if p.CheckDup && p.File == "" {
+			if id := e.findURL(p.URL); id != "" {
+				return map[string]any{"id": id, "duplicate": true}, nil
+			}
+		}
 		id, err := e.Add(p)
 		return map[string]string{"id": id}, err
+	case "startNow":
+		p, err := decode[idParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.queue.StartNow(p.ID)
 	case "pause", "resume", "remove", "retryLink", "showInFolder", "open", "deleteFile", "again":
 		p, err := decode[idParams](raw)
 		if err != nil {
@@ -218,6 +240,20 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, err
 		}
 		return nil, t.Choose(p.Files, dir)
+	case "setTorrentFiles":
+		p, err := decode[chooseParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		j, err := e.queue.Get(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		t, ok := j.(*torrent.Torrent)
+		if !ok {
+			return nil, fmt.Errorf("%q is not a torrent", p.ID)
+		}
+		return nil, t.SetFiles(p.Files)
 	case "torrentFiles":
 		p, err := decode[idParams](raw)
 		if err != nil {
@@ -227,7 +263,10 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		if err != nil {
 			return nil, err
 		}
-		files := j.Summary().Files
+		var files []download.FileSummary
+		if t, ok := j.(*torrent.Torrent); ok {
+			files = t.Files()
+		}
 		if files == nil {
 			files = []download.FileSummary{}
 		}
@@ -397,7 +436,18 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		if err != nil {
 			return nil, err
 		}
+		if p.SaveDir != nil {
+			if err := checkSaveDir(*p.SaveDir); err != nil {
+				return nil, err
+			}
+		}
 		return e.setSettings(p), nil
+	case "restoreSettings":
+		return e.restoreSettings(), nil
+	case "openLog":
+		return nil, openFile(filepath.Join(e.dir, "engine.log"))
+	case "openDataFolder":
+		return nil, openFile(e.dir)
 	case "setInterface":
 		p, err := decode[ifacePatch](raw)
 		if err != nil {
@@ -454,6 +504,14 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, err
 		}
 		return nil, e.removeTunnel(p.Iface)
+	case "forgetInterface":
+		p, err := decode[struct {
+			ID string `json:"id"`
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.forgetInterface(p.ID)
 	case "refreshInterfaces":
 		e.refreshInterfaces()
 		return nil, nil

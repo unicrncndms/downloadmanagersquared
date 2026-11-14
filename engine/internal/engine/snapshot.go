@@ -8,12 +8,14 @@ import (
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/paths"
+	"downloadmanagersquared/engine/internal/rate"
 	"downloadmanagersquared/engine/internal/vpn"
 )
 
 type IfaceView struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
+	WindowsName string   `json:"windowsName"` // the name Windows gives it; Name is the user's when set
 	Description string   `json:"description"`
 	IP          string   `json:"ip"` // IPv4, else IPv6
 	IP6         string   `json:"ip6,omitempty"`
@@ -92,6 +94,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	defer e.mu.Unlock()
 	for i := range sums {
 		sums[i].Actions.RecordRecipe = e.canRecordLocked(sums[i], browsers[i])
+		e.markLimitLocked(&sums[i], total, speeds)
 	}
 	now := time.Now()
 	e.cum += total * dt.Seconds()
@@ -121,12 +124,12 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	for id, ent := range e.ifaces {
 		var same []string
 		for _, other := range sameRouter[id] {
-			same = append(same, e.ifaces[other].info.Name)
+			same = append(same, e.nameLocked(other, e.ifaces[other].info.Name))
 		}
 		sort.Strings(same)
 		up, down := ent.shaper.Limits()
 		views = append(views, IfaceView{
-			ID: id, Name: ent.info.Name, Description: ent.info.Description, IP: ipText(ent.info.IP()), IP6: ipText(ent.info.IPv6),
+			ID: id, Name: e.nameLocked(id, ent.info.Name), WindowsName: ent.info.Name, Description: ent.info.Description, IP: ipText(ent.info.IP()), IP6: ipText(ent.info.IPv6),
 			Families: ent.info.Families(),
 			Present:  ent.present, Color: e.colorLocked(id), Enabled: e.enabledLocked(ent), VPN: ent.info.VPN,
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
@@ -145,6 +148,25 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	sort.Slice(tviews, func(i, j int) bool { return tviews[i].Name < tviews[j].Name })
 	views = append(views, tviews...)
 	e.snapshot = StateEvent{Downloads: sums, Groups: download.Groups(sums), Interfaces: views, PIA: e.vpn.PIA(), Speed: total, ETA: e.eta.Seconds(), Active: active, Update: e.updateViewLocked(), IPv6Only: e.ipv6Only}
+}
+
+// markLimitLocked names the limit holding the running download s back: its own,
+// then a connection's it fetches over, then the one for all connections.
+func (e *Engine) markLimitLocked(s *download.Summary, total float64, speeds map[string]float64) {
+	if s.Status != download.StatusRunning {
+		return
+	}
+	caps := []rate.Cap{{Name: "this download's limit", Limit: s.Limit, Speed: s.Speed}}
+	for id, l := range s.Links {
+		if ent := e.ifaces[id]; ent != nil && l.Speed > 0 {
+			_, down := ent.shaper.Limits()
+			caps = append(caps, rate.Cap{Name: e.nameLocked(id, ent.info.Name) + "'s limit", Limit: down, Speed: speeds[id]})
+		}
+	}
+	caps = append(caps, rate.Cap{Name: "the limit for all connections", Limit: e.settings.DownloadLimit, Speed: total})
+	if c, ok := rate.Binding(caps...); ok {
+		s.LimitedBy, s.LimitedTo = c.Name, c.Limit
+	}
 }
 
 func ipText(ip net.IP) string {

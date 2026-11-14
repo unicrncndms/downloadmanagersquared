@@ -10,7 +10,7 @@
 </head>
 <body>
   <header>
-    <h1 class="logo" aria-label="DMS²">DMS<span class="t2" aria-hidden="true">2</span></h1>
+    <h1 class="logo"><img src="../icons/icon.svg" alt="">DMS²</h1>
     <span id="conn" class="badge st dim">…</span>
     <nav class="tabs" id="pages" aria-label="Pages">
       <a class="tab" href="#connections">Connections</a>
@@ -19,11 +19,12 @@
     <nav class="sections" id="sections" aria-label="Sections">
       <a href="#connections" data-page="connections">Connections</a>
       <a href="#vpn" data-page="connections">VPN</a>
-      <a href="#downloads" data-page="settings">Downloads</a>
+      <a href="#downloads" data-page="settings">Saving and speed</a>
       <a href="#torrents" data-page="settings">Torrents</a>
       <a href="#sites" data-page="settings">Sites</a>
       <a href="#appearance" data-page="settings">Appearance</a>
       <a href="#startup" data-page="settings">Startup</a>
+      <a href="#about" data-page="settings">About</a>
     </nav>
     <input type="search" id="find" placeholder="Find a setting" aria-label="Find a setting">
   </header>
@@ -42,9 +43,9 @@
           <div class="setting"><label for="sIPv6">Enable IPv6 (experimental)
             <span class="info" tabindex="0" data-tip="Off by default. On: a connection with only IPv6 (some phone tethers) is used too, and the others may use IPv6 to reach servers that have only IPv6. Not yet tested on a real mobile network with NAT64."></span></label>
             <span><input type="checkbox" id="sIPv6"></span></div>
-          <div class="setting"><span>Connections
-            <span class="info" tabindex="0" data-tip="Check lines asks a public STUN server (stun.cloudflare.com) through each connection which public IP it comes from. Two with the same IP share one line to the internet. Only sent when you click."></span></span>
-            <span class="buttons"><button id="refreshIfaces">Look for connections again</button><button id="checkLines">Check lines</button></span></div>
+          <div class="setting"><span>Connection list
+            <span class="info" tabindex="0" data-tip="DMS² notices new and lost connections by itself every few seconds; Refresh looks now. The test asks a public STUN server (stun.cloudflare.com) through each connection which public IP it comes from. Two with the same IP share one line to the internet. Only sent when you click."></span></span>
+            <span class="buttons"><button id="refreshIfaces">Refresh</button><button id="checkLines">Test whether these are separate lines</button></span></div>
         </div>
         <div id="lineResult" class="uplink" hidden></div>
       </div>
@@ -57,10 +58,11 @@
         <h3>Provider</h3>
         <div class="fields">
           <div class="setting"><label for="vpnProvider">VPN provider
-            <span class="info" tabindex="0" data-tip="Signing in to a provider gives every connection without its own .conf a tunnel. For other VPNs, import a .conf per connection above."></span></label>
+            <span class="info" tabindex="0" data-tip="Signing in to a provider gives every connection without its own .conf a tunnel. For other VPNs, choose Other and import a WireGuard .conf per connection."></span></label>
             <select id="vpnProvider">
               <option value="">None</option>
               <option value="pia">Private Internet Access</option>
+              <option value="conf">Other (WireGuard .conf files)</option>
             </select></div>
         </div>
         <div id="piaOut" class="row-actions" role="alert" hidden>
@@ -68,6 +70,12 @@
           <button class="primary" id="piaOutYes">Sign out</button>
           <button id="piaOutNo">Cancel</button>
         </div>
+      </div>
+
+      <div class="group" id="tunnelBox" hidden>
+        <h3>Tunnels
+          <span class="info" tabindex="0" data-tip="One tunnel per connection. Import a WireGuard .conf from your VPN provider to give a connection its own."></span></h3>
+        <div id="tunnelList" class="tunnel-list"></div>
       </div>
 
       <div class="group" id="piaBox" hidden>
@@ -92,9 +100,9 @@
       <div class="group">
         <h3>What goes through the tunnels</h3>
         <div class="fields">
-          <div class="setting"><label for="sVpnHttp">VPN for downloads
-            <span class="info" tabindex="0" data-tip="Firefox already contacted the server once from your own address before handing a download over. To avoid that, right-click the link and choose “Download with DMS²”."></span></label>
+          <div class="setting"><label for="sVpnHttp">VPN for downloads</label>
             <select id="sVpnHttp" data-setting></select></div>
+          <div class="warn" id="vpnOnlyWarn" hidden>With “VPN only”, Firefox has already contacted the server from your own address before DMS² takes over a download. To avoid that, right-click the link and choose “Download with DMS²”.</div>
           <div class="setting"><label for="sVpnTorrent">VPN for torrents</label>
             <select id="sVpnTorrent" data-setting></select></div>
         </div>
@@ -102,18 +110,25 @@
     </section>
 
     <section id="downloads" class="panel">
-      <h2 class="mk">Downloads</h2>
+      <h2 class="mk">Saving and speed</h2>
       <div class="group">
         <h3>Where and when</h3>
         <div class="fields">
           <div class="setting"><label for="sDir">Download folder</label>
-            <span class="pathrow"><input type="text" id="sDir" data-setting><button type="button" id="sBrowse">Browse…</button></span></div>
-          <div class="setting"><label for="sThreshold">Take over Firefox downloads above (MB)</label>
-            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sThreshold" required data-setting></div>
+            <span><span class="pathrow"><input type="text" id="sDir" data-setting aria-describedby="sDirErr"><button type="button" id="sBrowse">Browse…</button></span>
+            <span class="field-error" id="sDirErr" role="alert" hidden></span></span></div>
           <div class="setting"><label for="sParallel">Downloads at once</label>
             <input type="number" id="sParallel" min="1" max="16" required data-setting></div>
+          <div class="setting"><label for="sThreshold"><span id="sThresholdText">Take over your browser's downloads above (MB)</span>
+            <span class="info" tabindex="0" data-tip="Smaller downloads stay with the browser. A .torrent or Metalink file is always taken over."></span></label>
+            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sThreshold" required data-setting></div>
+          <div class="setting"><label for="sNever">Never take over downloads from
+            <span class="info" tabindex="0" data-tip="Sites whose downloads stay with the browser, for example a bank or a site that breaks when DMS² takes over. Separate them with commas; a site includes its sub-domains."></span></label>
+            <input type="text" id="sNever" placeholder="example.com, bank.example" autocomplete="off" data-setting></div>
           <div class="setting"><label for="sNotify">Notify when a download finishes or fails</label>
             <span><input type="checkbox" id="sNotify" data-setting></span></div>
+          <div class="setting"><label for="sAwake">Keep the PC awake while downloading</label>
+            <span><input type="checkbox" id="sAwake" data-setting></span></div>
         </div>
       </div>
 
@@ -124,14 +139,9 @@
             <select id="sSpeedUnit" data-setting></select></div>
           <div class="setting"><label for="sDownLimit">Download limit, all connections (<span class="speedUnit">MB/s</span>)
             <span class="info" tabindex="0" data-tip="Caps everything DMS² receives, on top of each connection's own limit. Empty: none."></span></label>
-            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sDownLimit" placeholder="none" data-setting></div>
+            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sDownLimit" placeholder="none" data-setting> <span class="speedUnit muted">MB/s</span></div>
           <div class="setting"><label for="sUpLimit">Upload limit, all connections (<span class="speedUnit">MB/s</span>)</label>
-            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sUpLimit" placeholder="none" data-setting></div>
-          <div class="setting"><label for="sConns">Default requests per connection</label>
-            <input type="number" id="sConns" min="1" max="32" required data-setting></div>
-          <div class="setting"><label for="sEta">Time-left averaging (seconds)
-            <span class="info" tabindex="0" data-tip="Longer gives a steadier estimate; shorter reacts faster to speed changes."></span></label>
-            <input type="number" id="sEta" min="5" max="3600" required data-setting></div>
+            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sUpLimit" placeholder="none" data-setting> <span class="speedUnit muted">MB/s</span></div>
         </div>
       </div>
 
@@ -139,16 +149,27 @@
         <h3>Archives</h3>
         <div class="fields">
           <div class="setting"><label for="sFolder">Download archives as folders
-            <span class="info" tabindex="0" data-tip="A .zip, .7z or .rar is extracted while it downloads, into the folder you last extracted into, and its space is freed as each file is done: you get the folder, never the archive. Each download can still be switched on its card."></span></label>
+            <span class="note">A .zip, .7z or .rar is extracted as it downloads: you get the folder, not the archive. <a href="#" data-guide="download-as-folder">More</a></span></label>
             <span><input type="checkbox" id="sFolder" data-setting></span></div>
-          <div class="setting"><label for="sParts">Download a split archive's parts at once
-            <span class="info" tabindex="0" data-tip="For a split archive downloaded as a folder. Off, the parts of one that can only be read front to back (RAR volumes, a solid 7z) download one at a time, so none waits on disk for the extraction to reach it. On, they download side by side: faster where a server limits each connection, but the parts fetched ahead take up space until they are extracted. Archives whose files can be extracted in any order always download their parts at once."></span></label>
-            <span><input type="checkbox" id="sParts" data-setting></span></div>
           <div class="setting"><label for="sKeep">Keep the archive
-            <span class="info" tabindex="0" data-tip="What a download as folder does with the archive while it extracts, unless chosen for it in its Details. Interruption recovery: an update, reboot or crash while it extracts downloads nothing again, at the cost of room for the archive until it is extracted. Automatic keeps it until extracted when the drive has room for it, and frees it as it extracts otherwise."></span></label>
+            <span class="note">What a download as folder does with the archive while it extracts. Automatic keeps it when the drive has room. <a href="#" data-guide="download-as-folder">More</a></span></label>
             <select id="sKeep" data-setting></select></div>
         </div>
       </div>
+
+      <details class="group adv" id="advanced">
+        <summary>Advanced</summary>
+        <div class="fields">
+          <div class="setting"><label for="sConns">Default requests per connection</label>
+            <input type="number" id="sConns" min="1" max="32" required data-setting></div>
+          <div class="setting"><label for="sEta">Time-left averaging (seconds)
+            <span class="info" tabindex="0" data-tip="Longer gives a steadier estimate; shorter reacts faster to speed changes."></span></label>
+            <input type="number" id="sEta" min="5" max="3600" required data-setting></div>
+          <div class="setting"><label for="sParts">Download a split archive's parts at once
+            <span class="note">Off: parts that can only be read in order download one at a time. On: side by side, faster, but the parts fetched ahead take disk space until extracted. <a href="#" data-guide="download-as-folder">More</a></span></label>
+            <span><input type="checkbox" id="sParts" data-setting></span></div>
+        </div>
+      </details>
     </section>
 
     <section id="torrents" class="panel">
@@ -157,6 +178,11 @@
         <div class="setting"><label for="sRatio">Seed until ratio
           <span class="info" tabindex="0" data-tip="A finished torrent keeps uploading until it has sent this many times its size. 0 stops as soon as it's done."></span></label>
           <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sRatio" required data-setting></div>
+        <div class="setting"><label for="sTorrentPort">Port for incoming peers
+          <span class="info" tabindex="0" data-tip="Where torrent peers connect in, on every connection. Set it to the port you forward on your router. Takes effect when DMS² restarts."></span></label>
+          <input type="number" id="sTorrentPort" min="1024" max="65535" required data-setting></div>
+        <div class="setting"><span>Upload limits</span>
+          <span><a href="#connections">Set per connection</a>, under Options on the Connections page</span></div>
       </div>
     </section>
 
@@ -173,9 +199,15 @@
     <section id="appearance" class="panel">
       <h2 class="mk">Appearance</h2>
       <div class="fields">
-        <div class="setting"><span>Accent color
-          <span class="info" tabindex="0" data-tip="Follow Firefox takes the color of your Firefox theme; the default themes have none, so the pages stay blue."></span></span>
-          <div class="swatches" id="accents" role="radiogroup" aria-label="Accent color"></div></div>
+        <div class="setting"><label for="sTheme">Theme</label>
+          <select id="sTheme" data-setting>
+            <option value="">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select></div>
+        <div class="setting"><span>Accent colour
+          <span class="info" tabindex="0" data-tip="Follow the browser's theme takes the colour of your browser's theme; the default themes have none, so the pages stay blue."></span></span>
+          <div class="swatches" id="accents" role="radiogroup" aria-label="Accent colour"></div></div>
       </div>
     </section>
 
@@ -186,6 +218,23 @@
           <span><input type="checkbox" id="sAuto"></span></div>
       </div>
     </section>
+
+    <section id="about" class="panel">
+      <h2 class="mk">About</h2>
+      <div class="fields">
+        <div class="setting"><span>Version</span><span id="aboutVersion" class="muted"></span></div>
+        <div class="setting"><span>Help</span>
+          <span class="buttons"><button id="openLog">Open log</button><button id="openData">Open data folder</button>
+            <a href="#" data-guide="">Guide</a><a href="#" data-releases>Release notes</a></span></div>
+        <div class="setting"><span>Settings on this page</span>
+          <span><button id="restoreAsk">Restore defaults…</button></span></div>
+      </div>
+      <div id="restoreBox" class="row-actions" role="alert" hidden>
+        <span>Put the settings on this page back to their defaults? Your connections, the VPN and learned sites are not changed.</span>
+        <button class="primary" id="restoreYes">Restore defaults</button>
+        <button id="restoreNo">Cancel</button>
+      </div>
+    </section>
     <p class="empty" id="notFound" role="status" hidden></p>
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -194,6 +243,7 @@
   <script src="../lib/accent.js"></script>
   <script src="../lib/iface.js"></script>
   <script src="../lib/rpc.js"></script>
+  <script src="../lib/provider.js"></script>
   <script src="host.js"></script>
   <script src="common.js"></script>
   <script src="settings.js"></script>

@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"errors"
+	"strings"
 	"time"
 
 	"downloadmanagersquared/engine/internal/paths"
@@ -61,14 +63,35 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		if p.NotifyDone != nil {
 			s.NotifyDone = *p.NotifyDone
 		}
+		if p.KeepAwake != nil {
+			s.KeepAwake = *p.KeepAwake
+		}
 		if p.SpeedUnit != nil {
 			s.SpeedUnit = *p.SpeedUnit // normalize puts back one that isn't a choice
+		}
+		if p.TorrentPort != nil {
+			s.TorrentPort = *p.TorrentPort // normalize picks another when out of range
+		}
+		if p.NeverCapture != nil {
+			s.NeverCapture = *p.NeverCapture
+		}
+		if p.Theme != nil {
+			s.Theme = *p.Theme
 		}
 		if p.Accent != nil {
 			s.Accent = *p.Accent
 		}
 		if p.ThemeAccent != nil {
 			s.ThemeAccent = *p.ThemeAccent
+		}
+		if p.DismissedUpdate != nil {
+			s.DismissedUpdate = *p.DismissedUpdate
+		}
+		if p.SeenVersion != nil {
+			s.SeenVersion = *p.SeenVersion
+		}
+		if p.FoldedSections != nil {
+			s.FoldedSections = *p.FoldedSections
 		}
 	})
 	if p.IPv6 != nil {
@@ -82,6 +105,18 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		e.setVPNAll(true, s.VPNTorrent)
 	}
 	return s
+}
+
+// restoreSettings puts the settings page's choices back to the defaults.
+func (e *Engine) restoreSettings() Settings {
+	return e.applySettings(func(s *Settings) { *s = s.restored() })
+}
+
+// KeepAwake is the keepAwake setting, for the tray.
+func (e *Engine) KeepAwake() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.settings.KeepAwake
 }
 
 // SpeedUnit is the speedUnit setting, for the tray.
@@ -116,6 +151,9 @@ func (e *Engine) setInterface(p ifacePatch) Settings {
 		if p.DownloadLimit != nil {
 			is.DownloadLimit = *p.DownloadLimit
 		}
+		if p.Label != nil {
+			is.Label = cleanLabel(*p.Label)
+		}
 		if p.Color != nil && *p.Color >= 0 && *p.Color < colorCount {
 			v := *p.Color
 			is.Color = &v
@@ -124,36 +162,80 @@ func (e *Engine) setInterface(p ifacePatch) Settings {
 }
 
 type settingsPatch struct {
-	MainInterface      *string  `json:"mainInterface"`
-	ThresholdBytes     *int64   `json:"thresholdBytes"`
-	SaveDir            *string  `json:"saveDir"`
-	MaxParallel        *int     `json:"maxParallel"`
-	UploadLimit        *int64   `json:"uploadLimit"`
-	DownloadLimit      *int64   `json:"downloadLimit"`
-	ETAWindowSec       *int     `json:"etaWindowSec"`
-	DefaultConnections *int     `json:"defaultConnections"`
-	SeedRatio          *float64 `json:"seedRatio"`
-	VPNHTTP            *string  `json:"vpnHttp"`
-	VPNTorrent         *string  `json:"vpnTorrent"`
-	VPNProvider        *string  `json:"vpnProvider"`
-	FolderDefault      *bool    `json:"folderDefault"`
-	PartsParallel      *bool    `json:"partsParallel"`
-	ArchiveKeeping     *string  `json:"archiveKeeping"`
-	IPv6               *bool    `json:"ipv6"`
-	NotifyDone         *bool    `json:"notifyDone"`
-	SpeedUnit          *string  `json:"speedUnit"`
-	Accent             *string  `json:"accent"`
-	ThemeAccent       *string  `json:"themeAccent"`
+	MainInterface      *string   `json:"mainInterface"`
+	ThresholdBytes     *int64    `json:"thresholdBytes"`
+	SaveDir            *string   `json:"saveDir"`
+	MaxParallel        *int      `json:"maxParallel"`
+	UploadLimit        *int64    `json:"uploadLimit"`
+	DownloadLimit      *int64    `json:"downloadLimit"`
+	ETAWindowSec       *int      `json:"etaWindowSec"`
+	DefaultConnections *int      `json:"defaultConnections"`
+	SeedRatio          *float64  `json:"seedRatio"`
+	VPNHTTP            *string   `json:"vpnHttp"`
+	VPNTorrent         *string   `json:"vpnTorrent"`
+	VPNProvider        *string   `json:"vpnProvider"`
+	FolderDefault      *bool     `json:"folderDefault"`
+	PartsParallel      *bool     `json:"partsParallel"`
+	ArchiveKeeping     *string   `json:"archiveKeeping"`
+	IPv6               *bool     `json:"ipv6"`
+	NotifyDone         *bool     `json:"notifyDone"`
+	KeepAwake          *bool     `json:"keepAwake"`
+	SpeedUnit          *string   `json:"speedUnit"`
+	TorrentPort        *int      `json:"torrentPort"`
+	NeverCapture       *[]string `json:"neverCapture"`
+	Theme              *string   `json:"theme"`
+	Accent             *string   `json:"accent"`
+	ThemeAccent        *string   `json:"themeAccent"`
+	DismissedUpdate    *string   `json:"dismissedUpdate"`
+	SeenVersion        *string   `json:"seenVersion"`
+	FoldedSections     *[]string `json:"foldedSections"`
 }
 
 type ifacePatch struct {
-	ID            string `json:"id"`
-	Enabled       *bool  `json:"enabled"`
-	Connections   *int   `json:"connections"`
-	Upload        *bool  `json:"upload"`
-	UploadLimit   *int64 `json:"uploadLimit"`
-	DownloadLimit *int64 `json:"downloadLimit"`
-	Color         *int   `json:"color"` // 0..5; anything else is ignored
+	ID            string  `json:"id"`
+	Enabled       *bool   `json:"enabled"`
+	Connections   *int    `json:"connections"`
+	Upload        *bool   `json:"upload"`
+	UploadLimit   *int64  `json:"uploadLimit"`
+	DownloadLimit *int64  `json:"downloadLimit"`
+	Color         *int    `json:"color"` // 0..5; anything else is ignored
+	Label         *string `json:"label"` // "" gives the Windows name back
+}
+
+// cleanLabel is a name the user typed: trimmed, at most 40 characters.
+func cleanLabel(s string) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) > 40 {
+		r = r[:40]
+	}
+	return string(r)
+}
+
+// forgetInterface drops what is saved about an interface that is not connected:
+// its settings, its tunnel and its place in the list.
+func (e *Engine) forgetInterface(id string) error {
+	var err error
+	e.applySettings(func(s *Settings) {
+		if ent := e.ifaces[id]; ent != nil {
+			if ent.present {
+				err = errors.New("that connection is in use now")
+				return
+			}
+			ent.socks.Close()
+			if ent.binding != nil {
+				ent.binding.Close()
+			}
+			delete(e.ifaces, id)
+		}
+		delete(s.Interfaces, id)
+		if s.MainInterface == id {
+			s.MainInterface = ""
+		}
+	})
+	if err == nil {
+		_ = e.vpn.Remove(id) // none configured is fine
+	}
+	return err
 }
 
 func (e *Engine) applySettings(f func(*Settings)) Settings {

@@ -6,6 +6,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
@@ -23,11 +24,12 @@ import (
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
-const title = "downloadmanagersquared"
+const title = "DMS²"
 
 // Flags the installing copy passes to the installed one.
 const (
 	flagUpdated   = "--updated"   // upgrade: say so in a balloon
+	flagInstalled = "--installed" // first install: a balloon points at the tray icon
 	flagUninstall = "--uninstall" // from Installed apps
 )
 
@@ -67,14 +69,22 @@ func main() {
 				return installFrom(l, src, &install.Options{StartMenu: c.StartMenu, Desktop: c.Desktop, Autostart: c.Autostart})
 			},
 			Browsers: winutil.FirefoxBrowsers,
-			AddExtension: func(b winutil.Browser) {
-				// The signed extension the release zip carries: the browser asks
-				// once to add it. A build without one gets it from the release.
-				target := filepath.Join(src, "downloadmanagersquared.xpi")
-				if _, err := os.Stat(target); err != nil {
-					target = install.ExtensionURL()
+			Version:  engine.Version,
+			Connected: func() []string {
+				res, err := ipc.Call("extensionBrowsers")
+				var exes []string
+				if err == nil {
+					json.Unmarshal(res, &exes)
 				}
-				if err := winutil.OpenBrowser(b.Exe, target); err != nil {
+				return exes
+			},
+			OpenFile: func() {
+				if err := winutil.ShellOpen(extensionTarget(src)); err != nil {
+					winutil.MessageBox(title, "Could not open the extension file: "+err.Error())
+				}
+			},
+			AddExtension: func(b winutil.Browser) {
+				if err := winutil.OpenBrowser(b.Exe, extensionTarget(src)); err != nil {
 					winutil.MessageBox(title, "Could not open "+b.Name+": "+err.Error())
 				}
 			},
@@ -88,6 +98,16 @@ func main() {
 		return
 	}
 	run(l)
+}
+
+// extensionTarget is the signed extension the release zip carries: the browser
+// asks once to add it. A build without one gets it from the release.
+func extensionTarget(src string) string {
+	target := filepath.Join(src, "downloadmanagersquared.xpi")
+	if _, err := os.Stat(target); err != nil {
+		return install.ExtensionURL()
+	}
+	return target
 }
 
 // run is the installed engine.
@@ -111,6 +131,10 @@ func run(l install.Layout) {
 	}
 	if slices.Contains(os.Args[1:], flagUpdated) {
 		winutil.Notify("Updated", "DMS² is updated to v"+engine.Version+".")
+	}
+	if slices.Contains(os.Args[1:], flagInstalled) {
+		// Windows 11 hides a new tray icon in the overflow: say where it is.
+		winutil.Notify("DMS² is running", "Its icon is in the tray, next to the clock. If you cannot see it, click the arrow to find it.")
 	}
 	w := downloadsWindow(e)
 	e.SetWindow(w)

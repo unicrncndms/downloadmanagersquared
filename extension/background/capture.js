@@ -47,7 +47,19 @@ const Capture = {
     });
 
     browser.contextMenus.create({ id: "dms-link", title: "Download with DMS²", contexts: ["link"] });
-    browser.contextMenus.create({ id: "dms-page", title: "Download this page's file with DMS²", contexts: ["page"] });
+    // The page item means something only on a file's own address or a learned site: Firefox asks
+    // again each time the menu opens (menus.onShown); without that hook it always shows.
+    const onShown = browser.menus && browser.menus.onShown;
+    browser.contextMenus.create({ id: "dms-page", title: "Download this page's file with DMS²", contexts: ["page"], visible: !onShown });
+    if (onShown) {
+      onShown.addListener(async (info, tab) => {
+        const show = !!info.menuIds.includes("dms-page") && this.pageMenuFits(tab && tab.url);
+        if (this.pageMenuShown === show) return;
+        this.pageMenuShown = show;
+        await browser.menus.update("dms-page", { visible: show });
+        browser.menus.refresh();
+      });
+    }
     browser.contextMenus.onClicked.addListener((info, tab) => {
       if (info.menuItemId === "dms-link") {
         this.handOff({ url: info.linkUrl, pageUrl: tab.url, cookieStoreId: tab.cookieStoreId });
@@ -55,6 +67,13 @@ const Capture = {
         this.handOff({ url: tab.url, pageUrl: tab.url, cookieStoreId: tab.cookieStoreId });
       }
     });
+  },
+
+  pageMenuShown: false,
+
+  // Whether "Download this page's file" can mean something on this page.
+  pageMenuFits(url) {
+    return !!url && (fileLikeUrl(url) || (isHttp(url) && hostOf(url) in Resolver.recipes));
   },
 
   onHeaders(d, cookie = SentCookies.take(d.requestId)) { // dropped whatever happens to the response
@@ -65,7 +84,7 @@ const Capture = {
     const h = headerMap(d.responseHeaders);
     if (!Engine.connected || !Engine.settings) return {};
     const kind = captureResponse(h, d.url, d.statusCode, Engine.settings.thresholdBytes);
-    if (!kind) return {};
+    if (!kind || neverCaptured(Engine.settings.neverCapture, d.url, d.originUrl, d.documentUrl)) return {};
     if (this.bypass.delete(d.url)) return {};
     this.handOff({
       torrent: kind === "torrent",
@@ -92,7 +111,7 @@ const Capture = {
     const url = item.finalUrl || item.url;
     if (this.bypass.delete(item.url) || this.bypass.delete(url)) return;
     const kind = captureDownload(item, Engine.settings.thresholdBytes);
-    if (!kind) return;
+    if (!kind || neverCaptured(Engine.settings.neverCapture, url, item.referrer)) return;
     await discardDownload(item.id);
     this.handOff({
       torrent: kind === "torrent",
@@ -152,8 +171,7 @@ const Capture = {
       if (torrent) {
         this.torrentAdded();
       } else {
-        this.rememberPages(id, pages);
-        notify("Downloading with DMS²", filename || "download started");
+        this.rememberPages(id, pages); // no notice: the toolbar button shows it running, and the engine speaks when it ends
       }
     } catch (e) {
       // Don't lose the download: give it back to Firefox.

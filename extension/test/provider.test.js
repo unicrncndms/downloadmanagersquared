@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
-const { handOverProvider } = require("../lib/provider.js");
+const { handOverProvider, tunnelsShown } = require("../lib/provider.js");
 
 // browser.storage.local, with what the extension stored before upgrading.
 function storage(initial) {
@@ -48,4 +48,11 @@ test("an engine that doesn't keep the choice yet leaves it stored", async () => 
   const e = engine(() => ({ saveDir: "C:\\" }));
   await handOverProvider(s, {}, e.call);
   assert.deepEqual(s.store, { vpnProvider: "pia" });
+});
+
+test("the tunnels list shows for conf and PIA, or when a tunnel exists, not for no VPN", () => {
+  assert.equal(tunnelsShown("conf", 0), true);
+  assert.equal(tunnelsShown("pia", 0), true);
+  assert.equal(tunnelsShown("", 2), true);
+  assert.equal(tunnelsShown("", 0), false);
 });

@@ -333,3 +333,35 @@ test("the toolbar badge counts running downloads, shows ! when one needs you, an
   b.Engine.emit("state", { downloads: [{ status: "completed", section: "done" }] });
   assert.deepEqual(text(), ["2", "!", ""]);
 });
+
+test("the page menu item shows only on a file's address or a learned site", async () => {
+  const b = load();
+  await b.settle();
+  const item = b.calls.find((c) => c[0] === "contextMenus.create" && c[1].id === "dms-page");
+  assert.equal(item[1].visible, false);
+  b.Resolver.recipes["site.test"] = { steps: [] };
+  const shown = async (url) => {
+    await b.fire("menus.onShown", { menuIds: ["dms-page"] }, { url });
+    return b.calls.filter((c) => c[0] === "menus.update").pop()[2].visible;
+  };
+  assert.equal(await shown("https://cdn.test/big.zip"), true);
+  assert.equal(await shown("https://news.test/story"), false);
+  assert.equal(await shown("https://site.test/get/1"), true);
+});
+
+test("a capture raises no start notification", async () => {
+  const b = load();
+  await b.settle();
+  b.connect();
+  await b.Capture.handOff({ url: "https://cdn.test/big.zip", pages: [], cookie: "" });
+  assert.equal(b.calls.filter((c) => c[0] === "notifications.create").length, 0);
+});
+
+test("install opens the welcome page once; an update opens nothing", () => {
+  const b = load();
+  const welcome = () => b.calls.filter((c) => c[0] === "tabs.create" && String(c[1].url).endsWith("ui/welcome.html"));
+  b.fire("runtime.onInstalled", { reason: "update", previousVersion: "0.8.0" });
+  assert.equal(welcome().length, 0);
+  b.fire("runtime.onInstalled", { reason: "install" });
+  assert.equal(welcome().length, 1);
+});

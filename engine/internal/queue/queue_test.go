@@ -264,3 +264,38 @@ func TestAQueuedEntryMovedBeforeARunningOneTakesItsSlot(t *testing.T) {
 		t.Fatal("a held entry took a slot")
 	}
 }
+
+func TestStartNowRunsBesideTheSlots(t *testing.T) {
+	a, b := queued(false), queued(false)
+	q := newQueue(t, a, b)
+	q.Schedule(1, lo)
+	if err := q.StartNow(b.id); err != nil {
+		t.Fatal(err)
+	}
+	q.Schedule(1, lo)
+	if !a.running || !b.running {
+		t.Fatalf("a %v, b %v; want both running, the limit is 1", a.running, b.running)
+	}
+	if err := q.StartNow(b.id); err == nil {
+		t.Fatal("a running download started now")
+	}
+}
+
+func TestStartNowStillWaitsForATunnelUnderVPNOnly(t *testing.T) {
+	a, b := queued(false), queued(false)
+	b.mode = paths.VPNOnly
+	q := newQueue(t, a, b)
+	if err := q.StartNow(b.id); err != nil {
+		t.Fatal(err)
+	}
+	q.Schedule(1, lo)
+	if b.running {
+		t.Fatal("started by hand without a tunnel under VPN only")
+	}
+	up := paths.Snapshot{Ifaces: []paths.Iface{{ID: "lo", Present: true, Enabled: true, TunnelUp: true}}}
+	q.Schedule(1, up)
+	q.Schedule(1, up)
+	if !a.running || !b.running {
+		t.Fatalf("tunnel up: a %v, b %v; want both running beside the limit of 1", a.running, b.running)
+	}
+}

@@ -46,3 +46,10 @@ test("recording ends after five minutes without a click, page load or captcha ch
   assert.equal(recordingIdle(1000, 1000 + RECORD_IDLE - 1), false);
   assert.equal(recordingIdle(1000, 1000 + RECORD_IDLE), true);
 });
+
+test("learningPlace counts the site's connections still to learn", () => {
+  const { learningPlace } = require("../lib/recipe.js");
+  const a = { host: "x", mode: "record" }, b = { host: "x", mode: "waiting" }, c = { host: "y", mode: "record" }, d = { host: "x", mode: "record", done: true };
+  assert.deepEqual(learningPlace([d, a, c, b], a), { n: 1, of: 2 });
+  assert.deepEqual(learningPlace([d, a, c, b], b), { n: 2, of: 2 });
+});

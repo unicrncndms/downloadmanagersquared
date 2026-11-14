@@ -32,28 +32,32 @@ type LinkSummary struct {
 
 // Summary is what the UI shows for a download.
 type Summary struct {
-	Kind     string                 `json:"kind,omitempty"` // KindTorrent; empty for HTTP
-	ID       string                 `json:"id"`
-	URL      string                 `json:"url"`
-	PageURL  string                 `json:"pageUrl,omitempty"`
-	Filename string                 `json:"filename"`
-	Dir      string                 `json:"dir"`
-	Size     int64                  `json:"size"`
-	Done     int64                  `json:"done"`
-	Status   Status                 `json:"status"`
-	Error    string                 `json:"error,omitempty"`
-	Speed    float64                `json:"speed"`
-	ETA      float64                `json:"eta"`             // seconds, -1 when unknown
-	Limit    int64                  `json:"limit,omitempty"` // HTTP only: the download's speed cap, bytes per second
-	RangeOK  bool                   `json:"rangeOk"`
-	Probed   bool                   `json:"probed"`
-	SHA256   string                 `json:"sha256,omitempty"`
-	MD5      string                 `json:"md5,omitempty"`
-	Links    map[string]LinkSummary `json:"links"`
-	Map      string                 `json:"map,omitempty"`   // HTTP, unfinished: the file as squares (fileMap)
-	MapBy    []string               `json:"mapBy,omitempty"` // the interfaces Map's digits stand for
-	Added    time.Time              `json:"added"`
-	Finished time.Time              `json:"finished,omitzero"`
+	Kind     string  `json:"kind,omitempty"` // KindTorrent; empty for HTTP
+	ID       string  `json:"id"`
+	URL      string  `json:"url"`
+	PageURL  string  `json:"pageUrl,omitempty"`
+	Filename string  `json:"filename"`
+	Dir      string  `json:"dir"`
+	Size     int64   `json:"size"`
+	Done     int64   `json:"done"`
+	Status   Status  `json:"status"`
+	Error    string  `json:"error,omitempty"`
+	Speed    float64 `json:"speed"`
+	ETA      float64 `json:"eta"`             // seconds, -1 when unknown
+	Limit    int64   `json:"limit,omitempty"` // HTTP only: the download's speed cap, bytes per second
+	// LimitedBy names the speed limit holding a running download back ("Wi-Fi's limit"), LimitedTo its size in bytes per second; set by the engine.
+	LimitedBy string                 `json:"limitedBy,omitempty"`
+	LimitedTo int64                  `json:"limitedTo,omitempty"`
+	RangeOK   bool                   `json:"rangeOk"`
+	Probed    bool                   `json:"probed"`
+	SHA256    string                 `json:"sha256,omitempty"`
+	MD5       string                 `json:"md5,omitempty"`
+	Links     map[string]LinkSummary `json:"links"`
+	Map       string                 `json:"map,omitempty"`     // HTTP, unfinished: the file as squares (fileMap)
+	MapBy     []string               `json:"mapBy,omitempty"`   // the interfaces Map's digits stand for
+	MapFill   string                 `json:"mapFill,omitempty"` // how far each square Map's digits mark is (mapFill)
+	Added     time.Time              `json:"added"`
+	Finished  time.Time              `json:"finished,omitzero"`
 
 	VPN paths.Mode `json:"vpn,omitempty"`
 
@@ -101,6 +105,7 @@ type FileSummary struct {
 	Path     string `json:"path"` // within the torrent, "/"-separated
 	Size     int64  `json:"size"`
 	Selected bool   `json:"selected"`
+	Done     int64  `json:"done,omitempty"` // bytes on disk, while the torrent is in the swarm
 }
 
 func (d *Download) Summary() Summary {
@@ -130,7 +135,9 @@ func (d *Download) Summary() Summary {
 	switch {
 	case s.Status == StatusCompleted || !d.st.Allocated:
 	case d.plan != nil && d.plan.splittable:
-		s.Map, s.MapBy = fileMap(s.Size, d.plan.ranges(), d.plan.fetching(), d.plan.landed, d.plan.writers)
+		at := d.plan.fetching()
+		s.Map, s.MapBy = fileMap(s.Size, d.plan.ranges(), at, d.plan.landed, d.plan.writers)
+		s.MapFill = mapFill(s.Size, at)
 	case d.plan == nil && s.RangeOK:
 		s.Map, s.MapBy = fileMap(s.Size, d.st.Remaining, nil, nil, nil)
 	}

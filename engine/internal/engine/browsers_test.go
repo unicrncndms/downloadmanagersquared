@@ -187,3 +187,18 @@ func TestAResolveCarriesTheDownloadsCookieStore(t *testing.T) {
 		t.Fatal("no resolve")
 	}
 }
+
+// Setup asks which browsers' extensions have said hello, to tick them.
+func TestExtensionBrowsersListsTheOnesThatSaidHello(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	firefox := fakeBrowserExe(t, "firefox.exe")
+	connectExtension(t, e, firefox, "")
+	got, err := e.Call(nil, "extensionBrowsers", nil)
+	if list, _ := got.([]string); err != nil || len(list) != 1 || list[0] != firefox {
+		t.Fatalf("extensionBrowsers = %v, %v", got, err)
+	}
+}

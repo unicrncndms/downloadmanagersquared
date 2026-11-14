@@ -108,3 +108,21 @@ test("the cookie fallback keeps only the download site's first-party cookies", (
   assert.equal(r.cookieHeaderFor(cookies, "dl.example.com"), "a=1; b=2; c=3; f=6");
   assert.equal(r.cookieHeaderFor([], "x"), "");
 });
+
+test("fileLikeUrl: a page address that names a file", () => {
+  const { fileLikeUrl } = require("../lib/capture-rules.js");
+  assert.equal(fileLikeUrl("https://x.test/a/b.ISO?dl=1"), true);
+  assert.equal(fileLikeUrl("https://x.test/a/page.html"), false);
+  assert.equal(fileLikeUrl("https://x.test/a/"), false);
+  assert.equal(fileLikeUrl("nonsense"), false);
+});
+
+test("a site on the never-capture list stays with the browser, with its sub-domains", () => {
+  const sites = ["bank.example"];
+  assert.ok(r.neverCaptured(sites, "https://bank.example/a.pdf"));
+  assert.ok(r.neverCaptured(sites, "https://cdn.bank.example/a.zip"));
+  assert.ok(r.neverCaptured(sites, "https://cdn.other/a.zip", "https://www.bank.example/page"));
+  assert.ok(!r.neverCaptured(sites, "https://notbank.example/a.zip", ""));
+  assert.ok(!r.neverCaptured([], "https://bank.example/a.pdf"));
+  assert.ok(!r.neverCaptured(undefined, "https://bank.example/a.pdf"));
+});

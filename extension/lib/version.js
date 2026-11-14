@@ -21,4 +21,25 @@ function versionsClash(engine, extension) {
   return a[0] !== b[0] || (a[0] === 0 && a[1] !== b[1]);
 }
 
-if (typeof module !== "undefined") module.exports = { versionsClash };
+// "engine" or "extension": whichever of the two clashing versions is older.
+function olderSide(engine, extension) {
+  const a = releaseVersion(engine), b = releaseVersion(extension);
+  if (!a || !b) return "";
+  return a[0] !== b[0] ? (a[0] < b[0] ? "engine" : "extension") : a[1] < b[1] ? "engine" : "extension";
+}
+
+// The note after an upgrade, from the engine version last acknowledged (the
+// engine's seenVersion setting): "record" the first time ever (nothing to
+// announce), "show" once the engine version changed, "" otherwise.
+function updateNote(seen, engine) {
+  if (!releaseVersion(engine)) return "";
+  if (!seen) return "record";
+  return seen === engine ? "" : "show";
+}
+
+// The release page of version v, from the "latest" one.
+function releaseNotesURL(latestURL, v) {
+  return latestURL.replace(/\/latest$/, "/tag/v" + String(v).replace(/^v/, ""));
+}
+
+if (typeof module !== "undefined") module.exports = { versionsClash, olderSide, updateNote, releaseNotesURL };

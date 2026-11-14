@@ -156,30 +156,54 @@
     }
   }
 
-  function startRecording(ifaceName, prev) {
+  // The bar lives in a shadow root so page CSS can't touch it, and takes the
+  // pages' tokens (ui.css) and the stored accent, light and dark.
+  const BAR_CSS = (t) => `
+    :host { all: initial; position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647; }
+    .bar { --accent: ${t.light.accent}; --on-accent: ${t.light.onAccent}; --soft: ${t.light.accentSoft};
+      --panel: #fff; --text: #16181d; --muted: #646b78; --line: #e2e5ea;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 16px;
+      font: 14px/1.4 Rubik, system-ui, sans-serif; color: var(--text); background: var(--panel);
+      border-bottom: 2px solid var(--accent); box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+    @media (prefers-color-scheme: dark) { .bar { --accent: ${t.dark.accent}; --on-accent: ${t.dark.onAccent};
+      --soft: ${t.dark.accentSoft}; --panel: #1d2026; --text: #e8eaee; --muted: #9aa1ad; --line: #2c3038; } }
+    b { color: var(--accent); }
+    .more { flex-basis: 100%; margin: 0; color: var(--muted); }
+    button { font: inherit; cursor: pointer; padding: 3px 10px; border-radius: 4px; color: var(--text);
+      background: transparent; border: 1px solid var(--line); }
+    button.q { padding: 3px 8px; font-weight: 600; color: var(--accent); background: var(--soft); border-color: transparent; }
+    .sp { flex: 1; }`;
+
+  function startRecording(msg) {
     if (recording) return;
     recording = true;
-    const bar = document.createElement("div");
-    bar.id = "dms-resolver-bar";
-    bar.textContent = prev
-      ? `DMS² is learning (${ifaceName}): click through to the download as usual. Wrong page? Go back first. `
-      : `DMS² is learning (${ifaceName}): click through to the download as usual. Wrong page? Paste the page you started from into the address bar above.`;
-    Object.assign(bar.style, {
-      position: "fixed", left: "0", right: "0", bottom: "0", zIndex: "2147483647",
-      padding: "10px 16px", font: "14px system-ui, sans-serif", color: "#fff",
-      background: "#2563eb", textAlign: "center",
-    });
+    const { ifaceName, prev, n, of, learn, tokens } = msg;
+    const host = document.createElement("div");
+    host.id = "dms-resolver-bar";
+    const root = host.attachShadow({ mode: "closed" });
+    const el = (tag, text, cls) => Object.assign(document.createElement(tag), { textContent: text, className: cls || "" });
+    const style = el("style", BAR_CSS(tokens));
+    const bar = el("div", "", "bar");
+    const count = of > 1 ? `${n} of ${of}, ` : "";
+    const title = el("span", "");
+    title.append(el("b", `DMS² is watching (${count}${ifaceName}): `), document.createTextNode("click to the download as you normally do."));
+    const more = el("p", `Wrong page? ${prev ? "Go back with the button here, or paste" : "Paste"} the page you started from into the address bar. ` +
+      (learn ? "Skip closes this window; nothing changes for the download." : "Skip closes this window and this connection's download fails."), "more");
+    more.hidden = true;
+    const q = el("button", "?", "q");
+    q.title = "More";
+    q.addEventListener("click", () => { more.hidden = !more.hidden; });
+    bar.append(title, q, el("span", "", "sp"));
     if (prev) {
-      const back = document.createElement("button");
-      back.textContent = "◀ Previous page";
-      Object.assign(back.style, {
-        marginLeft: "8px", padding: "3px 10px", font: "inherit", cursor: "pointer",
-        color: "#2563eb", background: "#fff", border: "0", borderRadius: "4px",
-      });
+      const back = el("button", "◀ Previous page");
       back.addEventListener("click", () => { location.href = prev; });
-      bar.appendChild(back);
+      bar.append(back);
     }
-    document.documentElement.appendChild(bar);
+    const skip = el("button", "Skip this connection");
+    skip.addEventListener("click", () => browser.runtime.sendMessage({ resolver: true, type: "skip" }));
+    bar.append(skip, more);
+    root.append(style, bar);
+    document.documentElement.appendChild(host);
     document.addEventListener("click", (e) => {
       // Clicks on the captcha are yours alone; they must not become steps to replay.
       if (!e.isTrusted || e.target.closest("#dms-resolver-bar") || e.target.closest(CAPTCHA)) return;
@@ -189,6 +213,6 @@
 
   browser.runtime.onMessage.addListener((msg) => {
     if (msg.cmd === "replay") replay(msg.step, msg.index, msg.next, msg.budget);
-    if (msg.cmd === "record") startRecording(msg.ifaceName, msg.prev);
+    if (msg.cmd === "record") startRecording(msg);
   });
 })();

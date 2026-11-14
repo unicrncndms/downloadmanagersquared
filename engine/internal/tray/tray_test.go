@@ -87,3 +87,25 @@ func TestSpeedInBytesOrBits(t *testing.T) {
 		}
 	}
 }
+
+func TestTheIconSaysDownloadingOrNeedsYou(t *testing.T) {
+	run := download.Summary{Status: download.StatusRunning}
+	for _, c := range []struct {
+		name string
+		s    engine.StateEvent
+		want iconState
+	}{
+		{"idle", engine.StateEvent{}, iconIdle},
+		{"paused", engine.StateEvent{Downloads: []download.Summary{{Status: download.StatusPaused}}}, iconIdle},
+		{"downloading", engine.StateEvent{Active: 1, Downloads: []download.Summary{run}}, iconBusy},
+		{"failed", engine.StateEvent{Downloads: []download.Summary{{Status: download.StatusFailed}}}, iconNeedsYou},
+		{"waiting on a choice while another runs", engine.StateEvent{Active: 1, Downloads: []download.Summary{run, {Status: download.StatusChoosing}}}, iconNeedsYou},
+	} {
+		if got := iconFor(c.s); got != c.want {
+			t.Errorf("%s: iconFor = %v, want %v", c.name, got, c.want)
+		}
+	}
+	if string(icons[iconIdle]()) == string(icons[iconBusy]()) || string(icons[iconBusy]()) == string(icons[iconNeedsYou]()) {
+		t.Error("two states share one icon")
+	}
+}

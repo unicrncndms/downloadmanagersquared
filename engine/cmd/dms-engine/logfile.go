@@ -1,9 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
 func setupLog(dir string) {
@@ -23,6 +26,22 @@ type logFile struct {
 	max  int64
 	f    *os.File
 	size int64
+
+	now  func() time.Time // the clock; time.Now unless a test sets it
+	seen map[string]*repeat
+}
+
+// dupWindow is how long an identical line is written only once.
+const dupWindow = time.Minute
+
+// stampLen is the length of the log package's "2006/01/02 15:04:05.000000 " prefix.
+const stampLen = 27
+
+// repeat is a line written once, then counted when it comes again within dupWindow.
+type repeat struct {
+	first time.Time
+	n     int
+	msg   string
 }
 
 func (l *logFile) open() error {
@@ -40,7 +59,38 @@ func (l *logFile) open() error {
 	return nil
 }
 
+// Write drops a line identical to one written less than dupWindow ago and
+// counts it; a "(repeated N times)" line follows with the next line written
+// after the window ends (shortcut: no timer, so the last count of a log that
+// goes quiet waits for its next line).
 func (l *logFile) Write(p []byte) (int, error) {
+	if len(p) > stampLen {
+		now := time.Now()
+		if l.now != nil {
+			now = l.now()
+		}
+		if l.seen == nil {
+			l.seen = map[string]*repeat{}
+		}
+		msg := string(p[stampLen:])
+		if r := l.seen[msg]; r != nil && now.Sub(r.first) < dupWindow {
+			r.n++
+			return len(p), nil
+		}
+		for k, r := range l.seen {
+			if now.Sub(r.first) >= dupWindow {
+				delete(l.seen, k)
+				if r.n > 0 {
+					l.write([]byte(fmt.Sprintf("%s (repeated %d times) %s\n", now.Format("2006/01/02 15:04:05.000000"), r.n, strings.TrimSpace(r.msg))))
+				}
+			}
+		}
+		l.seen[msg] = &repeat{first: now, msg: msg}
+	}
+	return l.write(p)
+}
+
+func (l *logFile) write(p []byte) (int, error) {
 	if l.size > l.max {
 		l.f.Close()
 		if err := l.open(); err != nil {

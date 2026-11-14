@@ -316,6 +316,27 @@ func (p *plan) fetching() []fetch {
 	return now
 }
 
+// mapFill says how far each square being written is, for the pages' pulse: a
+// digit per square of fileMap, 0 just begun to 9 nearly done; '0' for a square
+// no connection is writing. "" for a file of unknown size.
+func mapFill(size int64, now []fetch) string {
+	if size <= 0 {
+		return ""
+	}
+	m := []byte(strings.Repeat("0", mapCells))
+	for _, f := range now {
+		i := int64(min(f.pos*mapCells/size, mapCells-1))
+		start, end := i*size/mapCells, (i+1)*size/mapCells
+		if i == mapCells-1 {
+			end = size
+		}
+		if end > start {
+			m[i] = byte('0' + min(9, (f.pos-start)*10/(end-start)))
+		}
+	}
+	return string(m)
+}
+
 // fileMap draws a file of size bytes as mapCells characters, for the pages'
 // grid of squares: '#' all on disk, '.' some of it missing, a letter where
 // all of it is on disk and an interface wrote it (a for by[0], b for by[1]…),

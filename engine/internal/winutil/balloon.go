@@ -8,6 +8,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"downloadmanagersquared/engine/internal/mark"
 )
 
 // Balloons are shown on the tray icon fyne.io/systray creates: its window
@@ -68,8 +70,7 @@ var balloon struct {
 	click   func() // the latest balloon's action
 }
 
-// SetBalloonIcon gives balloons the app's icon (ICO bytes holding one PNG
-// image, as the tray uses).
+// SetBalloonIcon gives balloons the app's icon (the tray's ICO bytes).
 func SetBalloonIcon(ico []byte) {
 	h := Icon(ico, 32)
 	if h == 0 {
@@ -80,17 +81,13 @@ func SetBalloonIcon(ico []byte) {
 	balloon.Unlock()
 }
 
-// Icon is an icon of size×size pixels made from ICO bytes holding one PNG
-// image, as the tray uses; 0 if they don't hold one.
+// Icon is an icon of size×size pixels made from the nearest image of the
+// tray's ICO bytes; 0 if they hold none.
 func Icon(ico []byte, size int) windows.Handle {
-	if len(ico) < 22 {
+	img := mark.Pick(ico, size)
+	if len(img) == 0 {
 		return 0
 	}
-	off := int(uint32(ico[18]) | uint32(ico[19])<<8 | uint32(ico[20])<<16 | uint32(ico[21])<<24)
-	if off >= len(ico) {
-		return 0
-	}
-	img := ico[off:]
 	h, _, _ := pCreateIconFromResEx.Call(uintptr(unsafe.Pointer(&img[0])), uintptr(len(img)), 1, 0x00030000, uintptr(size), uintptr(size), 0)
 	return windows.Handle(h)
 }

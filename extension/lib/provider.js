@@ -14,4 +14,10 @@ async function handOverProvider(storage, engineSettings, call) {
   await storage.remove("vpnProvider");
 }
 
-if (typeof module !== "undefined") module.exports = { handOverProvider };
+// The Tunnels list is for the providers that need a tunnel per connection ("conf"),
+// for PIA's tunnels' state, and for any tunnel there already is. "" is no VPN.
+function tunnelsShown(provider, tunnelCount) {
+  return provider === "conf" || provider === "pia" || tunnelCount > 0;
+}
+
+if (typeof module !== "undefined") module.exports = { handOverProvider, tunnelsShown };

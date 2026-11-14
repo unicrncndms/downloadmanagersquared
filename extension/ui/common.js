@@ -14,7 +14,7 @@ function call(method, params) {
 }
 
 function connectUI(onUpdate) {
-  return Host.subscribe((m) => { applyAccent(m.settings); if (m.settings) setSpeedUnit(m.settings.speedUnit); onUpdate(m); });
+  return Host.subscribe((m) => { applyAccent(m.settings); applyTheme(m.settings); if (m.settings) setSpeedUnit(m.settings.speedUnit); onUpdate(m); });
 }
 
 // Sets the accent tokens (lib/accent.js) from the engine's settings; without
@@ -25,6 +25,14 @@ function applyAccent(settings) {
   if (!style) style = document.head.appendChild(Object.assign(document.createElement("style"), { id: "accent" }));
   const css = accentCSS(pageAccent(settings));
   if (style.textContent !== css) style.textContent = css;
+}
+
+// The theme choice: light or dark overrides the system's (ui.css, data-theme); "" follows it.
+function applyTheme(settings) {
+  if (!settings) return;
+  const t = settings.theme === "light" || settings.theme === "dark" ? settings.theme : "";
+  if (t) document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
 }
 
 // An (i)'s note opens to the right, or to the left when the right has less room.
@@ -43,12 +51,16 @@ function link(url, text) {
 // Where the engine and the extension are released (build.ps1 -Repo sets the repo).
 const RELEASES_URL = "https://github.com/unicrncndms/downloadmanagersquared/releases/latest";
 
+// The guide, in the same repository (docs/guide.md); a section is added as #heading.
+const GUIDE_URL = RELEASES_URL.replace(/\/releases\/latest$/, "/blob/main/docs/guide.md");
+
 // Engine connection badge in the page header.
 function renderConn(m) {
   const conn = $("conn");
   conn.textContent = m.connected ? "Engine connected" : m.notInstalled ? "Engine not installed" : m.quit ? "Engine quit" : "Engine offline";
   conn.className = "badge st " + (m.connected ? "ok" : "bad");
   conn.title = m.error || conn.textContent; // in the popup the square alone shows; its words on hover
+  conn.hidden = m.connected && document.body.classList.contains("engine-window"); // the window is the engine: only trouble is news
 }
 
 // In the Downloads window both pages share one header: the logo, the engine
@@ -116,19 +128,25 @@ function ifaceName(id, state, settings) {
   const v = ((state && state.interfaces) || []).find((i) => i.id === id);
   if (v) return v.name;
   const s = settings && settings.interfaces && settings.interfaces[id];
-  return (s && s.name) || id.slice(0, 8);
+  return (s && (s.label || s.name)) || id.slice(0, 8);
 }
 
 const $ = (id) => document.getElementById(id);
 
 // Short message at the bottom of the page (needs an element with id "toast").
 // It stays long enough to read: longer for longer text, up to 15 seconds.
-function toast(text) {
+// An error (toast(text, true)) looks different and stays until closed.
+function toast(text, error) {
   const t = $("toast");
-  t.textContent = text;
-  t.classList.add("show");
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => t.classList.remove("show"), Math.min(15000, Math.max(2500, text.length * 60)));
+  t.classList.toggle("error", !!error);
+  t.setAttribute("role", error ? "alert" : "status");
+  t.replaceChildren(text);
+  if (error) {
+    t.append(el("button", { class: "icon", title: "Close", "aria-label": "Close this message", onclick: () => t.classList.remove("show") }, "×"));
+  }
+  t.classList.add("show");
+  if (!error) toast.timer = setTimeout(() => t.classList.remove("show"), Math.min(15000, Math.max(2500, text.length * 60)));
 }
 
 // Calls the engine, reporting success or the error as a toast.
@@ -137,6 +155,6 @@ async function act(method, params, okText) {
     await call(method, params);
     if (okText) toast(okText);
   } catch (e) {
-    toast(e.message);
+    toast(e.message, true);
   }
 }

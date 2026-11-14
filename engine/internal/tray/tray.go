@@ -16,7 +16,7 @@ import (
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
-const ifaceRows = 6
+const ifaceRows = 6 // interface lines in the tooltip
 
 // Window is the Downloads window (internal/window). The menu opens it
 // through the engine (Engine.OpenWindow), which is given it with SetWindow.
@@ -40,30 +40,24 @@ func onReady(e *engine.Engine, w Window) {
 	// A left click opens the downloads; a right click shows the menu.
 	systray.SetOnTapped(func() { go openDownloads(e) })
 
-	status := newLine(systray.AddMenuItem("Idle", ""))
-	status.item.Disable()
-	var rows []*line
-	for range ifaceRows {
-		r := newLine(systray.AddMenuItem("", ""))
-		r.item.Disable()
-		r.show(false)
-		rows = append(rows, r)
-	}
+	open := systray.AddMenuItem("Show downloads", "Show the downloads")
+	clip := systray.AddMenuItem("Add link from clipboard", "Add the http, https or magnet links on the clipboard")
+	settings := systray.AddMenuItem("Connections & settings", "Show the connections and settings")
+	systray.AddSeparator()
 	pause := newLine(systray.AddMenuItem("Pause all", ""))
 	resume := newLine(systray.AddMenuItem("Resume all", ""))
 	pause.enable(false)
 	resume.enable(false)
 	systray.AddSeparator()
-	open := systray.AddMenuItem("Show downloads", "Show the downloads")
-	settings := systray.AddMenuItem("Connections & settings", "Show the connections and settings")
-	systray.AddSeparator()
-	quit := systray.AddMenuItem("Quit", "Stop all downloads and exit")
+	quit := systray.AddMenuItem("Quit (downloads stop)", "Stop all downloads and exit")
 
 	go func() {
 		for {
 			select {
 			case <-open.ClickedCh:
 				go openDownloads(e)
+			case <-clip.ClickedCh:
+				go addFromClipboard(e)
 			case <-settings.ClickedCh:
 				go openSettings(e)
 			case <-pause.item.ClickedCh:
@@ -89,18 +83,20 @@ func onReady(e *engine.Engine, w Window) {
 
 	go func() {
 		used := map[string]time.Time{}
+		shown := iconIdle
 		for now := range time.Tick(time.Second) {
 			if d := winutil.AppsDark(); d != dark {
 				dark = d
 				winutil.SetMenusDark(dark)
 			}
-			m := menuFor(e.Snapshot(), e.SpeedUnit(), used, now)
-			status.set(m.Status)
-			for i, r := range rows {
-				if i < len(m.Rows) {
-					r.set(m.Rows[i])
-				}
-				r.show(i < len(m.Rows))
+			snap := e.Snapshot()
+			m := menuFor(snap, e.SpeedUnit(), used, now)
+			if snap.Active > 0 && e.KeepAwake() {
+				winutil.StayAwake()
+			}
+			if st := iconFor(snap); st != shown {
+				shown = st
+				systray.SetIcon(icons[st]())
 			}
 			pause.enable(m.Pause)
 			resume.enable(m.Resume)
@@ -116,17 +112,14 @@ func onReady(e *engine.Engine, w Window) {
 	}()
 }
 
-// line is a menu item that is changed only when its title or visibility
-// does: every change redraws an open menu, so updating it each second
-// made the lines flicker.
+// line is a menu item that is changed only when its state does: every
+// change redraws an open menu, so updating it each second made it flicker.
 type line struct {
 	item    *systray.MenuItem
-	title   string
-	visible bool
 	enabled bool
 }
 
-func newLine(it *systray.MenuItem) *line { return &line{item: it, visible: true, enabled: true} }
+func newLine(it *systray.MenuItem) *line { return &line{item: it, enabled: true} }
 
 func (l *line) enable(on bool) {
 	if on == l.enabled {
@@ -137,25 +130,6 @@ func (l *line) enable(on bool) {
 		l.item.Enable()
 	} else {
 		l.item.Disable()
-	}
-}
-
-func (l *line) set(title string) {
-	if title != l.title {
-		l.title = title
-		l.item.SetTitle(title)
-	}
-}
-
-func (l *line) show(on bool) {
-	if on == l.visible {
-		return
-	}
-	l.visible = on
-	if on {
-		l.item.Show()
-	} else {
-		l.item.Hide()
 	}
 }
 
@@ -216,6 +190,26 @@ func menuFor(s engine.StateEvent, unit string, used map[string]time.Time, now ti
 
 // openDownloads is a left click and "Show downloads": the Downloads window's downloads view.
 func openDownloads(e *engine.Engine) { e.OpenWindow("") }
+
+// addFromClipboard adds the links on the clipboard, or says there are none.
+func addFromClipboard(e *engine.Engine) {
+	links := winutil.Links(winutil.ClipboardText())
+	if len(links) == 0 {
+		winutil.Notify(winutil.AppName, "No link on the clipboard")
+		return
+	}
+	added := 0
+	for _, l := range links {
+		if _, err := e.Add(engine.AddRequest{URL: l}); err != nil {
+			winutil.Notify("Could not add the link", err.Error())
+			continue
+		}
+		added++
+	}
+	if added > 0 {
+		winutil.Notify(winutil.AppName, fmt.Sprintf("Added %d from the clipboard", added))
+	}
+}
 
 // openSettings is "Connections & settings": the Downloads window's settings view.
 func openSettings(e *engine.Engine) { e.OpenWindow(window.Settings) }

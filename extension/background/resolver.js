@@ -427,7 +427,9 @@ const Resolver = {
     let i = tab ? pages.indexOf(tab.url) : -1;
     if (i < 0) i = pages.indexOf(job.pageUrl);
     const prev = i > 0 ? pages[i - 1] : null;
-    browser.tabs.sendMessage(job.tabId, { cmd: "record", ifaceName: job.ifaceName, prev }).catch(() => {});
+    const { n, of } = learningPlace([...this.jobs.values()], job);
+    const tokens = accentTokens(pageAccent(Engine.settings)) || accentTokens("#1d4ed8");
+    browser.tabs.sendMessage(job.tabId, { cmd: "record", ifaceName: job.ifaceName, prev, n, of, learn: job.learn, tokens }).catch(() => {});
   },
 
   // A captcha needs a person: show the window and hold all timeouts until it's solved.
@@ -553,6 +555,9 @@ const Resolver = {
         break;
       case "captchaDone":
         if (job.captcha) this.captchaDone(job);
+        break;
+      case "skip": // the same as closing the window
+        if (job.windowId !== null) browser.windows.remove(job.windowId).catch(() => {});
         break;
       case "recorded":
         if (job.mode !== "record") return;

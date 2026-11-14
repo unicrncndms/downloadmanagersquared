@@ -50,6 +50,7 @@ type Set struct {
 	view     atomic.Pointer[SetSummary]
 	tail     atomic.Pointer[Download] // the part whose end the Set needs before it can extract anything: a 7z's or ZIP's list of files is at the end of its last part; it starts first, fetches its end first, and gives way again once nil
 	inOrder  atomic.Bool              // read front to back only (a RAR, a solid 7z, one huge Entry): a part fetched before the ones ahead of it waits whole on disk; else fetching several at once costs no space
+	gaveUp   string                   // the reason last given up for (the loop's alone)
 	accepted atomic.Bool              // the archive's list of files has been read: the Set extracts as parts come, and completed parts keep their .part; until then only part 1 and tail are of any use
 	finished atomic.Bool              // all extracted: no part's .part is needed
 	cost     atomic.Int64             // RestartCost, as of the last step
@@ -438,7 +439,7 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 		}
 	case s.zip && run.parts == nil:
 		if err := s.layZip(run, members); err != nil {
-			return false, s.giveUp(members, err)
+			return false, s.giveUp(run, members, err)
 		}
 	}
 	if (s.rar || s.zip) && run.parts == nil {
@@ -461,7 +462,7 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 		}
 		sizes, err := archive.SplitSizes(front, p1.size)
 		if err != nil {
-			return false, s.giveUp(members, err)
+			return false, s.giveUp(run, members, err)
 		}
 		run.parts = archive.NewParts(sizes)
 		run.files = make([]*os.File, len(sizes))
@@ -483,10 +484,10 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 			break // laid out as they come
 		}
 		if k > n {
-			return false, s.giveUp(members, &archive.Unsupported{Reason: fmt.Sprintf("Part %d is more than the archive has (%d)", k, n)})
+			return false, s.giveUp(run, members, &archive.Unsupported{Reason: fmt.Sprintf("Part %d is more than the archive has (%d)", k, n)})
 		}
 		if want := run.parts.Span(k - 1); m.probed && m.size != want.End-want.Start {
-			return false, s.giveUp(members, &archive.Unsupported{Reason: fmt.Sprintf("Part %d is %s, not the %s the archive needs", k, human(m.size), human(want.End-want.Start))})
+			return false, s.giveUp(run, members, &archive.Unsupported{Reason: fmt.Sprintf("Part %d is %s, not the %s the archive needs", k, human(m.size), human(want.End-want.Start))})
 		}
 	}
 
@@ -562,7 +563,7 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 		}
 		return false, nil
 	case errors.As(err, &u):
-		return false, s.giveUp(members, err)
+		return false, s.giveUp(run, members, err)
 	case run.ex.arc == nil:
 		return false, nil // its list of files isn't all there yet
 	default:
@@ -861,12 +862,20 @@ func (s *Set) finish(run *setRun, members map[int]partInfo) {
 
 // giveUp downloads the parts as plain files: the archive can't be extracted
 // as a folder. Nothing was freed yet, or this wouldn't have been reached.
-func (s *Set) giveUp(members map[int]partInfo, err error) error {
+func (s *Set) giveUp(run *setRun, members map[int]partInfo, err error) error {
 	var u *archive.Unsupported
 	if !errors.As(err, &u) {
 		return err
 	}
-	log.Printf("set %s: not as a folder: %s", s.set, u.Reason)
+	if s.gaveUp != u.Reason { // parts with bytes freed stay on, so this comes again each tick
+		s.gaveUp = u.Reason
+		log.Printf("set %s: not as a folder: %s", s.set, u.Reason)
+	}
+	// The run's handles on the .part files block renaming them on Windows.
+	if run.parts != nil {
+		run.close()
+	}
+	*run = setRun{}
 	for _, m := range members {
 		d := m.d
 		d.mu.Lock()
@@ -890,16 +899,22 @@ func (s *Set) giveUp(members map[int]partInfo, err error) error {
 func (d *Download) keepPart(part string) {
 	d.mu.Lock()
 	dir, name := d.st.Dir, d.st.Filename
+	holdOff := time.Now().Before(d.renameNext)
 	d.mu.Unlock()
-	if !exists(part) {
+	if holdOff || !exists(part) {
 		return
 	}
 	final := filepath.Join(dir, uniqueName(dir, name, ""))
 	if err := os.Rename(part, final); err != nil {
 		log.Printf("download %s: naming the part: %v", d.ID(), err)
+		d.mu.Lock()
+		d.renameFails++
+		d.renameNext = time.Now().Add(renameDelay(d.renameFails))
+		d.mu.Unlock()
 		return
 	}
 	d.mu.Lock()
+	d.renameFails = 0
 	d.st.Filename = filepath.Base(final)
 	d.mu.Unlock()
 }
@@ -967,3 +982,9 @@ func (s *Set) publish(run *setRun) {
 
 // Summary is what the parts show of the Set, nil before it has run.
 func (s *Set) Summary() *SetSummary { return s.view.Load() }
+
+// renameDelay is the wait before naming a part is tried again after n
+// failures in a row: 1 s, doubling, up to 30 s.
+func renameDelay(n int) time.Duration {
+	return min(time.Second<<min(max(n-1, 0), 5), 30*time.Second)
+}

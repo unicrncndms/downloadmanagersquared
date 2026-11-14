@@ -1,0 +1,421 @@
+<!doctype html>
+<!-- Three character ideas for the redesign as static popup mockups (480 x 600). Nothing here works.
+     ?m=a, ?m=b or ?m=c shows one. Shares ui.css: Rubik, the tokens, light and dark. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DMS² character mockups</title>
+<link rel="stylesheet" href="../ui/ui.css">
+<style>
+  body { margin: 0; padding: 24px; font-size: 13px; background: var(--bg); }
+  .mock { margin-bottom: 48px; }
+  .mock > h1 { font-size: 20px; margin: 0 0 4px; }
+  .mock > p { margin: 0 0 16px; color: var(--muted); max-width: 980px; }
+  .frames { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+  .frame { width: 480px; height: 600px; border: 1px solid var(--line); background: var(--bg); overflow: hidden;
+    display: flex; flex-direction: column; box-shadow: 0 10px 28px rgba(0, 0, 0, .14); }
+  .frame.short { height: 380px; }
+  .cap { font-size: 11px; color: var(--muted); margin: 0 0 6px; }
+  .num { font-variant-numeric: tabular-nums; }
+  svg.i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  button.ic { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0;
+    border-color: transparent; background: transparent; color: var(--muted); }
+  .sq { display: inline-block; width: 9px; height: 9px; border-radius: 2px; background: currentColor; flex: none; }
+  .warn { color: var(--warn); font-weight: 500; }
+  .muted { color: var(--muted); }
+
+  /* The file as squares: shared by all three. */
+  .grid { display: grid; grid-template: repeat(3, auto) / repeat(32, 1fr); grid-auto-flow: column; gap: 2px; }
+  .grid i { aspect-ratio: 1; border-radius: 2px; background: var(--bar); }
+  .grid i.got { background: currentColor; }
+  .grid i.now { background: currentColor; animation: pulse .9s ease-in-out infinite alternate; }
+  .grid.rest i.got { background: var(--muted); opacity: .6; }
+  @keyframes pulse { to { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .grid i.now { animation: none; } }
+
+  /* ---------- A: the sum ---------- */
+  .a header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 14px 10px; }
+  .a .top { display: flex; align-items: center; gap: 8px; }
+  .a h2 { margin: 0; font-size: 15px; display: flex; gap: 6px; align-items: center; }
+  .a h2 img { width: 18px; }
+  .a .total { margin-left: auto; text-align: right; line-height: 1.15; }
+  .a .total b { font-size: 20px; font-weight: 600; }
+  .a .total small { display: block; font-size: 11px; color: var(--muted); }
+  .a .eq { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin-top: 8px; font-size: 12px; }
+  .a .eq .part { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: var(--r); background: var(--bg); }
+  .a .eq .op { color: var(--muted); font-weight: 600; }
+  .a .eq .part.idle { color: var(--muted); }
+  .a .eq .part.idle .sq { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+  .a .tools { display: flex; gap: 6px; margin-top: 10px; }
+  .a .tools input { flex: 1; }
+  .a main { flex: 1; overflow: hidden; padding: 0 12px; }
+  .a .sec { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .a .sec::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .a .row { padding: 8px 4px 10px; }
+  .a .row + .row { border-top: 1px solid var(--line); }
+  .a .l1 { display: flex; align-items: baseline; gap: 8px; }
+  .a .l1 .nm { font-weight: 500; font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .a .l1 .sp { font-weight: 600; font-size: 14px; }
+  .a .grid { margin: 6px 0 0; }
+  .a .share { display: flex; height: 4px; gap: 2px; margin-top: 4px; }
+  .a .share i { border-radius: 2px; background: currentColor; }
+  .a .l3 { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; }
+  .a .l3 .who { display: inline-flex; align-items: center; gap: 5px; }
+  .a .l3 .right { margin-left: auto; color: var(--muted); }
+  .a .tag { font-size: 11px; padding: 0 5px; border: 1px solid var(--line); border-radius: var(--r); color: var(--muted); }
+  .a .q { display: flex; align-items: center; gap: 10px; padding: 7px 4px; }
+  .a .q + .q { border-top: 1px solid var(--line); }
+  .a .q .n { width: 14px; text-align: right; color: var(--muted); font-size: 12px; }
+  .a .q .nm { flex: 1; }
+  .a .empty { flex: 1; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; }
+  .a .empty .big { font-size: 17px; font-weight: 500; max-width: 320px; }
+  .a .empty ul { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 12px; color: var(--muted); text-align: left; }
+  .a .empty li { display: flex; gap: 8px; align-items: baseline; }
+  .a .empty li .sq { width: 6px; height: 6px; color: var(--accent); }
+  kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; background: var(--panel); color: var(--text); }
+
+  /* ---------- B: instrument panel ---------- */
+  .b header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 14px 10px; }
+  .b .top { display: flex; align-items: flex-start; gap: 8px; }
+  .b h2 { margin: 0; font-size: 15px; display: flex; gap: 6px; align-items: center; }
+  .b h2 img { width: 18px; }
+  .b .read { margin-left: auto; text-align: right; line-height: 1; }
+  .b .read b { font-size: 26px; font-weight: 500; letter-spacing: -.01em; }
+  .b .read small { font-size: 12px; color: var(--muted); margin-left: 2px; }
+  .b .read div { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .b .meters { display: grid; grid-template-columns: 52px 1fr 34px 40px; gap: 5px 10px; align-items: center; margin-top: 10px; font-size: 12px; }
+  .b .lab { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  .b .meter { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; }
+  .b .meter i { height: 8px; border-radius: 1.5px; background: var(--bar); }
+  .b .meter i.on { background: currentColor; }
+  .b .meters .v { text-align: right; font-weight: 500; }
+  .b .meters .st { font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .b .meters .st.warn { color: var(--warn); }
+  .b .tools { display: flex; gap: 6px; margin-top: 10px; }
+  .b .tools input { flex: 1; }
+  .b main { flex: 1; overflow: hidden; padding: 0 12px; }
+  .b .cols, .b .r1 { display: grid; grid-template-columns: 18px minmax(0, 1fr) 72px 64px; gap: 8px; align-items: baseline; }
+  .b .cols { padding: 8px 4px 4px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--text); }
+  .b .cols span:nth-child(n+3), .b .r1 span:nth-child(n+3) { text-align: right; }
+  .b .rule { display: flex; align-items: center; gap: 8px; margin: 12px 0 2px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .b .rule::after { content: ""; flex: 1; border-top: 1px dashed var(--line); }
+  .b .row { padding: 7px 4px; border-bottom: 1px solid var(--line); }
+  .b .r1 .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .b .r1 .n { color: var(--muted); font-size: 11px; text-align: right; }
+  .b .r1 b { font-weight: 500; }
+  .b .r2 { display: grid; grid-template-columns: 18px minmax(0, 1fr) 40px; gap: 8px; align-items: center; margin-top: 5px; }
+  .b .r2 .pc { text-align: right; font-size: 11px; color: var(--muted); }
+  .b .r3 { margin: 4px 0 0 26px; font-size: 11px; color: var(--muted); display: flex; gap: 12px; }
+  .b .r3 span { display: inline-flex; gap: 4px; align-items: center; }
+  .b .empty { flex: 1; display: grid; align-content: center; gap: 10px; padding: 24px 28px; }
+  .b .empty .big { font-size: 15px; font-weight: 500; }
+  .b .empty dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 6px 0 0; font-size: 12px; }
+  .b .empty dt { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding-top: 2px; }
+  .b .empty dd { margin: 0; }
+
+  /* ---------- C: tiles ---------- */
+  .c header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 14px 10px; }
+  .c .top { display: flex; align-items: center; gap: 8px; }
+  .c .logo { display: flex; align-items: center; gap: 2px; font-size: 16px; font-weight: 600; }
+  .c .logo .t2 { width: 20px; height: 20px; border-radius: var(--r); background: var(--accent); color: var(--on-accent);
+    display: grid; place-items: center; font-size: 12px; margin-left: 2px; }
+  .c .tiles { display: flex; gap: 6px; margin-left: auto; }
+  .c .tile { display: grid; grid-template-rows: 26px auto; justify-items: center; gap: 2px; font-size: 10px; color: var(--muted); }
+  .c .tile b { width: 26px; height: 26px; border-radius: var(--r); background: currentColor; display: grid; place-items: center; }
+  .c .tile b span { color: var(--on-accent); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .c .tile.idle b { background: transparent; box-shadow: inset 0 0 0 2px currentColor; }
+  .c .tile.idle b span { color: inherit; }
+  .c .tile em { font-style: normal; color: var(--text); }
+  .c .tile.busy em::after { content: " busy"; color: var(--warn); font-weight: 500; }
+  .c .sum { text-align: right; line-height: 1.1; margin-left: 10px; }
+  .c .sum b { font-size: 18px; font-weight: 600; }
+  .c .sum small { display: block; font-size: 11px; color: var(--muted); }
+  .c .tools { display: flex; gap: 6px; margin-top: 10px; }
+  .c .tools input { flex: 1; }
+  .c .tb { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; border-radius: var(--r); }
+  .c .tb.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .c main { flex: 1; overflow: hidden; padding: 0 12px; }
+  .c .sec { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; font-size: 12px; font-weight: 600; }
+  .c .sec .mk { display: grid; grid-template-columns: 5px 5px; gap: 2px; }
+  .c .sec .mk i { width: 5px; height: 5px; border-radius: 1px; background: var(--accent); }
+  .c .sec .mk i:nth-child(n+3) { opacity: .35; }
+  .c .sec .ct { min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--r); background: var(--bar); display: grid; place-items: center; font-size: 11px; font-weight: 500; }
+  .c .row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 4px 10px; padding: 8px; margin-bottom: 6px;
+    border-radius: var(--r); background: var(--panel); border: 1px solid var(--line); }
+  .c .st { width: 28px; height: 28px; border-radius: var(--r); display: grid; place-items: center; grid-row: span 2; align-self: start; }
+  .c .st.run { background: var(--accent); color: var(--on-accent); }
+  .c .st.q { box-shadow: inset 0 0 0 2px var(--line); color: var(--muted); font-weight: 600; font-size: 12px; }
+  .c .st.seed { background: var(--accent-soft); color: var(--accent); }
+  .c .nm { font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; align-self: center; }
+  .c .acts { display: flex; gap: 4px; }
+  .c .acts .tb { width: 26px; height: 26px; }
+  .c .body2 { grid-column: 2 / -1; }
+  .c .grid { gap: 3px; }
+  .c .grid i { border-radius: 2.5px; }
+  .c .foot { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 12px; }
+  .c .foot .pill { display: inline-flex; align-items: center; gap: 5px; }
+  .c .foot .right { margin-left: auto; font-weight: 600; }
+  .c .foot .right small { font-weight: 400; color: var(--muted); }
+  .c .row.q1 { grid-template-columns: 28px minmax(0, 1fr) auto auto; align-items: center; padding: 6px 8px; }
+  .c .row.q1 .st { grid-row: auto; }
+  .c .empty { flex: 1; display: grid; align-content: center; justify-items: center; gap: 14px; padding: 20px; text-align: center; }
+  .c .empty .wait { display: grid; grid-template-columns: repeat(16, 14px); gap: 3px; }
+  .c .empty .wait i { height: 14px; border-radius: 2.5px; background: var(--bar); }
+  .c .empty .wait i.a { background: var(--accent); opacity: .5; }
+  .c .empty .big { font-size: 16px; font-weight: 500; }
+  .c .empty .row2 { display: flex; gap: 8px; }
+</style>
+</head>
+<body>
+
+<!-- ======================= A ======================= -->
+<section class="mock" id="a">
+  <h1>A · The sum</h1>
+  <p>Every speed is written as an addition of its connections. The header is the equation; each row says who brings what, under squares coloured by the connection that fetched them, with a share bar. The empty list says how many connections are ready to add up.</p>
+  <div class="frames">
+    <div>
+      <div class="cap">Popup, three downloads</div>
+      <div class="frame a">
+        <header>
+          <div class="top">
+            <h2><img src="../icons/icon.svg" alt="">DMS²</h2>
+            <div class="total num"><b>11.5 MB/s</b><small>5m 22s left</small></div>
+            <button class="ic" title="Settings" data-icon="gear"></button>
+          </div>
+          <div class="eq num">
+            <span class="part" style="color:var(--c0)"><i class="sq"></i><span style="color:var(--text)">Ethernet 7.1</span></span>
+            <span class="op">+</span>
+            <span class="part" style="color:var(--c1)"><i class="sq"></i><span style="color:var(--text)">Wi‑Fi 4.4</span> <span class="warn">busy</span></span>
+            <span class="op">+</span>
+            <span class="part idle" style="color:var(--c2)"><i class="sq"></i>VPN idle</span>
+            <span class="op">=</span>
+            <b>11.5</b>
+          </div>
+          <div class="tools"><button class="primary">+ Add</button><input placeholder="Search downloads"><button>Pause all</button></div>
+        </header>
+        <main>
+          <div class="sec">Downloading 2</div>
+          <div class="row">
+            <div class="l1"><span class="nm">ubuntu-24.04.iso</span><span class="sp num">11.5 MB/s</span></div>
+            <div class="grid" data-map="ubuntu" data-by="c0,c1"></div>
+            <div class="share"><i style="flex:7.1;color:var(--c0)"></i><i style="flex:4.4;color:var(--c1)"></i></div>
+            <div class="l3 num">
+              <span class="who"><i class="sq" style="color:var(--c0)"></i>Eth 7.1</span><span class="muted">+</span>
+              <span class="who"><i class="sq" style="color:var(--c1)"></i>Wi‑Fi 4.4 <span class="warn">busy</span></span>
+              <span class="right">39% · 5m 22s left</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="l1"><span class="nm">dataset-2026.tar</span><span class="muted">Paused</span></div>
+            <div class="grid rest" data-map="dataset" data-by="c0"></div>
+            <div class="l3 num"><span class="tag">2 mirrors</span><span class="tag">SHA-256</span><span class="right">12% · 3.1 of 25 GB</span></div>
+          </div>
+          <div class="sec">Queue 2</div>
+          <div class="q"><span class="n">1</span><span class="nm">holiday-video.rar</span><span class="tag">as folder</span><span class="muted num">4.2 GB</span></div>
+          <div class="q"><span class="n">2</span><span class="nm">three.iso</span><span class="muted num">6.1 GB</span></div>
+          <div class="sec">Seeding 1</div>
+          <div class="row">
+            <div class="l1"><span class="nm">debian-13.iso</span><span class="sp num">↑ 300 KB/s</span></div>
+            <div class="l3 num"><span class="who"><i class="sq" style="color:var(--c0)"></i>Eth 3 peers</span><span class="muted">+</span><span class="who"><i class="sq" style="color:var(--c1)"></i>Wi‑Fi 2 peers</span><span class="right">ratio 0.15 of 1.00</span></div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div>
+      <div class="cap">Popup, nothing yet</div>
+      <div class="frame a short">
+        <header>
+          <div class="top">
+            <h2><img src="../icons/icon.svg" alt="">DMS²</h2>
+            <div class="total"><b>Ready</b></div>
+            <button class="ic" title="Settings" data-icon="gear"></button>
+          </div>
+          <div class="eq">
+            <span class="part idle" style="color:var(--c0)"><i class="sq"></i>Ethernet</span><span class="op">+</span>
+            <span class="part idle" style="color:var(--c1)"><i class="sq"></i>Wi‑Fi</span><span class="op">+</span>
+            <span class="part idle" style="color:var(--c2)"><i class="sq"></i>VPN</span>
+          </div>
+        </header>
+        <div class="empty">
+          <div class="big">Three connections ready to work on one file together.</div>
+          <button class="primary">+ Add a link</button>
+          <ul>
+            <li><i class="sq"></i><span>Firefox downloads over 100 MB come here by themselves</span></li>
+            <li><i class="sq"></i><span><kbd>Ctrl</kbd>+<kbd>V</kbd> anywhere adds the links you copied</span></li>
+            <li><i class="sq"></i><span>Magnet links, .torrent and Metalink work too</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= B ======================= -->
+<section class="mock" id="b">
+  <h1>B · Instrument panel</h1>
+  <p>The engine as a measuring device in the tray. One level meter of squares per connection in the header, numbers in fixed columns that never jump, small-caps labels and hairline rules. Calm and exact; the list reads like a table.</p>
+  <div class="frames">
+    <div>
+      <div class="cap">Popup, three downloads</div>
+      <div class="frame b">
+        <header>
+          <div class="top">
+            <h2><img src="../icons/icon.svg" alt="">DMS²</h2>
+            <div class="read num"><b>11.5</b><small>MB/s</small><div>5m 22s left</div></div>
+            <button class="ic" title="Settings" data-icon="gear"></button>
+          </div>
+          <div class="meters num">
+            <span class="lab"><i class="sq" style="color:var(--c0)"></i>Eth</span><span class="meter" style="color:var(--c0)" data-level="17"></span><span class="v">7.1</span><span class="st"></span>
+            <span class="lab"><i class="sq" style="color:var(--c1)"></i>Wi‑Fi</span><span class="meter" style="color:var(--c1)" data-level="11"></span><span class="v">4.4</span><span class="st warn">Busy</span>
+            <span class="lab"><i class="sq" style="color:var(--c2)"></i>VPN</span><span class="meter" style="color:var(--c2)" data-level="0"></span><span class="v muted">0.0</span><span class="st">Idle</span>
+          </div>
+          <div class="tools"><button class="primary">+ Add</button><input placeholder="Search downloads"><button>Pause all</button></div>
+        </header>
+        <main>
+          <div class="cols"><span></span><span>Name</span><span>Speed</span><span>Left</span></div>
+          <div class="rule">Downloading · 2</div>
+          <div class="row">
+            <div class="r1 num"><span class="n"></span><span class="nm">ubuntu-24.04.iso</span><span><b>11.5</b> MB/s</span><span>5m 22s</span></div>
+            <div class="r2"><span></span><div class="grid" data-map="ubuntu" data-by="c0,c1"></div><span class="pc num">39%</span></div>
+            <div class="r3 num"><span><i class="sq" style="color:var(--c0)"></i>Eth ×4</span><span><i class="sq" style="color:var(--c1)"></i>Wi‑Fi ×2 <b class="warn">busy</b></span></div>
+          </div>
+          <div class="row">
+            <div class="r1 num"><span class="n"></span><span class="nm">dataset-2026.tar</span><span class="muted">paused</span><span class="muted">—</span></div>
+            <div class="r2"><span></span><div class="grid rest" data-map="dataset" data-by="c0"></div><span class="pc num">12%</span></div>
+          </div>
+          <div class="rule">Queue · 2</div>
+          <div class="row"><div class="r1 num"><span class="n">1</span><span class="nm">holiday-video.rar</span><span class="muted">4.2 GB</span><span class="muted">next</span></div></div>
+          <div class="row"><div class="r1 num"><span class="n">2</span><span class="nm">three.iso</span><span class="muted">6.1 GB</span><span></span></div></div>
+          <div class="rule">Seeding · 1</div>
+          <div class="row"><div class="r1 num"><span class="n"></span><span class="nm">debian-13.iso</span><span>↑ <b>0.3</b> MB/s</span><span class="muted">0.15/1</span></div></div>
+        </main>
+      </div>
+    </div>
+    <div>
+      <div class="cap">Popup, nothing yet</div>
+      <div class="frame b short">
+        <header>
+          <div class="top">
+            <h2><img src="../icons/icon.svg" alt="">DMS²</h2>
+            <div class="read num"><b class="muted">0.0</b><small>MB/s</small></div>
+            <button class="ic" title="Settings" data-icon="gear"></button>
+          </div>
+          <div class="meters num">
+            <span class="lab"><i class="sq" style="color:var(--c0)"></i>Eth</span><span class="meter" data-level="0"></span><span class="v muted">0.0</span><span class="st">Ready</span>
+            <span class="lab"><i class="sq" style="color:var(--c1)"></i>Wi‑Fi</span><span class="meter" data-level="0"></span><span class="v muted">0.0</span><span class="st">Ready</span>
+            <span class="lab"><i class="sq" style="color:var(--c2)"></i>VPN</span><span class="meter" data-level="0"></span><span class="v muted">0.0</span><span class="st">Ready</span>
+          </div>
+        </header>
+        <div class="empty">
+          <div class="big">Nothing running. Three connections ready.</div>
+          <dl>
+            <dt>Firefox</dt><dd>Downloads over 100 MB come here by themselves</dd>
+            <dt>Paste</dt><dd><kbd>Ctrl</kbd>+<kbd>V</kbd> anywhere, or <button class="primary" style="padding:1px 8px">+ Add</button></dd>
+            <dt>Also</dt><dd>Magnet links, .torrent, Metalink</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= C ======================= -->
+<section class="mock" id="c">
+  <h1>C · Tiles</h1>
+  <p>Everything is built from the one square: the ² is a tile, each connection is a coloured tile with its speed inside, buttons and status marks are square tiles, section marks are four small squares. The empty list is a field of squares waiting to be filled. The most playful of the three.</p>
+  <div class="frames">
+    <div>
+      <div class="cap">Popup, three downloads</div>
+      <div class="frame c">
+        <header>
+          <div class="top">
+            <span class="logo">DMS<span class="t2">2</span></span>
+            <div class="tiles num">
+              <span class="tile" style="color:var(--c0)"><b><span>7.1</span></b><em>Eth</em></span>
+              <span class="tile busy" style="color:var(--c1)"><b><span>4.4</span></b><em>Wi‑Fi</em></span>
+              <span class="tile idle" style="color:var(--c2)"><b><span>–</span></b><em>VPN</em></span>
+            </div>
+            <div class="sum num"><b>11.5</b> <small>MB/s · 5m 22s</small></div>
+          </div>
+          <div class="tools"><button class="tb primary" title="Add" data-icon="plus"></button><input placeholder="Search downloads"><button class="tb" title="Pause all" data-icon="pause"></button><button class="tb" title="Settings" data-icon="gear"></button></div>
+        </header>
+        <main>
+          <div class="sec"><span class="mk"><i></i><i></i><i></i><i></i></span>Downloading <span class="ct">2</span></div>
+          <div class="row">
+            <span class="st run" data-icon="down"></span><span class="nm">ubuntu-24.04.iso</span>
+            <span class="acts"><button class="tb" data-icon="pause" title="Pause"></button><button class="tb" data-icon="more" title="More"></button></span>
+            <div class="body2">
+              <div class="grid" data-map="ubuntu" data-by="c0,c1"></div>
+              <div class="foot num"><span class="pill"><i class="sq" style="color:var(--c0)"></i>Eth 4×</span><span class="pill"><i class="sq" style="color:var(--c1)"></i>Wi‑Fi 2× <b class="warn">busy</b></span><span class="right">11.5 MB/s <small>39%</small></span></div>
+            </div>
+          </div>
+          <div class="row">
+            <span class="st q" data-icon="pause"></span><span class="nm">dataset-2026.tar</span>
+            <span class="acts"><button class="tb" data-icon="play" title="Resume"></button><button class="tb" data-icon="more" title="More"></button></span>
+            <div class="body2"><div class="grid rest" data-map="dataset" data-by="c0"></div><div class="foot num muted">Paused · 12% · 3.1 of 25 GB</div></div>
+          </div>
+          <div class="sec"><span class="mk"><i></i><i></i><i></i><i></i></span>Queue <span class="ct">2</span></div>
+          <div class="row q1"><span class="st q">1</span><span class="nm">holiday-video.rar</span><span class="muted num">4.2 GB</span><span class="acts"><button class="tb" data-icon="more" title="More"></button></span></div>
+          <div class="row q1"><span class="st q">2</span><span class="nm">three.iso</span><span class="muted num">6.1 GB</span><span class="acts"><button class="tb" data-icon="more" title="More"></button></span></div>
+        </main>
+      </div>
+    </div>
+    <div>
+      <div class="cap">Popup, nothing yet</div>
+      <div class="frame c short">
+        <header>
+          <div class="top">
+            <span class="logo">DMS<span class="t2">2</span></span>
+            <div class="tiles">
+              <span class="tile idle" style="color:var(--c0)"><b><span>–</span></b><em>Eth</em></span>
+              <span class="tile idle" style="color:var(--c1)"><b><span>–</span></b><em>Wi‑Fi</em></span>
+              <span class="tile idle" style="color:var(--c2)"><b><span>–</span></b><em>VPN</em></span>
+            </div>
+          </div>
+        </header>
+        <div class="empty">
+          <div class="wait" id="wait"></div>
+          <div class="big">Paste a link and three connections fill it together.</div>
+          <div class="row2"><button class="primary">+ Add a link</button><span class="muted" style="align-self:center">or <kbd>Ctrl</kbd>+<kbd>V</kbd> anywhere</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  // Same map format as the engine: letter on disk by connection a=0…, digit fetching now, "." missing.
+  const run = (on, now, off, who) => who.repeat(on) + now + ".".repeat(off);
+  const maps = {
+    ubuntu: run(9, "0", 6, "a") + run(7, "0", 8, "a") + run(8, "1", 7, "b") + run(5, "0", 10, "a") + run(6, "1", 9, "b") + run(2, "0", 13, "a"),
+    dataset: "a".repeat(12) + ".".repeat(84),
+  };
+  for (const g of document.querySelectorAll(".grid")) {
+    const by = g.dataset.by.split(",");
+    for (const ch of maps[g.dataset.map]) {
+      const i = document.createElement("i");
+      if (ch >= "a" && ch <= "j") { i.className = "got"; i.style.color = `var(--${by[ch.charCodeAt(0) - 97]})`; }
+      else if (ch >= "0" && ch <= "9") { i.className = "now"; i.style.color = `var(--${by[+ch]})`; }
+      g.append(i);
+    }
+  }
+  for (const m of document.querySelectorAll(".meter")) {
+    for (let k = 0; k < 24; k++) { const i = document.createElement("i"); if (k < +m.dataset.level) i.className = "on"; m.append(i); }
+  }
+  const wait = document.getElementById("wait");
+  for (let k = 0; k < 48; k++) { const i = document.createElement("i"); if ([5, 6, 21, 22, 37].includes(k)) i.className = "a"; wait.append(i); }
+  const icons = {
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    pause: '<path d="M9 5v14M15 5v14"/>',
+    play: '<path d="M7 5l12 7-12 7z"/>',
+    more: '<circle cx="5" cy="12" r=".6"/><circle cx="12" cy="12" r=".6"/><circle cx="19" cy="12" r=".6"/>',
+    down: '<path d="M12 4v13M6 11l6 6 6-6M5 20h14"/>',
+  };
+  for (const e of document.querySelectorAll("[data-icon]")) e.innerHTML = `<svg class="i" viewBox="0 0 24 24">${icons[e.dataset.icon]}</svg>`;
+  const only = new URLSearchParams(location.search).get("m");
+  if (only) for (const s of document.querySelectorAll(".mock")) s.hidden = s.id !== only;
+</script>
+</body>
+</html>

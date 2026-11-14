@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -14,6 +15,7 @@ import (
 	"downloadmanagersquared/engine/internal/engine"
 	"downloadmanagersquared/engine/internal/install"
 	"downloadmanagersquared/engine/internal/ipc"
+	"downloadmanagersquared/engine/internal/setup"
 	"downloadmanagersquared/engine/internal/tray"
 	"downloadmanagersquared/engine/internal/winutil"
 )
@@ -51,43 +53,66 @@ func installFrom(l install.Layout, src string, first *install.Options) error {
 		return err
 	}
 	if first != nil {
-		return winutil.StartDetached(l.Engine()) // setup's window says the rest
+		return winutil.StartDetached(l.Engine(), flagInstalled) // setup's window says the rest
 	}
 	return winutil.StartDetached(l.Engine(), flagUpdated)
 }
 
-// uninstall removes the install after asking, keeping the downloads.
+// uninstall removes the install after asking in one window, keeping the
+// downloads.
 func uninstall(l install.Layout) {
-	if winutil.Dialog(title, "Uninstall downloadmanagersquared?\n\nDownloaded files are kept, including unfinished ones.",
-		windows.MB_OKCANCEL|windows.MB_ICONQUESTION) != winutil.IDOK {
-		return
-	}
 	data, _ := engine.DataDir()
-	wipe := winutil.Dialog(title, "Also delete settings and download history?\n\n"+
-		"That is everything in "+data+": settings, learned sites, the download list, VPN keys and torrents. "+
-		"Downloaded files are kept either way.",
-		windows.MB_YESNO|windows.MB_DEFBUTTON2|windows.MB_ICONQUESTION) == winutil.IDYES
-	if !quitEngine() {
-		for _, pid := range winutil.ProcessesOf(l.Engine()) {
-			winutil.Dialog(title, "Quit DMS² from its tray icon (right-click → Quit), then press OK.", windows.MB_OK|windows.MB_ICONINFORMATION)
-			winutil.WaitExit(pid, 30*time.Second)
-		}
-	}
-	var errs []error
-	errs = append(errs, l.Unregister())
-	if wipe && data != "" {
-		errs = append(errs, os.RemoveAll(data))
-	}
-	if err := errors.Join(errs...); err != nil {
-		winutil.MessageBox(title, "Uninstalled, but not everything could be removed: "+err.Error())
-	} else {
-		winutil.Dialog(title, "downloadmanagersquared is uninstalled. Remove the extension in Firefox under Add-ons too.",
-			windows.MB_OK|windows.MB_ICONINFORMATION)
+	done := setup.RunUninstall(tray.Icon(), setup.Steps{
+		Version:  engine.Version,
+		Browsers: winutil.FirefoxBrowsers,
+		OpenAddons: func(b winutil.Browser) {
+			if err := winutil.OpenBrowser(b.Exe, "about:addons"); err != nil {
+				winutil.MessageBox(title, "Could not open "+b.Name+": "+err.Error())
+			}
+		},
+		Remove: func(wipe bool) error {
+			if !quitEngine() {
+				for _, pid := range winutil.ProcessesOf(l.Engine()) {
+					winutil.Dialog(title, "Quit DMS² from its tray icon (right-click → Quit), then press OK.", windows.MB_OK|windows.MB_ICONINFORMATION)
+					winutil.WaitExit(pid, 30*time.Second)
+				}
+			}
+			errs := []error{l.Unregister()}
+			if wipe && data != "" {
+				errs = append(errs, os.RemoveAll(data))
+			}
+			return errors.Join(errs...)
+		},
+	}, setup.UninstallInfo{DataDir: data, Unfinished: unfinishedFolders(data)})
+	if !done {
+		return
 	}
 	// Last, as this exe lives in the folder: it can only go once this process has exited.
 	if err := l.RemoveLater(); err != nil {
 		winutil.MessageBox(title, "Could not remove "+l.Dir+": "+err.Error())
 	}
+}
+
+// unfinishedFolders are the folders that hold an unfinished download's
+// .dms.part file, from the saved download list in dataDir.
+func unfinishedFolders(dataDir string) []string {
+	files, _ := filepath.Glob(filepath.Join(dataDir, "downloads", "*.json"))
+	var out []string
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var st struct{ Dir, Filename string }
+		if json.Unmarshal(b, &st) != nil || st.Dir == "" || st.Filename == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(st.Dir, st.Filename+".dms.part")); err == nil && !slices.Contains(out, st.Dir) {
+			out = append(out, st.Dir)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // updateNow asks first when quitting the running engine would download a

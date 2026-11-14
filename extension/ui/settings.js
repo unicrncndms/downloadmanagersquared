@@ -17,6 +17,7 @@ windowHeader();
 
 // --- connections ---
 
+// The engine looks for changes itself every few seconds; this looks now.
 $("refreshIfaces").onclick = () => act("refreshInterfaces", {}, "Connections refreshed");
 // Only on this click does DMS² contact a STUN server.
 $("checkLines").onclick = async () => {
@@ -53,26 +54,29 @@ function badge(text, cls, title) {
   return el("span", { class: "badge " + (cls || "dim"), title }, text);
 }
 
-function vpnCell(i, tun) {
-  if (!tun) {
-    return el("div", { class: "vpn" },
-      el("button", { class: "small", onclick: () => { confFor = i.id; $("confFile").click(); } }, "Import .conf"));
-  }
-  const pia = tun.provider === "pia";
+// One line of the VPN section: a connection with its tunnel, or the way to import one.
+function tunnelRow(i, tun) {
+  const pia = tun && tun.provider === "pia";
   // The port the VPN provider forwards to this tunnel, where it can't tell DMS² itself.
   let port = null;
-  if (!pia) {
-    port = el("input", { type: "number", class: "port", min: 1, max: 65535, placeholder: "Port", "aria-label": `Forwarded port: ${i.name}`, title: "A port your VPN provider forwards to this connection, for torrent peers to connect in (empty: none, or found by NAT-PMP). AirVPN: leave the port's Local field empty, and with several connections give each its own port, linked to that connection's device.", value: tun.forwardedPort || "" });
+  if (tun && !pia) {
+    port = el("input", { type: "number", class: "port", min: 1, max: 65535, placeholder: "none", "aria-label": `Forwarded port: ${i.name}`, value: tun.forwardedPort || "" });
     port.addEventListener("change", () => {
       const n = Number(port.value) || 0;
       act("setForwardedPort", { iface: i.id, port: n }, n ? `Forwarded port ${n} set` : "Forwarded port cleared");
     });
   }
-  return el("div", { class: "vpn" },
-    badge((pia ? "PIA · " : "") + (TUNNEL_TEXT[tun.tunnelState] || tun.tunnelState).replace(/^VPN /, ""),
-      TUNNEL_CLASS[tun.tunnelState], tun.tunnelError || tun.ip),
-    port,
-    pia ? null : el("button", { class: "small", onclick: () => act("removeTunnel", { iface: i.id }, "VPN tunnel removed") }, "Remove"));
+  return el("div", { class: "tunnel-row" },
+    el("b", {}, i.name),
+    tun ? el("div", { class: "vpn" },
+      badge((pia ? "PIA · " : "") + (TUNNEL_TEXT[tun.tunnelState] || tun.tunnelState).replace(/^VPN /, ""), TUNNEL_CLASS[tun.tunnelState], tun.ip),
+      tun.tunnelError ? el("span", { class: "muted tunnel-error" }, tun.tunnelError) : null)
+      : el("span", { class: "muted" }, "No tunnel"),
+    port && el("label", {}, "Forwarded port ", port,
+      el("span", { class: "info", tabindex: "0", "data-tip": "A port your VPN provider forwards to this connection, for torrent peers to connect in (empty: none, or found by NAT-PMP). AirVPN: leave the port's Local field empty, and with several connections give each its own port, linked to that connection's device." })),
+    pia ? null : tun
+      ? el("button", { class: "small", onclick: () => act("removeTunnel", { iface: i.id }, "VPN tunnel removed") }, "Remove")
+      : el("button", { class: "small", onclick: () => { confFor = i.id; $("confFile").click(); } }, "Import .conf"));
 }
 
 // A connection's state now, in a word: what the row leads with.
@@ -101,23 +105,22 @@ function ifaceRow(i, tun, settings) {
     input.addEventListener("change", () => input.reportValidity() && set({ [key]: speedFromUnit(dec(input.value) || 0) }));
     return input;
   };
-  // The colour it is shown in everywhere: native radios, so the arrow keys move
-  // between the swatches and the browser says which one is checked.
+  // The colour it is shown in everywhere: click its tile to pick it, from the
+  // same swatches as the accent.
   const shown = Number.isInteger(i.color) ? i.color : 0;
-  const colours = el("span", { class: "colours", role: "radiogroup", "aria-label": `Colour: ${i.name}` },
-    IFACE_COLORS.map((name, n) => {
-      const r = el("input", { type: "radio", name: `colour-${i.id}`, checked: n === shown, title: name, "aria-label": `${name}: ${i.name}` });
-      r.style.color = `var(--c${n})`;
-      r.addEventListener("change", () => set({ color: n }, `${i.name} is now ${name}`));
-      return r;
-    }));
+  const colours = el("div", { class: "swatches", role: "radiogroup", "aria-label": `Colour: ${i.name}`, hidden: true },
+    IFACE_COLORS.map((name, n) => el("button", { role: "radio", "aria-checked": String(n === shown), title: name, "aria-label": name, style: `background:var(--c${n})`,
+      onclick: () => set({ color: n }, `${i.name} is now ${name}`) })));
+  const label = el("input", { type: "text", class: "name", maxlength: 40, placeholder: i.windowsName || i.name, value: i.name === i.windowsName ? "" : i.name, "aria-label": `Name: ${i.windowsName || i.name}` });
+  label.addEventListener("change", () => set({ label: label.value }, label.value.trim() ? "Name saved" : "Windows' name restored"));
 
-  // What the connection is, then the few facts worth a badge.
+  // In this order: what it is, its role, then what torrents get from it.
   const badges = [
     familyText(i) ? badge(familyText(i), "dim", i.ip6 && i.ip6 !== i.ip ? i.ip6 : undefined) : null,
-    i.isDefault ? badge("Windows default") : null,
     i.vpn ? badge("System VPN", "warn") : null,
-    i.incoming ? badge(i.incoming === "reachable" ? "Reachable" : "Outgoing only", i.incoming === "reachable" ? "ok" : "dim", INCOMING_TITLE[i.incoming]) : null,
+    i.isMain ? badge("Main") : null,
+    i.isDefault ? badge("Windows default") : null,
+    i.incoming ? badge("Torrents: " + (i.incoming === "reachable" ? "Reachable" : "Outgoing only"), i.incoming === "reachable" ? "ok" : "dim", INCOMING_TITLE[i.incoming]) : null,
   ].filter(Boolean);
   // First what it is and does now; its settings fold under it.
   const [word, tone] = connState(i, tun);
@@ -125,40 +128,57 @@ function ifaceRow(i, tun, settings) {
   const more = el("div", { class: "conn-more", hidden: !open },
     el("label", {}, "Requests at once ", conns,
       el("span", { class: "info", tabindex: "0", "data-tip": "How many parts of a download this connection fetches at the same time." })),
-    el("span", { class: "colourfield" }, "Colour ", colours),
-    el("label", {}, check(i.upload, "upload", "Upload"), " Upload"),
-    el("span", { class: "limits" }, `Limit (${speedUnitLabel()}) ↓`, limit(i.downloadLimit, "downloadLimit", "Download limit"), "↑", limit(i.uploadLimit, "uploadLimit", "Upload limit")),
-    el("span", { class: "vpnfield" }, "VPN ", vpnCell(i, tun)));
+    el("label", {}, "Name ", label),
+    el("label", {}, check(i.upload, "upload", "Seed torrents over this connection"), " Seed torrents over this connection"),
+    el("label", {}, `Download limit (${speedUnitLabel()}) `, limit(i.downloadLimit, "downloadLimit", "Download limit")),
+    el("label", {}, `Upload limit (${speedUnitLabel()}) `, limit(i.uploadLimit, "uploadLimit", "Upload limit")),
+    el("a", { href: "#vpn" }, tun ? "VPN tunnel: see VPN" : "Import a VPN .conf: see VPN"),
+    i.present ? null : el("button", { class: "small", onclick: () => act("forgetInterface", { id: i.id }, `${i.name} forgotten`) }, "Forget"));
   const toggle = el("button", { class: "small", "aria-expanded": String(open), onclick: () => {
     const on = more.hidden;
     more.hidden = !on;
     toggle.setAttribute("aria-expanded", String(on));
     on ? openConns.add(i.id) : openConns.delete(i.id);
-  } }, "Settings");
-  // Its tile: its colour, with what it fetches now inside (speedTile).
-  const tile = el("span", { class: "tile num", "data-speed": i.id });
+  } }, "Options");
+  // Its tile: its colour, with what it fetches now inside (speedTile); a click picks the colour.
+  const tile = el("span", { class: "tile num", "data-speed": i.id, role: "button", tabindex: "0", "aria-label": `Colour: ${i.name}. Pick another`,
+    onclick: () => { colours.hidden = !colours.hidden; },
+    onkeydown: (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); tile.click(); } } });
   tile.style.color = ifaceHue(i.id, latestState);
   return el("div", { class: "conn-row" + (i.present ? "" : " absent") }, tile,
     el("div", { class: "who" },
-      el("b", {}, i.name, i.isMain ? badge("Main") : null, tun ? badge("VPN", TUNNEL_CLASS[tun.tunnelState]) : null),
-      el("div", { class: "sub" }, i.present ? el("span", { class: "mono" }, i.ip) : "not connected", " · ", i.description),
-      badges.length ? el("div", { class: "badges" }, badges) : null),
+      el("b", {}, i.name, tun ? badge("VPN", TUNNEL_CLASS[tun.tunnelState]) : null),
+      el("div", { class: "sub" }, i.present ? el("span", { class: "mono" }, i.ip) : "not connected", " · ", i.windowsName && i.windowsName !== i.name ? i.windowsName + " · " : "", i.description),
+      badges.length ? el("div", { class: "badges" }, badges) : null,
+      i.vpn && !i.enabled && i.present ? el("div", { class: "sub" }, "Off because this is a VPN running in Windows. Turn it on to download through it as an extra connection.") : null,
+      colours),
     el("span", { class: "badge st " + tone, "data-state": i.id }, word),
     el("label", { class: "use" }, check(i.enabled, "enabled", "Use"), " Use"),
     toggle, more);
+}
+
+let tunnelSig = "";
+function showTunnels(ifaces, tunnels, settings) {
+  const box = $("tunnelBox");
+  box.hidden = !tunnelsShown(settings.vpnProvider, tunnels.size);
+  const sig = JSON.stringify([ifaces.map((i) => { const t = tunnels.get(i.id); return [i.id, i.name, t && [t.provider, t.tunnelState, t.tunnelError, t.ip, t.forwardedPort]]; })]);
+  if (sig === tunnelSig || $("tunnelList").contains(document.activeElement)) return;
+  tunnelSig = sig;
+  $("tunnelList").replaceChildren(...ifaces.filter((i) => i.present || tunnels.has(i.id)).map((i) => tunnelRow(i, tunnels.get(i.id))));
 }
 
 function renderIfaces(state, settings) {
   const all = state.interfaces || [];
   const ifaces = all.filter((i) => !i.tunnel);
   const tunnels = new Map(all.filter((i) => i.tunnel).map((t) => [t.of, t]));
-  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.color, i.isMain, i.isDefault, i.name, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort, i.ip6, i.families]), settings.mainInterface, speedUnitLabel()]);
+  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.color, i.windowsName, i.isMain, i.isDefault, i.name, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort, i.ip6, i.families]), settings.mainInterface, speedUnitLabel()]);
   const warnings = routerWarnings(all);
   const hints = ipv6Hints(state);
   $("ipv6Hint").hidden = !hints.length;
   $("ipv6Hint").replaceChildren(...hints.map((t) => el("div", { class: "muted" }, t)));
   $("uplinkWarn").hidden = !warnings.length;
   $("uplinkWarn").replaceChildren(...warnings.map((t) => el("div", { class: "warn" }, t)));
+  showTunnels(ifaces, tunnels, settings);
   const body = $("ifaces");
   if (sig !== ifaceSig && !body.contains(document.activeElement)) {
     ifaceSig = sig;
@@ -198,47 +218,71 @@ const FIELDS = {
   sSpeedUnit: ["speedUnit", (s) => (s.speedUnit === "Mbps" ? "Mbps" : "MBps"), String],
   sConns: ["defaultConnections", (s) => s.defaultConnections, Number],
   sEta: ["etaWindowSec", (s) => s.etaWindowSec, Number],
+  sNever: ["neverCapture", (s) => (s.neverCapture || []).join(", "), (v) => v.split(/[\s,;]+/).filter(Boolean)],
+  sTorrentPort: ["torrentPort", (s) => s.torrentPort, Number],
+  sTheme: ["theme", (s) => s.theme || "", String],
   sRatio: ["seedRatio", (s) => s.seedRatio, dec],
   sVpnHttp: ["vpnHttp", (s) => s.vpnHttp, String],
   sVpnTorrent: ["vpnTorrent", (s) => s.vpnTorrent, String],
   sKeep: ["archiveKeeping", (s) => s.archiveKeeping || "auto", String],
 };
 
-for (const [id, [key, , parse]] of Object.entries(FIELDS)) {
+// The download folder is checked by the engine: what it refuses is said at the field.
+function dirError(text) {
+  $("sDirErr").hidden = !text;
+  $("sDirErr").textContent = text || "";
+  $("sDir").setAttribute("aria-invalid", String(!!text));
+}
+$("sDir").addEventListener("input", () => dirError(""));
+$("sDir").addEventListener("change", async () => {
+  try {
+    await call("setSettings", { saveDir: $("sDir").value.trim() });
+    dirError("");
+    toast("Saved");
+  } catch (e) {
+    dirError(e.message);
+  }
+});
+
+for (const [id, [key, , parse]] of Object.entries(FIELDS).filter(([id]) => id !== "sDir")) {
   // Out of its min/max, or empty where a number is needed: say so, send nothing.
   $(id).addEventListener("change", () => $(id).reportValidity() && act("setSettings", { [key]: parse($(id).value) }, "Saved"));
 }
+$("sVpnHttp").addEventListener("change", () => { $("vpnOnlyWarn").hidden = $("sVpnHttp").value !== "vpn"; });
 $("sAuto").addEventListener("change", () => act("setAutostart", { on: $("sAuto").checked }, "Saved"));
 $("sFolder").addEventListener("change", () => act("setSettings", { folderDefault: $("sFolder").checked }, "Saved"));
 $("sNotify").addEventListener("change", () => act("setSettings", { notifyDone: $("sNotify").checked }, "Saved"));
+$("sAwake").addEventListener("change", () => act("setSettings", { keepAwake: $("sAwake").checked }, "Saved"));
 // The engine shows Windows' folder picker and saves the choice; the field follows the settings it sends.
 $("sBrowse").addEventListener("click", () => act("pickSaveFolder", {}));
 $("sParts").addEventListener("change", () => act("setSettings", { partsParallel: $("sParts").checked }, "Saved"));
 $("sIPv6").addEventListener("change", () => act("setSettings", { ipv6: $("sIPv6").checked }, $("sIPv6").checked ? "IPv6 on" : "IPv6 off"));
 
-// The accent: Follow Firefox, a preset, or any color (lib/accent.js).
+// The accent: Follow the browser's theme, a preset, or any color (lib/accent.js).
 const setAccent = (c, said) => act("setSettings", { accent: c }, said);
 function renderAccents(s) {
   const chosen = s.accent || "";
   const custom = chosen && !ACCENT_PRESETS.some(([, c]) => c === chosen);
   const radio = (checked, attrs, ...kids) => el("button", { role: "radio", "aria-checked": String(checked), ...attrs }, ...kids);
-  const picker = el("input", { type: "color", value: chosen || pageAccent(s) || "#1d4ed8", "aria-label": "Custom color" });
-  picker.addEventListener("change", () => setAccent(picker.value, "Accent color saved"));
+  const picker = el("input", { type: "color", value: chosen || pageAccent(s) || "#1d4ed8", "aria-label": "Custom colour" });
+  picker.addEventListener("change", () => setAccent(picker.value, "Accent colour saved"));
   $("accents").replaceChildren(
-    radio(!chosen, { class: "follow", onclick: () => setAccent("", "Accent follows Firefox") }, "Follow Firefox"),
+    radio(!chosen, { class: "follow", onclick: () => setAccent("", "Accent follows the browser's theme") }, "Follow the browser's theme"),
     ...ACCENT_PRESETS.map(([name, c]) => radio(chosen === c,
       { title: name, "aria-label": name, style: `background:${c}`, onclick: () => setAccent(c, `Accent: ${name}`) })),
-    el("label", { title: "Custom color" }, picker, custom ? "Custom" : "Other…"));
+    el("label", { title: "Custom colour" }, picker, custom ? "Custom" : "Other…"));
 }
 
 // fillSettings shows what the engine has, except in the field being edited.
 function fillSettings(s) {
+  dirError(""); // the field below shows what is saved
   for (const [id, [, show]] of Object.entries(FIELDS)) {
     if (document.activeElement !== $(id)) $(id).value = show(s);
   }
   $("sFolder").checked = !!s.folderDefault;
   $("sParts").checked = !!s.partsParallel;
   $("sNotify").checked = s.notifyDone !== false; // on unless the engine says off
+  $("sAwake").checked = s.keepAwake !== false; // on unless the engine says off
   $("sIPv6").checked = !!s.ipv6;
   for (const e of document.querySelectorAll(".speedUnit")) e.textContent = speedUnitLabel();
 }
@@ -294,7 +338,7 @@ function renderPIA(p, settings) {
   $("piaState").className = "badge " + cls;
   $("piaError").textContent = p.state === "error" ? p.error || "" : "";
   $("piaClear").hidden = !p.configured;
-  $("piaSave").textContent = p.configured ? "Save" : "Sign in";
+  $("piaSave").hidden = !!p.configured; // signed in: the region saves itself, a new login needs signing out first
   if (!piaRegionsLoaded) {
     piaRegionsLoaded = true;
     call("piaRegions", {}).then((regions) => {
@@ -312,20 +356,31 @@ $("piaSave").onclick = () => {
   act("setPia", { user, pass: $("piaPass").value, region: $("piaRegion").value }, user ? "Signed in to PIA" : "Region saved")
     .then(() => { $("piaPass").value = ""; });
 };
+$("piaRegion").addEventListener("change", () => piaSignedIn && act("setPia", { user: "", pass: "", region: $("piaRegion").value }, "Region saved"));
 $("piaClear").onclick = () => act("clearPia", {}, "Signed out of PIA");
 
 // --- learned sites ---
 
+// Learned sites are kept by the browser that learned them, so only its pages list them.
+// The window says which browsers have an extension connected (the engine knows).
 function renderRecipes(recipes) {
   const box = $("recipes");
   if (!Host.recipesHere) {
-    if (!box.childElementCount) box.replaceChildren(el("div", { class: "muted" }, "Recipes are kept in Firefox, where they are learned and replayed."));
+    if (box.childElementCount) return;
+    box.replaceChildren(el("div", { class: "muted" }, "Learned sites are kept in your browser, where they are learned and used. Open DMS² settings in the browser to see or forget them."));
+    call("extensionBrowsers", {}).then((exes) => {
+      const names = [...new Set((exes || []).map((p) => p.split(/[\\/]/).pop().replace(/\.exe$/i, "")).filter(Boolean).map((n) => n[0].toUpperCase() + n.slice(1)))];
+      if (names.length) box.replaceChildren(el("div", { class: "muted" }, `Learned sites are kept in ${names.join(" and ")}, where they are learned and used. Open DMS² settings there to see or forget them.`));
+    }).catch(() => {});
     return;
   }
-  const sig = JSON.stringify(recipes);
+  latestRecipes = recipes;
+  const shown = Object.fromEntries(Object.entries(recipes || {}).filter(([h]) => !forgetting.has(h)));
+  const sig = JSON.stringify(shown);
   if (sig === recipesSig) return;
   recipesSig = sig;
-  const hosts = Object.keys(recipes || {}).sort();
+  recipes = shown;
+  const hosts = Object.keys(recipes).sort();
   if (!hosts.length) {
     box.replaceChildren(el("div", { class: "muted" }, "None yet. The first time a site needs it, DMS² asks you to click through once."));
     return;
@@ -335,7 +390,25 @@ function renderRecipes(recipes) {
       el("td", {}, h),
       el("td", { class: "muted" }, recipes[h].steps.map((s) => s.text || s.tag).join(" → ") || "no clicks (the download starts by itself)"),
       el("td", { class: "muted when" }, new Date(recipes[h].learned).toLocaleDateString()),
-      el("td", {}, el("button", { class: "small", onclick: () => Host.forgetRecipe(h).then(() => toast("Forgotten")) }, "Forget"))))))));
+      el("td", {}, el("button", { class: "small", onclick: () => forgetSite(h) }, "Forget"))))))));
+}
+
+// Forgetting waits for the Undo toast to end: the row goes now, the browser forgets the site after.
+const forgetting = new Set();
+let latestRecipes = null;
+function forgetSite(h) {
+  forgetting.add(h);
+  renderRecipes(latestRecipes);
+  const t = $("toast");
+  toast(`Forgot ${h}`);
+  const end = () => t.classList.remove("show");
+  const timer = setTimeout(() => {
+    end();
+    Host.forgetRecipe(h).catch((e) => toast(e.message, true)).finally(() => { forgetting.delete(h); renderRecipes(latestRecipes); });
+  }, 8000);
+  t.append(" ", el("button", { class: "small", onclick: () => { clearTimeout(timer); forgetting.delete(h); end(); renderRecipes(latestRecipes); } }, "Undo"));
+  clearTimeout(toast.timer); // toast() would close it sooner
+  toast.timer = setTimeout(end, 8000);
 }
 
 // speedTile shows a connection's speed in its tile: the number, the unit
@@ -360,11 +433,15 @@ const sectionLinks = [...$("sections").querySelectorAll("a")];
 // title matches, else each group whose title does, else each setting whose
 // label does; a group with nothing found goes too. Whether it found any.
 function found(section, q) {
-  const has = (node) => !!node && node.textContent.toLowerCase().includes(q);
+  // What a row says: its text, its (i) notes and the names of its controls.
+  const said = (node) => (node.textContent + " " + [...node.querySelectorAll("[data-tip],[aria-label],[title]")]
+    .map((e) => (e.dataset.tip || "") + " " + (e.getAttribute("aria-label") || "") + " " + (e.title || "")).join(" ")).toLowerCase().replace(/colour/g, "color");
+  q = q.replace(/colour/g, "color");
+  const has = (node) => !!node && said(node).includes(q);
   const all = !q || has(section.querySelector("h2"));
   let any = all;
   for (const g of section.querySelectorAll(".group")) {
-    const whole = all || has(g.querySelector("h3"));
+    const whole = all || has(g.querySelector("h3, summary"));
     let hits = whole;
     for (const row of g.querySelectorAll(".setting")) {
       const hit = whole || has(row.firstElementChild);
@@ -374,7 +451,12 @@ function found(section, q) {
     g.classList.toggle("unfound", !hits);
     any = any || hits;
   }
-  for (const row of section.querySelectorAll(":scope > .fields > .setting")) {
+  for (const row of section.querySelectorAll("#ifaces .conn-row")) {
+    const hit = all || has(row);
+    row.classList.toggle("unfound", !hit);
+    any = any || hit;
+  }
+  for (const row of section.querySelectorAll(":scope > .setting, :scope > .fields > .setting")) {
     const hit = all || has(row.firstElementChild);
     row.classList.toggle("unfound", !hit);
     any = any || hit;
@@ -401,6 +483,8 @@ function showPage() {
     else a.removeAttribute("aria-current");
   }
   for (const a of sectionLinks) a.hidden = !!q || a.dataset.page !== page;
+  // A folded group opens when the search finds something in it.
+  if (q) for (const d of document.querySelectorAll("details.adv")) d.open = !!d.querySelector(".setting:not(.unfound)");
   $("notFound").hidden = shown > 0;
   $("notFound").textContent = `No setting matches “${$("find").value.trim()}”.`;
   // Jump to the section asked for; a page's first section is its top.
@@ -430,10 +514,34 @@ for (const a of [...sectionLinks, ...$("pages").querySelectorAll("a")]) {
 }
 showPage();
 
+// --- about and restore ---
+
+// Guide and release notes leave DMS² through the host, like any link.
+for (const a of document.querySelectorAll("a[data-guide], a[data-releases]")) {
+  const url = "guide" in a.dataset ? GUIDE_URL + (a.dataset.guide ? "#" + a.dataset.guide : "") : RELEASES_URL;
+  a.href = url;
+  a.addEventListener("click", (e) => { e.preventDefault(); Host.openUrl(url); });
+}
+$("openLog").onclick = () => act("openLog", {});
+$("openData").onclick = () => act("openDataFolder", {});
+$("restoreAsk").onclick = () => { $("restoreBox").hidden = false; };
+$("restoreNo").onclick = () => { $("restoreBox").hidden = true; };
+$("restoreYes").onclick = async () => {
+  $("restoreBox").hidden = true;
+  await act("restoreSettings", {}, "Settings restored to their defaults");
+};
+// In the extension the engine and the extension are versions of their own; in the window there is one.
+function renderAbout(m) {
+  const engine = m.engineVersion || "unknown";
+  $("aboutVersion").textContent = Host.openDownloads ? `DMS² ${engine}` : `Engine ${engine} · Extension ${Host.version}`;
+}
+if (Host.openDownloads) $("sThresholdText").textContent = "Take over downloads above (MB)";
+
 // --- wiring ---
 
 connectUI((m) => {
   renderConn(m);
+  renderAbout(m);
   if (!m.state || !m.settings) return;
   latestState = m.state;
   renderIfaces(m.state, m.settings);
@@ -442,6 +550,7 @@ connectUI((m) => {
   if (JSON.stringify(m.settings) !== JSON.stringify(latestSettings)) {
     latestSettings = m.settings;
     fillSettings(m.settings);
+    $("vpnOnlyWarn").hidden = m.settings.vpnHttp !== "vpn";
     renderAccents(m.settings);
     if (!piaSignedIn && document.activeElement !== $("vpnProvider")) showProvider(m.settings.vpnProvider || "");
   }

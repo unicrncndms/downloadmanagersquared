@@ -51,8 +51,10 @@ body:not(.windowed) #conn.ok { width: 7px; overflow: hidden; white-space: nowrap
 /* In the popup, with more than two, the short names. */
 .strip .nm.short, body:not(.windowed) .strip.many .nm { display: none; }
 body:not(.windowed) .strip.many .nm.short { display: inline; }
-.strip .chip.idle .dot { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+.strip .chip.idle .dot { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; opacity: .45; }
 .strip .chip { color: var(--text); }
+/* Busy: a ring, as a row's busy connection tile. */
+.strip .chip.busy .dot { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
 .strip .chip .busy { color: var(--warn); font-weight: 500; }
 .tools { position: relative; display: flex; align-items: center; gap: var(--s2); margin-top: var(--s3); }
 .tools .spacer { flex: 1; min-width: 0; }
@@ -87,8 +89,7 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .sec:hover button svg, .sec button:focus-visible svg, .sec button[aria-expanded="false"] svg { opacity: 1; }
 .sec button[aria-expanded="false"] svg { transform: rotate(-90deg); }
 .sec .count { margin-left: var(--s1); font-weight: 400; color: var(--muted); }
-.sec a { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted); text-decoration: none; }
-.sec a:hover { color: var(--text); text-decoration: underline; }
+.sec a { margin-left: auto; font-size: 12px; font-weight: 400; }
 
 /* A download's row: its status tile, name, connection tiles and buttons;
    its squares and numbers; a line of what it does. Then whatever asks for an answer. */
@@ -105,6 +106,13 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .card.detailed { border-color: var(--accent); box-shadow: none; }
 .card.drop { border-color: var(--accent); border-style: dashed; }
 .card[draggable="true"] { cursor: grab; }
+.grip { display: inline-flex; flex: none; color: var(--muted); cursor: grab; }
+.grip[hidden] { display: none; }
+.grip svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.ctile.busy { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+.ctile.busy > span { color: currentColor; }
+.toast.undo { pointer-events: auto; display: flex; align-items: center; gap: var(--s3); bottom: 96px; }
+.toast.undo button { background: transparent; color: inherit; border: 1px solid currentColor; }
 .card [hidden] { display: none !important; }
 .card > .n { grid-area: 1 / 1; }
 .card > .title { grid-area: 1 / 2 / 2 / 4; display: flex; align-items: center; gap: var(--s3); min-width: 0; }
@@ -137,20 +145,15 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .what .left.bad { color: var(--bad); }
 .card.group > .name .badge { margin-left: var(--s1); font-weight: 400; line-height: 1.5; vertical-align: 1px; }
 .prog > .bar { margin: 5px 0; max-width: 318px; }
-/* A very wide window: the list keeps a readable width in the middle, as the settings do. */
-@container (min-width: 1040px) {
-  main > * { max-width: 1000px; margin-left: auto !important; margin-right: auto !important; }
-  main > .sec { max-width: calc(1000px - 2 * var(--s1)); }
-}
 /* Narrower than the popup's list: smaller squares, so the 32 columns still fit beside the numbers. */
 @container (max-width: 459px) {
   .card .chunks { --sq: 6px; }
 }
 @container (min-width: 680px) {
-  /* A wide list: bigger squares, more room. */
+  /* A wide list: the squares grow with the window, filling the file's column (180px is the row's other columns). */
   .card { padding: var(--s2); }
-  .card .chunks { --sq: 12px; }
-  .card .prog > .bar { max-width: 446px; height: 8px; }
+  .card .chunks { --sq: round(down, calc((100cqw - 180px + 2px) / var(--cols) - 2px), 1px); }
+  .card .prog > .bar { max-width: none; height: 8px; }
   .card > .nums { min-width: 120px; }
 }
 
@@ -163,10 +166,9 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .chunks i { border-radius: 2px; background: var(--bar); transition: background .3s; }
 .chunks i.on { background: var(--accent); }
 .chunks i.got { background: currentColor; }
-.chunks i.now { background: currentColor; animation: fetching .9s ease-in-out infinite alternate; }
-.chunks i.now:nth-child(3n) { animation-delay: -.3s; }
-.chunks i.now:nth-child(3n+1) { animation-delay: -.6s; }
-@keyframes fetching { to { opacity: .3; } }
+/* A slow pulse whose low point rises with how far the square is (--f, 0 to 1, from the engine's mapFill). */
+.chunks i.now { --f: 0; background: currentColor; animation: fetching 2.4s ease-in-out infinite alternate; }
+@keyframes fetching { from { opacity: calc(.15 + .75 * var(--f)); } to { opacity: calc(.45 + .55 * var(--f)); } }
 .idle .chunks i.on, .idle .chunks i.got { background: var(--muted); opacity: .6; }
 .idle .chunks i.now { background: var(--bar); animation: none; }
 
@@ -211,6 +213,9 @@ button.icon[aria-expanded] svg { transition: transform .15s; }
 .pick .vpnask { display: grid; gap: 3px; padding: 6px 8px; margin-bottom: 6px; border-radius: var(--r); background: var(--accent-soft); }
 .pick .files { max-height: 180px; overflow-y: auto; display: grid; gap: 2px; padding: 4px 0; }
 .pick .files label { display: flex; gap: 6px; align-items: baseline; }
+.pick .files details > summary { display: flex; gap: 6px; align-items: baseline; cursor: pointer; }
+.pick .files details > div { display: grid; gap: 2px; padding-left: 18px; }
+.pick .bulk { display: flex; gap: 8px; align-items: baseline; }
 .pick .files .path { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .conns { margin-top: var(--s1); display: grid; grid-template-columns: minmax(70px, auto) 1fr auto auto; gap: 2px var(--s2); align-items: center; font-size: 12px; }
 .conns > span { white-space: nowrap; }
@@ -255,6 +260,9 @@ button.icon[aria-expanded] svg { transition: transform .15s; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .facts dd.lines { white-space: pre-line; }
+.facts dd.linkrow { display: flex; align-items: center; gap: var(--s1); }
+.facts dd.linkrow > .one-line { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.facts dd.linkrow > .icon { flex: none; }
 .facts dd.one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 .activity { list-style: none; margin: 0 0 var(--s2); padding: 0; max-height: 160px; overflow-y: auto; font-size: 11px; display: grid; gap: var(--s1); }
 .activity li { overflow-wrap: anywhere; }
@@ -313,3 +321,10 @@ kbd { font: inherit; font-size: 11px; padding: 0 var(--s1); border: 1px solid va
 .group-files .card.line { position: relative; }
 .group-files .card.line::after { content: ""; position: absolute; left: var(--s1); bottom: 2px; width: min(318px, 100% - 120px);
   height: 4px; border-radius: 2px; background: var(--accent); }
+
+#addBox details summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+#addBox .add-opts { display: grid; gap: var(--s2); margin-top: var(--s1); }
+#addBox .add-opts label { display: grid; grid-template-columns: 5.5em 1fr; align-items: center; gap: var(--s2); font-size: 12px; }
+#addBox .add-dup { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); font-size: 12px; }
+#addBox .add-dup[hidden], #addBox details[hidden] { display: none; }
+body.dropping #list { outline: 2px dashed var(--accent); outline-offset: -4px; }

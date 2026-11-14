@@ -146,13 +146,15 @@ type Download struct {
 	mu  sync.Mutex
 	st  State
 
-	running  bool
-	checking bool // a finished file is being checked against new checksums
-	cancel   context.CancelFunc
-	done     chan struct{}
-	stopAs   Status
-	fatal    chan error
-	wg       sync.WaitGroup
+	renameFails int       // keepPart failures in a row
+	renameNext  time.Time // no new try before this
+	running     bool
+	checking    bool // a finished file is being checked against new checksums
+	cancel      context.CancelFunc
+	done        chan struct{}
+	stopAs      Status
+	fatal       chan error
+	wg          sync.WaitGroup
 
 	file    *os.File
 	plan    *plan      // nil unless running with the file open

@@ -157,6 +157,8 @@ type view struct {
 	bridge   *bridge
 	pages    fs.FS
 	done     chan struct{}
+	dir      string // the data folder: the window's placement is kept there
+	normal   rect   // where the window sits when not maximised (see noteNormal)
 
 	mu    sync.Mutex
 	queue []func()
@@ -183,7 +185,16 @@ func (w *Window) create(u string) (*view, error) {
 	scale := func(n int) int { return n * int(dpi) / 96 }
 	x, y, cx, cy := centred(scale(width), scale(height))
 
-	v := &view{pages: w.cfg.Pages, done: make(chan struct{})}
+	sw := uintptr(swShow)
+	if p, ok := loadPlacement(w.cfg.DataDir); ok && p.usable(workAreas(), scale(minWidth), scale(minHeight)) {
+		x, y, cx, cy = p.X, p.Y, p.W, p.H
+		if p.Max {
+			sw = swMaximize
+		}
+	}
+
+	v := &view{pages: w.cfg.Pages, done: make(chan struct{}), dir: w.cfg.DataDir,
+		normal: rect{int32(x), int32(y), int32(x + cx), int32(y + cy)}}
 	t, _, _ := pGetCurrentThreadID.Call()
 	v.thread = uint32(t)
 	cls, _ := windows.UTF16PtrFromString(className)
@@ -209,7 +220,7 @@ func (w *Window) create(u string) (*view, error) {
 	c.MessageCallback = v.fromPage
 	c.WebResourceRequestedCallback = v.serve
 	v.chromium = c
-	pShowWindow.Call(hwnd, swShow)
+	pShowWindow.Call(hwnd, sw)
 	pUpdateWindow.Call(hwnd)
 	if !c.Embed(hwnd) {
 		views.Delete(hwnd)

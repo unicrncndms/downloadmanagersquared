@@ -11,7 +11,7 @@
 <body>
   <header>
     <div class="head">
-      <h1 class="logo" aria-label="DMS²">DMS<span class="t2" aria-hidden="true">2</span></h1>
+      <h1 class="logo"><img src="../icons/icon.svg" alt="">DMS²</h1>
       <span id="conn" class="badge dim">…</span>
       <span class="total num" id="total"></span>
       <span class="strip" id="strip"></span>
@@ -22,7 +22,7 @@
     <div class="version-warn" id="staleWarn" role="status" hidden></div>
     <div class="tools">
       <button class="primary" id="toggleAdd">+ Add</button>
-      <input type="search" id="search" class="spacer" aria-label="Search downloads" placeholder="Search downloads">
+      <input type="search" id="search" class="spacer" aria-label="Search downloads" placeholder="Search"><span class="info keys" tabindex="0" role="note" aria-label="Keyboard" data-tip="Keyboard&#10;Ctrl+F or /  search&#10;Ctrl+N  add a link&#10;Ctrl+V  paste links anywhere&#10;Ctrl+A  select all&#10;Arrows  move between rows&#10;Space  select a row&#10;is:failed  in the search: only failed (also is:paused, is:queued, is:running, is:done)&#10;Enter  open or show details&#10;Delete  remove&#10;Esc  close or clear selection"></span>
 
       <button id="pauseAll">Pause all</button>
       <button id="resumeAll">Resume all</button>
@@ -32,13 +32,22 @@
       <textarea id="addUrl" rows="2" aria-label="Links to add, one per line" placeholder="File link, landing page, magnet or .torrent link (one per line)" required spellcheck="false"></textarea>
       <input type="url" id="addPage" aria-label="Landing page" placeholder="Landing page (optional, for every link)" hidden>
       <select id="addVpn" title="Whether this download goes through the VPN" hidden>
-        <option value="">VPN as in settings</option>
-        <option value="off">No VPN</option>
+        <option value="">As in settings</option>
+        <option value="off">Off</option>
         <option value="alongside">VPN and direct</option>
         <option value="vpn">VPN only</option>
       </select>
+      <details id="addOptions">
+        <summary>Options</summary>
+        <div class="add-opts">
+          <label id="addNameRow">File name <input type="text" id="addName" placeholder="as the server names it" spellcheck="false"></label>
+          <label id="addSumRow">Checksum <input type="text" id="addSum" placeholder="SHA-256 or MD5, to check the file" spellcheck="false" autocomplete="off"></label>
+        </div>
+      </details>
+      <div id="addDup" class="add-dup" role="status" hidden></div>
       <label id="addFolderRow" class="check" hidden><input type="checkbox" id="addFolder"> Download as folder: extract it while it downloads</label>
-      <div class="add-end"><span class="muted" id="addHint">Paste links here, or anywhere on the list with Ctrl+V.</span><button class="primary" id="addGo">Add</button></div>
+      <div class="add-end"><span class="muted" id="addHint">Paste links here, or anywhere on the list with Ctrl+V.</span><button type="button" id="addFileBtn" title="Add a .torrent or Metalink file from this PC">File…</button><button class="primary" id="addGo">Add</button></div>
+      <input type="file" id="addFile" accept=".torrent,.meta4,.metalink" multiple hidden>
     </form>
   </header>
   <div class="body">

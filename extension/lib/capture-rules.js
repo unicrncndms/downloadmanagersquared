@@ -160,3 +160,23 @@ if (typeof module !== "undefined") {
     stepBackFor, learnedStepBack, cookieHeaderFor,
   };
 }
+
+// fileLikeUrl: whether a page's URL names a file by its extension (archive,
+// disk image, installer, video, document...), for the page menu item.
+const FILE_EXT = /\.(zip|7z|rar|tar|gz|tgz|bz2|xz|iso|img|exe|msi|dmg|pkg|deb|rpm|apk|torrent|metalink|meta4|mp4|mkv|avi|mov|webm|mp3|flac|wav|pdf|epub|bin)$/i;
+function fileLikeUrl(url) {
+  try { return FILE_EXT.test(new URL(url).pathname); } catch { return false; }
+}
+
+if (typeof module !== "undefined") Object.assign(module.exports, { fileLikeUrl });
+
+// neverCaptured: whether one of the urls is on a site the user keeps with the
+// browser (settings.neverCapture, host names): the host itself or a sub-domain.
+function neverCaptured(sites, ...urls) {
+  return urls.some((u) => {
+    const h = hostOf(u).toLowerCase();
+    return !!h && (sites || []).some((s) => h === s || h.endsWith("." + s));
+  });
+}
+
+if (typeof module !== "undefined") Object.assign(module.exports, { neverCaptured });

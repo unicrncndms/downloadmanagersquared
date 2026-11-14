@@ -56,3 +56,9 @@ test("a Firefox theme's accent is its tab line, else a highlight; the default th
   assert.equal(themeAccent({ colors: null }), "");
   assert.equal(themeAccent({}), "");
 });
+
+test("the accent follows the theme choice like ui.css's own dark tokens", () => {
+  const css = accentCSS("#16a34a");
+  assert.match(css, /:root:not\(\[data-theme="light"\]\)/);
+  assert.match(css, /:root\[data-theme="dark"\]/);
+});

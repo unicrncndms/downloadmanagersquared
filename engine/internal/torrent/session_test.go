@@ -889,3 +889,46 @@ func TestDiscardDeletesOnlyTheTorrentsOwnFiles(t *testing.T) {
 		t.Fatal("a torrent with no files known deleted a folder by its name")
 	}
 }
+
+func TestFilesCanBeTickedAfterTheChoice(t *testing.T) {
+	sw := newMultiSwarm(t, 1, 512<<10, 512<<10)
+	var peers atomic.Int32
+	s, err := NewSession(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetIfaces([]Iface{sw.iface("eth", &peers)})
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir(), Choose: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tor.SetFiles([]bool{true, true}); err == nil {
+		t.Fatal("files changed before the choice")
+	}
+	tor.Start()
+	waitFor(t, "the torrent's files", 10*time.Second, func() bool { return tor.Status() == StatusChoosing })
+	chosen := t.TempDir()
+	if err := tor.Choose([]bool{false, true}, chosen); err != nil {
+		t.Fatal(err)
+	}
+	if err := tor.SetFiles([]bool{false, false}); err == nil {
+		t.Fatal("no file at all was accepted")
+	}
+	if err := tor.SetFiles([]bool{true, true}); err != nil {
+		t.Fatal(err)
+	}
+	if sum := tor.Summary(); sum.Size != 1024<<10 {
+		t.Fatalf("size = %d, want both files' %d", sum.Size, 1024<<10)
+	}
+	if fs := tor.Files(); len(fs) != 2 || !fs[0].Selected {
+		t.Fatalf("files = %+v", fs)
+	}
+	tor.Start()
+	waitFor(t, "both files", 30*time.Second, func() bool { return tor.Status() == download.StatusCompleted })
+	for _, p := range []string{"f0.bin", "f1.bin"} {
+		if _, err := os.Stat(filepath.Join(chosen, "pack", p)); err != nil {
+			t.Fatalf("file missing: %v", err)
+		}
+	}
+}

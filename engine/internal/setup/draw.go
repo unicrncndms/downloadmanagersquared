@@ -15,12 +15,12 @@ import (
 
 // palette holds ui.css's colours as 0xRRGGBB.
 type palette struct {
-	bg, panel, text, muted, line, accent, accentSoft, ok, bad uint32
+	bg, panel, text, muted, line, accent, accentSoft, onAccent, ok, bad uint32
 }
 
 var (
-	lightPalette = palette{0xf6f7f9, 0xffffff, 0x16181d, 0x646b78, 0xe2e5ea, 0x2563eb, 0xe6eefe, 0x15803d, 0xb91c1c}
-	darkPalette  = palette{0x15171b, 0x1d2026, 0xe8eaee, 0x9aa1ad, 0x2c3038, 0x5b8cff, 0x1f2a44, 0x4ade80, 0xf87171}
+	lightPalette = palette{0xf6f7f9, 0xffffff, 0x16181d, 0x646b78, 0xe2e5ea, 0x1d4ed8, 0xe6eefe, 0xffffff, 0x166534, 0xb91c1c}
+	darkPalette  = palette{0x15171b, 0x1d2026, 0xe8eaee, 0x9aa1ad, 0x2c3038, 0x5b8cff, 0x1f2a44, 0x0b1020, 0x4ade80, 0xf87171}
 )
 
 // forceTheme ("light" or "dark") overrides Windows' setting, for looking at

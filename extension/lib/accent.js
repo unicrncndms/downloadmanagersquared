@@ -73,7 +73,8 @@ function accentCSS(color) {
   const t = accentTokens(color);
   if (!t) return "";
   const vars = (s) => `--accent: ${s.accent}; --accent-soft: ${s.accentSoft}; --on-accent: ${s.onAccent};`;
-  return `:root { ${vars(t.light)} }\n@media (prefers-color-scheme: dark) { :root { ${vars(t.dark)} } }\n`;
+  // The same selectors as ui.css's dark tokens (data-theme is the settings' theme choice).
+  return `:root { ${vars(t.light)} }\n@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { ${vars(t.dark)} } }\n:root[data-theme="dark"] { ${vars(t.dark)} }\n`;
 }
 
 // pageAccent is the color the pages use: the one chosen, else Firefox's

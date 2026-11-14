@@ -52,6 +52,12 @@ function recordingIdle(lastActivity, now) {
   return now - lastActivity >= RECORD_IDLE;
 }
 
+// learningPlace: which of the site's connections still to learn this job is, {n, of}.
+function learningPlace(jobs, job) {
+  const mine = jobs.filter((j) => !j.done && j.host === job.host && (j.mode === "record" || j.mode === "waiting"));
+  return { n: Math.max(1, mine.indexOf(job) + 1), of: Math.max(1, mine.length) };
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { mergeSteps, recorded, budget, replayTimeout, withMeasuredWaits, recordingIdle, RECORD_IDLE };
+  module.exports = { mergeSteps, recorded, budget, replayTimeout, withMeasuredWaits, recordingIdle, RECORD_IDLE, learningPlace };
 }

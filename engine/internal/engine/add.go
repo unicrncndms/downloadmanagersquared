@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -41,6 +42,10 @@ type AddRequest struct {
 	Folder    *bool  `json:"folder"`   // Download as folder: on (asks for the folder), off, or nil for the default
 	Dir       string `json:"dir"`      // the folder to save into; "" = the download folder (a torrent can still change it in its add step)
 	Browser   string `json:"-"`        // the exe of the browser that sent it, known from its connection
+	Checksum  string `json:"checksum"` // a SHA-256 or MD5 the finished file is checked against (one link only)
+	File      string `json:"file"`     // a local .torrent or .meta4 file's bytes, base64: added in place of a link
+	FileName  string `json:"fileName"` // the local file's name, which says what it is
+	CheckDup  bool   `json:"checkDup"` // asks before adding a link already in the list (the Add box); the list's id comes back instead
 	// CookieStore is the browser's cookie store (container) the download came from.
 	CookieStore string `json:"cookieStore"`
 }
@@ -62,6 +67,9 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	var err error
 	if r.Dir, err = cleanDir(r.Dir); err != nil {
 		return "", err
+	}
+	if r.File != "" {
+		return e.addLocalFile(r)
 	}
 	if strings.HasPrefix(r.URL, "magnet:") {
 		id, err := e.addTorrent(torrent.State{Magnet: r.URL, Dir: r.Dir}, r.VPN)
@@ -88,13 +96,17 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	if r.Metalink || isMetalinkURL(r.URL) {
 		return e.addMetalinkURL(r)
 	}
+	sha, md, err := download.ParseChecksum(r.Checksum)
+	if err != nil {
+		return "", err
+	}
 	e.mu.Lock()
 	st := download.State{
 		VPN: paths.ParseMode(r.VPN, e.settings.VPNHTTP),
 		ID:  newID(), URL: r.URL, PageURL: strings.TrimSpace(r.PageURL),
 		Cookie: download.Secret(r.Cookie), Referer: r.Referer, UserAgent: r.UserAgent, Browser: r.Browser,
 		CookieStore: r.CookieStore, Dir: cmp.Or(r.Dir, e.settings.SaveDir), Filename: download.SanitizeFilename(r.Filename),
-		Size: -1, Status: download.StatusQueued, Added: time.Now(),
+		Size: -1, Status: download.StatusQueued, Added: time.Now(), SHA256: sha, MD5: md,
 	}
 	if st.Filename == "" {
 		// A link that names a part of a split archive: known as one before it
@@ -120,6 +132,41 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	e.queue.Add(download.New(e, st))
 	log.Printf("added %s", st.ID) // no URL: links are private
 	return st.ID, nil
+}
+
+// addLocalFile adds a .torrent or Metalink file the user picked or dropped,
+// sent as base64 in r.File; what it is comes from r.FileName.
+func (e *Engine) addLocalFile(r AddRequest) (string, error) {
+	b, err := base64.StdEncoding.DecodeString(r.File)
+	if err != nil || len(b) > maxSmallFile {
+		return "", errors.New("that file could not be read")
+	}
+	switch strings.ToLower(filepath.Ext(r.FileName)) {
+	case ".torrent":
+		magnet, info, err := torrent.ParseFile(b)
+		if err != nil {
+			return "", err
+		}
+		return e.addTorrent(torrent.State{Magnet: magnet, Info: info, Dir: r.Dir}, r.VPN)
+	case ".meta4", ".metalink":
+		e.mu.Lock()
+		m := paths.ParseMode(r.VPN, e.settings.VPNHTTP)
+		e.mu.Unlock()
+		r.Filename, r.URL = cmp.Or(r.Filename, r.FileName), ""
+		return e.addMetalink(b, r, m)
+	}
+	return "", errors.New("only .torrent, .meta4 and .metalink files can be added")
+}
+
+// findURL is the id of the download added from link url, or "" when none.
+func (e *Engine) findURL(url string) string {
+	url = strings.TrimSpace(url)
+	for _, d := range e.queue.List() {
+		if s := d.Summary(); s.URL == url {
+			return s.ID
+		}
+	}
+	return ""
 }
 
 func isTorrentURL(u string) bool {

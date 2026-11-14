@@ -238,3 +238,14 @@ func TestTheSquaresOnDiskShowWhichConnectionWroteThem(t *testing.T) {
 		t.Fatalf("resumed square %q, want #", m[0])
 	}
 }
+
+func TestMapFillSaysHowFarEachSquareBeingWrittenIs(t *testing.T) {
+	size := int64(mapCells * 1000)
+	f := mapFill(size, []fetch{{0, "a"}, {1000 + 500, "b"}, {size - 1, "c"}})
+	if len(f) != mapCells || f[0] != '0' || f[1] != '5' || f[mapCells-1] != '9' || f[2] != '0' {
+		t.Fatalf("mapFill = %q", f)
+	}
+	if mapFill(0, nil) != "" {
+		t.Fatal("a file of unknown size has a fill")
+	}
+}

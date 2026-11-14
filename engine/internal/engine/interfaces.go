@@ -112,6 +112,14 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 	e.applyLimitsLocked()
 }
 
+// nameLocked is what an interface is called: the user's name for it, else Windows'.
+func (e *Engine) nameLocked(id, windows string) string {
+	if s := e.settings.Interfaces[id]; s != nil && s.Label != "" {
+		return s.Label
+	}
+	return windows
+}
+
 // colorLocked is the palette index an interface is shown in.
 func (e *Engine) colorLocked(id string) int {
 	if s := e.settings.Interfaces[id]; s != nil && s.Color != nil {
@@ -381,7 +389,7 @@ func (e *Engine) CheckLines(server string) []LineCheck {
 	var lines []line
 	for id, ent := range e.ifaces {
 		if ent.present && e.enabledLocked(ent) && ent.binding != nil {
-			lines = append(lines, line{LineCheck{ID: id, Name: ent.info.Name}, ent.binding})
+			lines = append(lines, line{LineCheck{ID: id, Name: e.nameLocked(id, ent.info.Name)}, ent.binding})
 		}
 	}
 	e.mu.Unlock()

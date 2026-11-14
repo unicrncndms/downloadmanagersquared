@@ -84,6 +84,11 @@ Engine.on("openManager", ({ hash } = {}) => {
   return browser.windows.create({ type: "popup", url: DOWNLOADS_URL + "?window", width: 520, height: 680 });
 });
 
+// Once, on install: a page that says what DMS² takes over and what its prompts are for.
+browser.runtime.onInstalled.addListener(({ reason }) => {
+  if (reason === "install") browser.tabs.create({ url: browser.runtime.getURL("ui/welcome.html") });
+});
+
 // Every listener is registered now, before anything is awaited.
 SentCookies.init();
 Resolver.init();

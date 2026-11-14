@@ -79,7 +79,7 @@ Then download a file of 100 MB or more as usual, or use *Download with DMS²* on
 - Replayed clicks are synthetic: sites that only accept real clicks ask every time.
 - Links a site creates through a form POST can't be fetched again.
 - Servers that fingerprint TLS may refuse DMS² despite your browser's User-Agent.
-- A torrent on the bare connections shows its peers the IP address of every connection it uses. That's why DMS² asks about the VPN before such a torrent starts.
+- A torrent with the VPN set to Off shows its peers the IP address of every connection it uses. That's why DMS² asks about the VPN before such a torrent starts.
 
 ## Privacy and security
 
