@@ -119,7 +119,10 @@ func (q *Queue) List() []Entry {
 	defer q.mu.Unlock()
 	out := make([]Entry, 0, len(q.order))
 	for _, id := range q.order {
-		out = append(out, q.byID[id])
+		// Remove drops byID first and order after Discard has stopped the entry: in between, id has no entry.
+		if e := q.byID[id]; e != nil {
+			out = append(out, e)
+		}
 	}
 	return out
 }

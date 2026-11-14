@@ -344,3 +344,29 @@ func TestAFailedStateWriteIsTriedAgain(t *testing.T) {
 		t.Fatalf("state not saved after the write failed once: %v", err)
 	}
 }
+
+// discarding lists the queue from inside Discard, as the engine's snapshot does
+// while a running download's connections still close.
+type discarding struct {
+	*fake
+	q    *Queue
+	seen []Entry
+}
+
+func (d *discarding) Discard(deleteFiles bool) { d.seen = d.q.List(); d.fake.Discard(deleteFiles) }
+
+func TestAnEntryBeingRemovedLeavesNoHoleInTheList(t *testing.T) {
+	a, b := queued(false), queued(false)
+	q := New(t.TempDir(), nil)
+	d := &discarding{fake: b, q: q}
+	q.Add(a)
+	q.Add(d)
+	if err := q.Remove(b.id, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range d.seen {
+		if e == nil {
+			t.Fatal("List held a nil entry while Remove was discarding one")
+		}
+	}
+}
