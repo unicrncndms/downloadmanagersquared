@@ -3,8 +3,10 @@
 // Two pages in one: Connections (with the VPN), and Settings, chosen by the
 // address's #. Every change is saved as soon as it's made.
 
-const GB = 1e9;
 const MB = 1e6;
+// Typed decimals: a point or a comma, whatever the system's locale.
+const DECIMAL = "[0-9]*[.,]?[0-9]*";
+const dec = (v) => Number(String(v).replace(",", "."));
 
 let ifaceSig = "";
 let recipesSig = "";
@@ -33,10 +35,10 @@ $("checkLines").onclick = async () => {
     btn.disabled = false;
   }
 };
-$("followWindows").addEventListener("change", () => {
-  const main = (latestState.interfaces || []).find((i) => i.isMain);
-  act("setSettings", { mainInterface: $("followWindows").checked ? "" : (main ? main.id : "") },
-    $("followWindows").checked ? "Main connection follows Windows" : "Main connection fixed");
+$("mainSelect").addEventListener("change", () => {
+  const id = $("mainSelect").value;
+  const name = id && $("mainSelect").selectedOptions[0].textContent;
+  act("setSettings", { mainInterface: id }, id ? `${name} is now the main connection` : "Main connection follows Windows");
 });
 
 // Importing a .conf: the file picker is shared, this is the connection it's for.
@@ -95,14 +97,10 @@ function ifaceRow(i, tun, settings) {
   const conns = el("input", { type: "number", min: 1, max: 32, value: i.connections, "aria-label": `Requests at once: ${i.name}` });
   conns.addEventListener("change", () => set({ connections: Number(conns.value) }));
   const limit = (bps, key, title) => {
-    const input = el("input", { type: "number", min: 0, step: "any", placeholder: "–", title: title + " (empty: none)", "aria-label": `${title} in MB/s: ${i.name}`, value: bps ? +(bps / MB).toFixed(3) : "" });
-    input.addEventListener("change", () => set({ [key]: Math.round((Number(input.value) || 0) * MB) }));
+    const input = el("input", { type: "text", inputmode: "decimal", pattern: DECIMAL, class: "dec", placeholder: "–", title: title + " (empty: none)", "aria-label": `${title} in ${speedUnitLabel()}: ${i.name}`, value: bps ? +speedToUnit(bps).toFixed(3) : "" });
+    input.addEventListener("change", () => input.reportValidity() && set({ [key]: speedFromUnit(dec(input.value) || 0) }));
     return input;
   };
-  // Shows the main connection in effect, chosen or Windows'.
-  const main = el("input", { type: "radio", name: "main", checked: i.isMain, "aria-label": `Main connection: ${i.name}` });
-  main.addEventListener("change", () => act("setSettings", { mainInterface: i.id }, `${i.name} is now the main connection`));
-
   // The colour it is shown in everywhere: native radios, so the arrow keys move
   // between the swatches and the browser says which one is checked.
   const shown = Number.isInteger(i.color) ? i.color : 0;
@@ -125,13 +123,11 @@ function ifaceRow(i, tun, settings) {
   const [word, tone] = connState(i, tun);
   const open = openConns.has(i.id);
   const more = el("div", { class: "conn-more", hidden: !open },
-    el("label", {}, main, " Main connection",
-      el("span", { class: "info", tabindex: "0", "data-tip": "Used alone for servers that can't split a file, and it decides which file the other connections must match." })),
     el("label", {}, "Requests at once ", conns,
       el("span", { class: "info", tabindex: "0", "data-tip": "How many parts of a download this connection fetches at the same time." })),
     el("span", { class: "colourfield" }, "Colour ", colours),
     el("label", {}, check(i.upload, "upload", "Upload"), " Upload"),
-    el("span", { class: "limits" }, "Limit (MB/s) ↓", limit(i.downloadLimit, "downloadLimit", "Download limit"), "↑", limit(i.uploadLimit, "uploadLimit", "Upload limit")),
+    el("span", { class: "limits" }, `Limit (${speedUnitLabel()}) ↓`, limit(i.downloadLimit, "downloadLimit", "Download limit"), "↑", limit(i.uploadLimit, "uploadLimit", "Upload limit")),
     el("span", { class: "vpnfield" }, "VPN ", vpnCell(i, tun)));
   const toggle = el("button", { class: "small", "aria-expanded": String(open), onclick: () => {
     const on = more.hidden;
@@ -156,7 +152,7 @@ function renderIfaces(state, settings) {
   const all = state.interfaces || [];
   const ifaces = all.filter((i) => !i.tunnel);
   const tunnels = new Map(all.filter((i) => i.tunnel).map((t) => [t.of, t]));
-  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.color, i.isMain, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort, i.ip6, i.families]), settings.mainInterface]);
+  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.color, i.isMain, i.isDefault, i.name, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort, i.ip6, i.families]), settings.mainInterface, speedUnitLabel()]);
   const warnings = routerWarnings(all);
   const hints = ipv6Hints(state);
   $("ipv6Hint").hidden = !hints.length;
@@ -167,7 +163,11 @@ function renderIfaces(state, settings) {
   if (sig !== ifaceSig && !body.contains(document.activeElement)) {
     ifaceSig = sig;
     body.replaceChildren(...ifaces.map((i) => ifaceRow(i, tunnels.get(i.id), settings)));
-    $("followWindows").checked = !settings.mainInterface;
+    const dflt = ifaces.find((i) => i.isDefault);
+    $("mainSelect").replaceChildren(
+      el("option", { value: "" }, dflt ? `Automatic (Windows' choice: ${dflt.name})` : "Automatic (Windows' choice)"),
+      ...ifaces.map((i) => el("option", { value: i.id }, i.name)));
+    $("mainSelect").value = settings.mainInterface || "";
   }
   // Speeds change every second: only the numbers, not the rows.
   for (const i of ifaces) {
@@ -186,17 +186,19 @@ function renderIfaces(state, settings) {
 for (const id of ["sVpnHttp", "sVpnTorrent"]) {
   $(id).replaceChildren(...VPN_MODES.map(([v, text]) => el("option", { value: v }, text)));
 }
+$("sSpeedUnit").replaceChildren(el("option", { value: "MBps" }, "MB/s"), el("option", { value: "Mbps" }, "Mbit/s"));
 $("sKeep").replaceChildren(...KEEP_CHOICES.map(([v, text]) => el("option", { value: v }, text)));
 
 const FIELDS = {
   sDir: ["saveDir", (s) => s.saveDir, (v) => v.trim()],
-  sThreshold: ["thresholdBytes", (s) => +(s.thresholdBytes / GB).toFixed(3), (v) => Math.round(Number(v) * GB)],
+  sThreshold: ["thresholdBytes", (s) => +(s.thresholdBytes / MB).toFixed(3), (v) => Math.max(MB, Math.round(dec(v) * MB))],
   sParallel: ["maxParallel", (s) => s.maxParallel, Number],
-  sDownLimit: ["downloadLimit", (s) => (s.downloadLimit ? +(s.downloadLimit / MB).toFixed(3) : ""), (v) => Math.round((Number(v) || 0) * MB)],
-  sUpLimit: ["uploadLimit", (s) => (s.uploadLimit ? +(s.uploadLimit / MB).toFixed(3) : ""), (v) => Math.round((Number(v) || 0) * MB)],
+  sDownLimit: ["downloadLimit", (s) => (s.downloadLimit ? +speedToUnit(s.downloadLimit).toFixed(3) : ""), (v) => speedFromUnit(dec(v) || 0)],
+  sUpLimit: ["uploadLimit", (s) => (s.uploadLimit ? +speedToUnit(s.uploadLimit).toFixed(3) : ""), (v) => speedFromUnit(dec(v) || 0)],
+  sSpeedUnit: ["speedUnit", (s) => (s.speedUnit === "Mbps" ? "Mbps" : "MBps"), String],
   sConns: ["defaultConnections", (s) => s.defaultConnections, Number],
   sEta: ["etaWindowSec", (s) => s.etaWindowSec, Number],
-  sRatio: ["seedRatio", (s) => s.seedRatio, Number],
+  sRatio: ["seedRatio", (s) => s.seedRatio, dec],
   sVpnHttp: ["vpnHttp", (s) => s.vpnHttp, String],
   sVpnTorrent: ["vpnTorrent", (s) => s.vpnTorrent, String],
   sKeep: ["archiveKeeping", (s) => s.archiveKeeping || "auto", String],
@@ -208,6 +210,9 @@ for (const [id, [key, , parse]] of Object.entries(FIELDS)) {
 }
 $("sAuto").addEventListener("change", () => act("setAutostart", { on: $("sAuto").checked }, "Saved"));
 $("sFolder").addEventListener("change", () => act("setSettings", { folderDefault: $("sFolder").checked }, "Saved"));
+$("sNotify").addEventListener("change", () => act("setSettings", { notifyDone: $("sNotify").checked }, "Saved"));
+// The engine shows Windows' folder picker and saves the choice; the field follows the settings it sends.
+$("sBrowse").addEventListener("click", () => act("pickSaveFolder", {}));
 $("sParts").addEventListener("change", () => act("setSettings", { partsParallel: $("sParts").checked }, "Saved"));
 $("sIPv6").addEventListener("change", () => act("setSettings", { ipv6: $("sIPv6").checked }, $("sIPv6").checked ? "IPv6 on" : "IPv6 off"));
 
@@ -233,8 +238,9 @@ function fillSettings(s) {
   }
   $("sFolder").checked = !!s.folderDefault;
   $("sParts").checked = !!s.partsParallel;
+  $("sNotify").checked = s.notifyDone !== false; // on unless the engine says off
   $("sIPv6").checked = !!s.ipv6;
-
+  for (const e of document.querySelectorAll(".speedUnit")) e.textContent = speedUnitLabel();
 }
 
 // --- VPN provider ---

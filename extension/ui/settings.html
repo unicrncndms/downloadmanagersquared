@@ -30,14 +30,15 @@
   <main>
     <section id="connections" class="panel">
       <h2 class="mk">Network connections</h2>
+      <div class="setting main-pick"><label for="mainSelect">Main connection
+        <span class="info" tabindex="0" data-tip="Used alone for servers that can't split a file, and it decides which file the other connections must match."></span></label>
+        <select id="mainSelect"></select></div>
       <div id="ifaces"></div>
       <div id="uplinkWarn" class="uplink" hidden></div>
       <div id="ipv6Hint" class="uplink" hidden></div>
       <div class="group">
         <h3>Options</h3>
         <div class="fields">
-          <div class="setting"><label for="followWindows">Let Windows pick the main connection</label>
-            <span><input type="checkbox" id="followWindows"></span></div>
           <div class="setting"><label for="sIPv6">Enable IPv6 (experimental)
             <span class="info" tabindex="0" data-tip="Off by default. On: a connection with only IPv6 (some phone tethers) is used too, and the others may use IPv6 to reach servers that have only IPv6. Not yet tested on a real mobile network with NAT64."></span></label>
             <span><input type="checkbox" id="sIPv6"></span></div>
@@ -106,22 +107,26 @@
         <h3>Where and when</h3>
         <div class="fields">
           <div class="setting"><label for="sDir">Download folder</label>
-            <input type="text" id="sDir" data-setting></div>
-          <div class="setting"><label for="sThreshold">Take over Firefox downloads above (GB)</label>
-            <input type="number" id="sThreshold" min="0.001" step="any" required data-setting></div>
+            <span class="pathrow"><input type="text" id="sDir" data-setting><button type="button" id="sBrowse">Browse…</button></span></div>
+          <div class="setting"><label for="sThreshold">Take over Firefox downloads above (MB)</label>
+            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sThreshold" required data-setting></div>
           <div class="setting"><label for="sParallel">Downloads at once</label>
             <input type="number" id="sParallel" min="1" max="16" required data-setting></div>
+          <div class="setting"><label for="sNotify">Notify when a download finishes or fails</label>
+            <span><input type="checkbox" id="sNotify" data-setting></span></div>
         </div>
       </div>
 
       <div class="group">
         <h3>Speed</h3>
         <div class="fields">
-          <div class="setting"><label for="sDownLimit">Download limit, all connections (MB/s)
+          <div class="setting"><label for="sSpeedUnit">Show speeds in</label>
+            <select id="sSpeedUnit" data-setting></select></div>
+          <div class="setting"><label for="sDownLimit">Download limit, all connections (<span class="speedUnit">MB/s</span>)
             <span class="info" tabindex="0" data-tip="Caps everything DMS² receives, on top of each connection's own limit. Empty: none."></span></label>
-            <input type="number" id="sDownLimit" min="0" step="any" placeholder="none" data-setting></div>
-          <div class="setting"><label for="sUpLimit">Upload limit, all connections (MB/s)</label>
-            <input type="number" id="sUpLimit" min="0" step="any" placeholder="none" data-setting></div>
+            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sDownLimit" placeholder="none" data-setting></div>
+          <div class="setting"><label for="sUpLimit">Upload limit, all connections (<span class="speedUnit">MB/s</span>)</label>
+            <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sUpLimit" placeholder="none" data-setting></div>
           <div class="setting"><label for="sConns">Default requests per connection</label>
             <input type="number" id="sConns" min="1" max="32" required data-setting></div>
           <div class="setting"><label for="sEta">Time-left averaging (seconds)
@@ -151,7 +156,7 @@
       <div class="fields">
         <div class="setting"><label for="sRatio">Seed until ratio
           <span class="info" tabindex="0" data-tip="A finished torrent keeps uploading until it has sent this many times its size. 0 stops as soon as it's done."></span></label>
-          <input type="number" id="sRatio" min="0" max="100" step="any" required data-setting></div>
+          <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sRatio" required data-setting></div>
       </div>
     </section>
 

@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"math/rand"
 	"net/http"
@@ -755,5 +756,43 @@ func TestDownloadLimitHoldsAcrossInterfaces(t *testing.T) {
 	d.SetLimit(-5)
 	if got := d.State().Limit; got != 0 {
 		t.Fatalf("limit after a negative one: %d, want 0 (none)", got)
+	}
+}
+
+// Each link counts what its interface fetched, saved with the download, so a
+// finished one can say how the file was shared between connections.
+func TestLinksCountTheirBytesAndKeepThemAcrossARestart(t *testing.T) {
+	data := randomData(8 << 20)
+	counts := map[string]*atomic.Int64{"eth": {}, "wifi": {}}
+	srv := fileServer(t, data, counts)
+	defer srv.Close()
+	env := &testEnv{ifaces: []Iface{iface("eth", 2, 0), iface("wifi", 2, 0)}, main: "eth"}
+	d := runToEnd(t, env, State{
+		ID: "b1", URL: srv.URL + "/file/eth", Dir: t.TempDir(), Size: -1, Status: StatusQueued,
+		Links: map[string]*Link{"wifi": {URL: srv.URL + "/file/wifi", Status: LinkPending}},
+	})
+	var sum int64
+	for _, l := range d.Summary().Links {
+		sum += l.Bytes
+	}
+	if sum != int64(len(data)) {
+		t.Fatalf("links' bytes add up to %d, want the file's %d", sum, len(data))
+	}
+	_, saved := d.Saved()
+	raw, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back State
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
+	}
+	for id, l := range d.State().Links {
+		if back.Links[id] == nil || back.Links[id].Bytes != l.Bytes {
+			t.Errorf("link %s: %d bytes after a restart, want %d", id, back.Links[id].Bytes, l.Bytes)
+		}
+	}
+	if d.State().Links["eth"].Bytes == 0 {
+		t.Error("the main link fetched nothing")
 	}
 }

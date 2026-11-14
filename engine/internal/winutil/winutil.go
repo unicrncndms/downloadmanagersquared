@@ -3,10 +3,12 @@ package winutil
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -132,4 +134,39 @@ func CurrentUserSID() (string, error) {
 		return "", err
 	}
 	return u.User.Sid.String(), nil
+}
+
+// OpenFile opens path with its default app, as a double click in Explorer does.
+func OpenFile(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return err
+	}
+	return windows.ShellExecute(0, windows.StringToUTF16Ptr("open"), windows.StringToUTF16Ptr(path), nil, nil, windows.SW_SHOWNORMAL)
+}
+
+// Recycle moves a file or folder to the Recycle Bin, with no dialog.
+func Recycle(path string) error {
+	if _, err := os.Lstat(path); err != nil {
+		return err
+	}
+	from, err := windows.UTF16FromString(path)
+	if err != nil {
+		return err
+	}
+	from = append(from, 0) // the list ends in a second NUL
+	op := struct {
+		Wnd     windows.Handle
+		Func    uint32
+		From    *uint16
+		To      *uint16
+		Flags   uint16
+		Aborted int32
+		Maps    uintptr
+		Title   *uint16
+	}{Func: 3 /* FO_DELETE */, From: &from[0], Flags: 0x40 | 0x10 | 0x4 | 0x400 /* ALLOWUNDO, NOCONFIRMATION, SILENT, NOERRORUI */}
+	r, _, _ := shell32.NewProc("SHFileOperationW").Call(uintptr(unsafe.Pointer(&op)))
+	if r != 0 || op.Aborted != 0 {
+		return fmt.Errorf("moving %s to the Recycle Bin failed (code %#x)", filepath.Base(path), r)
+	}
+	return nil
 }

@@ -94,7 +94,7 @@ func onReady(e *engine.Engine, w Window) {
 				dark = d
 				winutil.SetMenusDark(dark)
 			}
-			m := menuFor(e.Snapshot(), used, now)
+			m := menuFor(e.Snapshot(), e.SpeedUnit(), used, now)
 			status.set(m.Status)
 			for i, r := range rows {
 				if i < len(m.Rows) {
@@ -172,7 +172,7 @@ type menu struct {
 
 // menuFor is the menu for s. used remembers when each interface last
 // carried a download; menuFor updates it.
-func menuFor(s engine.StateEvent, used map[string]time.Time, now time.Time) menu {
+func menuFor(s engine.StateEvent, unit string, used map[string]time.Time, now time.Time) menu {
 	var m menu
 	for _, d := range s.Downloads {
 		switch d.Status {
@@ -185,7 +185,7 @@ func menuFor(s engine.StateEvent, used map[string]time.Time, now time.Time) menu
 	}
 	switch {
 	case s.Active > 0:
-		m.Status = fmt.Sprintf("%s  ·  %s left", Speed(s.Speed), Duration(s.ETA))
+		m.Status = fmt.Sprintf("%s  ·  %s left", Speed(s.Speed, unit), Duration(s.ETA))
 	case m.Resume && !m.Pause:
 		m.Status = "Paused"
 	default:
@@ -209,7 +209,7 @@ func menuFor(s engine.StateEvent, used map[string]time.Time, now time.Time) menu
 		if t, ok := used[v.ID]; !ok || now.Sub(t) > linger || len(m.Rows) >= ifaceRows {
 			continue
 		}
-		m.Rows = append(m.Rows, fmt.Sprintf("%s: %s", v.Name, Speed(v.Speed)))
+		m.Rows = append(m.Rows, fmt.Sprintf("%s: %s", v.Name, Speed(v.Speed, unit)))
 	}
 	return m
 }
@@ -220,11 +220,18 @@ func openDownloads(e *engine.Engine) { e.OpenWindow("") }
 // openSettings is "Connections & settings": the Downloads window's settings view.
 func openSettings(e *engine.Engine) { e.OpenWindow(window.Settings) }
 
-func Speed(bps float64) string {
-	if bps < 1 {
-		return "0 B/s"
-	}
+// Speed is bytes per second as text, in the speedUnit setting's unit: bytes
+// ("MBps", the default) or bits ("Mbps": Mbit/s = bytes/s * 8 / 1e6). The pages
+// have the same rule (fmtSpeed in lib/list.js).
+func Speed(bps float64, unit string) string {
 	units := []string{"B/s", "KB/s", "MB/s", "GB/s"}
+	if unit == engine.SpeedBits {
+		units = []string{"bit/s", "kbit/s", "Mbit/s", "Gbit/s"}
+		bps *= 8
+	}
+	if bps < 1 {
+		return "0 " + units[0]
+	}
 	i := 0
 	for bps >= 1000 && i < len(units)-1 {
 		bps /= 1000

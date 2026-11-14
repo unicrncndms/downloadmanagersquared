@@ -33,6 +33,17 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   return undefined;
 });
 
+// The toolbar button shows what is running, or "!" when a download needs you; it follows the engine, so it outlives the popup.
+let badge = "";
+Engine.on("state", (st) => {
+  const b = badgeOf(st && st.downloads);
+  if (b.text + b.color === badge) return;
+  badge = b.text + b.color;
+  browser.browserAction.setBadgeBackgroundColor({ color: b.color });
+  browser.browserAction.setBadgeText({ text: b.text });
+});
+Engine.on("connection", ({ connected }) => { if (!connected) { badge = ""; browser.browserAction.setBadgeText({ text: "" }); } });
+
 const SETTINGS_URL = browser.runtime.getURL("ui/settings.html");
 const DOWNLOADS_URL = browser.runtime.getURL("ui/popup.html");
 

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -38,15 +39,32 @@ type AddRequest struct {
 	Metalink  bool   `json:"metalink"` // the URL serves a Metalink (.meta4)
 	VPN       string `json:"vpn"`      // "off", "alongside" or "vpn"; "" = the default for its type
 	Folder    *bool  `json:"folder"`   // Download as folder: on (asks for the folder), off, or nil for the default
+	Dir       string `json:"dir"`      // the folder to save into; "" = the download folder (a torrent can still change it in its add step)
 	Browser   string `json:"-"`        // the exe of the browser that sent it, known from its connection
 	// CookieStore is the browser's cookie store (container) the download came from.
 	CookieStore string `json:"cookieStore"`
 }
 
+// cleanDir is a folder the user chose: "" (none), or an absolute path on a drive.
+func cleanDir(dir string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(dir) || filepath.VolumeName(dir) == "" {
+		return "", errors.New("not a folder: " + dir)
+	}
+	return filepath.Clean(dir), nil
+}
+
 func (e *Engine) Add(r AddRequest) (string, error) {
 	r.URL = strings.TrimSpace(r.URL)
+	var err error
+	if r.Dir, err = cleanDir(r.Dir); err != nil {
+		return "", err
+	}
 	if strings.HasPrefix(r.URL, "magnet:") {
-		id, err := e.addTorrent(torrent.State{Magnet: r.URL}, r.VPN)
+		id, err := e.addTorrent(torrent.State{Magnet: r.URL, Dir: r.Dir}, r.VPN)
 		if err != nil {
 			return "", fmt.Errorf("not a usable magnet link: %w", err)
 		}
@@ -75,7 +93,7 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		VPN: paths.ParseMode(r.VPN, e.settings.VPNHTTP),
 		ID:  newID(), URL: r.URL, PageURL: strings.TrimSpace(r.PageURL),
 		Cookie: download.Secret(r.Cookie), Referer: r.Referer, UserAgent: r.UserAgent, Browser: r.Browser,
-		CookieStore: r.CookieStore, Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(r.Filename),
+		CookieStore: r.CookieStore, Dir: cmp.Or(r.Dir, e.settings.SaveDir), Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(),
 	}
 	if st.Filename == "" {
@@ -161,7 +179,11 @@ func (e *Engine) addTorrentURL(r AddRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.addTorrentFile(b, r.VPN)
+	magnet, info, err := torrent.ParseFile(b)
+	if err != nil {
+		return "", err
+	}
+	return e.addTorrent(torrent.State{Magnet: magnet, Info: info, Dir: r.Dir}, r.VPN)
 }
 
 // addMetalinkURL fetches a Metalink through the main interface and adds a
@@ -202,7 +224,7 @@ func (e *Engine) addMetalink(b []byte, r AddRequest, m paths.Mode) (string, erro
 	for _, f := range files {
 		st := download.State{
 			VPN: m, ID: newID(), URL: f.URLs[0], UserAgent: r.UserAgent, Browser: r.Browser,
-			Dir: e.settings.SaveDir, Filename: download.SanitizeFilename(path.Base(f.Name)),
+			Dir: cmp.Or(r.Dir, e.settings.SaveDir), Filename: download.SanitizeFilename(path.Base(f.Name)),
 			Size: -1, MetaSize: f.Size, SHA256: f.SHA256, MD5: f.MD5,
 			Status: download.StatusQueued, Added: time.Now(), Group: group, GroupName: name,
 		}
@@ -238,7 +260,7 @@ func (e *Engine) addTorrentFile(b []byte, vpn string) (string, error) {
 // VPN mode vpn ("" = the default for torrents).
 func (e *Engine) addTorrent(st torrent.State, vpn string) (string, error) {
 	e.mu.Lock()
-	st.Dir = e.settings.SaveDir
+	st.Dir = cmp.Or(st.Dir, e.settings.SaveDir)
 	st.VPN = paths.ParseMode(vpn, e.settings.VPNTorrent)
 	// About to join the swarm on the bare connection, unasked: suggest a VPN first.
 	st.AskVPN = vpn == "" && st.VPN == paths.Off

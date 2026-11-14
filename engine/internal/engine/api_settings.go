@@ -58,6 +58,12 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		if p.IPv6 != nil {
 			s.IPv6 = *p.IPv6
 		}
+		if p.NotifyDone != nil {
+			s.NotifyDone = *p.NotifyDone
+		}
+		if p.SpeedUnit != nil {
+			s.SpeedUnit = *p.SpeedUnit // normalize puts back one that isn't a choice
+		}
 		if p.Accent != nil {
 			s.Accent = *p.Accent
 		}
@@ -76,6 +82,13 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		e.setVPNAll(true, s.VPNTorrent)
 	}
 	return s
+}
+
+// SpeedUnit is the speedUnit setting, for the tray.
+func (e *Engine) SpeedUnit() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.settings.SpeedUnit
 }
 
 // setInterface changes the settings of one interface.
@@ -127,8 +140,10 @@ type settingsPatch struct {
 	PartsParallel      *bool    `json:"partsParallel"`
 	ArchiveKeeping     *string  `json:"archiveKeeping"`
 	IPv6               *bool    `json:"ipv6"`
+	NotifyDone         *bool    `json:"notifyDone"`
+	SpeedUnit          *string  `json:"speedUnit"`
 	Accent             *string  `json:"accent"`
-	ThemeAccent        *string  `json:"themeAccent"`
+	ThemeAccent       *string  `json:"themeAccent"`
 }
 
 type ifacePatch struct {

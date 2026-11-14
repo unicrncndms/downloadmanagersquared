@@ -14,7 +14,7 @@ function call(method, params) {
 }
 
 function connectUI(onUpdate) {
-  return Host.subscribe((m) => { applyAccent(m.settings); onUpdate(m); });
+  return Host.subscribe((m) => { applyAccent(m.settings); if (m.settings) setSpeedUnit(m.settings.speedUnit); onUpdate(m); });
 }
 
 // Sets the accent tokens (lib/accent.js) from the engine's settings; without

@@ -400,6 +400,12 @@ func (e *Engine) Finished(d *download.Download) { e.notifyFinished(d.Summary(), 
 // notify shows a tray balloon, running click when it is clicked; tests switch it off.
 var notify = winutil.NotifyClick
 
+// openFile and recycleFile act on a finished download's file; tests switch them off.
+var (
+	openFile    = winutil.OpenFile
+	recycleFile = winutil.Recycle
+)
+
 // notifyFinished says a download ended; a click on a finished one shows it in its folder.
 // markTorrent writes the Mark of the Web on every file under path, the
 // torrent's file or folder. No URL: a torrent's files come from peers.
@@ -418,16 +424,35 @@ func markTorrent(id, path string) {
 	})
 }
 
-func (e *Engine) notifyFinished(s download.Summary, path string) {
+// finishNotice is the balloon for a download that ended: its title and text,
+// and whether the notifyDone setting allows one.
+func finishNotice(s download.Summary, on bool) (title, msg string, ok bool) {
+	if !on {
+		return "", "", false
+	}
 	if s.Status == download.StatusCompleted || s.Status == torrent.StatusSeeding {
-		msg := s.Filename
+		msg = s.Filename
 		if f := s.Folder; f != nil && f.On && f.Out != "" {
 			msg = "Extracted to " + filepath.Base(f.Out)
 		}
-		notify("Download complete", msg, func() { winutil.ShowInFolder(path) })
-	} else {
-		notify("Download failed", s.Filename+": "+s.Error, nil)
+		return "Download complete", msg, true
 	}
+	return "Download failed", s.Filename + ": " + s.Error, true
+}
+
+func (e *Engine) notifyFinished(s download.Summary, path string) {
+	e.mu.Lock()
+	on := e.settings.NotifyDone
+	e.mu.Unlock()
+	title, msg, ok := finishNotice(s, on)
+	if !ok {
+		return
+	}
+	var click func()
+	if title == "Download complete" {
+		click = func() { winutil.ShowInFolder(path) }
+	}
+	notify(title, msg, click)
 }
 
 func (e *Engine) PauseAll()  { e.queue.PauseAll() }
@@ -550,6 +575,84 @@ func (e *Engine) PickFolder(id string) error {
 		}
 	}()
 	return nil
+}
+
+// SetDir moves an unfinished HTTP download's partial file into dir and saves
+// the download there from now on (see download.SetDir).
+func (e *Engine) SetDir(id, dir string) error {
+	d, err := e.get(id)
+	if err != nil {
+		return err
+	}
+	if dir, err = cleanDir(dir); err != nil || dir == "" {
+		return errors.New("not a folder")
+	}
+	return d.SetDir(dir)
+}
+
+// pickFrom shows the folder picker over the Downloads window, starting at
+// start; ok is false when it was cancelled.
+func (e *Engine) pickFrom(start, title string) (dir string, ok bool) {
+	e.mu.Lock()
+	var owner uintptr
+	if h, isWin := e.window.(windowHandle); isWin {
+		owner = h.Handle()
+	}
+	pick := e.pickFolder
+	e.mu.Unlock()
+	return pick(owner, start, title)
+}
+
+// BrowseFolder is Other folder… for a folder the page itself uses (the Add
+// box, a torrent's Save to): the picker's answer, "" if cancelled. It waits
+// for the picker, so it serves the Downloads window; the toolbar popup closes
+// as soon as the picker opens.
+func (e *Engine) BrowseFolder(start string) string {
+	if start == "" {
+		e.mu.Lock()
+		start = e.settings.SaveDir
+		e.mu.Unlock()
+	}
+	dir, _ := e.pickFrom(start, "Choose the save folder")
+	return dir
+}
+
+// PickDir shows the picker for an unfinished download's save folder and moves
+// it there. Like PickFolder it returns at once and the result shows in the
+// download's state.
+func (e *Engine) PickDir(id string) error {
+	d, err := e.get(id)
+	if err != nil {
+		return err
+	}
+	start := d.State().Dir
+	go func() {
+		if dir, ok := e.pickFrom(start, "Choose the save folder"); ok {
+			if err := e.SetDir(id, dir); err != nil {
+				log.Printf("download %s: the save folder chosen: %v", id, err)
+			}
+		}
+	}()
+	return nil
+}
+
+// PickSaveFolder shows the folder picker for the Download folder setting and
+// saves the folder chosen. Like PickFolder it returns at once; the new
+// setting arrives in the settings the page is sent.
+func (e *Engine) PickSaveFolder() {
+	e.mu.Lock()
+	start := e.settings.SaveDir
+	var owner uintptr
+	if h, ok := e.window.(windowHandle); ok {
+		owner = h.Handle()
+	}
+	pick := e.pickFolder
+	e.mu.Unlock()
+	go func() {
+		if dir, ok := pick(owner, start, "Choose the download folder"); ok {
+			e.setSettings(settingsPatch{SaveDir: &dir})
+		}
+	}()
 }
 
 // SetFolder sets a download's folder to extract into, which becomes the last

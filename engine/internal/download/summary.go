@@ -17,6 +17,7 @@ type LinkSummary struct {
 	Mirror   string     `json:"mirror,omitempty"` // the host of the mirror it uses, when the file has several
 	Family   string     `json:"family,omitempty"` // "IPv4" or "IPv6", on an interface with IPv6
 	Up       float64    `json:"up,omitempty"`     // torrents: upload speed to the peers on this path
+	Bytes    int64      `json:"bytes,omitempty"`  // HTTP: what this interface fetched of the file, for each one's share on a finished download
 
 	// Filled in by present.
 	Label    string `json:"label"`
@@ -135,7 +136,7 @@ func (d *Download) Summary() Summary {
 	}
 	now := time.Now()
 	for id, l := range d.st.Links {
-		ls := LinkSummary{Status: l.Status, Error: l.Error, Resolved: l.URL != d.st.URL && d.mirrorLocked(l.URL) == nil, Family: l.Family}
+		ls := LinkSummary{Status: l.Status, Error: l.Error, Resolved: l.URL != d.st.URL && d.mirrorLocked(l.URL) == nil, Family: l.Family, Bytes: l.Bytes}
 		if len(d.st.Mirrors) > 0 {
 			ls.Mirror = hostOf(l.URL)
 		}

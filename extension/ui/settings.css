@@ -39,7 +39,9 @@ h3 { display: flex; align-items: center; margin: 0 0 var(--s2); font-size: 12px;
 /* Block, not flex: a label that wraps keeps its (i) right after its last word. */
 .setting > label, .setting > span:first-child { display: block; }
 .setting input[type=text], .setting input[type=password], .setting select { width: 100%; height: var(--tile); }
-.setting input[type=number] { width: 110px; height: var(--tile); }
+.setting input.dec, .setting input[type=number] { width: 110px; height: var(--tile); }
+.setting .pathrow { display: flex; gap: var(--s2); min-width: 0; }
+.setting .pathrow input { flex: 1; min-width: 0; }
 .setting .buttons { display: flex; flex-wrap: wrap; gap: var(--s2); }
 .box { border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); padding: var(--s1) var(--s4); }
 
@@ -66,7 +68,7 @@ h3 { display: flex; align-items: center; margin: 0 0 var(--s2); font-size: 12px;
 .conn-more { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; padding: 10px 12px;
   border-radius: var(--r); background: var(--bg); }
 .conn-more label, .conn-more > span { display: inline-flex; align-items: center; gap: 6px; }
-.conn-more input[type=number] { width: 60px; }
+.conn-more input.dec, .conn-more input[type=number] { width: 60px; }
 .conn-more .colours { display: inline-flex; gap: 6px; }
 .conn-more .colours input { appearance: none; width: 20px; height: 20px; margin: 0; border-radius: var(--r); background: currentColor; cursor: pointer; border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--line); }
 .conn-more .colours input:checked { box-shadow: 0 0 0 2px var(--text); }

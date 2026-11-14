@@ -26,7 +26,7 @@ func TestPresentLabelsDownloads(t *testing.T) {
 		{"failed", Summary{Status: StatusFailed, Probed: true, RangeOK: true},
 			"Failed", "bad", "", Actions{Resume: true, ShowInFolder: true, Remove: true}, true},
 		{"completed", Summary{Status: StatusCompleted, Probed: true, RangeOK: true},
-			"Completed", "ok", "", Actions{ShowInFolder: true, Remove: true}, false},
+			"Completed", "ok", "", Actions{ShowInFolder: true, Remove: true, Open: true, DeleteFile: true}, false},
 		{"torrent learning files", Summary{Kind: KindTorrent, Status: StatusMetadata},
 			"Finding files", "", "Asking peers for the torrent's files…", Actions{Pause: true, Remove: true}, true},
 		{"torrent choosing before files", Summary{Kind: KindTorrent, Status: StatusChoosing},
@@ -34,9 +34,9 @@ func TestPresentLabelsDownloads(t *testing.T) {
 		{"torrent choosing files", Summary{Kind: KindTorrent, Status: StatusChoosing, Size: 10, Files: []FileSummary{{Size: 10}}},
 			"Waiting for you", "", "", Actions{Cancel: true}, true},
 		{"torrent seeding", Summary{Kind: KindTorrent, Status: StatusSeeding, Size: 10, Done: 10, Finished: done},
-			"Seeding", "ok", "complete", Actions{Pause: true, ShowInFolder: true, Remove: true}, false},
+			"Seeding", "ok", "complete", Actions{Pause: true, ShowInFolder: true, Remove: true, Open: true}, false},
 		{"torrent done seeding", Summary{Kind: KindTorrent, Status: StatusCompleted, Size: 10, Done: 10, Finished: done},
-			"Finished", "ok", "complete", Actions{ShowInFolder: true, Remove: true}, false},
+			"Finished", "ok", "complete", Actions{ShowInFolder: true, Remove: true, Open: true, DeleteFile: true}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -66,9 +66,9 @@ func TestPresentLabelsLinks(t *testing.T) {
 		{"fetching", "", StatusRunning, LinkSummary{Status: LinkReady, Conns: 4}, "Downloading", "ok", false},
 		{"ready but idle", "", StatusPaused, LinkSummary{Status: LinkReady}, "Ready", "ok", false},
 		{"backing off", "", StatusRunning, LinkSummary{Status: LinkReady, Conns: 2, busy: true, allowed: 2, maxConns: 4},
-			"Server busy · 2 of 4 connections", "warn", false},
+			"Server busy · 2 of 4 requests", "warn", false},
 		{"backing off while retrying", "", StatusRunning, LinkSummary{Status: LinkRetrying, busy: true, allowed: 0, maxConns: 4},
-			"Server busy · 0 of 4 connections", "warn", true},
+			"Server busy · 0 of 4 requests", "warn", true},
 		{"retrying", "", StatusRunning, LinkSummary{Status: LinkRetrying}, "Retrying soon", "warn", true},
 		{"failed", "", StatusRunning, LinkSummary{Status: LinkFailed}, "Failed", "bad", true},
 		{"mismatch", "", StatusRunning, LinkSummary{Status: LinkMismatch}, "Different file: excluded", "bad", true},
@@ -154,6 +154,23 @@ func TestPresentPlain(t *testing.T) {
 	for _, c := range cases {
 		if got := Present(c.in).Plain; got != c.want {
 			t.Errorf("%s: plain %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestPresentOffersAgainOnlyOnAFinishedHTTPDownload(t *testing.T) {
+	done := Summary{Status: StatusCompleted, Probed: true, URL: "https://x.test/f"}
+	if a := Present(done).Actions; !a.Again || !a.Open || !a.DeleteFile {
+		t.Errorf("finished: %+v, want open, deleteFile and again", a)
+	}
+	for name, s := range map[string]Summary{
+		"running": {Status: StatusRunning, Probed: true, URL: "https://x.test/f"},
+		"failed":  {Status: StatusFailed, Probed: true, URL: "https://x.test/f"},
+		"torrent": {Kind: KindTorrent, Status: StatusCompleted, Size: 1, URL: "magnet:?x"},
+	} {
+		a := Present(s).Actions
+		if a.Again || (name != "torrent" && (a.Open || a.DeleteFile)) {
+			t.Errorf("%s: %+v offers more than it should", name, a)
 		}
 	}
 }

@@ -126,7 +126,7 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 		e.mu.Unlock()
 		id, err := e.Add(p)
 		return map[string]string{"id": id}, err
-	case "pause", "resume", "remove", "retryLink", "showInFolder":
+	case "pause", "resume", "remove", "retryLink", "showInFolder", "open", "deleteFile", "again":
 		p, err := decode[idParams](raw)
 		if err != nil {
 			return nil, err
@@ -150,6 +150,26 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			d.RetryLink(p.Iface)
 		case "showInFolder":
 			return nil, winutil.ShowInFolder(j.Path())
+		case "open":
+			if !j.Summary().Actions.Open {
+				return nil, errors.New("only a finished download can be opened")
+			}
+			return nil, openFile(j.Path())
+		case "deleteFile":
+			if !j.Summary().Actions.DeleteFile {
+				return nil, errors.New("only a finished download's file can be deleted")
+			}
+			if err := recycleFile(j.Path()); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+			return nil, e.Remove(p.ID, false) // the file is gone: so is its row
+		case "again":
+			s := j.Summary()
+			if !s.Actions.Again {
+				return nil, errors.New("only a finished download can be downloaded again")
+			}
+			id, err := e.Add(AddRequest{URL: s.URL, PageURL: s.PageURL})
+			return map[string]string{"id": id}, err
 		}
 		return nil, nil
 	case "setLimit":
@@ -193,7 +213,11 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 				return nil, err
 			}
 		}
-		return nil, t.Choose(p.Files, strings.TrimSpace(p.Dir))
+		dir, err := cleanDir(p.Dir)
+		if err != nil {
+			return nil, err
+		}
+		return nil, t.Choose(p.Files, dir)
 	case "torrentFiles":
 		p, err := decode[idParams](raw)
 		if err != nil {
@@ -275,6 +299,32 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 			return nil, err
 		}
 		return nil, e.PickFolder(p.ID)
+	case "pickSaveFolder":
+		e.PickSaveFolder()
+		return nil, nil
+	case "setDir":
+		p, err := decode[struct {
+			ID  string `json:"id"`
+			Dir string `json:"dir"`
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.SetDir(p.ID, p.Dir)
+	case "pickDir":
+		p, err := decode[idParams](raw)
+		if err != nil {
+			return nil, err
+		}
+		return nil, e.PickDir(p.ID)
+	case "browseFolder":
+		p, err := decode[struct {
+			Start string `json:"start"`
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"dir": e.BrowseFolder(p.Start)}, nil
 	case "setPageUrl":
 		p, err := decode[pageParams](raw)
 		if err != nil {

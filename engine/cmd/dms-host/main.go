@@ -67,7 +67,7 @@ func relayIn(from io.Reader, to io.Writer, browser string) {
 		if json.Compact(&buf, withBrowser(msg, browser)) != nil {
 			continue
 		}
-		if method(msg) == "pickFolder" {
+		if m := method(msg); m == "pickFolder" || m == "pickSaveFolder" || m == "pickDir" || m == "browseFolder" {
 			// The engine runs in the background, so Windows would put its
 			// folder picker behind Firefox. Firefox started this host and is
 			// in front, so the host may let the engine come forward.

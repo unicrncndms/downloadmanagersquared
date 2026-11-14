@@ -13,8 +13,24 @@ function fmtBytes(n) {
   return `${n.toFixed(i && n < 100 ? 1 : 0)} ${u[i]}`;
 }
 
-function fmtSpeed(bps) {
-  return bps >= 1 ? fmtBytes(bps) + "/s" : "0 B/s";
+// The unit speeds and limits are shown in: the engine's speedUnit setting,
+// "MBps" (bytes, the default) or "Mbps" (bits). The pages set it from the
+// settings (setSpeedUnit); stored limits stay bytes per second. The Go tray has
+// the same rule (tray.Speed).
+let speedUnit = "MBps";
+function setSpeedUnit(u) { speedUnit = u === "Mbps" ? "Mbps" : "MBps"; }
+function speedUnitLabel(unit = speedUnit) { return unit === "Mbps" ? "Mbit/s" : "MB/s"; }
+// speedToUnit / speedFromUnit convert bytes per second to a number in the unit (Mbit/s = bytes/s * 8 / 1e6) and back.
+function speedToUnit(bps, unit = speedUnit) { return bps * (unit === "Mbps" ? 8 : 1) / 1e6; }
+function speedFromUnit(v, unit = speedUnit) { return Math.round(v * 1e6 / (unit === "Mbps" ? 8 : 1)); }
+
+function fmtSpeed(bps, unit = speedUnit) {
+  if (unit !== "Mbps") return bps >= 1 ? fmtBytes(bps) + "/s" : "0 B/s";
+  if (!(bps >= 1)) return "0 bit/s";
+  let n = bps * 8, i = 0;
+  const u = ["bit", "kbit", "Mbit", "Gbit"];
+  while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+  return `${n.toFixed(i && n < 100 ? 1 : 0)} ${u[i]}/s`;
 }
 
 function fmtETA(sec) {
@@ -211,8 +227,8 @@ function problemLinks(d) {
 }
 
 // viaLine is a short line of the interfaces a running download uses, busiest
-// first, with each one's connections (peers for a torrent): "via Ethernet 4×
-// · Wi-Fi 2×". "" when it isn't running or nothing is connected. nameOf gives
+// first, with each one's connections (peers for a torrent): "via Ethernet 4
+// requests · Wi-Fi 2 requests". "" when it isn't running or nothing is connected. nameOf gives
 // an interface's name.
 function viaLine(d, nameOf, order) {
   const torrent = d.kind === "torrent";
@@ -220,7 +236,7 @@ function viaLine(d, nameOf, order) {
   if (!used.length) return "";
   return "via " + used.map((id) => {
     const n = d.links[id].conns;
-    return `${nameOf(id)} ${torrent ? `${n} peer${n === 1 ? "" : "s"}` : `${n}×`}`;
+    return `${nameOf(id)} ${torrent ? `${n} peer${n === 1 ? "" : "s"}` : `${n} request${n === 1 ? "" : "s"}`}`;
   }).join(" · ");
 }
 
@@ -366,6 +382,56 @@ function addView(text) {
   return { count: n, bad: bad.length, page: web, vpn: n > 0, label: n > 1 ? `Add ${n} downloads` : "Add" };
 }
 
+// finishedSummary is a finished download's one line: "3.0 GB in 4m 10s · 12 MB/s
+// · Ethernet 62%, Wi-Fi 38%". The time is from added to finished; shares only
+// when more than one interface fetched bytes. "" when it can't say.
+function finishedSummary(d, nameOf) {
+  const secs = (new Date(d.finished) - new Date(d.added)) / 1000;
+  const parts = [];
+  if (d.size > 0) parts.push(secs >= 0 ? `${fmtBytes(d.size)} in ${fmtETA(secs)}` : fmtBytes(d.size));
+  if (d.size > 0 && secs > 0) parts.push(fmtSpeed(d.size / secs));
+  const by = Object.keys(d.links || {}).filter((id) => d.links[id].bytes > 0).sort((a, b) => d.links[b].bytes - d.links[a].bytes);
+  const total = by.reduce((n, id) => n + d.links[id].bytes, 0);
+  if (by.length > 1) parts.push(by.map((id) => `${nameOf(id)} ${Math.round((d.links[id].bytes / total) * 100)}%`).join(", "));
+  return parts.join(" · ");
+}
+
+// linesNote is what the empty list says of the lines found (ready interfaces):
+// how many, and whether they look separate. `add` asks for the second-line hint
+// (one line), `check` offers Check lines (several lines that look separate).
+// Lines behind one router say so and promise no speed.
+function linesNote(ready) {
+  const names = ready.map((i) => i.name);
+  if (names.length < 2) return { text: "One line found. A second line (USB tether, hotspot) is what adds speed.", add: true, check: false };
+  const same = routerWarnings(ready);
+  if (same.length) return { text: `${names.length} lines found. ${same.join(" ").replace(/go through the same router: together they are no faster than one of them\./g, "share one line and will not add speed.")}`, add: false, check: true };
+  return { text: `${names.length} lines found, they look separate (${andList(names)}).`, add: false, check: true };
+}
+
+// finishedVerdict is one factual line after a multi-connection download: two
+// that share a router gained nothing, else the smallest share "added N%".
+// "" when one connection fetched, or the engine doesn't say.
+function finishedVerdict(d, interfaces, nameOf) {
+  const by = Object.keys(d.links || {}).filter((id) => d.links[id].bytes > 0);
+  if (by.length < 2) return "";
+  const total = by.reduce((n, id) => n + d.links[id].bytes, 0);
+  const info = (id) => (interfaces || []).find((i) => i.id === id);
+  for (const a of by) for (const b of by) {
+    if (a < b && info(a) && (info(a).sameRouter || []).includes(nameOf(b))) return `${andList([nameOf(a), nameOf(b)])} share one line: no gain`;
+  }
+  const least = by.sort((a, b) => d.links[a].bytes - d.links[b].bytes)[0];
+  return `${nameOf(least)} added ${Math.round((d.links[least].bytes / total) * 100)}%`;
+}
+
+// badgeOf is the toolbar button's badge for the engine's downloads: "!" on a
+// warning colour while one needs the user or failed, else how many run.
+function badgeOf(downloads) {
+  const ds = downloads || [];
+  if (ds.some((d) => d.section === "needs" || d.status === "failed")) return { text: "!", color: "#d97706" };
+  const n = ds.filter((d) => d.status === "running").length;
+  return { text: n ? String(n) : "", color: "#2563eb" };
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { addLines, addView, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, fmtETA, percent, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
+  module.exports = { linesNote, finishedVerdict, finishedSummary, badgeOf, addLines, addView, matchesSearch, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, viaLine, seedLine, bulkActions, routerWarnings, lineResults, familyText, ipv6Hints };
 }

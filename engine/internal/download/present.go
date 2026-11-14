@@ -15,7 +15,10 @@ type Actions struct {
 	Resume       bool `json:"resume"`
 	ShowInFolder bool `json:"showInFolder"`
 	Remove       bool `json:"remove"`
-	Cancel       bool `json:"cancel"` // a torrent waiting for its files to be chosen: Remove under another name
+	Open         bool `json:"open"`       // the finished file opens in its default app
+	DeleteFile   bool `json:"deleteFile"` // the finished file goes to the Recycle Bin
+	Again        bool `json:"again"`      // a new download from the same link
+	Cancel       bool `json:"cancel"`     // a torrent waiting for its files to be chosen: Remove under another name
 	// Record the landing page's recipe now, while someone is there. Set by the
 	// engine, which knows the browsers' recipes, not by Present.
 	RecordRecipe bool `json:"recordRecipe"`
@@ -87,6 +90,9 @@ func Present(s Summary) Summary {
 	s.Actions.ShowInFolder = known && !choosing
 	s.Actions.Remove, s.Actions.Cancel = !choosing, choosing
 	s.PartialFile = s.Status != StatusCompleted && !finished
+	s.Actions.Open = known && (s.Status == StatusCompleted || s.Status == StatusSeeding)
+	s.Actions.DeleteFile = known && s.Status == StatusCompleted
+	s.Actions.Again = !torrent && s.Status == StatusCompleted && s.URL != ""
 
 	switch {
 	case choosing && len(s.Files) == 0:
@@ -253,7 +259,7 @@ func presentLink(l LinkSummary, s Summary) LinkSummary {
 			l.Label = "Connected"
 		}
 	case l.busy && (l.Status == LinkReady || l.Status == LinkRetrying): // Backoff
-		l.Label, l.Tone = fmt.Sprintf("Server busy · %d of %d connections", l.allowed, l.maxConns), toneWarn
+		l.Label, l.Tone = fmt.Sprintf("Server busy · %d of %d requests", l.allowed, l.maxConns), toneWarn
 	case l.Status == LinkReady && s.Status == StatusRunning && l.Conns > 0:
 		l.Label = "Downloading"
 	}

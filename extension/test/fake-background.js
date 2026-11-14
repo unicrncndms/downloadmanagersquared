@@ -66,6 +66,7 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
     webNavigation: { onCommitted: ev("webNavigation.onCommitted"), onHistoryStateUpdated: ev("webNavigation.onHistoryStateUpdated") },
     downloads: { onCreated: ev("downloads.onCreated"), cancel: rec("downloads.cancel"), erase: rec("downloads.erase"), download: rec("downloads.download") },
     cookies: { getAll: rec("cookies.getAll", (q) => (cookieJar[q.storeId || "firefox-default"] || []).slice()), set: rec("cookies.set") },
+    browserAction: { setBadgeText: rec("browserAction.setBadgeText"), setBadgeBackgroundColor: rec("browserAction.setBadgeBackgroundColor") },
     notifications: { create: rec("notifications.create") },
     theme: { getCurrent: rec("theme.getCurrent", () => shared.theme || { colors: null }), onUpdated: ev("theme.onUpdated") },
     contextMenus: { create: rec("contextMenus.create"), onClicked: ev("contextMenus.onClicked") },

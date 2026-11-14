@@ -38,6 +38,7 @@
       "lib/provider.js",
       "lib/accent.js",
       "lib/rpc.js",
+      "lib/list.js",
       "background/util.js",
       "background/engine.js",
       "background/resolver.js",

@@ -113,10 +113,9 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .card > .name, .title > .name { grid-area: 1 / 2; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 24px; line-height: 24px; }
 /* A file name in Arabic or Hebrew reads in its own direction, still at the left. */
 .name, #detailTitle { unicode-bidi: plaintext; text-align: left; }
-/* Calm: a row's buttons show on hover, keyboard focus and selection; what asks for an answer always shows. */
-.card > .end { grid-area: 1 / 4; display: flex; align-items: center; justify-content: flex-end; white-space: nowrap; opacity: 0; transition: opacity .12s; }
+/* A row's buttons always show, quietly; hover, focus and selection strengthen them. */
+.card > .end { grid-area: 1 / 4; display: flex; align-items: center; justify-content: flex-end; white-space: nowrap; opacity: .6; transition: opacity .12s; }
 .card:hover > .end, .card:focus-within > .end, .card.sel > .end, .card.detailed > .end, .card:has(.menu:not([hidden])) > .end { opacity: 1; }
-@media (hover: none) { .card > .end { opacity: 1; } }
 /* The connections by the name: a tile each, how many connections inside, and "busy" in words. */
 .card .mini { flex: none; display: flex; gap: var(--s1); align-items: center; font-size: 11px; white-space: nowrap; }
 .mini > span { display: inline-flex; align-items: center; gap: var(--s1); }
@@ -251,6 +250,8 @@ button.icon[aria-expanded] svg { transition: transform .15s; }
 }
 @keyframes sheet { from { transform: translateY(28px); } }
 .facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s1) var(--s3); margin: 0; }
+.facts .linklike { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.facts .linklike:hover { text-decoration: underline; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .facts dd.lines { white-space: pre-line; }

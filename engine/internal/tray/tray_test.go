@@ -43,7 +43,7 @@ func TestTheMenuShowsOnlyTheInterfacesCarryingDownloads(t *testing.T) {
 		Links:  map[string]download.LinkSummary{"eth": {Conns: 4, Speed: 7.1e6}, "tun:eth": {Conns: 2, Speed: 2e6}, "wifi": {}},
 	}}}
 
-	m := menuFor(running, used, now)
+	m := menuFor(running, engine.SpeedBytes, used, now)
 	if want := []string{"Ethernet: 7.1 MB/s", "VPN via Ethernet: 2.0 MB/s"}; !slices.Equal(m.Rows, want) {
 		t.Fatalf("rows %q, want %q", m.Rows, want)
 	}
@@ -53,18 +53,37 @@ func TestTheMenuShowsOnlyTheInterfacesCarryingDownloads(t *testing.T) {
 
 	// A second without connections keeps the line, so it doesn't blink.
 	running.Downloads[0].Links["tun:eth"] = download.LinkSummary{}
-	if m := menuFor(running, used, now.Add(time.Second)); len(m.Rows) != 2 {
+	if m := menuFor(running, engine.SpeedBytes, used, now.Add(time.Second)); len(m.Rows) != 2 {
 		t.Fatalf("rows %q a second after the tunnel went quiet, want it still listed", m.Rows)
 	}
-	if m := menuFor(running, used, now.Add(linger+2*time.Second)); len(m.Rows) != 1 {
+	if m := menuFor(running, engine.SpeedBytes, used, now.Add(linger+2*time.Second)); len(m.Rows) != 1 {
 		t.Fatalf("rows %q long after the tunnel went quiet, want it gone", m.Rows)
 	}
 
 	paused := engine.StateEvent{Interfaces: ifaces, Downloads: []download.Summary{{Status: download.StatusPaused}}}
-	if m := menuFor(paused, used, now); len(m.Rows) != 0 || m.Status != "Paused" || m.Pause || !m.Resume {
+	if m := menuFor(paused, engine.SpeedBytes, used, now); len(m.Rows) != 0 || m.Status != "Paused" || m.Pause || !m.Resume {
 		t.Fatalf("paused: got %+v, want status Paused, no rows, only Resume all", m)
 	}
-	if m := menuFor(engine.StateEvent{Interfaces: ifaces}, used, now); len(m.Rows) != 0 || m.Status != "Idle" || m.Pause || m.Resume {
+	if m := menuFor(engine.StateEvent{Interfaces: ifaces}, engine.SpeedBytes, used, now); len(m.Rows) != 0 || m.Status != "Idle" || m.Pause || m.Resume {
 		t.Fatalf("idle: got %+v, want status Idle and nothing else", m)
+	}
+}
+
+func TestSpeedInBytesOrBits(t *testing.T) {
+	for _, c := range []struct {
+		bps  float64
+		unit string
+		want string
+	}{
+		{0, engine.SpeedBytes, "0 B/s"},
+		{1.5e6, engine.SpeedBytes, "1.5 MB/s"},
+		{0, engine.SpeedBits, "0 bit/s"},
+		{1.5e6, engine.SpeedBits, "12.0 Mbit/s"},
+		{125e6, engine.SpeedBits, "1.0 Gbit/s"},
+		{1e6, "", "1.0 MB/s"}, // an unknown unit is bytes
+	} {
+		if got := Speed(c.bps, c.unit); got != c.want {
+			t.Errorf("Speed(%v, %q) = %q, want %q", c.bps, c.unit, got, c.want)
+		}
 	}
 }

@@ -12,14 +12,25 @@ function closeMenu() {
   if (openMenu) openMenu.hidden = true;
   openMenu = null;
 }
-// Below its button, pushed up and left as far as needed to stay inside the window.
-function showMenu(menu, button) {
+// Below its button (or at the pointer, for a right-click: at is {x, y}),
+// pushed up and left as far as needed to stay inside the window.
+function showMenu(menu, button, at) {
   menu.hidden = false;
   openMenu = menu;
-  const b = button.getBoundingClientRect();
+  const b = at ? { bottom: at.y - 4, right: at.x + menu.offsetWidth } : button.getBoundingClientRect();
   menu.style.top = Math.max(4, Math.min(b.bottom + 4, innerHeight - menu.offsetHeight - 4)) + "px";
   menu.style.left = Math.max(4, Math.min(b.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 4)) + "px";
 }
+// A right-click on a card opens its "⋯" menu at the pointer; fields and links keep the browser's own.
+document.addEventListener("contextmenu", (e) => {
+  if (e.target.closest("input, textarea, select, a, .menu")) return;
+  const card = e.target.closest(".card");
+  const menu = card && (card.querySelector(".menu") || (card.buildMenu && card.buildMenu()));
+  if (!menu) return;
+  e.preventDefault();
+  closeMenu();
+  showMenu(menu, null, { x: e.clientX, y: e.clientY });
+});
 // A fixed menu would stay put while its row scrolls away.
 document.addEventListener("scroll", () => closeMenu(), true);
 // Escape closes it too, and gives the focus back to its "⋯" button.

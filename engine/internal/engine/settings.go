@@ -60,6 +60,12 @@ func (s *Settings) assignColors(ids []string) bool {
 	return changed
 }
 
+// The speedUnit setting's two values.
+const (
+	SpeedBytes = "MBps"
+	SpeedBits  = "Mbps"
+)
+
 type Settings struct {
 	Interfaces         map[string]*IfaceSettings `json:"interfaces"`
 	MainInterface      string                    `json:"mainInterface"` // "" = Windows default route
@@ -76,6 +82,8 @@ type Settings struct {
 	VPNTorrent         paths.Mode                `json:"vpnTorrent"`  // the same for a torrent
 	PIARegion          string                    `json:"piaRegion"`   // "" = the lowest latency
 	VPNProvider        string                    `json:"vpnProvider"` // the settings page's provider choice: "", "conf" or "pia"
+	NotifyDone         bool                      `json:"notifyDone"`  // a balloon when a download finishes or fails
+	SpeedUnit          string                    `json:"speedUnit"`   // how speeds and limits are shown: SpeedBytes (MB/s) or SpeedBits (Mbit/s); stored limits are bytes per second either way
 	IPv6               bool                      `json:"ipv6"`        // Enable IPv6 (experimental); off: IPv4 only, no AAAA lookups, no IPv6 sockets
 
 	// Download as folder
@@ -171,7 +179,9 @@ func defaultSettings() Settings {
 		PartsParallel:      true,
 		ArchiveKeeping:     download.KeepAuto,
 		SeedRatio:          1,
-		VPNHTTP:            paths.Off,
+		NotifyDone:         true,
+		SpeedUnit:          SpeedBytes,
+		VPNHTTP:           paths.Off,
 		VPNTorrent:         paths.Off, // each new torrent asks first
 	}
 }
@@ -203,6 +213,9 @@ func (s *Settings) normalize() {
 	}
 	s.VPNHTTP = paths.ParseMode(string(s.VPNHTTP), d.VPNHTTP)
 	s.VPNTorrent = paths.ParseMode(string(s.VPNTorrent), d.VPNTorrent)
+	if s.SpeedUnit != SpeedBits {
+		s.SpeedUnit = SpeedBytes
+	}
 	switch s.VPNProvider {
 	case "", "conf", "pia":
 	default:

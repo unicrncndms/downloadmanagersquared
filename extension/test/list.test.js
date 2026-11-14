@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { moveBefore, statusLine, problemLinks, viaLinks, viaLine, seedLine, bulkActions, finished } = require("../lib/list.js");
+const { linesNote, finishedVerdict, moveBefore, statusLine, problemLinks, viaLinks, viaLine, seedLine, bulkActions, finished, finishedSummary, badgeOf } = require("../lib/list.js");
 
 // The engine's section for a status; a test of what needs the user says "needs".
 const SECTION = { running: "active", verifying: "active", metadata: "active", checking: "active", seeding: "seeding", queued: "queued",
@@ -51,7 +51,7 @@ test("a running card says which interfaces it uses and how many connections each
     wifi: { conns: 2, speed: 4.4e6 }, eth: { conns: 4, speed: 7.1e6 }, vpn: { conns: 0, label: "Failed" },
   } });
   // Busiest first; one not connected isn't listed.
-  assert.equal(viaLine(d, nameOf), "via Ethernet 4× · Wi-Fi 2×");
+  assert.equal(viaLine(d, nameOf), "via Ethernet 4 requests · Wi-Fi 2 requests");
   const t = dl("t", "seeding", { kind: "torrent", links: { eth: { conns: 3 }, wifi: { conns: 1 } } });
   assert.equal(viaLine(t, nameOf), "via Ethernet 3 peers · Wi-Fi 1 peer");
   assert.equal(viaLine(dl("p", "paused", { links: { eth: { conns: 4 } } }), nameOf), "");
@@ -333,4 +333,56 @@ test("the tiles of a download's connections keep their places as the counts chan
   const at = (a, b) => dl("x", "running", { links: { eth: { conns: a }, wifi: { conns: b }, "wifi~vpn": { conns: 2 } } });
   assert.deepEqual(viaLinks(at(4, 1), order), ["wifi", "eth", "wifi~vpn"]);
   assert.deepEqual(viaLinks(at(1, 4), order), ["wifi", "eth", "wifi~vpn"]);
+});
+
+test("finishedSummary: size, time, speed and each connection's share when several fetched", () => {
+  const nameOf = (id) => ({ eth: "Ethernet", wifi: "Wi-Fi" })[id];
+  const base = { size: 3e9, added: "2026-11-03T19:00:00Z", finished: "2026-11-03T19:04:10Z" };
+  assert.equal(finishedSummary({ ...base, links: { eth: { bytes: 1.86e9 }, wifi: { bytes: 1.14e9 } } }, nameOf),
+    "3.0 GB in 4m 10s · 12.0 MB/s · Ethernet 62%, Wi-Fi 38%");
+  assert.equal(finishedSummary({ ...base, links: { eth: { bytes: 3e9 }, wifi: {} } }, nameOf), "3.0 GB in 4m 10s · 12.0 MB/s");
+  assert.equal(finishedSummary({ size: 5, links: {} }, nameOf), "5 B");
+});
+
+test("badgeOf: ! for a download that needs you or failed, else the running count", () => {
+  assert.deepEqual(badgeOf([]), { text: "", color: "#2563eb" });
+  assert.equal(badgeOf([{ status: "running" }, { status: "running" }]).text, "2");
+  assert.equal(badgeOf([{ status: "running" }, { status: "failed", section: "needs" }]).text, "!");
+});
+
+test("fmtSpeed, in bytes or bits, and the limit conversions", () => {
+  const { fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit } = require("../lib/list.js");
+  assert.equal(fmtSpeed(1.5e6, "MBps"), "1.5 MB/s");
+  assert.equal(fmtSpeed(0, "MBps"), "0 B/s");
+  assert.equal(fmtSpeed(1.5e6, "Mbps"), "12.0 Mbit/s");
+  assert.equal(fmtSpeed(125e6, "Mbps"), "1.0 Gbit/s");
+  assert.equal(fmtSpeed(50, "Mbps"), "400 bit/s");
+  assert.equal(fmtSpeed(0, "Mbps"), "0 bit/s");
+  assert.equal(speedToUnit(1.25e6, "Mbps"), 10);
+  assert.equal(speedToUnit(1.25e6, "MBps"), 1.25);
+  assert.equal(speedFromUnit(10, "Mbps"), 1.25e6);
+  assert.equal(speedFromUnit(1.25, "MBps"), 1.25e6);
+  assert.equal(speedUnitLabel("Mbps"), "Mbit/s");
+  setSpeedUnit("Mbps");
+  assert.equal(fmtSpeed(1e6), "8.0 Mbit/s");
+  setSpeedUnit("junk");
+  assert.equal(fmtSpeed(1e6), "1.0 MB/s");
+});
+
+test("linesNote: one line hints a second, shared router promises no speed", () => {
+  const w = { id: "wifi", name: "Wi-Fi" };
+  assert.equal(linesNote([w]).add, true);
+  const sep = linesNote([w, { id: "eth", name: "Ethernet" }]);
+  assert.match(sep.text, /look separate/);
+  assert.equal(sep.check, true);
+  const same = linesNote([{ ...w, sameRouter: ["Ethernet"] }, { id: "eth", name: "Ethernet", sameRouter: ["Wi-Fi"] }]);
+  assert.match(same.text, /Ethernet and Wi-Fi share one line and will not add speed/);
+});
+
+test("finishedVerdict: smallest share added, shared router no gain, nothing when unknown", () => {
+  const nameOf = (id) => ({ eth: "Ethernet", wifi: "Wi-Fi" })[id];
+  const d = { links: { eth: { bytes: 62 }, wifi: { bytes: 38 } } };
+  assert.equal(finishedVerdict(d, [], nameOf), "Wi-Fi added 38%");
+  assert.equal(finishedVerdict(d, [{ id: "eth", sameRouter: ["Wi-Fi"] }], nameOf), "Ethernet and Wi-Fi share one line: no gain");
+  assert.equal(finishedVerdict({ links: { eth: { bytes: 5 } } }, [], nameOf), "");
 });

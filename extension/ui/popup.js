@@ -77,9 +77,15 @@ $("list").addEventListener("click", (e) => {
 });
 $("list").addEventListener("dblclick", (e) => {
   const row = e.target.closest(".card");
-  if (row && row.dataset.id && !e.target.closest("button, a, input, label")) showDetail(row.dataset.id);
+  if (row && row.dataset.id && !e.target.closest("button, a, input, label")) openOrDetails(row.dataset.id);
 });
-// On a row: the arrows go from row to row, Space selects, Enter opens Details, Delete removes.
+// A finished download's row opens the file; any other row, or a file that can't be opened, its Details.
+function openOrDetails(id) {
+  const d = ((latest.state && latest.state.downloads) || []).find((x) => x.id === id);
+  if (d && finished(d) && d.actions && d.actions.open) act("open", { id });
+  else showDetail(id);
+}
+// On a row: the arrows go from row to row, Space selects, Enter opens a finished download and shows another's Details, Delete removes.
 $("list").addEventListener("keydown", (e) => {
   const row = e.target;
   if (!row.classList || !row.classList.contains("card")) return;
@@ -89,7 +95,7 @@ $("list").addEventListener("keydown", (e) => {
     while (to && !to.classList.contains("card")) to = to[step];
     if (to) to.focus();
   } else if (e.key === " ") select(rowIds(row), { ctrlKey: true });
-  else if (e.key === "Enter" && row.dataset.id) showDetail(row.dataset.id);
+  else if (e.key === "Enter" && row.dataset.id) openOrDetails(row.dataset.id);
   else if (e.key === "Delete") {
     if (!rowIds(row).every((id) => selected.has(id))) select(rowIds(row), {});
     removeSelected();
@@ -162,10 +168,10 @@ function shortName(name) {
   return w.length > 6 ? w.slice(0, 3) : w;
 }
 
-// stripSpeed is a speed in MB/s with no unit, short enough for the strip:
-// 4.4, 87, and from 1 GB/s on 1.2G.
+// stripSpeed is a speed in the chosen unit with no unit shown, short enough
+// for the strip: 4.4, 87, and from 1000 on 1.2G. The first chip names the unit.
 function stripSpeed(bps) {
-  const mb = bps / 1e6;
+  const mb = speedToUnit(bps);
   return mb >= 1000 ? (mb / 1000).toFixed(1) + "G" : mb.toFixed(mb < 100 ? 1 : 0);
 }
 
@@ -178,14 +184,14 @@ function renderStrip(s) {
   // Held back on some download right now: the server busy, or backing off.
   const busy = new Set((s.downloads || []).flatMap((d) => Object.keys(d.links || {}).filter((id) => d.links[id].tone === "warn")));
   $("strip").classList.toggle("many", ifs.length > 2);
-  fresh($("strip"), ifs.map((i) => [i.id, i.name, Math.round((i.speed || 0) / 1e5), idle(i), busy.has(i.id)]), () => ifs.map((i) => {
+  fresh($("strip"), ifs.map((i) => [i.id, i.name, Math.round((i.speed || 0) / 1e5), idle(i), busy.has(i.id), speedUnitLabel()]), () => ifs.map((i, n) => {
     const sq = el("i", { class: "dot" });
     sq.style.color = ifaceHue(i.id, s);
     const said = idle(i) ? "idle" : fmtSpeed(i.speed || 0) + (busy.has(i.id) ? ", server busy" : "");
     return el("button", { class: "chip" + (idle(i) ? " idle" : ""), title: `${i.name}: ${said}`, "aria-label": `${i.name}, ${said}. Open Connections`,
       onclick: () => { Host.openSettings("#connections"); if (!document.body.classList.contains("windowed")) window.close(); } },
       sq, el("span", { class: "nm" }, i.name), el("span", { class: "nm short" }, shortName(i.name)),
-      el("span", { class: "muted num" }, idle(i) ? "idle" : stripSpeed(i.speed || 0)),
+      el("span", { class: "muted num" }, idle(i) ? "idle" : stripSpeed(i.speed || 0) + (n === 0 ? " " + speedUnitLabel() : "")),
       busy.has(i.id) ? el("span", { class: "busy" }, "busy") : null);
   }));
   fitStrip();
@@ -218,7 +224,10 @@ $("openSettings").onclick = () => {
 $("pauseAll").onclick = () => act("pauseAll");
 $("resumeAll").onclick = () => act("resumeAll");
 // The Add box: closed again by + Add or Escape.
+const addDir = folderControl();
+$("addFolderRow").after(addDir.root);
 function openAdd(on) {
+  if (on) addDir.paint(); // the download folder may have changed
   $("addBox").hidden = !on;
   $("toggleAdd").setAttribute("aria-expanded", String(on));
   if (on) $("addUrl").focus();
@@ -267,6 +276,7 @@ $("addBox").addEventListener("submit", async (e) => {
   for (const { line, url } of urls) {
     const add = { url, pageUrl: $("addPage").value, vpn: $("addVpn").value };
     if (Host.userAgent !== null) add.userAgent = Host.userAgent; // else the engine uses the browser's
+    if (addDir.get()) add.dir = addDir.get(); // else the download folder
     const folder = addFolderParam(!$("addFolderRow").hidden && zipLine(url), $("addFolder").checked, latest.settings);
     if (folder !== undefined) add.folder = folder;
     try {
@@ -286,6 +296,7 @@ $("addBox").addEventListener("submit", async (e) => {
   toast(added === 1 ? "Added" : `${added} downloads added`);
   $("addUrl").value = "";
   $("addPage").value = "";
+  addDir.reset();
   $("addUrl").dispatchEvent(new Event("input"));
   openAdd(false);
 });
@@ -395,7 +406,7 @@ function renderDownloads(state) {
   for (const id of groupCards.keys()) if (!seenGroups.has(id)) groupCards.delete(id);
   renderSelBar();
   const emptyText = `No downloads match “${query.trim()}”.`;
-  if (!all.length) want.push(welcome(state));
+  if (!all.length) want.push(welcome(state, (latest.settings || {}).thresholdBytes));
   else if (!res.matched) {
     if (emptyNote.textContent !== emptyText) emptyNote.textContent = emptyText;
     want.push(emptyNote);
@@ -423,9 +434,10 @@ function field(off) {
 // The empty list: how many connections stand ready, how to add a link, and
 // what DMS² takes on by itself.
 let welcomeNode = null, welcomeSig = "";
-function welcome(state) {
+function welcome(state, threshold) {
   const ready = (state.interfaces || []).filter((i) => !i.tunnel && i.present !== false && i.enabled);
-  const sig = ready.map((i) => i.id).join();
+  const note = linesNote(ready);
+  const sig = ready.map((i) => i.id + (i.sameRouter || []).join()).join() + "|" + threshold;
   if (welcomeNode && sig === welcomeSig) return welcomeNode;
   welcomeSig = sig;
   const f = field(false);
@@ -433,11 +445,21 @@ function welcome(state) {
   [3, 4, 20, 19, 35].forEach((k, n) => { if (ready.length) f.children[k].style.background = ifaceHue(ready[n % ready.length].id, state); });
   const feat = (name, text) => [el("span", { class: "st-tile seed" }, icon(name)), el("span", {}, text)];
   welcomeNode = el("div", { class: "void", role: "status" }, f,
-    el("div", { class: "big" }, ready.length > 1 ? `${ready.length} connections ready to fill one file together.` : "Ready for your first download."),
+    el("div", { class: "big" }, ready.length > 1 && !note.text.includes("share one line") ? `${ready.length} connections ready to fill one file together.` : "Ready for your first download."),
+    el("div", { class: "muted lines-note" }, note.text, " ",
+      note.add ? el("a", { href: "#", onclick: (e) => { e.preventDefault(); Host.openSettings("#connections"); if (!document.body.classList.contains("windowed")) window.close(); } }, "Add a second line…") : null,
+      note.check ? el("button", { class: "linklike", onclick: async (e) => {
+        const b = e.target;
+        b.disabled = true;
+        try {
+          const r = lineResults(await call("checkLines", {}));
+          b.replaceWith(...[...r.lines, ...r.warnings].map((t) => el("div", {}, t)));
+        } catch (err) { b.disabled = false; toast(err.message); }
+      } }, "Check lines") : null),
     el("div", { class: "go" }, el("button", { class: "primary", onclick: () => openAdd(true) }, "+ Add a link"),
       el("span", { class: "muted" }, "or ", el("kbd", {}, "Ctrl"), "+", el("kbd", {}, "V"), " anywhere here")),
     el("div", { class: "feats" },
-      feat("down", "Firefox downloads over 100 MB come here by themselves"),
+      feat("down", `Firefox downloads over ${fmtBytes(threshold || 100e6)} come here by themselves`),
       feat("link", "Magnet links, .torrent and Metalink work too"),
       feat("box", ".zip, .7z and .rar can be extracted while they download")));
   return welcomeNode;

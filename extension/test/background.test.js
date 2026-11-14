@@ -324,3 +324,12 @@ test("a message too long for Firefox, dropped by dms-host, is said until a state
   b.fire("port.onMessage", { event: "state", data: { downloads: [] } });
   assert.equal(b.Engine.lastError, "");
 });
+
+test("the toolbar badge counts running downloads, shows ! when one needs you, and clears when idle", () => {
+  const b = load();
+  const text = () => b.calls.filter((c) => c[0] === "browserAction.setBadgeText").map((c) => c[1].text);
+  b.Engine.emit("state", { downloads: [{ status: "running", section: "active" }, { status: "running", section: "active" }] });
+  b.Engine.emit("state", { downloads: [{ status: "running", section: "active" }, { status: "paused", section: "needs" }] });
+  b.Engine.emit("state", { downloads: [{ status: "completed", section: "done" }] });
+  assert.deepEqual(text(), ["2", "!", ""]);
+});

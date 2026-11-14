@@ -238,6 +238,9 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 				}
 				d.mu.Lock()
 				d.plan.wrote(seg, off, allowed)
+				if l := d.st.Links[w.iface]; l != nil {
+					l.Bytes += allowed
+				}
 				d.mu.Unlock()
 				w.bytes.Add(allowed)
 				ir.bytes.Add(allowed)

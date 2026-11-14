@@ -275,3 +275,87 @@ func TestACompletedDownloadKeepsNoCookie(t *testing.T) {
 		t.Fatalf("the completed download's state still holds the cookie:\n%s", b)
 	}
 }
+
+func TestFinishNoticeSaysWhatEndedAndRespectsTheSetting(t *testing.T) {
+	done := download.Summary{Filename: "a.zip", Status: download.StatusCompleted}
+	failed := download.Summary{Filename: "b.zip", Status: download.StatusFailed, Error: "disk full"}
+	if title, msg, ok := finishNotice(done, true); !ok || title != "Download complete" || msg != "a.zip" {
+		t.Errorf("finished: %q %q %v", title, msg, ok)
+	}
+	if title, msg, ok := finishNotice(failed, true); !ok || title != "Download failed" || msg != "b.zip: disk full" {
+		t.Errorf("failed: %q %q %v", title, msg, ok)
+	}
+	for _, s := range []download.Summary{done, failed} {
+		if _, _, ok := finishNotice(s, false); ok {
+			t.Errorf("%s: notified with notifyDone off", s.Filename)
+		}
+	}
+	if !defaultSettings().NotifyDone {
+		t.Error("notifyDone is off by default")
+	}
+}
+
+func TestNotifyDoneSettingSilencesTheBalloons(t *testing.T) {
+	shown := balloons(t)
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	s := download.Summary{Filename: "a.zip", Status: download.StatusCompleted}
+	e.notifyFinished(s, "")
+	off := false
+	e.setSettings(settingsPatch{NotifyDone: &off})
+	e.notifyFinished(s, "")
+	if len(*shown) != 1 {
+		t.Fatalf("balloons %q, want only the one before notifyDone went off", *shown)
+	}
+}
+
+func TestOpenDeleteFileAndAgainActOnAFinishedDownload(t *testing.T) {
+	var opened, recycled []string
+	oldO, oldR := openFile, recycleFile
+	openFile = func(p string) error { opened = append(opened, p); return nil }
+	recycleFile = func(p string) error { recycled = append(recycled, p); return nil }
+	t.Cleanup(func() { openFile, recycleFile = oldO, oldR })
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	done := download.New(e, download.State{
+		ID: "d1", URL: "https://x.test/f.bin", Dir: t.TempDir(), Filename: "f.bin", Size: 3, Probed: true,
+		Status: download.StatusCompleted, Finished: time.Now(),
+	})
+	e.queue.Add(done)
+	run := download.New(e, download.State{ID: "r1", URL: "https://x.test/g.bin", Dir: t.TempDir(), Size: -1, Status: download.StatusPaused})
+	e.queue.Add(run)
+	do := func(method, id string) (any, error) {
+		raw, _ := json.Marshal(idParams{ID: id})
+		return e.Call(nil, method, raw)
+	}
+	for _, m := range []string{"open", "deleteFile", "again"} {
+		if _, err := do(m, "r1"); err == nil {
+			t.Errorf("%s accepted an unfinished download", m)
+		}
+	}
+	if len(opened)+len(recycled) != 0 {
+		t.Fatalf("touched files of an unfinished download: %v %v", opened, recycled)
+	}
+	if _, err := do("open", "d1"); err != nil || len(opened) != 1 || opened[0] != done.Path() {
+		t.Errorf("open: %v, opened %v, want %s", err, opened, done.Path())
+	}
+	res, err := do("again", "d1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id := res.(map[string]string)["id"]; id == "" || id == "d1" {
+		t.Errorf("again gave id %q, want a new one", id)
+	}
+	if _, err := do("deleteFile", "d1"); err != nil || len(recycled) != 1 || recycled[0] != done.Path() {
+		t.Errorf("deleteFile: %v, recycled %v, want %s", err, recycled, done.Path())
+	}
+	if _, err := e.queue.Get("d1"); err == nil {
+		t.Error("the row stays after its file went to the Recycle Bin")
+	}
+}

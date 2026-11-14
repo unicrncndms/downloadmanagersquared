@@ -32,6 +32,8 @@ type Link struct {
 	Status   LinkStatus `json:"status"`
 	Error    string     `json:"error,omitempty"`
 	Resolves int        `json:"resolves,omitempty"`
+	// Bytes is what this interface has fetched for the file, over every run (and restart).
+	Bytes int64 `json:"bytes,omitempty"`
 	// HTTPErrors counts error answers in a row; kept across restarts so a dead link still gives up.
 	HTTPErrors int `json:"httpErrors,omitempty"`
 	// Version is what the link's server said of the file; a mirror's chunks are checked against it.
