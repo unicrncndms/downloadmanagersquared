@@ -405,7 +405,11 @@ function makeCard(id) {
     srcSum.editSource(true);
     srcSum.page.focus();
   } }, "Needs the page");
-  const extras = [extract.bar, extract.line, cardConns, needsPageBtn, picker.root, fold.row, fold.pass, fold.ask, ask];
+  // An SFTP server's key the engine hasn't met: nothing was sent to it; Trust keeps the key, Remove cancels.
+  const trustText = el("span", { class: "grow" });
+  const trust = el("div", { class: "extract fold", hidden: true }, el("div", { class: "row" }, trustText,
+    el("button", { class: "small primary", onclick: () => act("trustHostKey", { id }, "Key trusted") }, "Trust")));
+  const extras = [extract.bar, extract.line, cardConns, needsPageBtn, trust, picker.root, fold.row, fold.pass, fold.ask, ask];
   // The name and its connections share the first line: the connections never squeeze the squares.
   const root = el("div", { class: "card", tabindex: "-1", "data-id": id }, num, el("span", { class: "title" }, grip, name, mini), tools, prog, nums, line, ...extras, fin.ask);
   const queued = () => d && d.status === "queued";
@@ -578,6 +582,8 @@ function makeCard(id) {
     connSection.hidden = done || !ids.length;
 
     if (done) for (const n of extras) n.hidden = true;
+    trust.hidden = done || !d.hostKey;
+    if (d.hostKey) trustText.textContent = `Trust ${d.hostKey.host}? Its key is ${d.hostKey.fingerprint}. Nothing, not even your login, has been sent to it.`;
     // A button on the row, never a sheet opening by itself: the user may be typing in the search.
     needsPageBtn.hidden = done || torrent || !ids.some((ifc) => d.links[ifc].status === "needs-page");
     if (!details.open) return; // the rest is only drawn while Details is open

@@ -62,6 +62,7 @@ type State struct {
 	PageURL     string           `json:"pageUrl,omitempty"`
 	Cookie      Secret           `json:"cookie,omitempty"`
 	Login       Secret           `json:"login,omitempty"` // FTP: "user:password" from the link, which is saved and shown without it
+	HostAsk     *HostKeyAsk      `json:"hostAsk,omitempty"` // SFTP: an unknown server key waiting for the user's trust
 	Referer     string           `json:"referer,omitempty"`
 	Limit       int64            `json:"limit,omitempty"` // download speed cap, bytes per second; 0 = none
 	UserAgent   string           `json:"userAgent,omitempty"`

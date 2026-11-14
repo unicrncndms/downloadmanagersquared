@@ -558,6 +558,17 @@ function renderAbout(m) {
 }
 if (Host.openDownloads) $("sThresholdText").textContent = "Take over downloads above (MB)";
 
+// The SFTP logins kept on this PC, per host and user: listed without their secret, removable.
+async function loadSftpLogins() {
+  try {
+    const list = await call("sftpLogins", {});
+    $("sftpLogins").replaceChildren(...(list.length ? list : [null]).map((l) => !l ? el("span", { class: "muted" }, "None saved.") :
+      el("div", { class: "row" }, el("span", { class: "grow" }, `${l.user}@${l.host}`, el("span", { class: "muted" }, l.key ? " (key file)" : " (password)")),
+        el("button", { class: "small", onclick: async () => { await act("removeSftpLogin", { host: l.host, user: l.user }, "Login removed"); loadSftpLogins(); } }, "Remove"))));
+  } catch { /* the engine is not there yet; the list is empty */ }
+}
+loadSftpLogins();
+
 // --- wiring ---
 
 connectUI((m) => {

@@ -64,6 +64,8 @@ type Summary struct {
 
 	Folder *FolderSummary `json:"folder,omitempty"` // Download as folder, once asked for
 
+	HostKey *HostKeyAsk `json:"hostKey,omitempty"` // SFTP: the server's key waits for Trust
+
 	Mirrors   []Mirror `json:"mirrors,omitempty"`   // the file's sources, when it has several
 	Group     string   `json:"group,omitempty"`     // the files of one Metalink share it, and the parts of a split archive
 	GroupName string   `json:"groupName,omitempty"` // the Metalink's name, or the split archive's
@@ -121,7 +123,7 @@ func (d *Download) Summary() Summary {
 		serverSHA: d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.SHA256 != "",
 		serverMD:  d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.MD5 != "",
 		Added:     d.st.Added, Finished: d.st.Finished, Active: d.st.Active, VPN: d.st.VPN,
-		Folder: d.folderSummaryLocked(), Limit: d.st.Limit, WaitVPN: d.st.WaitVPN,
+		HostKey: d.st.HostAsk, Folder: d.folderSummaryLocked(), Limit: d.st.Limit, WaitVPN: d.st.WaitVPN,
 		Mirrors: slices.Clone(d.st.Mirrors), Group: d.st.Group, GroupName: d.st.GroupName,
 	}
 	if s.Group == "" && s.Filename != "" {

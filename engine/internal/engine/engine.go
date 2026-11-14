@@ -165,6 +165,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	os.MkdirAll(filepath.Join(dir, "downloads"), 0o755)
 	os.MkdirAll(filepath.Join(dir, "torrents"), 0o755)
 	atomicfile.RemoveStale(dir)
+	download.SFTP = download.OpenSFTPStore(filepath.Join(dir, "sftp.json"))
 	settings, broken := loadSettings(filepath.Join(dir, "settings.json"))
 	oldPorts := legacyForwardedPorts(filepath.Join(dir, "settings.json")) // gone from the settings at the next save
 	if broken {

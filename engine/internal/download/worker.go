@@ -197,6 +197,8 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 	var err error
 	if IsFTP(w.link.URL) {
 		body, err = w.openFTP(rctx, start, end, ranged, size, ver, login)
+	} else if IsSFTP(w.link.URL) {
+		body, err = w.openSFTP(rctx, start, end, ranged, size, ver)
 	} else {
 		body, err = w.openHTTP(rctx, start, end, ranged, size, ver)
 	}

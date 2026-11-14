@@ -43,7 +43,7 @@ func onReady(e *engine.Engine, w Window) {
 	systray.SetOnTapped(func() { go openDownloads(e) })
 
 	open := systray.AddMenuItem("Show downloads", "Show the downloads")
-	clip := systray.AddMenuItem("Add link from clipboard", "Add the http, https or magnet links on the clipboard")
+	clip := systray.AddMenuItem("Add link from clipboard", "Add the http, https, ftp, ftps, sftp or magnet links on the clipboard")
 	settings := systray.AddMenuItem("Connections & settings", "Show the connections and settings")
 	systray.AddSeparator()
 	pause := newLine(systray.AddMenuItem("Pause all", ""))

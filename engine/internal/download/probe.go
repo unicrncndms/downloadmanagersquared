@@ -32,6 +32,7 @@ type probeResult struct {
 	family  string        // "IPv4" or "IPv6": what the answer came over
 	msg     string        // FTP: the server's refusal, shown in place of "HTTP <status>"
 	fail    string        // the link can never work (an untrusted certificate, a folder): given up at once
+	hostKey *HostKeyAsk   // SFTP: the server's key is unknown, waiting for the user's trust
 }
 
 // busy: the server pushed back. That says nothing about the link itself.
@@ -220,6 +221,8 @@ func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
 		login := string(d.st.Login)
 		d.mu.Unlock()
 		res, err = probeFTP(ctx, ifc.Dial, l, login)
+	} else if IsSFTP(l.URL) {
+		res, err = probeSFTP(ctx, ifc.Dial, l)
 	} else {
 		res, err = probeLink(ctx, ifc.Client, l, d.st.UserAgent)
 	}
@@ -263,6 +266,9 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 	}
 	log.Printf("download %s probe via %s: HTTP %d, size %d, ranges %v, page %v", d.st.ID, ifaceID, r.status, r.size, r.rangeOK, r.isPage)
 	if r.fail != "" {
+		if r.hostKey != nil {
+			d.st.HostAsk = r.hostKey
+		}
 		l.fail(r.fail)
 		return
 	}

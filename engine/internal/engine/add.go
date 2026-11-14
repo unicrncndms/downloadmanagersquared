@@ -45,6 +45,8 @@ type AddRequest struct {
 	Checksum  string `json:"checksum"` // a SHA-256 or MD5 the finished file is checked against (one link only)
 	File      string `json:"file"`     // a local .torrent or .meta4 file's bytes, base64: added in place of a link
 	FileName  string `json:"fileName"` // the local file's name, which says what it is
+	KeyFile   string `json:"keyFile"`  // SFTP: a private key file to log in with, in place of a password in the link
+	KeyPass   string `json:"keyPass"`  // its passphrase: never logged
 	CheckDup  bool   `json:"checkDup"` // asks before adding a link already in the list (the Add box); the list's id comes back instead
 	// CookieStore is the browser's cookie store (container) the download came from.
 	CookieStore string `json:"cookieStore"`
@@ -78,15 +80,31 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		}
 		return id, nil
 	}
-	ftp := download.IsFTP(r.URL)
+	ftp := download.IsFTP(r.URL) || download.IsSFTP(r.URL)
 	var login download.Secret
-	if ftp {
+	if download.IsSFTP(r.URL) {
+		// Kept encrypted per host and user in the SFTP store, which later links with no login use too.
+		var user, host string
+		if r.URL, user, host, login, err = download.SplitSFTP(r.URL, strings.TrimSpace(r.KeyFile), r.KeyPass); err != nil {
+			return "", err
+		}
+		r.KeyFile, r.KeyPass = "", ""
+		if login == "" && download.SFTP.Login(host, user) == "" {
+			return "", errors.New("no saved login for " + user + "@" + host + ": add the link with a password (sftp://user:password@host/path) or a key file")
+		}
+		if login != "" {
+			if err := download.SFTP.SaveLogin(host, user, login); err != nil {
+				return "", errors.New("could not save the login: " + err.Error())
+			}
+			login = ""
+		}
+	} else if ftp {
 		// The password is kept encrypted apart from the link, which is saved and shown without it.
 		if r.URL, login, err = download.SplitLogin(r.URL); err != nil {
 			return "", err
 		}
 	} else if !strings.HasPrefix(r.URL, "http://") && !strings.HasPrefix(r.URL, "https://") {
-		return "", errors.New("only http, https, ftp, ftps and magnet links are supported")
+		return "", errors.New("only http, https, ftp, ftps, sftp and magnet links are supported")
 	}
 	if r.UserAgent == "" {
 		// Some servers drop clients with Go's default user agent: use the browser's.
@@ -181,6 +199,16 @@ func (e *Engine) AddUnlessKnown(r AddRequest) (id string, known bool, err error)
 // findURL is the id of the download added from link url, or "" when none.
 func (e *Engine) findURL(url string) string {
 	url = strings.TrimSpace(url)
+	// Saved links have no login in them, so a link that has one is compared without it.
+	if download.IsFTP(url) {
+		if c, _, err := download.SplitLogin(url); err == nil {
+			url = c
+		}
+	} else if download.IsSFTP(url) {
+		if c, _, _, _, err := download.SplitSFTP(url, "", ""); err == nil {
+			url = c
+		}
+	}
 	for _, d := range e.queue.List() {
 		if s := d.Summary(); s.URL == url {
 			return s.ID

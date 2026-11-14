@@ -47,12 +47,12 @@ func utf16Text(units []uint16) string {
 	return windows.UTF16ToString(units)
 }
 
-// Links are the http, https and magnet links in text, one per word.
+// Links are the http, https, ftp, ftps, sftp and magnet links in text, one per word.
 func Links(text string) []string {
 	var out []string
 	for _, w := range strings.Fields(text) {
 		l := strings.ToLower(w)
-		if strings.HasPrefix(l, "magnet:?") || strings.HasPrefix(l, "http://") && len(l) > 7 || strings.HasPrefix(l, "https://") && len(l) > 8 {
+		if strings.HasPrefix(l, "magnet:?") || strings.HasPrefix(l, "http://") && len(l) > 7 || strings.HasPrefix(l, "https://") && len(l) > 8 || slices.ContainsFunc([]string{"ftp://", "ftps://", "sftp://"}, func(p string) bool { return strings.HasPrefix(l, p) && len(l) > len(p) }) {
 			out = append(out, w)
 		}
 	}

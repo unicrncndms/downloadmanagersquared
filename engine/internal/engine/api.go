@@ -76,6 +76,11 @@ type passwordParams struct {
 	Password string `json:"password"`
 }
 
+type sftpLoginParams struct {
+	Host string `json:"host"`
+	User string `json:"user"`
+}
+
 type folderParams struct {
 	ID   string  `json:"id"`
 	On   *bool   `json:"on"`
@@ -350,6 +355,15 @@ var methods = map[string]handler{
 	}),
 	"retryExtraction": ack(func(e *Engine, p idParams) error { return e.RetryExtraction(p.ID) }),
 	"setFolder":       ack(func(e *Engine, p folderParams) error { return e.SetFolder(p.ID, p.On, p.Into, p.Keep) }),
+	"trustHostKey": ack(func(e *Engine, p idParams) error {
+		d, err := e.get(p.ID)
+		if err != nil {
+			return err
+		}
+		return d.TrustHostKey()
+	}),
+	"sftpLogins": bare(func(e *Engine) (any, error) { return download.SFTP.Logins(), nil }),
+	"removeSftpLogin": ack(func(e *Engine, p sftpLoginParams) error { return download.SFTP.RemoveLogin(p.Host, p.User) }),
 	"setArchivePassword": ack(func(e *Engine, p passwordParams) error {
 		d, err := e.get(p.ID)
 		if err != nil {

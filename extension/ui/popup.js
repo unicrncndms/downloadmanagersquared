@@ -300,6 +300,7 @@ $("addUrl").addEventListener("input", () => {
   $("addPage").parentElement.hidden = !v.page;
   $("addVpn").parentElement.hidden = !v.vpn;
   $("addNameRow").hidden = $("addSumRow").hidden = !single;
+  $("addKeyRow").hidden = $("addKeyPassRow").hidden = !(single && /^sftp:\/\//i.test($("addUrl").value.trim()));
   $("addVpn").options[0].textContent = `As in settings (${VPN_TEXT[latest.settings.vpnHttp] || "Off"})`;
   $("addGo").textContent = v.label;
   $("addOptions").hidden = !(single || v.page || v.vpn);
@@ -329,6 +330,7 @@ $("addBox").addEventListener("submit", async (e) => {
     const add = { url, pageUrl: $("addPage").value, vpn: $("addVpn").value, checkDup: !again };
     if (!many && $("addName").value.trim()) add.filename = $("addName").value.trim();
     if (!many && $("addSum").value.trim()) add.checksum = $("addSum").value.trim();
+    if (!many && $("addKey").value.trim() && /^sftp:/i.test(url)) { add.keyFile = $("addKey").value.trim(); add.keyPass = $("addKeyPass").value; }
     if (Host.userAgent !== null) add.userAgent = Host.userAgent; // else the engine uses the browser's
     if (addDir.get()) add.dir = addDir.get(); // else the download folder
     const folder = addFolderParam(!$("addFolderRow").hidden && zipLine(url), $("addFolder").checked, latest.settings);
@@ -352,7 +354,7 @@ $("addBox").addEventListener("submit", async (e) => {
   }
   toast(added === 1 ? "Added" : `${added} downloads added`);
   $("addUrl").value = "";
-  $("addPage").value = $("addName").value = $("addSum").value = "";
+  $("addPage").value = $("addName").value = $("addSum").value = $("addKey").value = $("addKeyPass").value = "";
   addDir.reset();
   $("addUrl").dispatchEvent(new Event("input"));
   openAdd(false);

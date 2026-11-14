@@ -67,6 +67,7 @@ Then download a file of 100 MB or more as usual, or use *Download with DMS²* on
 
 - **Takes over your browser's downloads.** Download as usual: files over 100 MB, magnet links, `.torrent` and Metalink (`.meta4`) files go to DMS² by themselves.
 - **Torrents** over all connections too.
+- **SFTP.** Paste an `sftp://user@host/path` link (with `:password` in it, or a key file in the box's Options): one SSH session per connection, each reading its part, over every connection. The first time a server is met you are asked to trust its key fingerprint, before any login is sent; a changed key fails the link with a warning. Logins are kept encrypted and can be removed in Settings.
 - **FTP and FTPS.** Paste an `ftp://` or `ftps://` link into Add download (or click one on a page): it downloads over every connection like any file, anonymously unless the link carries a login. The password is kept encrypted and never shown. Plain `ftp://` is unencrypted.
 - **Mirrors.** A Metalink, or a server that names mirrors with a checksum, lets each connection fetch from its own mirror, so one slow mirror doesn't hold back the rest. A mirror serving another file is dropped.
 - **Checksums.** Paste a SHA-256 or MD5, and the file is checked when it finishes.

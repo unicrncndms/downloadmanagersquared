@@ -6,12 +6,14 @@ require (
 	fyne.io/systray v1.12.2
 	github.com/Microsoft/go-winio v0.6.4
 	github.com/anacrolix/dht/v2 v2.24.0
+	github.com/anacrolix/generics v0.2.0
 	github.com/anacrolix/torrent v1.61.1-0.20260911233437-76452a2c8a2f
 	github.com/anacrolix/utp v0.2.0
 	github.com/bodgit/sevenzip v1.6.5
 	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
 	github.com/klauspost/compress v1.20.3
 	github.com/nwaples/rardecode/v2 v2.4.6
+	github.com/pkg/sftp v1.13.12
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.60.0
 	golang.org/x/sys v0.49.0
@@ -26,7 +28,6 @@ require (
 	github.com/anacrolix/btree v0.1.1 // indirect
 	github.com/anacrolix/chansync v0.8.0 // indirect
 	github.com/anacrolix/envpprof v1.4.0 // indirect
-	github.com/anacrolix/generics v0.2.0 // indirect
 	github.com/anacrolix/go-libutp v1.5.2-0.20260908013213-836dd42cdde6 // indirect
 	github.com/anacrolix/go-utp v0.0.0-20260908033909-9f1664acf866 // indirect
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb // indirect
@@ -62,6 +63,7 @@ require (
 	github.com/huandu/xstrings v1.3.2 // indirect
 	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.3 // indirect
+	github.com/kr/fs v0.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
