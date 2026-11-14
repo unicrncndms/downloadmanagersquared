@@ -15,6 +15,7 @@ import (
 	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/paths"
+	"downloadmanagersquared/engine/internal/queue"
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
@@ -89,6 +90,7 @@ type Settings struct {
 	IPv6               bool                      `json:"ipv6"`         // Enable IPv6 (experimental); off: IPv4 only, no AAAA lookups, no IPv6 sockets
 	NeverCapture       []string                  `json:"neverCapture"` // sites (host names) whose downloads the browser keeps; the extension checks it
 	Theme              string                    `json:"theme"`        // "" = follow the system, "light" or "dark"
+	QueueWindow        queue.Week                `json:"queueWindow"`  // per weekday when the queue runs; none set = always
 
 	// Download as folder
 	FolderDefault  bool     `json:"folderDefault"`        // new .zip, .7z and .rar downloads are one
@@ -242,6 +244,11 @@ func (s *Settings) normalize() {
 		s.Theme = ""
 	}
 	s.NeverCapture = cleanHosts(s.NeverCapture)
+	for i, sp := range s.QueueWindow {
+		if _, _, ok := sp.Valid(); !ok {
+			s.QueueWindow[i] = queue.Span{}
+		}
+	}
 	if s.TorrentPort < 1024 || s.TorrentPort > 65535 {
 		s.TorrentPort = pickTorrentPort(func() int { return 20000 + mrand.IntN(40000) })
 	}

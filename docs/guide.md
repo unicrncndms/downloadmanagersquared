@@ -33,6 +33,7 @@ A download's **Details → Checks → Edit** takes a SHA-256 or MD5. DMS² check
 ## Settings
 
 - **Connections:** turn each on or off, set its parallel requests (4) and speed limit, and choose the main connection, used alone for servers that can't split a file. VPN adapters start off. *Enable IPv6 (experimental)* (off) uses IPv6 too; each connection shows a badge with what it has: IPv4, IPv6 or IPv4 + IPv6.
+- **Queue window:** optionally, per weekday, the hours the queue runs (an end before the start runs past midnight). Outside it nothing starts, running downloads pause and seeding torrents stop; they resume when it begins. A download you start or resume yourself still runs. No day set: no limit.
 - **Downloads:** takeover size (100 MB), save folder, downloads at once (1), Download as folder for new archives (off), a split archive's parts at once (off), keep the archive (Automatic).
 - **Torrents:** seed ratio (1).
 - **Learned sites:** the clicks remembered per site. *Forget* makes DMS² ask again.

@@ -118,6 +118,9 @@
             <span class="field-error" id="sDirErr" role="alert" hidden></span></span></div>
           <div class="setting"><label for="sParallel">Downloads at once</label>
             <input type="number" id="sParallel" min="1" max="16" required data-setting></div>
+          <div class="setting"><label>Queue runs only between
+            <span class="info" tabindex="0" data-tip="Per weekday, local time. Outside it nothing starts, running downloads pause and seeding stops; they resume when it begins. A download you start yourself still runs. Leave every day empty to run any time. An end before the start runs past midnight."></span></label>
+            <span id="qWindow"></span></div>
           <div class="setting"><label for="sThreshold"><span id="sThresholdText">Take over your browser's downloads above (MB)</span>
             <span class="info" tabindex="0" data-tip="Smaller downloads stay with the browser. A .torrent or Metalink file is always taken over."></span></label>
             <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sThreshold" required data-setting></div>

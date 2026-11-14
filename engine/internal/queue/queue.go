@@ -59,12 +59,14 @@ type Queue struct {
 	// byID: once Remove has, Schedule no longer starts that entry.
 	startMu sync.Mutex
 
-	mu    sync.Mutex
-	byID  map[string]Entry
-	order []string
-	dirty map[string]bool
-	held  map[string]bool // queued entries Schedule doesn't start (Hold); replaced whole, never changed
-	now   map[string]bool // entries started by hand (StartNow): they run beside the slots, not in them
+	mu        sync.Mutex
+	byID      map[string]Entry
+	order     []string
+	dirty     map[string]bool
+	held      map[string]bool // queued entries Schedule doesn't start (Hold); replaced whole, never changed
+	closed    bool            // the time window is closed (SetWindow): Schedule starts nothing but entries started by hand
+	winPaused map[string]bool // entries the closing window stopped; only these resume when it opens
+	now       map[string]bool // entries started by hand (StartNow): they run beside the slots, not in them
 }
 
 // New is a queue saving under dir, holding loaded in the order they were
@@ -261,6 +263,9 @@ func (q *Queue) Pause(id string) error {
 	if err != nil {
 		return err
 	}
+	q.mu.Lock()
+	delete(q.winPaused, id) // paused by the user now: the window no longer resumes it
+	q.mu.Unlock()
 	e.Stop(download.StatusPaused)
 	return nil
 }
@@ -272,8 +277,22 @@ func (q *Queue) Resume(id string) error {
 	}
 	if !e.Running() {
 		e.Resume()
+		q.byHand(id)
 	}
 	return nil
+}
+
+// byHand lets the entry id run outside a closed window, like StartNow.
+func (q *Queue) byHand(id string) {
+	q.mu.Lock()
+	if q.closed {
+		if q.now == nil {
+			q.now = map[string]bool{}
+		}
+		q.now[id] = true
+	}
+	delete(q.winPaused, id)
+	q.mu.Unlock()
 }
 
 func (q *Queue) PauseAll() {
@@ -296,6 +315,7 @@ func (q *Queue) ResumeAll() {
 	for _, e := range q.List() {
 		if s := e.Status(); s == download.StatusPaused || s == download.StatusFailed {
 			e.Resume()
+			q.byHand(e.ID())
 		}
 	}
 }
@@ -310,7 +330,7 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 	var queued, yielding, downloading []Entry // downloading: yielding entries holding a slot
 	var holding []Entry                       // HTTP downloads holding a slot, oldest first
 	q.mu.Lock()
-	held := q.held
+	held, closed := q.held, q.closed
 	now := maps.Clone(q.now)
 	q.mu.Unlock()
 	for _, e := range q.List() {
@@ -326,13 +346,16 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 			if e.Running() {
 				continue
 			}
-			if e.Status() == download.StatusQueued {
+			if e.Status() == download.StatusQueued || e.Rejoins() {
 				q.startIfListed(e)
 				continue
 			}
 			q.mu.Lock() // it stopped: its next run takes a slot like any
 			delete(q.now, e.ID())
 			q.mu.Unlock()
+		}
+		if closed && !e.Running() {
+			continue // outside the window nothing starts, a seeding torrent included
 		}
 		switch {
 		case e.Running():
@@ -364,7 +387,7 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 		e.Stop(download.StatusQueued)
 		running--
 	}
-	for _, e := range append(queued, yielding...) {
+	for _, e := range append(queued, yielding...) { // both empty while closed
 		if running >= limit {
 			if e.Yields() || len(downloading) == 0 {
 				return

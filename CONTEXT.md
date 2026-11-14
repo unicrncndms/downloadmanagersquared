@@ -86,6 +86,9 @@ A later visit, where the recipe's clicks are repeated automatically.
 **Queue**:
 The downloads list in the order added, or as the user moved them, deciding which ones run. HTTP downloads go first; a torrent gives its slot to a queued HTTP download. A queued download the user moves before a running one takes its slot, and that one queues next behind it.
 
+**Queue window**:
+Per weekday, the hours the queue runs (setting). Outside it nothing starts; running downloads pause and seeding torrents stop, and only those resume when it begins. A download the user starts or resumes by hand outside it still runs.
+
 **Slot**:
 One of the *Max parallel* places a running download holds. Seeding and fetching a torrent's metadata hold none.
 

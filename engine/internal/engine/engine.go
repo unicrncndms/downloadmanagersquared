@@ -274,11 +274,10 @@ func (e *Engine) Run() {
 		case now := <-t.C:
 			n++
 			if n%10 == 0 {
-				e.refreshInterfaces() // which also does the next two
-			} else {
-				e.tickVPN(now)
-				e.syncTorrentIfaces()
+				e.listInterfaces() // a failed listing still ticks the VPN, as before
 			}
+			e.tickVPN(now)
+			e.syncTorrentIfaces()
 			e.checkUpdate(now)
 			e.syncSets()
 			e.schedule()
@@ -381,8 +380,9 @@ func (e *Engine) get(id string) (*download.Download, error) {
 // schedule lets the queue start what it can, under the current limit and paths.
 func (e *Engine) schedule() {
 	e.mu.Lock()
-	limit, snap := e.settings.MaxParallel, e.pathSnapshotLocked()
+	limit, snap, week := e.settings.MaxParallel, e.pathSnapshotLocked(), e.settings.QueueWindow
 	e.mu.Unlock()
+	e.queue.SetWindow(week.Open(time.Now()))
 	e.queue.Schedule(limit, snap)
 }
 

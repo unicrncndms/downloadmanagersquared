@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"downloadmanagersquared/engine/internal/paths"
+	"downloadmanagersquared/engine/internal/queue"
 )
 
 // setSettings changes the settings the patch names and applies what follows
@@ -77,6 +78,9 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		}
 		if p.Theme != nil {
 			s.Theme = *p.Theme
+		}
+		if p.QueueWindow != nil {
+			s.QueueWindow = *p.QueueWindow // normalize clears a day that is no window
 		}
 		if p.Accent != nil {
 			s.Accent = *p.Accent
@@ -162,33 +166,34 @@ func (e *Engine) setInterface(p ifacePatch) Settings {
 }
 
 type settingsPatch struct {
-	MainInterface      *string   `json:"mainInterface"`
-	ThresholdBytes     *int64    `json:"thresholdBytes"`
-	SaveDir            *string   `json:"saveDir"`
-	MaxParallel        *int      `json:"maxParallel"`
-	UploadLimit        *int64    `json:"uploadLimit"`
-	DownloadLimit      *int64    `json:"downloadLimit"`
-	ETAWindowSec       *int      `json:"etaWindowSec"`
-	DefaultConnections *int      `json:"defaultConnections"`
-	SeedRatio          *float64  `json:"seedRatio"`
-	VPNHTTP            *string   `json:"vpnHttp"`
-	VPNTorrent         *string   `json:"vpnTorrent"`
-	VPNProvider        *string   `json:"vpnProvider"`
-	FolderDefault      *bool     `json:"folderDefault"`
-	PartsParallel      *bool     `json:"partsParallel"`
-	ArchiveKeeping     *string   `json:"archiveKeeping"`
-	IPv6               *bool     `json:"ipv6"`
-	NotifyDone         *bool     `json:"notifyDone"`
-	KeepAwake          *bool     `json:"keepAwake"`
-	SpeedUnit          *string   `json:"speedUnit"`
-	TorrentPort        *int      `json:"torrentPort"`
-	NeverCapture       *[]string `json:"neverCapture"`
-	Theme              *string   `json:"theme"`
-	Accent             *string   `json:"accent"`
-	ThemeAccent        *string   `json:"themeAccent"`
-	DismissedUpdate    *string   `json:"dismissedUpdate"`
-	SeenVersion        *string   `json:"seenVersion"`
-	FoldedSections     *[]string `json:"foldedSections"`
+	MainInterface      *string     `json:"mainInterface"`
+	ThresholdBytes     *int64      `json:"thresholdBytes"`
+	SaveDir            *string     `json:"saveDir"`
+	MaxParallel        *int        `json:"maxParallel"`
+	UploadLimit        *int64      `json:"uploadLimit"`
+	DownloadLimit      *int64      `json:"downloadLimit"`
+	ETAWindowSec       *int        `json:"etaWindowSec"`
+	DefaultConnections *int        `json:"defaultConnections"`
+	SeedRatio          *float64    `json:"seedRatio"`
+	VPNHTTP            *string     `json:"vpnHttp"`
+	VPNTorrent         *string     `json:"vpnTorrent"`
+	VPNProvider        *string     `json:"vpnProvider"`
+	FolderDefault      *bool       `json:"folderDefault"`
+	PartsParallel      *bool       `json:"partsParallel"`
+	ArchiveKeeping     *string     `json:"archiveKeeping"`
+	IPv6               *bool       `json:"ipv6"`
+	NotifyDone         *bool       `json:"notifyDone"`
+	KeepAwake          *bool       `json:"keepAwake"`
+	SpeedUnit          *string     `json:"speedUnit"`
+	TorrentPort        *int        `json:"torrentPort"`
+	NeverCapture       *[]string   `json:"neverCapture"`
+	Theme              *string     `json:"theme"`
+	QueueWindow        *queue.Week `json:"queueWindow"`
+	Accent             *string     `json:"accent"`
+	ThemeAccent        *string     `json:"themeAccent"`
+	DismissedUpdate    *string     `json:"dismissedUpdate"`
+	SeenVersion        *string     `json:"seenVersion"`
+	FoldedSections     *[]string   `json:"foldedSections"`
 }
 
 type ifacePatch struct {

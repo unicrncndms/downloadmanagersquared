@@ -230,6 +230,26 @@ const FIELDS = {
   sKeep: ["archiveKeeping", (s) => s.archiveKeeping || "auto", String],
 };
 
+// The queue window: a start and an end per weekday, Monday first; the engine's index is Sunday = 0.
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const dayIndex = (n) => (n + 1) % 7;
+const winInputs = WEEKDAYS.map((day) => ["start", "end"].map((k) => el("input", { type: "time", "aria-label": `${day} ${k === "start" ? "from" : "until"}` })));
+$("qWindow").replaceChildren(...WEEKDAYS.map((day, n) => el("div", {}, el("span", { style: "display:inline-block;min-width:6em" }, day), winInputs[n][0], " to ", winInputs[n][1])));
+for (const [a, b] of winInputs) for (const i of [a, b]) i.addEventListener("change", () => {
+  // A day with only one time is not a window yet: nothing is sent until both are set or both cleared.
+  if (!a.value !== !b.value) return;
+  const week = Array.from({ length: 7 }, () => ({ start: "", end: "" }));
+  winInputs.forEach(([x, y], n) => (week[dayIndex(n)] = { start: x.value, end: y.value }));
+  act("setSettings", { queueWindow: week }, "Saved");
+});
+function fillWindow(s) {
+  WEEKDAYS.forEach((_, n) => {
+    const w = (s.queueWindow || [])[dayIndex(n)] || {};
+    winInputs[n][0].value = w.start || "";
+    winInputs[n][1].value = w.end || "";
+  });
+}
+
 // The checkboxes: the setting each one holds, and whether it is on when the engine sends none.
 const CHECKS = { sFolder: ["folderDefault", false], sParts: ["partsParallel", false], sNotify: ["notifyDone", true], sAwake: ["keepAwake", true] };
 
@@ -284,6 +304,7 @@ function fillSettings(s) {
   }
   for (const [id, [key, on]] of Object.entries(CHECKS)) $(id).checked = on ? s[key] !== false : !!s[key];
   $("sIPv6").checked = !!s.ipv6;
+  if (!$("qWindow").contains(document.activeElement)) fillWindow(s);
   for (const e of document.querySelectorAll(".speedUnit")) e.textContent = speedUnitLabel();
 }
 
