@@ -3,6 +3,7 @@
 Download a file of 100 MB or more as usual, or use *Download with DMS²* on a link's menu.
 
 - The toolbar icon lists your downloads. A left click on the tray icon opens the same list in its own window.
+- Links on the clipboard: paste them anywhere in the list, or use *Add link from clipboard* in the tray menu (links already in the list are skipped).
 - Each download shows its progress, speed and the connections it uses. **Details** has the rest.
 - **Connections & settings** is at the bottom of the list.
 - Unfinished files end in `.dms.part`. Progress is saved every few seconds.
@@ -42,16 +43,20 @@ A download's **Details → Checks → Edit** takes a SHA-256 or MD5. DMS² check
 
 - **Connections:** turn each on or off, set its parallel requests (4) and speed limit, and choose the main connection, used alone for servers that can't split a file. VPN adapters start off. *Enable IPv6 (experimental)* (off) uses IPv6 too; each connection shows a badge with what it has: IPv4, IPv6 or IPv4 + IPv6.
 - **Queue window:** optionally, per weekday, the hours the queue runs (an end before the start runs past midnight). Outside it nothing starts, running downloads pause and seeding torrents stop; they resume when it begins. A download you start or resume yourself still runs. No day set: no limit.
-- **Downloads:** takeover size (100 MB), save folder, downloads at once (1), Download as folder for new archives (off), a split archive's parts at once (off), keep the archive (Automatic).
-- **Torrents:** seed ratio (1).
+- **Saving and speed:** takeover size (100 MB), sites never taken over, save folder, downloads at once (1), notifications, keep the PC awake, start with Windows.
+- **Speed:** the unit speeds are shown in (sizes and speeds use base 1000: 1 MB = 1,000,000 bytes), and a download and an upload limit for all connections together (none).
+- **Archives:** Download as folder for new archives (off), a split archive's parts at once (off), keep the archive (Automatic).
+- **Torrents:** seed ratio (1), port for incoming peers.
+- **SFTP logins:** the logins and trusted server keys, removable.
 - **Learned sites:** the clicks remembered per site. *Forget* makes DMS² ask again.
+- **Appearance:** theme and accent colour.
 
 ### VPN
 
 Each connection can get its own WireGuard tunnel, for downloads, torrents or both. Choose **Off** (the connections without a tunnel only), **VPN and direct** (the tunnels too) or **VPN only** (the tunnels only).
 
 - **Private Internet Access:** sign in, and every connection without its own `.conf` gets a tunnel.
-- **Other providers:** import a `.conf` per connection. It must be plain WireGuard with an IPv4 address and an IPv4 DNS server (`DNS =`; IPv6 ones aren't used), one config per connection (a separate device or key at your provider). Obfuscated AmneziaWG configs don't work. If the provider forwards ports by NAT-PMP (Proton VPN on P2P servers, with NAT-PMP on when you make the config), DMS² gets a port for torrents by itself (not yet tested with Proton's servers). For a fixed port from your provider's panel (AirVPN), type it in the **Port** box next to the `.conf`.
+- **Other providers:** import a `.conf` per connection (it is kept encrypted with Windows). It must be plain WireGuard with an IPv4 address and an IPv4 DNS server (`DNS =`; IPv6 ones aren't used), one config per connection (a separate device or key at your provider). Obfuscated AmneziaWG configs don't work. If the provider forwards ports by NAT-PMP (Proton VPN on P2P servers, with NAT-PMP on when you make the config), DMS² gets a port for torrents by itself (not yet tested with Proton's servers). For a fixed port from your provider's panel (AirVPN), type it in the **Port** box next to the `.conf`.
 - For sites with a link per IP, use a different server for each connection, or they may share one address.
 - Which providers offer `.conf` files, and why PIA works differently: [vpn-providers.md](vpn-providers.md).
 

@@ -43,7 +43,8 @@ The engine keeps a download's cookies only until it completes, and sends them on
 | `cookies` | Read a URL's cookies in its container when no request header is available, and the containers' cookies. Before a temporary container opens a landing page, copy into it the cookies the user's own container would send to that page (`cookies.getAll({url})`, then `cookies.set` with the temporary container's `storeId`), so the page opens logged in. Never from a private window; nothing is copied back. |
 | `tabs` | Open and close resolve windows, inject the replay script with `tabs.executeScript`, and read the tabs open at startup for their pages. |
 | `storage` | The recorded clicks per site, the pages that led to recent downloads, the container ids, and running resolve jobs (`storage.session`). All local. |
-| `contextMenus` | "Download with DMS²" on links and pages. |
+| `contextMenus`, `menus` | "Download with DMS²" on links and pages; `menus.onShown` hides the page entry where it doesn't apply. |
+| `theme` | `theme.getCurrent` and `theme.onUpdated`: the browser theme's accent colour, sent to the engine for the pages' accent. |
 | `notifications` | Say that DMS² took a download or torrent, that it couldn't (Firefox downloads it instead), or that a resolve window needs the user. |
 | `<all_urls>` | Downloads and landing pages can be on any site: the `webRequest` listeners, script injection into resolve windows, and the `magnet:` content script. |
 

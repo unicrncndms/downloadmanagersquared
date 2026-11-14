@@ -9,7 +9,7 @@ The engine already encrypted the PIA login with DPAPI, but kept each download's 
 
 ## Decision
 
-Anything secret the engine writes to disk is encrypted with DPAPI for the current Windows user (`winutil.Protect`), never written readable. Today that is the PIA login, the cookies of a download and of each of its links, and the WireGuard configs the user imported (their private keys).
+Anything secret the engine writes to disk is encrypted with DPAPI for the current Windows user (`winutil.Protect`), never written readable. Today that is the PIA login, the cookies of a download and of each of its links, the WireGuard configs the user imported (their private keys), the logins of FTP and SFTP links (`sftp.json` keeps the SFTP ones per host and user) and an archive's password.
 
 Cookies use `download.Secret`, a string that encrypts itself when saved as JSON (`"dpapi:<base64>"`) and is plain in memory. It reads a plain value too, as older versions saved it, and encrypts it on the next save. A value that can't be decrypted (state copied from another user or PC) counts as no cookie: the download goes on without it rather than being set aside as broken. If encryption fails, saving fails; it never falls back to plain text.
 
