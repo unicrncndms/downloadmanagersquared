@@ -171,7 +171,7 @@ func run(title string, icon []byte, steps Steps, first func()) bool {
 	w.ctls = map[windows.Handle]*ctl{}
 	w.fontBody, w.fontSmall = newFont(14, 400), newFont(13, 400)
 	w.fontLabel, w.fontTitle = newFont(13, 600), newFont(20, 600)
-	w.icon = iconHandle(icon, px(32))
+	w.icon = winutil.Icon(icon, int(px(32)))
 	applyTheme()
 
 	inst, _, _ := pGetModuleHandle.Call(0)
@@ -191,14 +191,14 @@ func run(title string, icon []byte, steps Steps, first func()) bool {
 	ww, wh := r.right-r.left, r.bottom-r.top
 	sw, _, _ := pGetSystemMetrics.Call(0)
 	sh, _, _ := pGetSystemMetrics.Call(1)
-	main, _, _ := pCreateWindowEx.Call(wsExControlParent, uintptr(unsafe.Pointer(class.className)), str(title),
+	main, _, _ := pCreateWindowEx.Call(wsExControlParent, uintptr(unsafe.Pointer(class.className)), uintptr(unsafe.Pointer(str(title))),
 		style, uintptr((int32(sw)-ww)/2), uintptr((int32(sh)-wh)/2), uintptr(ww), uintptr(wh), 0, 0, inst, 0)
 	if main == 0 {
 		return false
 	}
 	w.main = windows.Handle(main)
 	applyTheme() // again, for the title bar now there is one
-	if small := iconHandle(icon, int32(16*w.dpi/96)); small != 0 {
+	if small := winutil.Icon(icon, int(16*w.dpi/96)); small != 0 {
 		pSendMessage.Call(main, wmSetIcon, 0, uintptr(small))
 	}
 	if w.icon != 0 {
@@ -260,6 +260,13 @@ func choosePage(d Choice) {
 // to the extension file covers the rest.
 const maxBrowsers = 4
 
+// shownBrowsers are the browsers the finished page lists: the first maxBrowsers.
+// Compare with this, not with Browsers(), or five browsers rebuild the page on every activation.
+func shownBrowsers() []winutil.Browser {
+	b := w.steps.Browsers()
+	return b[:min(len(b), maxBrowsers)]
+}
+
 // clearPage removes the page's controls, for the next page.
 func clearPage() {
 	for _, h := range w.children {
@@ -275,10 +282,7 @@ func clearPage() {
 func donePage() {
 	clearPage()
 	w.done = true
-	w.browsers = w.steps.Browsers()
-	if len(w.browsers) > maxBrowsers {
-		w.browsers = w.browsers[:maxBrowsers]
-	}
+	w.browsers = shownBrowsers()
 	text := func() uint32 { return w.pal.text }
 	header("DMS² is installed", "It runs in the tray. If you do not see its icon, look behind the arrow next to the clock.")
 	var first windows.Handle
@@ -335,14 +339,14 @@ func tick() {
 		if h := byID(idBrowser + i); h != 0 && connectedTo(b) {
 			any = true
 			w.ctls[h].kind, w.ctls[h].ok = button, true
-			pSetWindowText.Call(uintptr(h), str("✓ Added to "+b.Name))
+			pSetWindowText.Call(uintptr(h), uintptr(unsafe.Pointer(str("✓ Added to "+b.Name))))
 			invalidate(h)
 		}
 	}
 	if any && w.close != 0 {
 		setNote("DMS² is connected. Download any large file, or right-click a link and choose “Download with DMS²”.", false)
 		w.ctls[w.close].kind = primary
-		pSetWindowText.Call(uintptr(w.close), str("Done"))
+		pSetWindowText.Call(uintptr(w.close), uintptr(unsafe.Pointer(str("Done"))))
 		invalidate(w.close)
 	}
 }
@@ -380,10 +384,7 @@ func uninstallPage(u UninstallInfo) {
 func removedPage(err error) {
 	clearPage()
 	w.done = true
-	w.browsers = w.steps.Browsers()
-	if len(w.browsers) > maxBrowsers {
-		w.browsers = w.browsers[:maxBrowsers]
-	}
+	w.browsers = shownBrowsers()
 	sub := "Downloaded files are kept."
 	if err != nil {
 		sub = "Not everything could be removed: " + err.Error()
@@ -448,7 +449,7 @@ func setNote(s string, bad bool) {
 
 func child(class, text string, id int, style uint32, r rect) windows.Handle {
 	r = scaled(r)
-	h, _, _ := pCreateWindowEx.Call(0, str(class), str(text), uintptr(wsChild|wsVisible|style),
+	h, _, _ := pCreateWindowEx.Call(0, uintptr(unsafe.Pointer(str(class))), uintptr(unsafe.Pointer(str(text))), uintptr(wsChild|wsVisible|style),
 		uintptr(r.left), uintptr(r.top), uintptr(r.right-r.left), uintptr(r.bottom-r.top), uintptr(w.main), uintptr(id), 0, 0)
 	pSendMessage.Call(h, wmSetFont, uintptr(w.fontBody), 1)
 	w.children = append(w.children, windows.Handle(h))
@@ -684,7 +685,7 @@ func wndProc(hwnd windows.Handle, m uint32, wParam, lParam uintptr) uintptr {
 		}
 		return 0
 	case wmActivate: // back from installing a browser, maybe
-		if wParam&0xffff != 0 && w.done && !w.removal && !slices.Equal(w.steps.Browsers(), w.browsers) {
+		if wParam&0xffff != 0 && w.done && !w.removal && !slices.Equal(shownBrowsers(), w.browsers) {
 			donePage()
 		}
 	case wmSettingChange: // maybe light or dark mode changed
@@ -797,7 +798,7 @@ func startInstall(c Choice) {
 	for _, h := range w.children {
 		pEnableWindow.Call(uintptr(h), 0)
 	}
-	pSetWindowText.Call(uintptr(w.install), str("Installing…"))
+	pSetWindowText.Call(uintptr(w.install), uintptr(unsafe.Pointer(str("Installing…"))))
 	if winutil.CanWrite(c.Dir) {
 		setNote("Installing… Cancel is off until the files are copied.", false)
 	} else {
@@ -815,7 +816,7 @@ func startRemove(wipe bool) {
 	for _, h := range w.children {
 		pEnableWindow.Call(uintptr(h), 0)
 	}
-	pSetWindowText.Call(uintptr(w.install), str("Uninstalling…"))
+	pSetWindowText.Call(uintptr(w.install), uintptr(unsafe.Pointer(str("Uninstalling…"))))
 	setNote("Uninstalling… Cancel is off until it is done.", false)
 	go func() {
 		w.installErr <- w.steps.Remove(wipe)
@@ -836,7 +837,7 @@ func installDone() {
 		for _, h := range w.children {
 			pEnableWindow.Call(uintptr(h), 1)
 		}
-		pSetWindowText.Call(uintptr(w.install), str("Install"))
+		pSetWindowText.Call(uintptr(w.install), uintptr(unsafe.Pointer(str("Install"))))
 		if errors.Is(err, winutil.ErrShown) {
 			setNote("Not installed.", true)
 		} else {
@@ -859,7 +860,7 @@ func browse() {
 	if !strings.EqualFold(filepath.Base(p), w.folderName) {
 		p = filepath.Join(p, w.folderName)
 	}
-	pSetWindowText.Call(uintptr(w.dir), str(p))
+	pSetWindowText.Call(uintptr(w.dir), uintptr(unsafe.Pointer(str(p))))
 	setNote(adminNote, false)
 }
 

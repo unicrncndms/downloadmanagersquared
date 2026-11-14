@@ -148,6 +148,7 @@ func wndProc(hwnd, m, wp uintptr, lp unsafe.Pointer) uintptr {
 		matchTitleBar(hwnd)
 	case wmClose:
 		v.savePlacement()
+		v.closeWebView()
 		pDestroyWindow.Call(hwnd)
 		return 0
 	case wmDestroy:

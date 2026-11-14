@@ -23,7 +23,9 @@ func (o *comObject) call(slot int, args ...uintptr) uintptr {
 
 // Slots in ICoreWebView2Controller, ICoreWebView2 and the events' arguments.
 const (
+	controllerClose           = 24
 	controllerGetCoreWebView2 = 25
+	comRelease                = 2 // IUnknown::Release
 	webviewAddNavigationStart = 7
 	webviewAddNewWindow       = 44
 
@@ -34,7 +36,8 @@ const (
 )
 
 // eventHandler is a COM event handler (QueryInterface, AddRef, Release, Invoke)
-// that calls fn. Every handler shares one method table: Windows allows a
+// that calls fn. The caller keeps it (view.handlers) while WebView2 may call it:
+// Go's collector can't see WebView2's pointer. Every handler shares one method table: Windows allows a
 // process only so many callbacks.
 type eventHandler struct {
 	vtbl *[4]uintptr
@@ -44,8 +47,6 @@ type eventHandler struct {
 var (
 	handlerVtbl     [4]uintptr
 	handlerVtblOnce sync.Once
-	handlersMu      sync.Mutex
-	handlers        []*eventHandler // kept from the garbage collector while WebView2 holds them
 )
 
 func newEventHandler(fn func(args *comObject)) *eventHandler {
@@ -63,11 +64,7 @@ func newEventHandler(fn func(args *comObject)) *eventHandler {
 			}),
 		}
 	})
-	h := &eventHandler{vtbl: &handlerVtbl, fn: fn}
-	handlersMu.Lock()
-	handlers = append(handlers, h)
-	handlersMu.Unlock()
-	return h
+	return &eventHandler{vtbl: &handlerVtbl, fn: fn}
 }
 
 // getString calls a getter that hands back a string WebView2 allocated.
@@ -95,7 +92,7 @@ func coreWebView(c *edge.Chromium) *comObject {
 
 // onNewWindow handles every request for a new window (target="_blank",
 // window.open): none opens, and the page's URL goes to open.
-func onNewWindow(wv *comObject, open func(uri string)) {
+func onNewWindow(wv *comObject, open func(uri string)) *eventHandler {
 	h := newEventHandler(func(args *comObject) {
 		uri := getString(args, newWindowGetURI)
 		args.call(newWindowPutDone, 1)
@@ -103,11 +100,12 @@ func onNewWindow(wv *comObject, open func(uri string)) {
 	})
 	var token int64
 	wv.call(webviewAddNewWindow, uintptr(unsafe.Pointer(h)), uintptr(unsafe.Pointer(&token)))
+	return h
 }
 
 // onNavigation lets the page navigate only where allow says, and hands any
 // other URL to elsewhere.
-func onNavigation(wv *comObject, allow func(uri string) bool, elsewhere func(uri string)) {
+func onNavigation(wv *comObject, allow func(uri string) bool, elsewhere func(uri string)) *eventHandler {
 	h := newEventHandler(func(args *comObject) {
 		uri := getString(args, navStartGetURI)
 		if allow(uri) {
@@ -118,4 +116,17 @@ func onNavigation(wv *comObject, allow func(uri string) bool, elsewhere func(uri
 	})
 	var token int64
 	wv.call(webviewAddNavigationStart, uintptr(unsafe.Pointer(h)), uintptr(unsafe.Pointer(&token)))
+	return h
+}
+
+// closeWebView closes the controller, which ends WebView2's processes for this
+// window, and drops the reference coreWebView took. Before the window is destroyed.
+func (v *view) closeWebView() {
+	if ctl := (*comObject)(unsafe.Pointer(v.chromium.GetController())); ctl != nil {
+		ctl.call(controllerClose)
+	}
+	if v.wv != nil {
+		v.wv.call(comRelease)
+		v.wv = nil
+	}
 }

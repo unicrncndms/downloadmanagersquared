@@ -89,6 +89,10 @@ func uninstall(l install.Layout) {
 	}
 	// Last, as this exe lives in the folder: it can only go once this process has exited.
 	if err := l.RemoveLater(); err != nil {
+		if errors.Is(err, winutil.ErrElevationDeclined) {
+			// The files stay, so the extension and Windows' uninstall must still find them.
+			err = errors.Join(err, l.Restore(engine.Version))
+		}
 		winutil.MessageBox(title, "Could not remove "+l.Dir+": "+err.Error())
 	}
 }

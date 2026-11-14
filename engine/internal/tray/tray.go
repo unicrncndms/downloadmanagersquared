@@ -4,8 +4,8 @@ package tray
 import (
 	"fmt"
 	"math"
-	"strings"
 	"time"
+	"unicode/utf16"
 
 	"fyne.io/systray"
 	"golang.org/x/sys/windows"
@@ -102,14 +102,25 @@ func onReady(e *engine.Engine, w Window) {
 			resume.enable(m.Resume)
 
 			// Starts with the app name: balloons are named after the tooltip.
-			t := strings.Join(append([]string{winutil.AppName + "  " + m.Status}, m.Rows...), "\n")
-			// Windows cuts tray tooltips at 127 characters.
-			if len(t) > 127 {
-				t = t[:127]
-			}
-			systray.SetTooltip(t)
+			systray.SetTooltip(tooltip(winutil.AppName+"  "+m.Status, m.Rows))
 		}
 	}()
+}
+
+// tooltip is head and as many whole rows below it as Windows shows: it cuts
+// tray tooltips at 127 UTF-16 units, and a cut row would end in half a character.
+func tooltip(head string, rows []string) string {
+	t := head
+	for _, r := range rows {
+		if len(utf16.Encode([]rune(t+"\n"+r))) > 127 {
+			break
+		}
+		t += "\n" + r
+	}
+	if u := utf16.Encode([]rune(t)); len(u) > 127 { // the head alone is too long
+		t = string(utf16.Decode(u[:127]))
+	}
+	return t
 }
 
 // line is a menu item that is changed only when its state does: every

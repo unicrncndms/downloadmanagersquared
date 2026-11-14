@@ -63,6 +63,21 @@ func RunElevated(exe, params string, wait bool) (uint32, error) {
 	return code, err
 }
 
+// HoldUnchanged opens path so that nobody can write, replace or rename it (or
+// its folders) until the returned file is closed. Install holds the exe it
+// elevates so a same-user process can't swap it before the prompt is answered.
+func HoldUnchanged(path string) (*os.File, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	h, err := windows.CreateFile(p, windows.GENERIC_READ, windows.FILE_SHARE_READ, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(h), path), nil
+}
+
 // CanWrite is whether this process can create files in dir, or in the nearest
 // folder above it that exists (where dir would be created).
 func CanWrite(dir string) bool {

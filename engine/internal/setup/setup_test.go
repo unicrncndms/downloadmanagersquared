@@ -3,8 +3,19 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+
+	"downloadmanagersquared/engine/internal/winutil"
 )
+
+func TestShownBrowsersIsTheSameListEveryTime(t *testing.T) {
+	w.steps.Browsers = func() []winutil.Browser { return make([]winutil.Browser, 6) }
+	got := shownBrowsers()
+	if len(got) != maxBrowsers || !slices.Equal(got, shownBrowsers()) {
+		t.Errorf("shownBrowsers = %d browsers, want %d, equal on a second call", len(got), maxBrowsers)
+	}
+}
 
 func TestCheckDir(t *testing.T) {
 	w.folderName = "downloadmanagersquared"

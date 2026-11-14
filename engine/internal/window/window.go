@@ -24,6 +24,7 @@ import (
 	"unsafe"
 
 	"github.com/jchv/go-webview2/pkg/edge"
+	"github.com/jchv/go-webview2/webviewloader"
 	"golang.org/x/sys/windows"
 
 	"downloadmanagersquared/engine/internal/winutil"
@@ -65,7 +66,9 @@ func New(cfg Config) *Window { return &Window{cfg: cfg} }
 
 // Open shows view: "" is the downloads, Settings (or any other "#hash") the
 // settings page. An open window comes to the front and switches to it. It
-// fails only if WebView2 can't be created (its runtime is missing).
+// fails if the WebView2 runtime is missing. A failure go-webview2 reports only
+// later (a locked WebView2 data folder, say) ends the process: it calls
+// log.Fatalf, which nothing here can intercept.
 func (w *Window) Open(view string) error {
 	u := pageURL(view)
 	w.mu.Lock()
@@ -154,6 +157,7 @@ type view struct {
 	thread   uint32
 	chromium *edge.Chromium
 	wv       *comObject
+	handlers []*eventHandler // WebView2 calls them until closeWebView
 	bridge   *bridge
 	pages    fs.FS
 	done     chan struct{}
@@ -170,6 +174,11 @@ func (w *Window) create(u string) (*view, error) {
 	// OleInitialize, not only CoInitializeEx: without OLE, WebView2 can't
 	// drag anything inside the page (the queue is reordered by dragging).
 	pOleInitialize.Call(0)
+	// go-webview2 ends the process (log.Fatalf) when the runtime is missing but
+	// only fails later, so ask for it first and fail here, with an error.
+	if v, err := webviewloader.GetInstalledVersion(); err != nil || v == "" {
+		return nil, errors.New("WebView2 could not start (is its runtime installed?)")
+	}
 	if pSetThreadDpiAwareness.Find() == nil {
 		pSetThreadDpiAwareness.Call(^uintptr(1)) // DPI_AWARENESS_CONTEXT_SYSTEM_AWARE (-2)
 	}
@@ -234,8 +243,7 @@ func (w *Window) create(u string) (*view, error) {
 	}
 	c.AddWebResourceRequestedFilter(origin+"*", edge.COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)
 	if v.wv = coreWebView(c); v.wv != nil {
-		onNewWindow(v.wv, openOutside)
-		onNavigation(v.wv, ours, openOutside)
+		v.handlers = append(v.handlers, onNewWindow(v.wv, openOutside), onNavigation(v.wv, ours, openOutside))
 	}
 	c.Init(bridgeScript)
 	v.bridge = newBridge(w.cfg.Dial(), v.toPage)

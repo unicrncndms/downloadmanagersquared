@@ -45,8 +45,8 @@ func FirefoxBrowsers() []Browser {
 			subs, _ := k.ReadSubKeyNames(-1)
 			k.Close()
 			for _, sub := range subs {
-				name := keyValue(root, path+`\`+sub, "")
-				exe := commandExe(keyValue(root, path+`\`+sub+`\shell\open\command`, ""))
+				name := RegString(root, path+`\`+sub, "")
+				exe := commandExe(RegString(root, path+`\`+sub+`\shell\open\command`, ""))
 				if name == "" {
 					name = sub
 				}
@@ -97,7 +97,8 @@ func commandExe(cmd string) string {
 	return cmd
 }
 
-func keyValue(root registry.Key, path, name string) string {
+// RegString is the string value name ("" for the default) of the key at path under root, "" if there is none.
+func RegString(root registry.Key, path, name string) string {
 	k, err := registry.OpenKey(root, path, registry.QUERY_VALUE)
 	if err != nil {
 		return ""

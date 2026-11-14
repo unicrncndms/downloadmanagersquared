@@ -88,7 +88,7 @@ func Default() (Layout, error) {
 // Find is l moved to the folder this user installed into, read from the
 // Installed apps entry. False if there is no install (l is then unchanged).
 func (l Layout) Find() (Layout, bool) {
-	dir := readValue(l.UninstallKey, "InstallLocation")
+	dir := winutil.RegString(registry.CURRENT_USER, l.UninstallKey, "InstallLocation")
 	if dir == "" {
 		return l, false
 	}
@@ -143,7 +143,7 @@ func (l Layout) Install(src, version string, first *Options) error {
 		return err
 	}
 	if err := l.Register(); err != nil {
-		return err
+		return fmt.Errorf("the files are in %s but DMS² could not be registered with the browser: %w", l.Dir, err)
 	}
 	if first != nil {
 		if err := l.setUp(*first); err != nil {
@@ -185,7 +185,15 @@ func (l Layout) PutFiles(src string) error {
 const FlagPutFiles = "--put-files"
 
 func (l Layout) putFilesElevated(src string) error {
-	code, err := winutil.RunElevated(filepath.Join(src, "dms-engine.exe"), FlagPutFiles+" "+syscall.EscapeArg(l.Dir), true)
+	exe := filepath.Join(src, "dms-engine.exe")
+	// The folder src is the user's to write: hold the exe unchanged until the
+	// elevated copy has started from it (see ADR 0008).
+	hold, err := winutil.HoldUnchanged(exe)
+	if err != nil {
+		return err
+	}
+	defer hold.Close()
+	code, err := winutil.RunElevated(exe, FlagPutFiles+" "+syscall.EscapeArg(l.Dir), true)
 	if errors.Is(err, winutil.ErrElevationDeclined) {
 		return fmt.Errorf("installing into %s needs administrator rights. Allow it when Windows asks, or choose a folder of your own", l.Dir)
 	}
@@ -280,18 +288,12 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-// Register makes every supported browser family find the native host,
-// rewriting what is missing or points elsewhere. A Chromium family would get a
-// function of its own next to registerFirefox.
+// Register makes every supported browser find the native host, rewriting what
+// is missing or points elsewhere: the one HKCU Mozilla key that Firefox,
+// LibreWolf, Waterfox and Floorp all read points at the host manifest. It
+// rewrites the manifest too if that is missing or points elsewhere, which in a
+// folder only an administrator can write to only the install does.
 func (l Layout) Register() error {
-	return l.registerFirefox()
-}
-
-// registerFirefox points the one HKCU Mozilla key that Firefox, LibreWolf,
-// Waterfox and Floorp all read at the host manifest. It rewrites the manifest
-// too if that is missing or points elsewhere, which in a folder only an
-// administrator can write to only the install does.
-func (l Layout) registerFirefox() error {
 	err := l.writeManifest()
 	if err != nil && !errors.Is(err, fs.ErrPermission) {
 		return err
@@ -367,6 +369,13 @@ func (l Layout) Unregister() error {
 	return errors.Join(errs...)
 }
 
+// Restore puts back what Unregister removed that the extension and Windows
+// need (the browser registration and the Installed apps entry), when the files
+// could not be removed after all (the administrator prompt was declined).
+func (l Layout) Restore(version string) error {
+	return errors.Join(l.Register(), l.writeUninstallEntry(version))
+}
+
 // RemoveLater deletes the install's files once this process (which runs from
 // the folder) has exited, then the folder if nothing else is left in it: a
 // cmd waits a few seconds and tries a few times while a file is still in use
@@ -374,6 +383,12 @@ func (l Layout) Unregister() error {
 func (l Layout) RemoveLater() error {
 	cmdExe := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
 	if !winutil.CanWrite(l.Dir) {
+		// The folder comes from a registry value any process of the user can set:
+		// never elevate a command for one that isn't an install folder, or that
+		// cmd would read differently ("%" expands, "\"" ends the quote).
+		if !strings.EqualFold(filepath.Base(l.Dir), Name) || strings.ContainsAny(l.Dir, "%\"^&") {
+			return fmt.Errorf("%s is not a DMS² install folder; delete it yourself if it is", l.Dir)
+		}
 		_, err := winutil.RunElevated(cmdExe, l.removeCommand(), false)
 		return err
 	}
@@ -400,16 +415,6 @@ func (l Layout) removeCommand() string {
 	}
 	try += ` 2>nul & rmdir "` + l.Dir + `" 2>nul`
 	return `/d /c ` + try + ` & ` + try + ` & ` + try + ` & ` + try
-}
-
-func readValue(key, name string) string {
-	k, err := registry.OpenKey(registry.CURRENT_USER, key, registry.QUERY_VALUE)
-	if err != nil {
-		return ""
-	}
-	defer k.Close()
-	v, _, _ := k.GetStringValue(name)
-	return v
 }
 
 func setValue(key, name, v string) error {

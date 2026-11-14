@@ -1,12 +1,14 @@
 package winutil
 
 import (
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 // launch is how the engine opens a page.
@@ -35,7 +37,7 @@ func browserLaunch(exe string) launch {
 }
 
 // OpenBrowser opens url ("" just starts the browser) in the browser at exe:
-// by its path, else with the default browser, else with "start firefox".
+// by its path, else with the default browser, else Firefox from its App Paths entry.
 func OpenBrowser(exe, url string) error {
 	if browserLaunch(exe) == launchExe {
 		cmd := exec.Command(exe)
@@ -50,11 +52,28 @@ func OpenBrowser(exe, url string) error {
 	if url != "" && ShellOpen(url) == nil {
 		return nil
 	}
-	args := []string{"/c", "start", "", "firefox"}
-	if url != "" {
-		args = append(args, url)
+	return startFirefox(url)
+}
+
+// startFirefox starts Firefox as "start firefox" would find it (its App Paths
+// entry), with url if not "". No shell is involved: a URL is never a command line.
+func startFirefox(url string) error {
+	err := errors.New("Firefox is not registered")
+	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
+		exe := RegString(root, `Software\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe`, "")
+		if exe == "" {
+			continue
+		}
+		cmd := exec.Command(exe)
+		if url != "" {
+			cmd.Args = append(cmd.Args, url)
+		}
+		if err = cmd.Start(); err == nil {
+			go cmd.Wait()
+			return nil
+		}
 	}
-	return Hidden(exec.Command("cmd.exe", args...)).Start()
+	return err
 }
 
 // ShellOpen opens a URL or file the way Explorer would.

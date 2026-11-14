@@ -154,13 +154,6 @@ func (c canvas) roundRect(x, y, wd, ht, radius float32, fill, stroke uint32, str
 	}
 }
 
-func (c canvas) ellipse(x, y, wd, ht float32, color uint32) {
-	var brush uintptr
-	pGdipCreateSolidFill.Call(argb(color), uintptr(unsafe.Pointer(&brush)))
-	pGdipFillEllipse.Call(c.g, brush, f(x), f(y), f(wd), f(ht))
-	pGdipDeleteBrush.Call(brush)
-}
-
 // check draws a tick through points given as fractions of the box at x, y.
 func (c canvas) check(x, y, size, width float32, color uint32, pts [3][2]float32) {
 	var pen uintptr
@@ -181,7 +174,7 @@ func (c canvas) text(s string, r rect, font windows.Handle, color uint32, flags 
 	old, _, _ := pSelectObject.Call(uintptr(c.hdc), uintptr(font))
 	pSetTextColor.Call(uintptr(c.hdc), colorref(color))
 	pSetBkMode.Call(uintptr(c.hdc), 1) // transparent
-	pDrawText.Call(uintptr(c.hdc), str(s), ^uintptr(0), uintptr(unsafe.Pointer(&r)), flags|dtNoPrefix)
+	pDrawText.Call(uintptr(c.hdc), uintptr(unsafe.Pointer(str(s))), ^uintptr(0), uintptr(unsafe.Pointer(&r)), flags|dtNoPrefix)
 	pSelectObject.Call(uintptr(c.hdc), old)
 }
 
@@ -202,6 +195,6 @@ func buffered(hdc windows.Handle, r rect, paint func(c canvas)) {
 
 func newFont(sizePx, weight int32) windows.Handle {
 	h, _, _ := pCreateFont.Call(uintptr(-px(sizePx)), 0, 0, 0, uintptr(weight), 0, 0, 0,
-		1 /* DEFAULT_CHARSET */, 0, 0, 5 /* CLEARTYPE_QUALITY */, 0, str("Segoe UI"))
+		1 /* DEFAULT_CHARSET */, 0, 0, 5 /* CLEARTYPE_QUALITY */, 0, uintptr(unsafe.Pointer(str("Segoe UI"))))
 	return windows.Handle(h)
 }

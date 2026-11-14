@@ -15,3 +15,14 @@ func TestLinksFindsWebAndMagnetLinks(t *testing.T) {
 		t.Errorf("Links of plain text = %q, want none", got)
 	}
 }
+
+func TestUtf16TextStopsAtNulOrAtTheEnd(t *testing.T) {
+	for _, c := range []struct {
+		in   []uint16
+		want string
+	}{{[]uint16{'a', 'b', 0, 'c'}, "ab"}, {[]uint16{'a', 'b'}, "ab"}, {nil, ""}} {
+		if got := utf16Text(c.in); got != c.want {
+			t.Errorf("utf16Text(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

@@ -6,8 +6,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-
-	"downloadmanagersquared/engine/internal/mark"
 )
 
 // The Win32 the window needs, called directly.
@@ -39,7 +37,6 @@ var (
 	pAdjustWindowRectEx  = user32.NewProc("AdjustWindowRectEx")
 	pGetSystemMetrics    = user32.NewProc("GetSystemMetrics")
 	pLoadCursor          = user32.NewProc("LoadCursorW")
-	pCreateIconFromRes   = user32.NewProc("CreateIconFromResourceEx")
 	pDrawIconEx          = user32.NewProc("DrawIconEx")
 	pSetDpiAwareness     = user32.NewProc("SetProcessDpiAwarenessContext")
 	pGetDpiForSystem     = user32.NewProc("GetDpiForSystem")
@@ -163,9 +160,12 @@ type drawItemStruct struct {
 	_         uintptr // itemData
 }
 
-func str(s string) uintptr {
+// str is s as UTF-16 for a Win32 call. Convert it to uintptr inside the call's
+// own argument list, uintptr(unsafe.Pointer(str(s))), so the buffer stays
+// alive until the call returns.
+func str(s string) *uint16 {
 	p, _ := windows.UTF16PtrFromString(s)
-	return uintptr(unsafe.Pointer(p))
+	return p
 }
 
 func text(h windows.Handle) string {
@@ -180,16 +180,6 @@ func invalidate(h windows.Handle) { pInvalidateRect.Call(uintptr(h), 0, 0) }
 func enabled(h windows.Handle) bool {
 	r, _, _ := pIsWindowEnabled.Call(uintptr(h))
 	return r != 0
-}
-
-// iconHandle makes an icon from the nearest image of the ICO bytes.
-func iconHandle(ico []byte, size int32) windows.Handle {
-	img := mark.Pick(ico, int(size))
-	if len(img) == 0 {
-		return 0
-	}
-	h, _, _ := pCreateIconFromRes.Call(uintptr(unsafe.Pointer(&img[0])), uintptr(len(img)), 1, 0x00030000, uintptr(size), uintptr(size), 0)
-	return windows.Handle(h)
 }
 
 // modernControls makes this thread's edit fields version 6 of the common

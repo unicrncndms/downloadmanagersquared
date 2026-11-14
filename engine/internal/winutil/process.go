@@ -8,7 +8,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/registry"
 )
 
 // Dialog shows a message box and returns the button pressed (windows.IDOK…).
@@ -65,23 +64,6 @@ func StartDetached(exe string, args ...string) error {
 		}
 	}
 	return err
-}
-
-// OpenInFirefox opens url in Firefox, found as "start firefox" would find it,
-// else in the default browser.
-func OpenInFirefox(url string) error {
-	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
-		k, err := registry.OpenKey(root, `Software\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe`, registry.QUERY_VALUE)
-		if err != nil {
-			continue
-		}
-		exe, _, err := k.GetStringValue("")
-		k.Close()
-		if err == nil && exec.Command(exe, url).Start() == nil {
-			return nil
-		}
-	}
-	return ShellOpen(url)
 }
 
 // Buttons Dialog returns.

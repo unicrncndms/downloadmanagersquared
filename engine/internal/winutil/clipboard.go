@@ -1,6 +1,7 @@
 package winutil
 
 import (
+	"slices"
 	"strings"
 	"unsafe"
 
@@ -12,6 +13,7 @@ var (
 	pCloseClipboard   = user32.NewProc("CloseClipboard")
 	pGetClipboardData = user32.NewProc("GetClipboardData")
 	pGlobalLock       = windows.NewLazySystemDLL("kernel32.dll").NewProc("GlobalLock")
+	pGlobalSize       = windows.NewLazySystemDLL("kernel32.dll").NewProc("GlobalSize")
 	pGlobalUnlock     = windows.NewLazySystemDLL("kernel32.dll").NewProc("GlobalUnlock")
 	pSetExecState     = windows.NewLazySystemDLL("kernel32.dll").NewProc("SetThreadExecutionState")
 )
@@ -33,7 +35,16 @@ func ClipboardText() string {
 		return ""
 	}
 	defer pGlobalUnlock.Call(h)
-	return windows.UTF16PtrToString((*uint16)(*(*unsafe.Pointer)(unsafe.Pointer(&p))))
+	size, _, _ := pGlobalSize.Call(h) // another process wrote the block: don't trust its NUL
+	return utf16Text(unsafe.Slice((*uint16)(*(*unsafe.Pointer)(unsafe.Pointer(&p))), size/2))
+}
+
+// utf16Text is the text in units up to the first NUL, or all of them.
+func utf16Text(units []uint16) string {
+	if i := slices.Index(units, 0); i >= 0 {
+		units = units[:i]
+	}
+	return windows.UTF16ToString(units)
 }
 
 // Links are the http, https and magnet links in text, one per word.
