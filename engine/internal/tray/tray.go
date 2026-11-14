@@ -4,6 +4,8 @@ package tray
 import (
 	"fmt"
 	"math"
+	"net/url"
+	"path"
 	"time"
 	"unicode/utf16"
 
@@ -203,23 +205,55 @@ func menuFor(s engine.StateEvent, unit string, used map[string]time.Time, now ti
 func openDownloads(e *engine.Engine) { e.OpenWindow("") }
 
 // addFromClipboard adds the links on the clipboard, or says there are none.
+// A link already in the list is not added again; the balloon opens the window.
 func addFromClipboard(e *engine.Engine) {
 	links := winutil.Links(winutil.ClipboardText())
 	if len(links) == 0 {
 		winutil.Notify(winutil.AppName, "No link on the clipboard")
 		return
 	}
-	added := 0
+	added, known, name := 0, 0, ""
 	for _, l := range links {
-		if _, err := e.Add(engine.AddRequest{URL: l}); err != nil {
+		_, dup, err := e.AddUnlessKnown(engine.AddRequest{URL: l})
+		if err != nil {
 			winutil.Notify("Could not add the link", err.Error())
 			continue
 		}
+		if dup {
+			known++
+			continue
+		}
 		added++
+		name = linkName(l)
 	}
-	if added > 0 {
-		winutil.Notify(winutil.AppName, fmt.Sprintf("Added %d from the clipboard", added))
+	var msg string
+	switch {
+	case added == 0 && known == 0:
+		return // every link failed; each already said why
+	case added == 0:
+		msg = fmt.Sprintf("%d already in the list", known)
+	case added == 1 && known == 0 && name != "":
+		msg = "Added " + name
+	case known == 0:
+		msg = fmt.Sprintf("Added %d from the clipboard", added)
+	default:
+		msg = fmt.Sprintf("Added %d, %d already in the list", added, known)
 	}
+	winutil.NotifyClick(winutil.AppName, msg, func() { go openDownloads(e) })
+}
+
+// linkName is the file a link is likely to save as: its last path part.
+// shortcut: the server's own name (Content-Disposition) is not known yet when the link is added, so it can differ.
+func linkName(l string) string {
+	u, err := url.Parse(l)
+	if err != nil || u.Path == "" {
+		return ""
+	}
+	base := path.Base(u.Path)
+	if base == "/" || base == "." {
+		return ""
+	}
+	return download.SanitizeFilename(base)
 }
 
 // openSettings is "Connections & settings": the Downloads window's settings view.
