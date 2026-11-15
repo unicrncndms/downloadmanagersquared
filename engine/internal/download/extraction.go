@@ -34,6 +34,14 @@ type archivePart interface {
 	save() error
 }
 
+// idleKey is what an idle look at the archive saw: the bytes still to come, the
+// Entries done and whether it may free.
+type idleKey struct {
+	left int64
+	done int
+	free bool
+}
+
 // Extraction is one archive extracted while its bytes download (CONTEXT.md):
 // one download's own, as its one part, or a Set's parts laid end to end. It
 // reads the archive's list of files (its tail first), waits for the password
@@ -55,7 +63,8 @@ type Extraction struct {
 	arc      *archive.Archive
 	x        *archive.Extractor
 	out      string
-	finished bool // every Entry is done
+	finished bool     // every Entry is done
+	waiting  *idleKey // the last look found nothing to extract (step)
 
 	// What the last step found, for the owner's progress.
 	tail   int  // the part whose end it waits for, -1 for none
@@ -171,8 +180,23 @@ func (e *Extraction) step(ctx context.Context, parts []archivePart, missing []ar
 
 	e.x.Keep = !mayFree
 	e.x.Freeing = func(rs []archive.Range) error { return e.saveFreed(parts, rs) }
+	// A look that found nothing is not repeated until bytes arrive, an Entry
+	// is done or the freeing changes: Extract scans every Entry.
+	var left int64
+	for _, r := range missing {
+		left += r.End - r.Start
+	}
+	now := idleKey{left, len(p1.done), mayFree}
+	if e.waiting != nil && *e.waiting == now {
+		e.idle = true
+		return false, nil
+	}
+	e.waiting = nil
 	res, xerr := e.x.Extract(ctx, missing)
 	e.record(parts, res)
+	if e.idle && xerr == nil {
+		e.waiting = &now
+	}
 	e.streaming.Store(e.x.Streaming())
 	e.passed = e.x.Passed()
 	if errors.Is(xerr, archive.ErrWrongPassword) {
@@ -356,7 +380,7 @@ func (e *Extraction) refetchList(parts []archivePart, total int64) bool {
 	if !e.volumes && !strings.EqualFold(filepath.Ext(e.name), ".rar") {
 		return false
 	}
-	if !e.refetch(parts, archive.Range{Start: 0, End: total}, true) {
+	if !e.refetch(parts, archive.Range{Start: 0, End: total}, e.freedOf(parts)) {
 		return false
 	}
 	log.Printf("%s: its list of files was freed by a run stopped partway, fetching it again", e.who)
@@ -417,20 +441,37 @@ func (e *Extraction) nameOut(p1 archivePart, into string) (string, error) {
 // partway (a pause, a crash, a failed run) is extracted again from its
 // front, so the bytes freed behind its decompressor are needed again.
 func (e *Extraction) reclaim(parts []archivePart, done []int64) {
+	freed := e.freedOf(parts) // one look at each part: Entries are disjoint, so it stays right
+	if !slices.ContainsFunc(freed, func(f []Range) bool { return len(f) > 0 }) {
+		return
+	}
 	was := map[int64]bool{}
 	for _, s := range done {
 		was[s] = true
 	}
 	for _, en := range e.arc.Entries {
-		if !was[en.Start] && e.refetch(parts, archive.Range{Start: en.Start, End: en.End}, true) {
+		if !was[en.Start] && e.refetch(parts, archive.Range{Start: en.Start, End: en.End}, freed) {
 			log.Printf("%s: %s was stopped partway, fetching its freed bytes again", e.who, en.Name)
 		}
 	}
 }
 
-// refetch has the parts fetch r again: only what is freed of it, or all of
-// it. It reports whether any part has anything to fetch.
-func (e *Extraction) refetch(parts []archivePart, r archive.Range, freedOnly bool) bool {
+// freedOf is what is freed on each part, as it is now. partInfo clones a
+// part's whole state, so it is asked once, not once per Entry.
+func (e *Extraction) freedOf(parts []archivePart) [][]Range {
+	freed := make([][]Range, len(parts))
+	for i, p := range parts {
+		if p != nil {
+			freed[i] = p.partInfo().freed
+		}
+	}
+	return freed
+}
+
+// refetch has the parts fetch r again: only what is in freed (freedOf), or
+// all of it when freed is nil. It reports whether any part has anything to
+// fetch.
+func (e *Extraction) refetch(parts []archivePart, r archive.Range, freed [][]Range) bool {
 	idx, local := e.parts.Cut(r)
 	any := false
 	for k, i := range idx {
@@ -439,8 +480,8 @@ func (e *Extraction) refetch(parts []archivePart, r archive.Range, freedOnly boo
 			continue
 		}
 		want := []Range{{local[k].Start, local[k].End}}
-		if freedOnly {
-			want = intersectRanges(want, p.partInfo().freed)
+		if freed != nil {
+			want = intersectRanges(want, freed[i])
 		}
 		for _, w := range want {
 			p.refetch(w)
@@ -482,7 +523,7 @@ func (e *Extraction) record(parts []archivePart, res archive.Result) {
 	// res.Freed is on the parts already: saveFreed recorded it before it was freed.
 	for _, fl := range res.Failed {
 		log.Printf("%s: %s, fetching it again", e.who, fl)
-		e.refetch(parts, fl.Range, false)
+		e.refetch(parts, fl.Range, nil)
 	}
 	for _, fl := range twice {
 		msg := fmt.Sprintf("Paused: %s came out wrong twice (%s). Resume to download it again", fl.Entry.Name, fl.Reason)

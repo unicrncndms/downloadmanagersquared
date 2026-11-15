@@ -53,6 +53,7 @@ type Extractor struct {
 	files     int // Entries that are files
 	extracted int // of those, done
 	first     int // Entries before this are all done
+	unordered int // top: 0 not checked, 1 Entries in order of their bytes, 2 not
 
 	folders map[string]int // folder Entry path -> its index
 
@@ -212,6 +213,32 @@ func (x *Extractor) Progress() (files, of int) {
 	return x.extracted, x.files
 }
 
+// top is where Extract may stop looking: the first byte past all that is on
+// disk. It is MaxInt64 when the Entries are not in the order of their bytes,
+// or the size isn't known, so that nothing is skipped wrongly.
+func (x *Extractor) top(missing []Range) int64 {
+	if x.unordered == 0 {
+		x.unordered = 1
+		for i := 1; i < len(x.a.Entries); i++ {
+			if x.a.Entries[i].Start < x.a.Entries[i-1].Start {
+				x.unordered = 2
+				break
+			}
+		}
+	}
+	size, err := x.f.Size()
+	if x.unordered == 2 || err != nil || len(missing) == 0 {
+		return math.MaxInt64
+	}
+	if d := x.a.DirStart; d > 0 && d < size {
+		size = d // the central directory, fetched first, is no Entry's bytes
+	}
+	if last := missing[len(missing)-1]; last.End >= size {
+		return last.Start
+	}
+	return size
+}
+
 // Finished: every Entry is done.
 // Done says whether Entry i is extracted.
 func (x *Extractor) Done(i int) bool { return x.done[i] }
@@ -239,8 +266,12 @@ func (x *Extractor) Extract(ctx context.Context, missing []Range) (r Result, err
 			err = serr
 		}
 	}()
+	top := x.top(missing)
 	for i := x.first; i < len(x.a.Entries); i++ {
 		e := x.a.Entries[i]
+		if e.Start >= top {
+			break // nothing past the last byte on disk can be extracted yet
+		}
 		isLarge := !e.Dir && large(e)
 		if x.done[i] || !isLarge && !x.ready(e, missing) {
 			continue
@@ -384,6 +415,7 @@ func (x *Extractor) freeAll(rs []Range) error {
 	if x.Keep {
 		return nil
 	}
+	rs = merge(rs) // reach overlaps neighbours: one call per run, not per Entry
 	if x.Freeing != nil {
 		if err := x.Freeing(rs); err != nil {
 			return err
