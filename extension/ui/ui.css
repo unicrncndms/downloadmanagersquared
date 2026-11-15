@@ -201,5 +201,5 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 }
 /* Hidden it takes no room, so a narrow page never scrolls sideways; common.js picks the side with room. */
 .info:hover::after, .info:focus::after { display: block; }
-.info.keys::after { white-space: pre-line; left: 50%; transform: translateX(-50%); } /* it sits mid-toolbar: centred, so it fits the 520 px popup */
+.info.terms::after { white-space: pre-line; }
 .info.left::after { left: auto; right: -8px; }
