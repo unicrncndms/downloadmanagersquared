@@ -100,3 +100,30 @@ func TestUnwatchedClientsGetOnlyTheBadge(t *testing.T) {
 		t.Fatalf("after unwatch got %q, want badge", ev)
 	}
 }
+
+// A client that connects and never reads holds up neither the push nor the
+// other clients.
+func TestStuckClientDoesNotHoldUpThePush(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	ours, theirs := net.Pipe() // nobody reads theirs
+	t.Cleanup(func() { ours.Close(); theirs.Close() })
+	e.Connected(ipc.NewConn(ours))
+	_, events := watcher(t, e)
+
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		var sent lastSent
+		e.updateSnapshot(time.Second)
+		e.push(&sent)
+		if ev := next(t, events); ev != "state" {
+			t.Fatalf("got %q, want state", ev)
+		}
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("three pushes took %v with a client that reads nothing", d)
+	}
+}
