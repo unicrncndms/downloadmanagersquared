@@ -16,16 +16,23 @@ async function discardDownload(id) {
 
 // The Cookie header the browser sent with each request still being looked
 // at, by requestId: the last one across redirects. Filled from onSendHeaders;
-// take() hands it over once the response has been handled.
+// take() hands it over once the response has been handled. The same listener
+// hands Capture the Referer, so a document load's request headers are read once.
 const SentCookies = {
   byRequest: new Map(),
 
   init() {
     const filter = { urls: ["<all_urls>"], types: ["main_frame", "sub_frame"] };
     browser.webRequest.onSendHeaders.addListener((d) => {
-      const h = (d.requestHeaders || []).find((x) => x.name.toLowerCase() === "cookie");
-      if (h) this.byRequest.set(d.requestId, h.value);
+      let cookie, referer;
+      for (const x of d.requestHeaders || []) {
+        const n = x.name.toLowerCase();
+        if (n === "cookie") cookie = x.value;
+        else if (n === "referer") referer = x.value;
+      }
+      if (cookie !== undefined) this.byRequest.set(d.requestId, cookie);
       else this.byRequest.delete(d.requestId);
+      if (d.type === "main_frame") Capture.noteReferer(d, referer);
     }, filter, ["requestHeaders"]);
     browser.webRequest.onErrorOccurred.addListener((d) => this.byRequest.delete(d.requestId), filter);
   },
