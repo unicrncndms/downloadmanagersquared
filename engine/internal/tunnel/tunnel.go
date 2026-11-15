@@ -23,6 +23,8 @@ import (
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun/netstack"
+
+	"downloadmanagersquared/engine/internal/dnscache"
 )
 
 // Config is a WireGuard config with one peer, IPv4 only inside. Its endpoint
@@ -200,10 +202,11 @@ func GenerateKey() (priv, pub string, err error) {
 
 // Tunnel is one running WireGuard tunnel.
 type Tunnel struct {
-	dev  *device.Device
-	tnet *netstack.Net
-	cfg  Config
-	bind *packetBind
+	dev   *device.Device
+	tnet  *netstack.Net
+	cfg   Config
+	bind  *packetBind
+	names dnscache.Cache // hosts looked up inside the tunnel
 }
 
 // Start brings a tunnel up. listen opens the UDP socket its encrypted packets
@@ -291,20 +294,23 @@ func (t *Tunnel) LookupIP(ctx context.Context, host string) ([]net.IP, error) {
 	if ip := net.ParseIP(host); ip != nil {
 		return []net.IP{ip}, nil
 	}
-	addrs, err := t.tnet.LookupContextHost(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-	var out []net.IP
-	for _, a := range addrs {
-		if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
-			out = append(out, ip)
+	// A miss asks the tunnel's DNS and nothing else, never the bare connection.
+	return t.names.Lookup(ctx, host, func(ctx context.Context) ([]net.IP, error) {
+		addrs, err := t.tnet.LookupContextHost(ctx, host)
+		if err != nil {
+			return nil, err
 		}
-	}
-	if len(out) == 0 {
-		return nil, errors.New("no IPv4 address for " + host)
-	}
-	return out, nil
+		var out []net.IP
+		for _, a := range addrs {
+			if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
+				out = append(out, ip)
+			}
+		}
+		if len(out) == 0 {
+			return nil, errors.New("no IPv4 address for " + host)
+		}
+		return out, nil
+	})
 }
 
 // ListenPacket opens a UDP socket inside the tunnel on port (0: any).
