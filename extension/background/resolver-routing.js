@@ -61,6 +61,11 @@ Object.assign(Resolver, {
   cancelUnrouted(d) {
     if (!this.loaded) return this.ready.then(() => this.cancelUnrouted(d));
     const owner = this.ownerOf(d);
-    return owner && !this.portFor(owner.iface) ? { cancel: true } : {};
+    if (!owner) return {};
+    if (!this.portFor(owner.iface)) return { cancel: true };
+    // Nothing on a landing page needs sound, video or fonts to be clicked, so they are not
+    // fetched over a line that may be slow. Images stay (hosters' anti-adblock checks use
+    // them, and captchas need them), and so does everything else while a captcha shows.
+    return (d.type === "media" || d.type === "font") && !(owner.job && owner.job.captcha) ? { cancel: true } : {};
   }
 });

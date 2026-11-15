@@ -23,14 +23,6 @@ const Capture = {
     };
     browser.webNavigation.onCommitted.addListener(onNav);
     browser.webNavigation.onHistoryStateUpdated.addListener(onNav);
-    // Each page's referrer is the page it came from: that recovers the landing page
-    // even if it was loaded before the extension started.
-    browser.webRequest.onBeforeSendHeaders.addListener((d) => {
-      const ref = (d.requestHeaders || []).find((x) => x.name.toLowerCase() === "referer");
-      if (!ref || !isHttp(ref.value)) return;
-      this.referers.set(d.url, ref.value);
-      if (this.referers.size > 300) this.referers.delete(this.referers.keys().next().value);
-    }, { urls: ["<all_urls>"], types: ["main_frame"] }, ["requestHeaders"]);
     // Pages already open when the extension starts.
     browser.tabs.query({}).then((tabs) => {
       for (const t of tabs) if (isHttp(t.url) && !this.history.has(t.id)) this.recordPage(t.id, t.url);
@@ -72,6 +64,14 @@ const Capture = {
 
   pageMenuShown: false,
 
+  // Each page's referrer is the page it came from: that recovers the landing page
+  // even if it was loaded before the extension started. Called by SentCookies.
+  noteReferer(d, referer) {
+    if (!referer || !isHttp(referer)) return;
+    this.referers.set(d.url, referer);
+    if (this.referers.size > 300) this.referers.delete(this.referers.keys().next().value);
+  },
+
   // Whether "Download this page's file" can mean something on this page.
   pageMenuFits(url) {
     return pageMenuFits(url, Resolver.recipes);
@@ -81,9 +81,12 @@ const Capture = {
     if (!Resolver.loaded) return Resolver.ready.then(() => this.onHeaders(d, cookie));
     const owner = Resolver.ownerOf(d);
     if (owner) return Resolver.onHeaders(d, cookie, owner);
-    if (d.method !== "GET") return {};
-    const h = headerMap(d.responseHeaders);
+    if (d.method !== "GET" || (d.statusCode !== 200 && d.statusCode !== 206)) return {}; // captureResponse takes nothing else
     if (!Engine.connected || !Engine.settings) return {};
+    // An ordinary page is nearly every response: leave it before the whole map is built.
+    const type = (d.responseHeaders || []).find((x) => x.name.toLowerCase() === "content-type");
+    if (type && isPage({ "content-type": type.value })) return {};
+    const h = headerMap(d.responseHeaders);
     const kind = captureResponse(h, d.url, d.statusCode, Engine.settings.thresholdBytes);
     if (!kind || neverCaptured(Engine.settings.neverCapture, d.url, d.originUrl, d.documentUrl)) return {};
     if (this.bypass.delete(d.url)) return {};

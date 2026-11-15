@@ -26,7 +26,7 @@ test("every browser listener is registered before anything is awaited", () => {
   const b = load();
   for (const name of [
     "proxy.onRequest", "webRequest.onBeforeRequest", "webRequest.onHeadersReceived", "webRequest.onSendHeaders",
-    "webRequest.onBeforeSendHeaders", "downloads.onCreated", "webNavigation.onCommitted", "tabs.onUpdated",
+    "downloads.onCreated", "webNavigation.onCommitted", "tabs.onUpdated",
     "tabs.onCreated", "tabs.onRemoved", "windows.onRemoved", "contextualIdentities.onRemoved",
     "runtime.onMessage", "runtime.onConnect", "contextMenus.onClicked",
   ]) assert.ok(b.listeners[name], name);

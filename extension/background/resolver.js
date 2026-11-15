@@ -15,6 +15,7 @@ const Resolver = {
   recipes: {},      // landing-page host -> recipe (lib/recipe.js)
   jobs: new Map(),  // "downloadId|ifaceId" -> job
   tabJobs: new Map(), // tabId -> job: the job's own tabs and the ones they opened
+  newTabs: new Map(),  // tabId -> its judge (watchNewTab), for a tab a replayed click opened
   creating: new Map(),
   loaded: false,    // jobs, containers and recipes are read back
   ready: null,      // settles once they are
@@ -269,28 +270,39 @@ const Resolver = {
 
   // A tab a replayed click opened: the same site carries on there; another
   // site gets a moment to start a download, else it is a pop-up ad and closes.
+  // Judged when the tab changes (onTabUpdated) and once when the moment is up.
   watchNewTab(job, tab) {
     const openedAt = Date.now();
+    let timer;
     const check = async () => {
-      if (job.done) return;
+      clearTimeout(timer);
+      if (job.done) return this.newTabs.delete(tab.id);
       const t = await browser.tabs.get(tab.id).catch(() => null);
-      if (!t) return;
+      if (!this.newTabs.has(tab.id)) return; // judged meanwhile
+      if (!t) return this.newTabs.delete(tab.id);
       const url = t.url && t.url !== "about:blank" ? t.url : t.pendingUrl || "";
-      const verdict = popupVerdict({ openerSite: siteOf(job.lastUrl || job.pageUrl), site: url ? siteOf(url) : "", age: Date.now() - openedAt, download: false });
+      const age = Date.now() - openedAt;
+      const verdict = popupVerdict({ openerSite: siteOf(job.lastUrl || job.pageUrl), site: url ? siteOf(url) : "", age, download: false });
+      if (verdict === "wait") {
+        timer = setTimeout(check, POPUP_GRACE - age + 1);
+        return;
+      }
+      this.newTabs.delete(tab.id);
       if (verdict === "keep") {
         // The next page opened in a tab of its own: follow it there.
         job.tabId = tab.id;
         this.clickEffect(job, "newTab");
-      } else if (verdict === "close") {
-        browser.tabs.remove(tab.id).catch(() => {});
       } else {
-        setTimeout(check, 500);
+        browser.tabs.remove(tab.id).catch(() => {});
       }
     };
-    setTimeout(check, 500);
+    this.newTabs.set(tab.id, check);
+    check();
   },
 
   onTabUpdated(tabId, info, tab) {
+    const watch = this.newTabs.get(tabId);
+    if (watch) watch();
     const job = this.tabJobs.get(tabId);
     if (!job || job.done || tabId !== job.tabId) return;
     if (info.status === "loading") {
@@ -406,7 +418,7 @@ const Resolver = {
     if (!c || job.done || job.mode !== "replay") return;
     const verdict = afterClick(c.effects, Date.now() - c.at, c.clicks);
     if (verdict === "wait") {
-      this.setTimer(job, "effect", 250, "judgeClick");
+      this.setTimer(job, "effect", Math.max(1, EFFECT_WAIT - (Date.now() - c.at)), "judgeClick"); // once, for what is left
     } else if (verdict === "retry") {
       this.sendStep(job);
     } else if (verdict === "giveUp") {
