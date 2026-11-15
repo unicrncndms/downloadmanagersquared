@@ -23,8 +23,8 @@ type worker struct {
 	link    Link
 	ir      *ifaceRun
 	cancel  context.CancelFunc
-	closing bool // cancelled because the interface's connection setting went down
-	bytes   atomic.Int64
+	closing bool         // cancelled because the interface's connection setting went down
+	bytes   atomic.Int64 // received, credited per read: feeds speed, not progress
 	ewma    rate.EWMA
 	speed   float64
 }
@@ -213,7 +213,7 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 
 	ir := w.ir
 	for {
-		n, rerr := io.ReadFull(stallReader{body, stall}, buf)
+		n, rerr := io.ReadFull(stallReader{body, stall, [2]*atomic.Int64{&w.bytes, &ir.bytes}}, buf)
 		if n > 0 {
 			stall.Reset(stallTimeout)
 			d.mu.Lock()
@@ -231,8 +231,6 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 					l.Bytes += allowed
 				}
 				d.mu.Unlock()
-				w.bytes.Add(allowed)
-				ir.bytes.Add(allowed)
 			}
 			// Held to the download's own limit; waiting for it isn't a stall.
 			stall.Stop()
@@ -317,15 +315,21 @@ func (w *worker) openHTTP(rctx context.Context, start, end int64, ranged bool, s
 
 // stallReader restarts the stall timer on every read that brings data, so a
 // slow line that fills a buffer only after minutes is not mistaken for a dead one.
+// It also counts each read for the speed meters: crediting 256 KiB at a time
+// makes a slow connection's speed swing between 0 and several times its rate.
 type stallReader struct {
-	r     io.Reader
-	timer *time.Timer
+	r      io.Reader
+	timer  *time.Timer
+	counts [2]*atomic.Int64
 }
 
 func (s stallReader) Read(p []byte) (int, error) {
 	n, err := s.r.Read(p)
 	if n > 0 {
 		s.timer.Reset(stallTimeout)
+		for _, c := range s.counts {
+			c.Add(int64(n))
+		}
 	}
 	return n, err
 }
