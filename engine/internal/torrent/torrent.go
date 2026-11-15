@@ -67,6 +67,7 @@ type Torrent struct {
 	upSpeed rate.EWMA
 	info    *metainfo.Info // st.Info parsed, once needed
 	hash    string
+	upSaved time.Time // when a changed upload count last marked the entry dirty
 
 	verified atomic.Bool // its data was hashed since the engine started
 
@@ -378,17 +379,36 @@ func (t *Torrent) announceDHT(ctx context.Context, at *atorrent.Torrent) {
 	}
 }
 
+// upSaveEvery is how seldom a changed upload count alone is worth a state write.
+const upSaveEvery = 30 * time.Second
+
+// now is the clock update throttles by; tests replace it.
+var now = time.Now
+
 // update changes the state under the lock, unless the torrent left the swarm
-// (at is no longer its torrent), and reports whether it did.
+// (at is no longer its torrent), and reports whether it did. It marks the
+// entry dirty only if a saved field changed; the upload count alone counts at
+// most every upSaveEvery, so an idle seeder does not rewrite its state file.
 func (t *Torrent) update(at *atorrent.Torrent, f func()) bool {
 	t.mu.Lock()
 	if t.t != at {
 		t.mu.Unlock()
 		return false
 	}
+	old := t.st
 	f()
+	save := old.Status != t.st.Status || old.Error != t.st.Error || old.Size != t.st.Size ||
+		len(old.Info) != len(t.st.Info) || !slices.Equal(old.Skip, t.st.Skip)
+	if !save && old.Uploaded != t.st.Uploaded && now().Sub(t.upSaved) >= upSaveEvery {
+		save = true
+	}
+	if save {
+		t.upSaved = now()
+	}
 	t.mu.Unlock()
-	t.changed()
+	if save {
+		t.changed()
+	}
 	return true
 }
 

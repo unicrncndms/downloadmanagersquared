@@ -40,9 +40,9 @@ func Write(path string, data []byte, perm os.FileMode) error {
 	return err
 }
 
-// WriteJSON writes v as indented JSON with Write.
+// WriteJSON writes v as compact JSON with Write.
 func WriteJSON(path string, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
+	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
