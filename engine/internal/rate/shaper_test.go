@@ -176,3 +176,29 @@ func TestClosingAShapedConnWakesAPausedWrite(t *testing.T) {
 		t.Fatal("Write still paused a second after Close")
 	}
 }
+
+// A limit set after a shaper ran free holds from the next wait, and clearing it
+// makes waits free again.
+func TestLimitSetAndClearedAtRunTime(t *testing.T) {
+	s := NewShaper()
+	ctx := context.Background()
+	if err := s.wait(ctx, pickDown, 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	s.SetLimits(0, 100<<10) // 96 KB past the 32 KB burst at 100 KB/s: about 0.6 s
+	start := time.Now()
+	if err := s.wait(ctx, pickDown, 96<<10); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took < 400*time.Millisecond {
+		t.Fatalf("96 KB at 100 KB/s took %v once limited", took)
+	}
+	s.SetLimits(0, 0)
+	start = time.Now()
+	if err := s.wait(ctx, pickDown, 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 50*time.Millisecond {
+		t.Fatalf("1 MB waited %v after the limit was cleared", took)
+	}
+}

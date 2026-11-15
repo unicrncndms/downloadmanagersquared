@@ -292,6 +292,12 @@ func (w *worker) openHTTP(rctx context.Context, start, end int64, ranged bool, s
 		resp.Body.Close()
 		return nil, fe
 	}
+	// The probe got the file, so a page now is a link that has stopped working
+	// (an error page sent with 200): never write it into the file.
+	if isPageAnswer(resp.Header) {
+		resp.Body.Close()
+		return nil, &fetchError{kind: kindExpired, msg: "link now leads to a web page, not the file"}
+	}
 	if ranged {
 		if resp.StatusCode != http.StatusPartialContent {
 			resp.Body.Close()

@@ -431,7 +431,8 @@ func TestDownloadedTorrentSeedsInsteadOfFinishing(t *testing.T) {
 	}
 	defer s.Close()
 	s.SetIfaces([]Iface{sw.iface("eth", &peers)})
-	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir()})
+	dir := t.TempDir()
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,6 +448,14 @@ func TestDownloadedTorrentSeedsInsteadOfFinishing(t *testing.T) {
 	tor.Stop(download.StatusPaused)
 	if tor.Status() != download.StatusPaused {
 		t.Fatalf("stopped seeding torrent is %q", tor.Status())
+	}
+	// A stopped torrent's files can be moved and deleted at once.
+	file := filepath.Join(dir, sw.info.Name)
+	if err := os.Rename(file, file+".moved"); err != nil {
+		t.Fatalf("stopped torrent's file is still locked: %v", err)
+	}
+	if err := os.Remove(file + ".moved"); err != nil {
+		t.Fatalf("stopped torrent's file can't be deleted: %v", err)
 	}
 }
 

@@ -129,3 +129,19 @@ func TestEncryptedPeerIsClosedWhenUploadGoesOff(t *testing.T) {
 		t.Fatal("an encrypted peer that can't be filtered stayed open with upload off")
 	}
 }
+
+type discard struct{ net.Conn }
+
+func (discard) Write(p []byte) (int, error) { return len(p), nil }
+
+// A stream of pieces through a gate with upload on drops nothing, so it must not allocate.
+func BenchmarkUploadGateWritesPieces(b *testing.B) {
+	g := newUploadGate(discard{}, true)
+	g.Write(handshake())
+	piece := msg(pp.Message{Type: pp.Piece, Index: 1, Begin: 0, Piece: bytes.Repeat([]byte{7}, 16384)})
+	b.SetBytes(int64(len(piece)))
+	b.ReportAllocs()
+	for b.Loop() {
+		g.Write(piece)
+	}
+}

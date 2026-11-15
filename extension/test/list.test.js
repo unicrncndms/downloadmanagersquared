@@ -472,3 +472,11 @@ test("fmtBytes: base 1000, a decimal under 100", () => {
     assert.equal(fmtBytes(n), want);
   }
 });
+
+test("parseQuery gives the same answers as the string, states apart from words", () => {
+  const { matchesSearch, parseQuery } = require("../lib/list.js");
+  assert.deepEqual(parseQuery("  Is:Failed ISO is:nope "), { states: ["failed"], q: "iso is:nope" });
+  const d = dl("a", "failed", { filename: "a.iso", url: "https://host.example/a.iso" });
+  for (const q of ["", "is:failed", "is:done", "host.example", "a.iso is:failed", "zzz"]) assert.equal(matchesSearch(d, parseQuery(q)), matchesSearch(d, q), q);
+  assert.equal(matchesSearch(dl("m", "queued", { url: "magnet:?xt=urn:btih:abc" }), parseQuery("magnet")), false); // a magnet link has no host
+});

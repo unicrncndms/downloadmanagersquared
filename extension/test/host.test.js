@@ -249,3 +249,32 @@ test("every script a page loads exists in a folder build.ps1 copies", () => {
     }
   }
 });
+
+test("the window logs the state it got and what the list holds, once a minute", async () => {
+  const f = fakeWindow();
+  const logged = [];
+  f.win.dmsWindow.log = (m) => logged.push(m);
+  f.win.document = { hidden: false, getElementById: () => ({ children: { length: 2 } }) };
+  const host = pickHost(f.win);
+  host.subscribe(() => {});
+  f.answer("getState", { downloads: [] });
+  f.answer("getSettings", {});
+  f.answer("getAutostart", false);
+  f.answer("version", "1");
+  await tick();
+  f.engine({ event: "state", data: { downloads: [{ id: "a" }, { id: "b" }] } });
+  f.engine({ event: "state", data: { downloads: [] } });
+  assert.equal(logged.length, 1);
+  assert.match(logged[0], /^state: \d+ bytes, 2 downloads, 2 nodes in the list, hidden=false$/);
+});
+
+test("a page promise nobody catches is reported too", () => {
+  const f = fakeWindow();
+  const logged = [];
+  let on;
+  f.win.addEventListener = (type, fn) => { if (type === "unhandledrejection") on = fn; };
+  f.win.dmsWindow.log = (m) => logged.push(m);
+  pickHost(f.win);
+  on({ reason: new Error("cardFor is not defined") });
+  assert.match(logged[0], /cardFor is not defined/);
+});

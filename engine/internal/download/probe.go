@@ -94,9 +94,7 @@ func probeLink(ctx context.Context, client *http.Client, l Link, ua string) (pro
 	defer resp.Body.Close()
 
 	r := probeResult{status: resp.StatusCode, size: -1, family: family}
-	ct, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	disp, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Disposition"))
-	r.isPage = (ct == "text/html" || ct == "application/xhtml+xml") && disp != "attachment" // an attached .html is the file
+	r.isPage = isPageAnswer(resp.Header)
 	switch resp.StatusCode {
 	case http.StatusPartialContent:
 		if _, total, ok := parseContentRange(resp.Header.Get("Content-Range")); ok && total >= 0 {
@@ -114,6 +112,13 @@ func probeLink(ctx context.Context, client *http.Client, l Link, ua string) (pro
 		r.wait = retryAfter(resp.Header.Get("Retry-After"), time.Now())
 	}
 	return r, nil
+}
+
+// isPageAnswer: the answer is a web page, not the file. An attached .html is the file.
+func isPageAnswer(h http.Header) bool {
+	ct, _, _ := mime.ParseMediaType(h.Get("Content-Type"))
+	disp, _, _ := mime.ParseMediaType(h.Get("Content-Disposition"))
+	return (ct == "text/html" || ct == "application/xhtml+xml") && disp != "attachment"
 }
 
 // parseContentRange reads "bytes START-END/TOTAL"; total is -1 for "*".

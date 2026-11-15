@@ -347,9 +347,10 @@ func TestInterfacesShowWhetherPeersCanConnectIn(t *testing.T) {
 		return errors.New("no UPnP here")
 	}
 	e.mu.Lock()
+	// eth and wifi sit on loopback addresses: the session really listens on them.
 	e.refreshInterfacesLocked([]netif.Interface{
-		{ID: "eth", Name: "Ethernet", IPv4: net.IPv4(192, 168, 1, 20), Gateway: net.IPv4(192, 168, 1, 1)},
-		{ID: "wifi", Name: "Wi-Fi", IPv4: net.IPv4(10, 0, 0, 5), Gateway: net.IPv4(10, 0, 0, 1)},
+		{ID: "eth", Name: "Ethernet", IPv4: net.IPv4(127, 0, 0, 2), Gateway: net.IPv4(192, 168, 1, 1)},
+		{ID: "wifi", Name: "Wi-Fi", IPv4: net.IPv4(127, 0, 0, 3), Gateway: net.IPv4(10, 0, 0, 1)},
 		{ID: "wan", Name: "Modem", IPv4: net.IPv4(203, 0, 113, 7), Gateway: net.IPv4(203, 0, 113, 1)},
 	})
 	e.mu.Unlock()

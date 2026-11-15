@@ -140,9 +140,13 @@ func pickTorrentPort(pick func() int) int {
 	return p
 }
 
+// probeHost is the address bindable probes; tests set loopback so no probe
+// listens on a real interface (a Windows Firewall prompt nobody can answer).
+var probeHost = "0.0.0.0"
+
 // bindable: TCP and UDP can both listen on port p on every address now.
 func bindable(p int) bool {
-	addr := fmt.Sprintf("0.0.0.0:%d", p)
+	addr := fmt.Sprintf("%s:%d", probeHost, p)
 	l, err := net.Listen("tcp4", addr)
 	if err != nil {
 		return false

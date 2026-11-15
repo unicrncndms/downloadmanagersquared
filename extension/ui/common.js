@@ -14,7 +14,17 @@ function call(method, params) {
 }
 
 function connectUI(onUpdate) {
-  return Host.subscribe((m) => { applyAccent(m.settings); applyTheme(m.settings); if (m.settings) setSpeedUnit(m.settings.speedUnit); onUpdate(m); });
+  const draw = (m) => { applyAccent(m.settings); applyTheme(m.settings); if (m.settings) setSpeedUnit(m.settings.speedUnit); onUpdate(m); };
+  // A hidden page (a minimized Downloads window, another tab) draws nothing:
+  // it keeps the latest news and draws it when shown again.
+  let held = null;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden || !held) return;
+    const m = held;
+    held = null;
+    draw(m);
+  });
+  return Host.subscribe((m) => { if (document.hidden) held = m; else draw(m); });
 }
 
 // Sets the accent tokens (lib/accent.js) from the engine's settings; without

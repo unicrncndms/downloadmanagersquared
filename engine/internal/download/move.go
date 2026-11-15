@@ -427,6 +427,9 @@ func copyTree(ctx context.Context, src, dst string) error {
 	return nil
 }
 
+// moveBuf is the copy buffer of a move: a multi-GB file would otherwise be read and written 32 KiB at a time.
+const moveBuf = 1 << 20
+
 func copyFile(ctx context.Context, src, dst string, fi fs.FileInfo) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -437,7 +440,10 @@ func copyFile(ctx context.Context, src, dst string, fi fs.FileInfo) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(out, ctxReader{ctx, in})
+	// The writer hides os.File's ReadFrom, which on Windows copies in 32 KiB and
+	// ignores the buffer. The buffer is no bigger than the file (+1: CopyBuffer panics on none).
+	buf := make([]byte, min(fi.Size()+1, moveBuf))
+	_, err = io.CopyBuffer(struct{ io.Writer }{out}, ctxReader{ctx, in}, buf)
 	if err == nil {
 		// On disk before removeOld deletes the original.
 		err = out.Sync()
@@ -482,9 +488,10 @@ func copySparse(ctx context.Context, src, dst string) error {
 		if err := out.Truncate(fi.Size()); err != nil {
 			return err
 		}
+		buf := make([]byte, min(fi.Size()+1, moveBuf)) // shared by the ranges
 		for _, r := range rs {
 			w := io.NewOffsetWriter(out, r.Start)
-			if _, err := io.Copy(w, ctxReader{ctx, io.NewSectionReader(in, r.Start, r.End-r.Start)}); err != nil {
+			if _, err := io.CopyBuffer(w, ctxReader{ctx, io.NewSectionReader(in, r.Start, r.End-r.Start)}, buf); err != nil {
 				return err
 			}
 		}

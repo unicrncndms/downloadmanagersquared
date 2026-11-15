@@ -358,15 +358,31 @@ const STATE_WORDS = {
 // "is:queued", "is:running" and "is:done" take a state instead (several: any
 // of them); with other words, both must hold.
 function matchesSearch(d, query) {
+  const { states, q } = typeof query === "object" && query ? query : parseQuery(query);
+  if (states.length && !states.some((s) => STATE_WORDS[s](d))) return false;
+  if (!q) return true;
+  return [d.filename, hostOf(d.url), d.label, d.groupName].some((v) => v && String(v).toLowerCase().includes(q));
+}
+
+// parseQuery splits the box into its states and its words once, so a list of
+// thousands is not parsed once per download. matchesSearch takes it too.
+function parseQuery(query) {
   const words = String(query || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
   const isState = (w) => w.startsWith("is:") && Object.hasOwn(STATE_WORDS, w.slice(3));
-  const states = words.filter(isState).map((w) => w.slice(3));
-  if (states.length && !states.some((s) => STATE_WORDS[s](d))) return false;
-  const q = words.filter((w) => !isState(w)).join(" ");
-  if (!q) return true;
-  let host = "";
-  try { host = new URL(d.url).hostname; } catch { /* a magnet link has none */ }
-  return [d.filename, host, d.label, d.groupName].some((v) => v && String(v).toLowerCase().includes(q));
+  return { states: words.filter(isState).map((w) => w.slice(3)), q: words.filter((w) => !isState(w)).join(" ") };
+}
+
+// hostOf is a link's host name ("" for a magnet link), remembered: the same
+// links are searched again every second.
+const hosts = new Map();
+function hostOf(url) {
+  let h = hosts.get(url);
+  if (h === undefined) {
+    try { h = new URL(url).hostname; } catch { h = ""; }
+    if (hosts.size > 5000) hosts.clear();
+    hosts.set(url, h);
+  }
+  return h;
 }
 
 // errorSource is the connection a download's error belongs to, so the row can
@@ -517,5 +533,5 @@ function pickTotal(sizes, ticked) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { fileFolders, pickTotal, addSubmits, linesNote, finishedVerdict, finishedSummary, badgeOf, seenAfter, addLines, addView, plainFtpNote, addFileCheck, matchesSearch, errorSource, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, progressText, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, seedLine, bulkActions, routerWarnings, routerGroups, lineResults, familyText, ipv6Hints };
+  module.exports = { fileFolders, pickTotal, addSubmits, linesNote, finishedVerdict, finishedSummary, badgeOf, seenAfter, addLines, addView, plainFtpNote, addFileCheck, matchesSearch, parseQuery, errorSource, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, progressText, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, seedLine, bulkActions, routerWarnings, routerGroups, lineResults, familyText, ipv6Hints };
 }

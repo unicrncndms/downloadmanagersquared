@@ -1,6 +1,8 @@
 package tray
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -18,7 +20,10 @@ type fakeWindow struct{ views []string }
 func (w *fakeWindow) Open(view string) error { w.views = append(w.views, view); return nil }
 
 func TestTheMenuOpensTheWindowAtTheRightView(t *testing.T) {
-	e, err := engine.Open(t.TempDir())
+	dir := t.TempDir()
+	// A saved port keeps the engine from probing for one on every address, which a firewall would ask about.
+	os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"torrentPort":23456}`), 0o644)
+	e, err := engine.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
