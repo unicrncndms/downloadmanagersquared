@@ -117,18 +117,16 @@ func (e *Engine) RecordRecipe(id string) error {
 // canRecordLocked: the Record recipe button. An unfinished HTTP download with a
 // landing page whose browser's extension is connected, has said which hosts
 // it has recipes for, and has none for this one; with no resolve or
-// recording running for it.
-func (e *Engine) canRecordLocked(s download.Summary, browser string) bool {
+// recording running for it. resolving is resolvingIDsLocked, built once per tick.
+func (e *Engine) canRecordLocked(s download.Summary, browser string, resolving map[string]bool) bool {
 	if s.Kind != "" || s.Status == download.StatusCompleted || s.PageURL == "" {
 		return false
 	}
 	if c := e.learning[s.ID]; c != nil && e.clients[c] != nil {
 		return false
 	}
-	for k := range e.resolves {
-		if strings.HasPrefix(k, s.ID+"|") {
-			return false
-		}
+	if resolving[s.ID] {
+		return false
 	}
 	for _, l := range s.Links {
 		if l.Status == download.LinkResolving {
@@ -142,6 +140,17 @@ func (e *Engine) canRecordLocked(s download.Summary, browser string) bool {
 	hosts := e.clients[c].recipeHosts
 	u, err := url.Parse(s.PageURL)
 	return hosts != nil && err == nil && u.Hostname() != "" && !hosts[u.Hostname()]
+}
+
+// resolvingIDsLocked is the ids of the downloads with a resolve pending: the
+// part of each e.resolves key before its "|".
+func (e *Engine) resolvingIDsLocked() map[string]bool {
+	ids := make(map[string]bool, len(e.resolves))
+	for k := range e.resolves {
+		id, _, _ := strings.Cut(k, "|")
+		ids[id] = true
+	}
+	return ids
 }
 
 // startBrowser starts a browser so its extension connects; tests replace it.

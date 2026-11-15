@@ -110,7 +110,7 @@ func (s *Set) publish(run *setRun) {
 	if changed {
 		s.mu.Lock()
 		for _, d := range s.members {
-			d.env.Changed(d)
+			d.changed()
 		}
 		s.mu.Unlock()
 	}

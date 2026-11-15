@@ -158,7 +158,7 @@ func (d *Download) SetArchivePassword(password string) error {
 	}
 	f.Password, f.Ask = Secret(password), ""
 	d.mu.Unlock()
-	d.env.Changed(d)
+	d.changed()
 	return nil
 }
 
@@ -227,6 +227,17 @@ func (d *Download) FolderOn() bool {
 	return f != nil && (f.On || f.Auto && archive.Extractable(d.st.Filename) && d.st.SHA256 == "" && d.st.MD5 == "")
 }
 
+// FolderInto is the folder a Download as folder extracts into, "" when it is
+// not one yet (or has none).
+func (d *Download) FolderInto() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if f := d.st.Folder; f != nil && f.On {
+		return f.Into
+	}
+	return ""
+}
+
 // folderOnLocked: the download is a Download as folder.
 func (d *Download) folderOnLocked() bool { return d.st.Folder != nil && d.st.Folder.On }
 
@@ -256,7 +267,7 @@ func (d *Download) SetFolder(on bool) error {
 	if restart {
 		d.restart()
 	}
-	d.env.Changed(d)
+	d.changed()
 	return nil
 }
 
@@ -373,7 +384,7 @@ func (d *Download) SetArchiveKeeping(k string) error {
 		//lint:ignore ST1005 shown to the user as is, like the pause messages
 		return errors.New(lockedNote)
 	}
-	d.env.Changed(d)
+	d.changed()
 	return nil
 }
 
@@ -423,7 +434,7 @@ func (d *Download) SetFolderInto(dir string) error {
 			d.st.Dir = dir
 		}
 		d.mu.Unlock()
-		d.env.Changed(d)
+		d.changed()
 		return nil
 	}
 	f := d.st.Folder
@@ -443,7 +454,7 @@ func (d *Download) SetFolderInto(dir string) error {
 	if restart {
 		d.restart()
 	}
-	d.env.Changed(d)
+	d.changed()
 	return nil
 }
 

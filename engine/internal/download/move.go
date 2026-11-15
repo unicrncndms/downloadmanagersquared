@@ -49,7 +49,7 @@ func (d *Download) moveToLocked(dir string) error {
 		// Where it already is: a pending move is called off.
 		f.Moving, f.MoveError = "", ""
 		d.mu.Unlock()
-		d.env.Changed(d)
+		d.changed()
 		return nil
 	}
 	f.Moving, f.MoveError = dir, ""
@@ -61,10 +61,10 @@ func (d *Download) moveToLocked(dir string) error {
 		d.restart()
 	case !copying:
 		err := d.relocate(context.Background())
-		d.env.Changed(d)
+		d.changed()
 		return err
 	}
-	d.env.Changed(d)
+	d.changed()
 	return nil
 }
 
@@ -115,7 +115,7 @@ func (d *Download) relocate(ctx context.Context) error {
 	d.moving = copying
 	d.mu.Unlock()
 	if copying {
-		d.env.Changed(d)
+		d.changed()
 	}
 
 	err := d.doMove(ctx, m)
@@ -147,7 +147,7 @@ func (d *Download) relocate(ctx context.Context) error {
 		log.Printf("download %s: %v", d.st.ID, err)
 	}
 	d.mu.Unlock()
-	d.env.Changed(d)
+	d.changed()
 	if err == nil {
 		// The new place on disk first: a crash after the delete would leave
 		// a saved state pointing at what is gone.
@@ -237,7 +237,7 @@ func (d *Download) doMove(ctx context.Context, m *move) error {
 			d.st.Folder.MovePart = m.newPart
 		}
 		d.mu.Unlock()
-		d.env.Changed(d)
+		d.changed()
 	}
 
 	// The .part first: a folder held open is what usually stops a move, and

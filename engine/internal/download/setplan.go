@@ -40,9 +40,7 @@ func PlanSets(ds []*Download, sets map[string]*Set, parallel bool, saveDir strin
 			continue
 		}
 		f := setFact{id: d.ID(), key: key, set: set, part: part, lone: lone, status: d.Status(), running: d.Running(), folderOn: d.FolderOn()}
-		if fs := d.State().Folder; fs != nil && fs.On && fs.Into != "" {
-			f.folderInto = fs.Into
-		}
+		f.folderInto = d.FolderInto()
 		facts = append(facts, f)
 		byID[f.id] = d
 	}

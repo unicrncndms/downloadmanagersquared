@@ -273,7 +273,7 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 			p1.on = true
 		}
 		p1.d.mu.Unlock()
-		p1.d.env.Changed(p1.d)
+		p1.d.changed()
 	}
 	s.alreadyExtracted(run, members)
 	switch {
@@ -293,7 +293,7 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 		for _, m := range members {
 			if m.completed && !m.on && len(m.freed) == 0 && exists(m.path) {
 				m.d.keepPart(m.path)
-				m.d.env.Changed(m.d)
+				m.d.changed()
 			}
 		}
 		return false, nil
@@ -661,7 +661,7 @@ func (s *Set) follow(p1 partInfo, members map[int]partInfo) {
 			d.st.Dir = p1.into
 		}
 		d.mu.Unlock()
-		d.env.Changed(d)
+		d.changed()
 	}
 }
 
@@ -753,7 +753,7 @@ func (s *Set) finish(run *setRun, members map[int]partInfo) {
 		d.st.Folder.Out = out
 		d.st.Folder.Password = "" // kept only as long as it's needed
 		d.mu.Unlock()
-		d.env.Changed(d)
+		d.changed()
 		if !m.completed {
 			if err := d.save(); err != nil {
 				log.Printf("set %s: saving a part: %v", s.set, err)
@@ -788,7 +788,7 @@ func (s *Set) sweep(out string, members map[int]partInfo) {
 		}
 		d.settlePart(m.path, keep)
 		if keep {
-			d.env.Changed(d)
+			d.changed()
 		}
 	}
 }
@@ -822,7 +822,7 @@ func (s *Set) giveUp(run *setRun, members map[int]partInfo, err error) error {
 		if done {
 			d.keepPart(path)
 		}
-		d.env.Changed(d)
+		d.changed()
 	}
 	s.accepted.Store(false)
 	return nil

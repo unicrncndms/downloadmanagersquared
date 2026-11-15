@@ -112,8 +112,9 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	resolving := e.resolvingIDsLocked()
 	for i := range sums {
-		sums[i].Actions.RecordRecipe = e.canRecordLocked(sums[i], browsers[i])
+		sums[i].Actions.RecordRecipe = e.canRecordLocked(sums[i], browsers[i], resolving)
 		e.markLimitLocked(&sums[i], total, speeds)
 	}
 	now := time.Now()

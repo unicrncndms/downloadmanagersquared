@@ -50,7 +50,7 @@ func (d *Download) SetHashes(sha, md string) error {
 		d.checking = true
 	}
 	d.mu.Unlock()
-	d.env.Changed(d)
+	d.changed()
 	if check {
 		go d.checkFinished(path)
 	}
@@ -93,7 +93,7 @@ func (d *Download) checkFinished(path string) {
 			}
 		}
 		d.mu.Unlock()
-		d.env.Changed(d)
+		d.changed()
 		if !again {
 			return
 		}
@@ -138,7 +138,7 @@ func (d *Download) complete(ctx context.Context) error {
 		d.mu.Lock()
 		d.st.Status = StatusVerifying
 		d.mu.Unlock()
-		d.env.Changed(d)
+		d.changed()
 		if err := verifyFile(ctx, part, sha, md); err != nil {
 			switch {
 			case errors.Is(err, errMismatch) && fromServer:

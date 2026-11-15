@@ -564,7 +564,7 @@ func (d *Download) editFolder(edit func(f *Folder) bool) {
 	changed := edit(d.st.Folder)
 	d.mu.Unlock()
 	if changed {
-		d.env.Changed(d)
+		d.changed()
 	}
 }
 
@@ -594,7 +594,7 @@ func (d *Download) pauseWith(msg string) {
 		d.st.Error = msg
 	}
 	d.mu.Unlock()
-	d.env.Changed(d)
+	d.changed()
 }
 
 // preferTail is archivePart's: a running download fetches from at on first,
@@ -630,5 +630,5 @@ func (d *Download) refetch(r Range) {
 	}
 	d.mu.Unlock()
 	log.Printf("download %s: fetching %d-%d again", d.ID(), r.Start, r.End)
-	d.env.Changed(d)
+	d.changed()
 }

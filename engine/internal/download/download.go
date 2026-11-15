@@ -190,6 +190,11 @@ type Download struct {
 	limit *rate.Shaper // st.Limit, over all its connections
 
 	seen map[string]string // what the last summary showed, for the activity log; nil until the first
+
+	rev    atomic.Uint64 // bumped by changed(), for the kept Summary
+	sum    Summary       // the Summary of a finished download, while sumKey still holds
+	sumKey sumKey
+	sumOK  bool
 }
 
 func New(env Env, st State) *Download {
@@ -212,7 +217,7 @@ func (d *Download) SetLimit(bps int64) {
 	d.st.Limit = bps
 	d.mu.Unlock()
 	d.limit.SetLimits(0, bps)
-	d.env.Changed(d)
+	d.changed()
 }
 
 func (d *Download) ID() string { return d.st.ID }
@@ -324,7 +329,7 @@ func (d *Download) SetResolved(ifaceID, url, cookie, referer string) {
 	}
 	l.resolved(url, cookie, referer)
 	d.mu.Unlock()
-	d.env.Changed(d)
+	d.changed()
 }
 
 func (d *Download) ResolveFailed(ifaceID, msg string) {
@@ -333,7 +338,7 @@ func (d *Download) ResolveFailed(ifaceID, msg string) {
 		l.resolveFailed(msg)
 	}
 	d.mu.Unlock()
-	d.env.Changed(d)
+	d.changed()
 }
 
 // RetryLink gives a failed or mismatched interface another chance.
@@ -343,7 +348,7 @@ func (d *Download) RetryLink(ifaceID string) {
 		l.retry()
 	}
 	d.mu.Unlock()
-	d.env.Changed(d)
+	d.changed()
 }
 
 // SetPageURL sets the landing page and retries interfaces that were waiting for one.
@@ -364,7 +369,7 @@ func (d *Download) SetPageURL(u string) {
 	if wake {
 		d.Resume()
 	}
-	d.env.Changed(d)
+	d.changed()
 }
 
 func (d *Download) partPath() string { return filepath.Join(d.st.Dir, d.st.Filename+partSuffix) }
@@ -433,7 +438,7 @@ func (d *Download) run(ctx context.Context) {
 		d.startLocked()
 		close(old)
 		d.mu.Unlock()
-		d.env.Changed(d)
+		d.changed()
 		return
 	case d.stopAs != "":
 		d.st.Status = d.stopAs
@@ -455,7 +460,7 @@ func (d *Download) run(ctx context.Context) {
 	close(d.done)
 	d.mu.Unlock()
 
-	d.env.Changed(d)
+	d.changed()
 	if finished {
 		d.env.Finished(d)
 	}
@@ -489,7 +494,7 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 	defer func() {
 		d.mu.Unlock()
 		if changed {
-			d.env.Changed(d)
+			d.changed()
 		}
 	}()
 

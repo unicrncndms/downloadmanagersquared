@@ -51,7 +51,7 @@ func (d *Download) SetDir(dir string) error {
 		d.st.Filename = strings.TrimSuffix(filepath.Base(m.newPart), partSuffix)
 	}
 	d.mu.Unlock()
-	d.env.Changed(d)
+	d.changed()
 	if err := d.save(); err != nil {
 		return err // the old copy stays, as in relocate
 	}
