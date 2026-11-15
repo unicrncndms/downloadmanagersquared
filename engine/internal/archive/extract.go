@@ -3,7 +3,6 @@ package archive
 import (
 	"bufio"
 	"cmp"
-	"compress/flate"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -17,6 +16,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/klauspost/compress/flate"
 	"github.com/klauspost/compress/zstd"
 
 	"downloadmanagersquared/engine/internal/archive/deflate64"
@@ -422,14 +422,18 @@ func (f *flusher) init() {
 
 // finish flushes Entry i's checked file out and then puts it in place (see
 // finish) on a goroutine of its own. It waits only while flushers files are
-// being flushed already.
-func (f *flusher) finish(i int, e Entry, out *os.File, path string, mark func(string)) {
+// being flushed already. durable false skips the flush: only for an archive
+// that stays whole, where nothing is freed for the Entry (see Extractor.Keep).
+func (f *flusher) finish(i int, e Entry, out *os.File, path string, mark func(string), durable bool) {
 	f.mu.Lock()
 	f.busy[i]++
 	f.mu.Unlock()
 	f.slot <- struct{}{}
 	go func() {
-		err := syncFile(out)
+		var err error
+		if durable {
+			err = syncFile(out)
+		}
 		if err != nil {
 			discard(out)
 		} else {
@@ -492,7 +496,7 @@ func (x *Extractor) extractFile(ctx context.Context, i int, e Entry, path string
 		discard(out)
 		return bad, err
 	}
-	x.fl.finish(i, e, out, path, x.Mark)
+	x.fl.finish(i, e, out, path, x.Mark, !x.Keep)
 	return "", nil
 }
 
@@ -584,16 +588,21 @@ func zstdFits(e Entry, br *bufio.Reader) error {
 	return nil
 }
 
+// inflateBuf is how much of the archive a deflate decoder reads at once.
+const inflateBuf = 128 << 10
+
 // copyEntry decompresses the Entry's data from src into out and checks its
 // size and CRC32. bad is why its bytes are wrong; err is any other failure.
 func copyEntry(ctx context.Context, e Entry, src io.Reader, out *os.File) (bad string, err error) {
 	switch e.Method {
 	case Deflate:
-		fr := flate.NewReader(src)
+		// A bufio of its own: a SectionReader has no ReadByte, so the decoder
+		// would read the archive 4 KiB at a time.
+		fr := flate.NewReader(bufio.NewReaderSize(src, int(min(inflateBuf, e.CompressedSize+1))))
 		defer fr.Close()
 		src = fr
 	case Deflate64:
-		fr := deflate64.NewReader(src)
+		fr := deflate64.NewReader(bufio.NewReaderSize(src, int(min(inflateBuf, e.CompressedSize+1))))
 		defer fr.Close()
 		src = fr
 	case Zstd, zstdOld:
@@ -618,8 +627,10 @@ func copyEntry(ctx context.Context, e Entry, src io.Reader, out *os.File) (bad s
 	// writing more than that.
 	src = io.LimitReader(src, min(e.Size, math.MaxInt64-1)+1)
 	sum := crc32.NewIEEE()
-	w := bufio.NewWriterSize(io.MultiWriter(out, sum), 256<<10)
-	buf := make([]byte, 256<<10)
+	// Small files get small buffers: 100k of them would otherwise zero 50 GB.
+	bufLen := int(min(e.Size+1, 256<<10))
+	w := bufio.NewWriterSize(io.MultiWriter(out, sum), bufLen)
+	buf := make([]byte, bufLen)
 	var n int64
 	for {
 		if err := ctx.Err(); err != nil {

@@ -233,9 +233,13 @@ func (e *Extraction) freeDone(parts []archivePart, done []int64) error {
 	if e.arc == nil || len(done) == 0 {
 		return nil
 	}
+	isDone := make(map[int64]bool, len(done))
+	for _, s := range done {
+		isDone[s] = true
+	}
 	var rs []archive.Range
 	for _, en := range e.arc.Entries {
-		if slices.Contains(done, en.Start) {
+		if isDone[en.Start] {
 			rs = append(rs, archive.Range{Start: en.Start, End: en.End})
 		}
 	}

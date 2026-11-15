@@ -298,7 +298,7 @@ func (x *Extractor) decodeRar(ctx context.Context, _ int) (bad string, err error
 			}
 			return bad, err
 		}
-		x.fl.finish(0, e, out, path, x.Mark)
+		x.fl.finish(0, e, out, path, x.Mark, !x.Keep)
 		if !s.seen[key] {
 			s.seen[key] = true
 			s.files.Add(1)
