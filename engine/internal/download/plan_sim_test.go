@@ -1,6 +1,7 @@
 package download
 
 import (
+	"math"
 	"math/rand"
 	"testing"
 )
@@ -112,12 +113,74 @@ func TestOrderedPlanHoldsBackLess(t *testing.T) {
 			_, oa, om := simulate(true, append(starts[:len(starts):len(starts)], size), starts, size)
 			t.Logf("big Entries %d MiB, archive %d (%d MiB): held back on average %d MiB split by speed, %d ordered; most ahead of the front %d, %d MiB",
 				big>>20, seed, size>>20, ta>>20, oa>>20, tm>>20, om>>20)
-			if oa >= ta {
+			// The 32 MiB floor costs a little for small Entries (ADR 0007).
+			if oa >= ta+ta/20 {
 				t.Errorf("archive %d with %d MiB Entries: ordered held back %d on average, split by speed %d", seed, big>>20, oa, ta)
 			}
 			if om > 2*stride*speed {
 				t.Errorf("archive %d with %d MiB Entries: ordered had %d MiB ahead of the front, more than two strides (%d MiB)", seed, big>>20, om>>20, 2*stride*speed>>20)
 			}
 		}
+	}
+}
+
+// firstFree runs 6 connections of 8 MiB/s through a plan of a 2 GiB solid
+// archive (read front to back: nothing is freed before its first 128 MiB are
+// all on disk) in which the connection with the front chunk drops to a tenth
+// of its speed at 5 s. It returns the seconds until that front is on disk.
+func firstFree(ordered bool) float64 {
+	const size, front, speed = 2 << 30, 128 << 20, 8 << 20
+	p := newPlan(size, true, []Range{{0, size}})
+	p.ordered = ordered
+	ws := make([]*worker, 6)
+	segs := make([]*segment, len(ws))
+	for i := range ws {
+		ws[i] = &worker{speed: speed}
+	}
+	for t := 0.0; ; t += 0.25 {
+		if t == 5 {
+			ws[0].speed = speed / 10
+		}
+		for i, w := range ws {
+			if segs[i] == nil {
+				if s := p.claim(w.speed); s != nil {
+					s.owner, segs[i] = w, s
+				}
+			}
+		}
+		for i, w := range ws {
+			if s := segs[i]; s != nil {
+				n := int64(w.speed / 4)
+				off, k := p.take(s, n)
+				p.wrote(s, off, k)
+				if k < n || s.written >= s.end {
+					p.release(s)
+					segs[i] = nil
+				}
+			}
+		}
+		p.prune()
+		first := int64(size)
+		for _, r := range p.ranges() {
+			first = min(first, r.Start)
+		}
+		if first >= front || p.remaining() == 0 {
+			return t
+		}
+	}
+}
+
+// A slow connection on the front stride of a solid archive is taken over, so
+// the first bytes are freed much sooner than when it is left to finish; normal
+// mode (split by speed, no order) is the reference.
+func TestOrderedStealsASlowFront(t *testing.T) {
+	was := orderedSteal
+	orderedSteal = math.Inf(1)
+	before := firstFree(true)
+	orderedSteal = was
+	after, normal := firstFree(true), firstFree(false)
+	t.Logf("front 128 MiB on disk after %.1f s ordered without the takeover, %.1f s with it, %.1f s normal mode", before, after, normal)
+	if after >= before/2 {
+		t.Errorf("takeover: %.1f s, without it %.1f s", after, before)
 	}
 }

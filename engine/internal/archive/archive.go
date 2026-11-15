@@ -23,8 +23,10 @@ import (
 )
 
 // TailGuess is how much of the archive's end to fetch before anything is
-// known about it. Need then says exactly how much is needed.
-const TailGuess = 64 << 10
+// known about it. Need then says exactly how much is needed. 4 MiB holds the
+// whole list of most archives, so one request gets it; the bytes are the
+// file's own, written in place, and read in chunks, never held whole.
+const TailGuess = 4 << 20
 
 // Compression methods DMS² can extract.
 const (
