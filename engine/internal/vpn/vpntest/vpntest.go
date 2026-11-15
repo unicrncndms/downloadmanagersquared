@@ -104,6 +104,7 @@ type PIA struct {
 	Keys       atomic.Int32
 	Signatures atomic.Int32
 	Binds      atomic.Int32
+	Probes     atomic.Int32 // region latency probes: connections to the meta server
 	Password   string
 	VPN        *Server // the first server
 	// Unanswering hands out a server key no server has, so tunnels start but
@@ -170,7 +171,23 @@ func NewPIA(t testing.TB, forwards bool, n int) *PIA {
 	ca := x509.NewCertPool()
 	ca.AddCert(keys.Certificate())
 	_, kport, _ := net.SplitHostPort(keys.Listener.Addr().String())
-	f.API = pia.API{TokenURL: web.URL + "/token", ServerListURL: web.URL + "/servers", CA: ca, KeyPort: atoi(kport), MetaPort: 1, PFPort: 19999}
+	meta, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { meta.Close() })
+	go func() {
+		for {
+			c, err := meta.Accept()
+			if err != nil {
+				return
+			}
+			f.Probes.Add(1)
+			c.Close()
+		}
+	}()
+	_, mport, _ := net.SplitHostPort(meta.Addr().String())
+	f.API = pia.API{TokenURL: web.URL + "/token", ServerListURL: web.URL + "/servers", CA: ca, KeyPort: atoi(kport), MetaPort: atoi(mport), PFPort: 19999}
 
 	pfLn, err := f.VPN.T.Listen(19999) // inside the tunnel, as on PIA's servers
 	if err != nil {

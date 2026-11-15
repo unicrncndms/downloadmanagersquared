@@ -437,26 +437,38 @@ func (p *piaProvider) session(ctx context.Context, a *account, regionID string, 
 		}
 		regions, regionsAt = r, now
 	}
-	var region pia.Region
-	for _, r := range regions {
-		if r.ID == regionID {
-			region = r
-		}
-	}
-	if region.ID == "" && regionID == "" {
-		// Every interface uses the region the first one measured fastest.
+	find := func(id string) (region pia.Region) {
 		for _, r := range regions {
-			if r.ID == picked {
+			if r.ID == id {
 				region = r
 			}
 		}
+		return
+	}
+	region := find(regionID)
+	if region.ID == "" && regionID == "" {
+		// Every interface uses the region the first one measured fastest.
+		region = find(picked)
 	}
 	if region.ID == "" { // "" or gone: the lowest latency
-		r, err := p.api.Fastest(ctx, regions, b.DialContext)
-		if err != nil {
-			return "", pia.Region{}, err
+		// Under the logins lock, so interfaces starting together probe once:
+		// the later ones find the first one's pick stored.
+		p.logins.Lock()
+		t.mu.Lock()
+		picked = a.region.ID
+		t.mu.Unlock()
+		if region = find(picked); region.ID == "" {
+			r, err := p.api.Fastest(ctx, regions, b.DialContext)
+			if err != nil {
+				p.logins.Unlock()
+				return "", pia.Region{}, err
+			}
+			region = r
 		}
-		region = r
+		t.mu.Lock()
+		a.region = region
+		t.mu.Unlock()
+		p.logins.Unlock()
 	}
 	t.mu.Lock()
 	a.token, a.tokenAt, a.regions, a.regionsAt, a.region, a.err = token, tokenAt, regions, regionsAt, region, ""

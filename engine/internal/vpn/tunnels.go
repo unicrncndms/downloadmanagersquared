@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/netip"
@@ -25,8 +26,9 @@ import (
 )
 
 const (
-	tunnelRetry = 30 * time.Second // after a tunnel fails to start or loses its server
-	tunnelGrace = 30 * time.Second // for a new tunnel's first handshake
+	tunnelRetry      = 30 * time.Second // the longest wait after a tunnel fails to start or loses its server
+	tunnelFirstRetry = 5 * time.Second  // the first: the network may be back soon
+	tunnelGrace      = 30 * time.Second // for a new tunnel's first handshake
 )
 
 var errNotUp = errors.New("the VPN tunnel is not up")
@@ -110,6 +112,7 @@ type entry struct {
 	starting bool
 	started  time.Time
 	retryAt  time.Time
+	fails    int // starts in a row that failed or lost the server
 	err      string
 }
 
@@ -258,10 +261,13 @@ func (t *Tunnels) sync(now time.Time) {
 		usable := ifc.Usable && ifc.Binding != nil
 		if te.t != nil {
 			te.up = te.t.Up()
+			if te.up {
+				te.fails = 0
+			}
 			lost := !te.up && now.Sub(te.started) > tunnelGrace
 			if !usable || te.on != ifc.Binding || lost {
 				if lost {
-					te.err, te.retryAt = "the VPN server doesn't answer"+te.prov.lostHint(), now.Add(tunnelRetry)
+					te.err, te.retryAt = "the VPN server doesn't answer"+te.prov.lostHint(), now.Add(te.nextRetry())
 				}
 				stops = append(stops, te.stopLocked())
 			}
@@ -305,7 +311,7 @@ func (t *Tunnels) startTunnel(te *entry, b *netif.Binding) {
 	}
 	if err != nil {
 		log.Printf("tunnel for %s: %v", te.id, err)
-		te.err, te.retryAt = err.Error(), time.Now().Add(tunnelRetry)
+		te.err, te.retryAt = err.Error(), time.Now().Add(te.nextRetry())
 		return
 	}
 	te.cfg = cfg
@@ -313,6 +319,38 @@ func (t *Tunnels) startTunnel(te *entry, b *netif.Binding) {
 	te.gen++
 	te.client = netif.NewHTTPClient(tn.DialContext)
 	te.fw = newFw(tn)
+	t.goJob(func() { t.watchUp(te, tn) })
+}
+
+// nextRetry counts a failure and is how long to wait before the start after it:
+// 5 s, doubling to 30 s, with jitter so tunnels that failed together don't retry together.
+func (te *entry) nextRetry() time.Duration {
+	d := min(tunnelFirstRetry<<min(te.fails, 3), tunnelRetry)
+	te.fails++
+	return time.Duration(float64(d) * (0.8 + 0.4*jitter()))
+}
+
+var jitter = rand.Float64
+
+// watchUp polls tn every 200 ms for its first 3 s, so a tunnel is usable as
+// soon as it has shaken hands, not at the next Tick.
+func (t *Tunnels) watchUp(te *entry, tn *tunnel.Tunnel) {
+	for range 15 {
+		select {
+		case <-time.After(200 * time.Millisecond):
+		case <-t.ctx.Done():
+			return
+		}
+		if tn.Up() {
+			t.mu.Lock()
+			if te.t == tn {
+				te.up, te.fails = true, 0
+			}
+			t.mu.Unlock()
+			t.forward(time.Now()) // as the Tick that saw it up would
+			return
+		}
+	}
 }
 
 // forward keeps the ports of the tunnels that are up forwarded. A port the

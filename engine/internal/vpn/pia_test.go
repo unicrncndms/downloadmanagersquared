@@ -277,3 +277,38 @@ func TestALostPIATunnelSaysNothingAboutExpiredConfigs(t *testing.T) {
 		t.Fatalf("lost PIA tunnel: %q, %q; want down, saying only that the server doesn't answer", s.State, s.Err)
 	}
 }
+
+// Interfaces that start together measure the regions once.
+func TestPIAStartsTogetherProbeTheRegionsOnce(t *testing.T) {
+	f := vpntest.NewPIA(t, false, 1)
+	r := newRig(t, Options{PIA: f.API}, "lo", "lo2")
+	r.tick(time.Now())
+	if err := r.SetPIA("p0123456", "right"); err != nil {
+		t.Fatal(err)
+	}
+	r.waitUp(t, "lo", "lo2")
+	if n := f.Probes.Load(); n != 1 {
+		t.Fatalf("%d region probes, want 1", n)
+	}
+}
+
+func TestRetriesStartAtFiveSecondsAndBackOffToThirty(t *testing.T) {
+	old := jitter
+	jitter = func() float64 { return 0.5 } // no jitter
+	defer func() { jitter = old }()
+	te := &entry{}
+	var got []time.Duration
+	for range 6 {
+		got = append(got, te.nextRetry())
+	}
+	want := []time.Duration{5, 10, 20, 30, 30, 30}
+	for i, w := range want {
+		if got[i] != w*time.Second {
+			t.Fatalf("retry delays %v, want %v seconds", got, want)
+		}
+	}
+	jitter = func() float64 { return 1 }
+	if d := (&entry{}).nextRetry(); d != 6*time.Second {
+		t.Fatalf("first retry with the most jitter: %v", d)
+	}
+}

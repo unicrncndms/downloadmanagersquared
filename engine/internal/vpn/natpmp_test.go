@@ -32,7 +32,7 @@ func pmpTunnel(t *testing.T, set func(*vpntest.PMP)) (*rig, *vpntest.Server, *vp
 func (r *rig) upWithoutWaiting(t *testing.T) {
 	t.Helper()
 	waitFor(t, "the tunnel to come up", 30*time.Second, func() bool {
-		r.Wait()
+		time.Sleep(10 * time.Millisecond) // not Wait: a tunnel that is up starts its probe at once
 		r.Tick(time.Now(), r.ifaces)
 		_, ok := r.Up("lo")
 		return ok
