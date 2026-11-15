@@ -40,7 +40,7 @@ browser.runtime.onConnect.addListener((port) => {
 // open it sends the small badge event. An engine without watch/unwatch (older) answers with an
 // error and sends the state anyway, so the failure is ignored.
 let uiPorts = 0;
-const watch = (on) => Engine.call(on ? "watch" : "unwatch").catch(() => {});
+const watch = (on) => (on ? Engine.call("watch") : Engine.call("unwatch")).catch(() => {});
 Engine.on("connection", ({ connected }) => { if (connected) watch(uiPorts > 0); });
 
 // Only this extension's own pages (ui/) may ask for these; content scripts run in web pages.
