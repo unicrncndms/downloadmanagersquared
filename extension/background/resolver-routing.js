@@ -12,6 +12,7 @@ Object.assign(Resolver, {
   saveContainers() {
     this.reindex();
     browser.storage.local.set({ containers: this.containers });
+    this.fence();
   },
 
   async ensureContainer(iface, name) {

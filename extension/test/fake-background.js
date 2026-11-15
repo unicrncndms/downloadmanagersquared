@@ -38,8 +38,8 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
   const clock = { now, timers: [] };
   const ev = (name) => ({
     addListener: (f) => (listeners[name] = listeners[name] || []).push(f),
-    removeListener() {},
-    hasListener: () => false,
+    removeListener: (f) => { listeners[name] = (listeners[name] || []).filter((g) => g !== f); },
+    hasListener: (f) => (listeners[name] || []).includes(f),
   });
   const rec = (name, result) => (...args) => {
     calls.push([name, ...args]);

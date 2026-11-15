@@ -27,11 +27,9 @@ const Resolver = {
   // Registers every listener before anything is awaited (an MV3 worker only
   // gets the event that woke it if they are), then reads the state back.
   init() {
-    browser.proxy.onRequest.addListener((d) => this.proxyFor(d), { urls: ["<all_urls>"] });
-    // The second fence: with no proxy to send it through, a container request
-    // is cancelled. (Firefox would otherwise fail a dead extension proxy over
-    // to the user's own manual or PAC proxy.)
-    browser.webRequest.onBeforeRequest.addListener((d) => this.cancelUnrouted(d), { urls: ["<all_urls>"] }, ["blocking"]);
+    // They start registered: until the state is read back nobody knows whether
+    // a container is left. Once it is, fence() drops them if none is.
+    this.fence();
     // Without the engine no resolve can finish: fail them and close their windows.
     // With it, it learns which sites have a recipe (for its Record recipe button).
     Engine.on("connection", ({ connected }) => {
@@ -52,6 +50,28 @@ const Resolver = {
     Engine.on("resolve", (r) => this.ready.then(() => this.request(r)).catch((e) => console.error(e)));
     this.ready = this.load();
     return this.ready;
+  },
+
+  // The proxy listener and the blocking cancel listener, for every URL: they
+  // cost every request the browser makes, so they exist only while a job or a
+  // DMS² container does (or the state is unread). Fail closed wins over speed:
+  // a container left by a failed cleanup keeps them. The cancel listener is the
+  // second fence: with no proxy to send it through, a container request is
+  // cancelled (Firefox would otherwise fail a dead extension proxy over to the
+  // user's own manual or PAC proxy). Sync, so no container request slips
+  // through before they are there.
+  fence() {
+    const want = !this.loaded || this.jobs.size > 0 || Object.keys(this.containers).length > 0;
+    const all = { urls: ["<all_urls>"] };
+    this.onProxy = this.onProxy || ((d) => this.proxyFor(d));
+    this.onCancel = this.onCancel || ((d) => this.cancelUnrouted(d));
+    for (const [ev, f, ...args] of [
+      [browser.proxy.onRequest, this.onProxy, all],
+      [browser.webRequest.onBeforeRequest, this.onCancel, all, ["blocking"]],
+    ]) {
+      if (want && !ev.hasListener(f)) ev.addListener(f, ...args);
+      else if (!want && ev.hasListener(f)) ev.removeListener(f);
+    }
   },
 
   get session() {
@@ -85,6 +105,7 @@ const Resolver = {
     this.containers = { ...keep, ...this.containers };
     this.saveContainers();
     this.loaded = true;
+    this.fence();
     this.recheck(); // deadlines that passed while the background was away
   },
 
@@ -125,6 +146,7 @@ const Resolver = {
       activity: 0,      // while a person is needed: the last click, page load or captcha change
     };
     this.jobs.set(key, job);
+    this.fence(); // before launch awaits anything
     quiet(this.startOrQueue(job));
     this.save();
   },
@@ -511,6 +533,7 @@ const Resolver = {
       this.saveContainers();
       browser.contextualIdentities.remove(store).catch(() => {});
     }
+    this.fence();
     for (const j of [...this.jobs.values()]) {
       if (j.mode === "waiting" && j.host === job.host) quiet(this.startOrQueue(j));
     }
