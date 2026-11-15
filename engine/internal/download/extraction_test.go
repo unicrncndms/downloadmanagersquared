@@ -149,7 +149,7 @@ func TestAnExtractionRecordsOnTheRightPart(t *testing.T) {
 	if _, err := e.step(context.Background(), ps, []archive.Range{{Start: 0, End: total}}); err != nil {
 		t.Fatal(err)
 	}
-	if last := e.parts.Span(2); e.tail != 2 || fs[2].prefer != total-archive.TailGuess-last.Start {
+	if last := e.parts.Span(2); e.tail != 2 || fs[2].prefer != max(total-archive.TailGuess-last.Start, 0) {
 		t.Fatalf("waits for part %d, the last part prefers %d", e.tail+1, fs[2].prefer)
 	}
 	stepUntil(t, e, ps, "finished", func() bool { return e.finished })

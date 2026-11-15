@@ -161,33 +161,34 @@ func TestPlanAddGivesBytesBack(t *testing.T) {
 // An ordered plan (a Download as folder) hands a connection a stride's worth
 // off the front of what is missing, and the next one what follows: not the
 // far half of the file. Each chunk ends where the next begins, so it is
-// fetched to its end and its connection kept.
+// fetched to its end and its connection kept. A slow or unknown connection
+// still gets orderedStride, so a big file makes few requests.
 func TestOrderedPlanKeepsConnectionsNearTheFront(t *testing.T) {
-	size := int64(1000 * minSplit)
+	size := int64(1000 * orderedStride)
 	p := newPlan(size, true, []Range{{0, size}})
 	p.ordered = true
-	a := p.claim(1 << 20) // 1 MiB/s: 10 MiB within the stride
-	if a == nil || a.pos != 0 || a.end != stride<<20 {
-		t.Fatalf("first chunk %+v, want the first %d bytes", a, stride<<20)
+	a := p.claim(2 << 20) // 2 MiB/s: 20 MiB within the stride, so the floor
+	if a == nil || a.pos != 0 || a.end != orderedStride {
+		t.Fatalf("first chunk %+v, want the first %d bytes", a, orderedStride)
 	}
-	owned(a, 1<<20)
-	b := p.claim(2 << 20)
-	if b == nil || b.pos != a.end || b.end != 3*stride<<20 {
-		t.Fatalf("second chunk %+v, want %d-%d", b, a.end, 3*stride<<20)
+	owned(a, 2<<20)
+	b := p.claim(8 << 20) // 80 MiB within the stride
+	if b == nil || b.pos != a.end || b.end != a.end+stride*8<<20 {
+		t.Fatalf("second chunk %+v, want %d-%d", b, a.end, a.end+stride*8<<20)
 	}
-	owned(b, 2<<20)
-	// A speed not known yet: the smallest chunk.
-	if c := p.claim(0); c == nil || c.pos != b.end || c.end != b.end+minSplit {
-		t.Fatalf("third chunk %+v, want %d-%d", c, b.end, b.end+minSplit)
+	owned(b, 8<<20)
+	// A speed not known yet: the floor.
+	if c := p.claim(0); c == nil || c.pos != b.end || c.end != b.end+orderedStride {
+		t.Fatalf("third chunk %+v, want %d-%d", c, b.end, b.end+orderedStride)
 	}
 }
 
 // The cut lands on an Entry boundary when one is within minSplit of it.
 func TestOrderedPlanCutsOnANearbyEntryBoundary(t *testing.T) {
-	size := int64(1000 * minSplit)
+	size := int64(1000 * orderedStride)
 	p := newPlan(size, true, []Range{{0, size}})
 	p.ordered = true
-	near := int64(stride<<20) + minSplit/2
+	near := int64(orderedStride) + minSplit/2
 	p.bounds = []int64{0, near}
 	if got := p.claim(1 << 20); got == nil || got.end != near {
 		t.Fatalf("chunk %+v, want it to end on the boundary %d", got, near)

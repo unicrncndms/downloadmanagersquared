@@ -217,12 +217,13 @@ func TestNeedAsksForMoreWhenALongCommentHidesTheEnd(t *testing.T) {
 	comment := strings.Repeat("c", 65535)
 	b := goZip(t, comment, goFile{name: "big.bin", data: random(300 << 10), store: true})
 	size := int64(len(b))
+	const guess = 40 << 10 // a short first look, so the comment hides the end
 
-	n, err := Need(tailOnly{b, TailGuess}, size, TailGuess)
+	n, err := Need(tailOnly{b, guess}, size, guess)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n <= TailGuess {
+	if n <= guess {
 		t.Fatalf("need %d, want more than the first guess", n)
 	}
 	n2, err := Need(tailOnly{b, n}, size, n)

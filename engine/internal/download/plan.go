@@ -69,6 +69,18 @@ const (
 	minTake  = 1 << 20
 )
 
+// In an ordered plan a stride is at least orderedStride bytes however slow the
+// connection, so a big file at 1 MB/s makes tens of times fewer range requests.
+// The archive is then freed later by at most one such stride per connection.
+// A connection takes over the front chunk of an ordered plan, even with free
+// chunks left, when that chunk has more than orderedSteal seconds to go: a
+// chunk is sized to about stride seconds of its connection's speed, so twice
+// that means the connection has slowed to under half of it, and everything
+// read front to back waits for it.
+const orderedStride = 32 << 20
+
+var orderedSteal = float64(2 * stride) // a var so a test can show what it buys
+
 func newPlan(size int64, rangeOK bool, remaining []Range) *plan {
 	p := &plan{size: size, splittable: rangeOK, prefer: -1}
 	if !rangeOK {
@@ -95,11 +107,25 @@ func (p *plan) claim(newSpeed float64) *segment {
 			free = s
 		}
 	}
+	if free != nil && p.ordered && p.splittable {
+		var victim *segment
+		var worst float64
+		for _, s := range p.segs {
+			if canSplit(s) && s.pos <= free.written {
+				if t := timeLeft(s); t > worst {
+					worst, victim = t, s
+				}
+			}
+		}
+		if victim != nil && worst > orderedSteal {
+			return p.split(victim, balancedCut(victim, newSpeed))
+		}
+	}
 	if free != nil {
 		free.pos = free.written
 		if p.ordered && p.splittable {
 			// Only its front: the rest stays free, for the next connection.
-			at := free.pos + max(int64(newSpeed*stride), minSplit)
+			at := free.pos + max(int64(newSpeed*stride), orderedStride)
 			if at <= free.end-minSplit {
 				at = p.nearBound(free, at)
 				p.segs = append(p.segs, &segment{pos: at, written: at, end: free.end})
