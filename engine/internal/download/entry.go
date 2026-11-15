@@ -93,7 +93,7 @@ func (d *Download) SetVPN(m paths.Mode) error {
 	d.st.VPN = m
 	d.mu.Unlock()
 	if !same {
-		d.env.Changed(d)
+		d.changed()
 	}
 	return nil
 }
@@ -112,7 +112,7 @@ func (d *Download) PauseForVPN() {
 	d.mu.Lock()
 	d.st.Error, d.st.WaitVPN = "Paused: no VPN tunnel is up. It resumes by itself once one is.", true
 	d.mu.Unlock()
-	d.env.Changed(d)
+	d.changed()
 }
 
 // WaitingForVPN is whether the download paused only because no tunnel was up.

@@ -222,6 +222,6 @@ func (d *Download) folderFallback(u *archive.Unsupported) (bool, error) {
 	d.st.Folder.On, d.st.Folder.Note = false, u.Reason+", so it is downloaded as a "+strings.ToLower(filepath.Ext(d.st.Filename))
 	d.mu.Unlock()
 	log.Printf("download %s: not as a folder: %s", d.st.ID, u.Reason)
-	d.env.Changed(d)
+	d.changed()
 	return false, nil
 }

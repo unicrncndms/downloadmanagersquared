@@ -39,3 +39,22 @@ func TestSetKeyIgnoresCase(t *testing.T) {
 		t.Fatal("different folders share a key")
 	}
 }
+
+// The cheap test in front of the regexes never skips a name they accept.
+func TestMayBePartIsASupersetOfTheRegexes(t *testing.T) {
+	names := []string{"Movie.part1.rar", "movie.R01", "movie.r100", "movie.7z.001", "movie.ZIP", "movie.Z001", "a.rar.002", "movie.mkv", "movie", "", ".", "x.r1", "x.z1234", "movie.001", "report.part1.pdf", "a.b.rar."}
+	for _, n := range names {
+		raw := false
+		for _, p := range partNames {
+			raw = raw || p.re.MatchString(n)
+		}
+		if raw && !mayBePart(n) {
+			t.Errorf("%q matches a part regex but mayBePart skips it", n)
+		}
+	}
+	for _, n := range []string{"movie.mkv", "movie", "photo.jpg", "a.b.c"} {
+		if mayBePart(n) {
+			t.Errorf("mayBePart(%q) is true for an ordinary name", n)
+		}
+	}
+}

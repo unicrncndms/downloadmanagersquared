@@ -28,6 +28,9 @@ var partNames = []struct {
 // name (movie.rar, movie.7z, movie.zip) and the part's number. A plain
 // movie.rar or movie.zip names a set too, of which it may be the only part.
 func PartOf(name string) (set string, part int, ok bool) {
+	if !mayBePart(name) {
+		return "", 0, false
+	}
 	for _, p := range partNames {
 		m := p.re.FindStringSubmatch(name)
 		if m == nil {
@@ -40,6 +43,29 @@ func PartOf(name string) (set string, part int, ok bool) {
 		return m[1] + p.ext, p.part(n), true
 	}
 	return "", 0, false
+}
+
+// mayBePart is a cheap test every name PartOf accepts passes: the last
+// extension is rar or zip, or three digits, or r or z and two or three digits.
+// It keeps the six regexes off ordinary names, which are most of a long list.
+func mayBePart(name string) bool {
+	ext := name[strings.LastIndexByte(name, '.')+1:]
+	if strings.EqualFold(ext, "rar") || strings.EqualFold(ext, "zip") {
+		return true
+	}
+	if len(ext) == 3 && isDigits(ext) {
+		return true
+	}
+	return (len(ext) == 3 || len(ext) == 4) && strings.ContainsRune("rRzZ", rune(ext[0])) && isDigits(ext[1:])
+}
+
+func isDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // SetKey is the same for the parts of one set saved in one folder, ignoring

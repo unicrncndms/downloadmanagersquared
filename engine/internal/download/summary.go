@@ -112,9 +112,54 @@ type FileSummary struct {
 	Done     int64  `json:"done,omitempty"` // bytes on disk, while the torrent is in the swarm
 }
 
+// sumKey is all a finished download's Summary reads besides its State, which
+// changed() versions (rev): what can change without a save.
+type sumKey struct {
+	rev      uint64
+	view     *SetSummary
+	keep     string // the archiveKeeping setting
+	checking bool
+	speed    float64
+}
+
+// sumKeyLocked says what the cached Summary stands for; ok is false while
+// the download can still change in ways the key does not cover (running,
+// extracting, moving), so no Summary is cached then.
+func (d *Download) sumKeyLocked() (k sumKey, ok bool) {
+	if d.st.Status != StatusCompleted || d.running || d.plan != nil || d.fold != nil || d.parked != nil || d.moving {
+		return k, false
+	}
+	k = sumKey{rev: d.rev.Load(), keep: d.keepDefault(), checking: d.checking, speed: d.speed}
+	if d.set != nil {
+		k.view = d.set.Summary()
+	}
+	return k, true
+}
+
+// changed tells the engine d's State changed and drops the cached Summary.
+func (d *Download) changed() {
+	d.rev.Add(1)
+	d.env.Changed(d)
+}
+
+// Summary is what the UI shows. A finished download's is kept until
+// something it reads changes: the list is summarised every second. The
+// copy shares its maps and slices with the kept one: do not write to them.
 func (d *Download) Summary() Summary {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	k, cacheable := d.sumKeyLocked()
+	if cacheable && d.sumOK && d.sumKey == k && d.seen != nil {
+		return d.sum // observeLocked would find nothing new: the same summary was the last it saw
+	}
+	s := d.summaryLocked()
+	if cacheable {
+		d.sum, d.sumKey, d.sumOK = s, k, true
+	}
+	return s
+}
+
+func (d *Download) summaryLocked() Summary {
 	s := Summary{
 		ID: d.st.ID, URL: d.st.URL, PageURL: d.st.PageURL, Filename: d.st.Filename, Dir: d.st.Dir,
 		Size: d.st.Size, Done: d.doneLocked(), Status: d.st.Status, Error: d.st.Error,
