@@ -54,21 +54,21 @@ func (l *Link) probing() { l.Status = LinkProbing }
 func (l *Link) requeue() { l.Status = LinkPending }
 
 // restored: the engine restarted. A probe in flight is gone, and anything
-// retrying is due at once.
+// retrying is due at once. A pending resolve was in memory only, so it is asked for again.
 func (l *Link) restored() {
-	if l.Status == LinkProbing || l.Status == LinkRetrying {
+	if l.Status == LinkProbing || l.Status == LinkRetrying || l.Status == LinkResolving {
 		l.Status, l.pageHit, l.held = LinkPending, false, nil
 	}
 }
 
-// ready: the probe found the file. The HTTP error count stays until data
-// actually arrives, so a link whose data requests keep failing still gives up.
+// ready: the probe found the file. The HTTP error and resolve counts stay until
+// data actually arrives, so a link whose data requests keep failing still gives up.
 func (l *Link) ready() {
-	l.Status, l.Error, l.Resolves, l.retryAt = LinkReady, "", 0, time.Time{}
+	l.Status, l.Error, l.retryAt = LinkReady, "", time.Time{}
 }
 
 // dataArrived: a chunk came through, so the link works.
-func (l *Link) dataArrived() { l.HTTPErrors = 0 }
+func (l *Link) dataArrived() { l.HTTPErrors, l.Resolves = 0, 0 }
 
 func (l *Link) fail(msg string)     { l.Status, l.Error = LinkFailed, msg }
 func (l *Link) mismatch(msg string) { l.Status, l.Error = LinkMismatch, msg }

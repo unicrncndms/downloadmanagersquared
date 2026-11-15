@@ -26,7 +26,7 @@ test("every browser listener is registered before anything is awaited", () => {
   const b = load();
   for (const name of [
     "proxy.onRequest", "webRequest.onBeforeRequest", "webRequest.onHeadersReceived", "webRequest.onSendHeaders",
-    "webRequest.onBeforeSendHeaders", "downloads.onCreated", "webNavigation.onCommitted", "tabs.onUpdated",
+    "downloads.onCreated", "webNavigation.onCommitted", "tabs.onUpdated",
     "tabs.onCreated", "tabs.onRemoved", "windows.onRemoved", "contextualIdentities.onRemoved",
     "runtime.onMessage", "runtime.onConnect", "contextMenus.onClicked",
   ]) assert.ok(b.listeners[name], name);
@@ -397,4 +397,37 @@ test("a welcome page's ui port makes the engine retry within seconds, and its cl
   assert.equal(e.retryDelay, 3000);
   e.fast(false);
   assert.equal(e.retryCap, 30000);
+});
+
+const fenced = (b) => ["proxy.onRequest", "webRequest.onBeforeRequest"].map((n) => (b.listeners[n] || []).length);
+
+test("the proxy and cancel listeners exist only while a job or a DMS² container does", async () => {
+  const b = load();
+  await b.settle();
+  assert.deepEqual(fenced(b), [0, 0], "no job, no container: none");
+  b.connect();
+  const job = await recording(b);
+  assert.deepEqual(fenced(b), [1, 1], "a job: both");
+  b.Resolver.fail(job, "x");
+  await b.settle();
+  assert.deepEqual(fenced(b), [0, 0], "last job and container gone: removed");
+});
+
+test("a container restored after a background restart keeps the listeners", async () => {
+  const b = load();
+  await b.settle();
+  b.connect();
+  const job = await recording(b);
+  const b2 = load({ shared: b.shared, now: b.clock.now + 1000 });
+  assert.deepEqual(fenced(b2), [1, 1], "registered before the state is read");
+  await b2.settle();
+  assert.ok(b2.Resolver.jobs.get(job.key), "job carried on");
+  assert.deepEqual(fenced(b2), [1, 1]);
+  // A container with no job (failed cleanup) also holds them.
+  b2.Resolver.jobs.clear();
+  b2.Resolver.fence();
+  assert.deepEqual(fenced(b2), [1, 1], "container alone: kept");
+  b2.Resolver.containers = {};
+  b2.Resolver.fence();
+  assert.deepEqual(fenced(b2), [0, 0]);
 });

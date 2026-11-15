@@ -67,12 +67,14 @@ type Torrent struct {
 	upSpeed rate.EWMA
 	info    *metainfo.Info // st.Info parsed, once needed
 	hash    string
+	upSaved time.Time // when a changed upload count last marked the entry dirty
 
 	verified atomic.Bool // its data was hashed since the engine started
 
 	// What the swarm looks like, as of the last poll.
 	paths               map[string]*pathRate
 	peers, seeds, swarm int
+	wantDone, wantSize  int64 // of the files to download, as of the last poll
 }
 
 // pathRate is a torrent's traffic on one interface.
@@ -138,7 +140,7 @@ func (t *Torrent) Summary() download.Summary {
 		s.Done = t.st.Size
 		s.Speed = 0
 	case t.t != nil && t.t.Info() != nil:
-		s.Done, _ = wanted(t.t, t.st.Skip)
+		s.Done = t.wantDone
 		if s.Speed > 0 {
 			s.ETA = float64(s.Size-s.Done) / s.Speed
 		}
@@ -298,15 +300,13 @@ func (t *Torrent) run(ctx context.Context) {
 		case <-ctx.Done():
 		}
 	}
-	if !t.poll(ctx, at, func() bool { return !checking(at) }) {
+	if !t.poll(ctx, at, pollEvery, func() bool { return !checking(at) }) {
 		return
 	}
 	complete := func() bool { // reads the choice afresh: SetFiles may change it while this runs
 		t.mu.Lock()
-		skip := t.st.Skip
-		t.mu.Unlock()
-		done, size := wanted(at, skip)
-		return done == size
+		defer t.mu.Unlock()
+		return t.wantDone == t.wantSize
 	}
 	if !complete() {
 		if !t.update(at, func() { t.st.Status = download.StatusRunning }) {
@@ -315,7 +315,7 @@ func (t *Torrent) run(ctx context.Context) {
 		t.mu.Lock()
 		applySkip(at, t.st.Skip)
 		t.mu.Unlock()
-		if !t.poll(ctx, at, complete) {
+		if !t.poll(ctx, at, pollEvery, complete) {
 			return
 		}
 	}
@@ -332,7 +332,7 @@ func (t *Torrent) run(ctx context.Context) {
 	if f := t.s.cfg.Finished; notify && f != nil {
 		f(t)
 	}
-	if !t.poll(ctx, at, func() bool {
+	if !t.poll(ctx, at, seedEvery, func() bool {
 		t.mu.Lock()
 		defer t.mu.Unlock()
 		return t.st.Size > 0 && float64(t.st.Uploaded) >= t.s.ratio()*float64(t.st.Size)
@@ -378,24 +378,48 @@ func (t *Torrent) announceDHT(ctx context.Context, at *atorrent.Torrent) {
 	}
 }
 
+// upSaveEvery is how seldom a changed upload count alone is worth a state write.
+const upSaveEvery = 30 * time.Second
+
+// now is the clock update throttles by; tests replace it.
+var now = time.Now
+
 // update changes the state under the lock, unless the torrent left the swarm
-// (at is no longer its torrent), and reports whether it did.
+// (at is no longer its torrent), and reports whether it did. It marks the
+// entry dirty only if a saved field changed; the upload count alone counts at
+// most every upSaveEvery, so an idle seeder does not rewrite its state file.
 func (t *Torrent) update(at *atorrent.Torrent, f func()) bool {
 	t.mu.Lock()
 	if t.t != at {
 		t.mu.Unlock()
 		return false
 	}
+	old := t.st
 	f()
+	save := old.Status != t.st.Status || old.Error != t.st.Error || old.Size != t.st.Size ||
+		len(old.Info) != len(t.st.Info) || !slices.Equal(old.Skip, t.st.Skip)
+	if !save && old.Uploaded != t.st.Uploaded && now().Sub(t.upSaved) >= upSaveEvery {
+		save = true
+	}
+	if save {
+		t.upSaved = now()
+	}
 	t.mu.Unlock()
-	t.changed()
+	if save {
+		t.changed()
+	}
 	return true
 }
 
+// A seeding torrent only has the ratio and the upload speed to keep, so it polls slower.
+const (
+	pollEvery = 500 * time.Millisecond
+	seedEvery = 2 * time.Second
+)
+
 // poll keeps the speeds and upload count current until done reports true, and
 // reports false if the torrent left the swarm first.
-func (t *Torrent) poll(ctx context.Context, at *atorrent.Torrent, done func() bool) bool {
-	const every = 500 * time.Millisecond
+func (t *Torrent) poll(ctx context.Context, at *atorrent.Torrent, every time.Duration, done func() bool) bool {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
 	for {
@@ -403,6 +427,9 @@ func (t *Torrent) poll(ctx context.Context, at *atorrent.Torrent, done func() bo
 		completed, uploaded := at.BytesCompleted(), stats.BytesWrittenData.Int64()
 		byPath := t.s.peersByIface(at)
 		if !t.update(at, func() {
+			if at.Info() != nil { // the one walk of the files: Summary and the finish check read it
+				t.wantDone, t.wantSize = wanted(at, t.st.Skip)
+			}
 			t.speed.Update(completed, every)
 			t.upSpeed.Update(uploaded, every)
 			t.st.Uploaded = t.upBase + uploaded
@@ -448,6 +475,9 @@ func (t *Torrent) ratesLocked(byPath map[string]ifacePeers, every time.Duration)
 
 // wanted is how much of the files to download is done, and their size.
 func wanted(at *atorrent.Torrent, skip []int) (done, size int64) {
+	if len(skip) == 0 { // no per-file walk: it takes the client lock per file
+		return at.BytesCompleted(), at.Length()
+	}
 	for i, f := range at.Files() {
 		if !slices.Contains(skip, i) {
 			done += f.BytesCompleted()

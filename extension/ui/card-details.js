@@ -49,6 +49,7 @@ function activityPart(id) {
   const activityList = el("ol", { class: "activity num" });
   let activity = [];
   let activityAt = 0;
+  let activityShown = "";
   const copy = el("button", { class: "small", onclick: async () => {
     try {
       await navigator.clipboard.writeText(activity.join("\n"));
@@ -67,11 +68,16 @@ function activityPart(id) {
     activity = logLines(events, (ifc) => ifaceName(ifc, latest.state, latest.settings));
     copy.hidden = false;
     // The time leads each line, quietly: it is the first 19 characters (lib/list.js logLines).
-    activityList.replaceChildren(...activity.map((line) => el("li", {}, el("span", { class: "muted" }, line.slice(0, 19)), line.slice(19))));
+    const sig = JSON.stringify(activity);
+    if (sig !== activityShown) { // rebuilt only when the log changed
+      activityShown = sig;
+      activityList.replaceChildren(...activity.map((line) => el("li", {}, el("span", { class: "muted" }, line.slice(0, 19)), line.slice(19))));
+    }
     section.hidden = !activity.length;
   }
   function say(text) {
     section.hidden = false;
+    activityShown = "";
     activityList.replaceChildren(el("li", { class: "muted" }, text));
     copy.hidden = true;
   }

@@ -55,10 +55,14 @@ function makeLine(id) {
   function update(d) {
     cur = d;
     root.classList.toggle("sel", selected.has(id));
-    const summary = finishedSummary(d, (i) => ifaceName(i, latest.state, latest.settings));
-    const s = JSON.stringify([d.filename, d.url, d.size, d.actions, summary]);
+    // What the line shows, cheaply: a finished download hardly ever changes, and its summary costs more than this.
+    const can = d.actions || {};
+    const links = d.links || {};
+    const s = [d.filename, d.url, d.size, d.active, can.showInFolder, can.open, can.again, can.deleteFile,
+      ...Object.keys(links).map((i) => i + links[i].bytes + ifaceName(i, latest.state, latest.settings))].join("\n");
     if (s === sig) return;
     sig = s;
+    const summary = finishedSummary(d, (i) => ifaceName(i, latest.state, latest.settings));
     name.textContent = name.title = d.filename || d.url;
     size.textContent = d.size > 0 ? fmtBytes(d.size) : "";
     size.title = summary;
@@ -242,7 +246,8 @@ function chunkGrid(rows) {
         const p = part[i];
         const cls = c === "#" ? "on" : c === "." ? (p ? "part" : "") : got ? "got" : "now";
         if (cell.className !== cls) cell.className = cls;
-        cell.style.color = cls === "now" ? by[+c] || "" : got ? by[c.charCodeAt(0) - 97] || "" : cls === "part" ? (p.who >= 0 && by[p.who]) || "var(--accent)" : "";
+        const color = cls === "now" ? by[+c] || "" : got ? by[c.charCodeAt(0) - 97] || "" : cls === "part" ? (p.who >= 0 && by[p.who]) || "var(--accent)" : "";
+        if (cell.dataset.color !== color) { cell.dataset.color = color; cell.style.color = color; }
         if (cls === "part") cell.style.setProperty("--p", p.n / 9);
         if (cls === "now") cell.style.setProperty("--f", frontFill((d.mapFill || "")[i], p, !!d.mapPart));
         cell = cell.nextElementSibling;
@@ -530,11 +535,11 @@ function makeCard(id) {
     menuCopy.hidden = !d.url;
     menuRecord.hidden = recordSection.hidden = !can.recordRecipe;
     menuNow.hidden = menuNext.hidden = menuLast.hidden = !queued();
-    const all = (latest.state && latest.state.downloads) || [];
     // At an end of the queue an arrow keeps its place, unseen, so pause and ⋯ line up from row to row.
     moveUp.hidden = moveDown.hidden = !queued();
-    moveUp.style.visibility = queued() && moveBefore(all, id, "up") === null ? "hidden" : "";
-    moveDown.style.visibility = queued() && moveBefore(all, id, "down") === null ? "hidden" : "";
+    const at = queue.at.get(id); // the page's count of the queue (popup.js), not a scan of every download
+    moveUp.style.visibility = queued() && at === 0 ? "hidden" : "";
+    moveDown.style.visibility = queued() && at === queue.len - 1 ? "hidden" : "";
     limitRow.hidden = torrent;
     legend.textContent = `The number on a connection's tile is how many ${torrent ? "peers" : "requests"} it has open. A ring around it means the server is holding it back.`;
     limitLabel.textContent = `Speed limit (${speedUnitLabel()})`;
@@ -736,26 +741,88 @@ function makeGroupCard(gid) {
   return { root, update, ids, number(n) { if (n !== queuePlace) { queuePlace = n; if (g) update(g); } } };
 }
 
+// makeLight is a queued download nobody has touched (lib/rows.js isLight), drawn
+// as its slim card looks but with about a fifth of the elements: its buttons are
+// copies that do nothing. promote builds the real card when the pointer or the
+// focus comes to the row, before a click can land on a dead button.
+let lightEnd = null;
+function makeLight(id, promote) {
+  if (!lightEnd) {
+    lightEnd = el("span", { class: "end" }, ...["chevron:Details", "up:Move up", "down:Move down", "pause:Pause", "play:Resume", "more:More"]
+      .map((s) => iconButton(...s.split(":"))));
+    for (const b of lightEnd.children) b.tabIndex = -1;
+  }
+  const end = lightEnd.cloneNode(true);
+  const [, up, down, pause, resume] = end.children;
+  const num = el("span", { class: "n st-tile", role: "img" });
+  const name = el("span", { class: "name", title: "" });
+  const size = el("b", { class: "num" });
+  const root = el("div", { class: "card one idle", tabindex: "-1", draggable: "true", "data-id": id }, num,
+    el("span", { class: "title" }, el("span", { class: "grip", title: "Drag onto another queued download to move it" }, icon("grip")), name),
+    end, el("div", { class: "nums" }, size));
+  for (const ev of ["pointerenter", "focusin"]) root.addEventListener(ev, promote);
+  let d = null, queuePlace = 0, sig = "";
+  function paint() {
+    const can = d.actions || {};
+    const at = queue.at.get(id);
+    const s = [d.filename, d.url, d.size, d.label, d.tone, queuePlace, can.pause, can.resume, at, queue.len].join("\n");
+    if (s === sig) return;
+    sig = s;
+    paintTile(num, tileOf(d), queuePlace, d.label);
+    name.textContent = name.title = d.filename || d.url;
+    size.textContent = rowNums(d).main;
+    pause.hidden = !can.pause;
+    resume.hidden = !can.resume;
+    up.style.visibility = at === 0 ? "hidden" : "";
+    down.style.visibility = at === queue.len - 1 ? "hidden" : "";
+  }
+  return {
+    root,
+    update(next) { d = next; paint(); },
+    number(n) { if (n !== queuePlace) { queuePlace = n; if (d) paint(); } },
+  };
+}
+
 function cardFor(id) {
   let c = cards.get(id);
   if (!c) {
-    let line = null, full = null;
+    let line = null, full = null, light = null, place = 0, last = null;
+    // The card takes the light row's (or the line's) place, and the focus with it.
+    const build = () => {
+      full = makeCard(id);
+      full.number(place);
+      const old = light || line;
+      if (old) {
+        const focused = old.root.contains(document.activeElement);
+        old.root.replaceWith(full.root);
+        if (focused) full.root.focus();
+      }
+      light = line = null;
+    };
     c = {
-      get root() { return (full || line).root; },
-      number(n) { if (full) full.number(n); },
-      // form is the row's (lib/rows.js): "card", or a line ("line", or "part"
-      // for a group's fetched part). The DOM follows it.
+      get root() { return (full || light || line).root; },
+      number(n) { place = n; if (full) full.number(n); else if (light) light.number(n); },
+      // form is the row's (lib/rows.js): "card", "light" (a card not yet
+      // built), or a line ("line", or "part" for a group's fetched part). The
+      // DOM follows it.
       update(d, form) {
-        if (form === "card" && !full) {
-          full = makeCard(id);
-          if (line) line.root.replaceWith(full.root);
-          line = null;
-        } else if (!line && (form === "part" || (form === "line" && !full))) {
+        last = d;
+        if (form === "light" && !full && !line) {
+          if (!light) {
+            light = makeLight(id, () => { if (!full) { build(); full.update(last); } });
+            light.number(place);
+          }
+          light.update(d);
+          return;
+        }
+        if (form === "card" && !full) build();
+        else if (!line && (form === "part" || (form === "line" && !full))) {
           // A download that finishes while its card is shown keeps the card
           // until the page opens again; a group's fetched part turns into a line.
           line = makeLine(id);
-          if (full) full.root.replaceWith(line.root);
-          full = null;
+          const old = full || light;
+          if (old) old.root.replaceWith(line.root);
+          full = light = null;
         }
         (full || line).update(d);
       },

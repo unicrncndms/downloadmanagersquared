@@ -216,6 +216,7 @@ func (w *Window) create(u string) (*view, error) {
 	v.hwnd = hwnd
 	views.Store(hwnd, v)
 	matchTitleBar(hwnd)
+	matchPage(hwnd, nil) // before ShowWindow, so the first paint is the page's colour
 	minSize.Store(&[2]int32{int32(scale(minWidth)), int32(scale(minHeight))})
 	if big := winutil.Icon(w.cfg.Icon, scale(32)); big != 0 {
 		pSendMessage.Call(hwnd, wmSetIcon, 1, uintptr(big)) // ICON_BIG
@@ -236,6 +237,7 @@ func (w *Window) create(u string) (*view, error) {
 		pDestroyWindow.Call(hwnd)
 		return nil, errors.New("WebView2 could not start (is its runtime installed?)")
 	}
+	matchPage(hwnd, c)
 	c.Resize()
 	if s, err := c.GetSettings(); err == nil {
 		s.PutAreDevToolsEnabled(false)
