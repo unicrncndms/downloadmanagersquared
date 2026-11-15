@@ -145,7 +145,7 @@ func TestRecentFoldersKeepTheLastFive(t *testing.T) {
 // (Hyper-V, dynamic port exclusions) where a listen is refused, and a port
 // there would leave torrents with outgoing peers only for good.
 func TestANewTorrentPortCanBeBound(t *testing.T) {
-	taken, err := net.Listen("tcp4", "0.0.0.0:0")
+	taken, err := net.Listen("tcp4", probeHost+":0")
 	if err != nil {
 		t.Fatal(err)
 	}
