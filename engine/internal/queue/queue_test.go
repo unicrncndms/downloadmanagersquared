@@ -173,6 +173,28 @@ func TestChangesAreSavedByKindAndRemovedWithTheEntry(t *testing.T) {
 	}
 }
 
+// counting counts how often the queue asks for its state: each call clones the
+// state and flushes the .part, so a save must ask once.
+type counting struct {
+	*fake
+	saved int
+}
+
+func (c *counting) Saved() (string, any) { c.saved++; return c.fake.Saved() }
+
+func TestASaveAsksTheEntryForItsStateOnce(t *testing.T) {
+	q := New(t.TempDir(), nil)
+	c := &counting{fake: queued(false)}
+	q.Add(c)
+	q.Save()
+	if c.saved != 1 {
+		t.Fatalf("Save called Saved %d times", c.saved)
+	}
+	if err := q.SaveNow(c.id); err != nil || c.saved != 2 {
+		t.Fatalf("SaveNow: err %v, %d calls in all", err, c.saved)
+	}
+}
+
 func TestLoadedEntriesComeBackInTheOrderAdded(t *testing.T) {
 	a, b, c := queued(false), queued(true), queued(false)
 	q := New(t.TempDir(), []Entry{c, a, b})

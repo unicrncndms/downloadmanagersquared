@@ -279,8 +279,9 @@ func (q *Queue) RemoveMany(ids []string, deleteFiles bool) []string {
 	}
 	q.order = slices.DeleteFunc(q.order, func(x string) bool { return goneSet[x] })
 	q.mu.Unlock()
-	for _, e := range entries {
-		os.Remove(q.statePath(e))
+	for i, e := range entries {
+		kind, _ := e.Saved()
+		os.Remove(q.statePath(kind, gone[i]))
 	}
 	return gone
 }
@@ -451,8 +452,8 @@ func (q *Queue) Save() {
 	q.dirty = map[string]bool{}
 	q.mu.Unlock()
 	for _, e := range changed {
-		_, st := e.Saved()
-		if err := atomicfile.WriteJSON(q.statePath(e), st); err != nil {
+		kind, st := e.Saved()
+		if err := atomicfile.WriteJSON(q.statePath(kind, e.ID()), st); err != nil {
 			log.Printf("saving %s: %v", e.ID(), err)
 			q.MarkDirty(e.ID()) // the next Save tries again
 		}
@@ -470,8 +471,8 @@ func (q *Queue) SaveNow(id string) error {
 	if e == nil {
 		return nil
 	}
-	_, st := e.Saved()
-	return atomicfile.WriteJSON(q.statePath(e), st)
+	kind, st := e.Saved()
+	return atomicfile.WriteJSON(q.statePath(kind, e.ID()), st)
 }
 
 // Close stops every running entry, to queue again at the next start, and saves them all.
@@ -483,7 +484,6 @@ func (q *Queue) Close() {
 	q.Save()
 }
 
-func (q *Queue) statePath(e Entry) string {
-	kind, _ := e.Saved()
-	return filepath.Join(q.dir, kind, e.ID()+".json")
+func (q *Queue) statePath(kind, id string) string {
+	return filepath.Join(q.dir, kind, id+".json")
 }
