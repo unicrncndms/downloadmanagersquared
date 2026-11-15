@@ -431,3 +431,62 @@ test("a container restored after a background restart keeps the listeners", asyn
   b2.Resolver.fence();
   assert.deepEqual(fenced(b2), [0, 0]);
 });
+
+test("a resolve is routed by the port its event names, with no state to read it from", async () => {
+  const b = load();
+  await b.settle();
+  b.connect([]);
+  const job = await recording(b, { socksPort: 6123 });
+  assert.equal(b.Resolver.proxyFor({ tabId: job.tabId }).port, 6123);
+  assert.deepEqual(b.Resolver.cancelUnrouted({ tabId: job.tabId, type: "main_frame" }), {});
+});
+
+test("the background watches while a resolve runs, popup or not, one call at a time", async () => {
+  const b = load();
+  await b.settle();
+  b.connect();
+  await b.settle();
+  const watches = () => b.engine.filter((c) => /watch/i.test(c.method)).map((c) => c.method);
+  assert.deepEqual(watches(), ["unwatch"]); // a new connection starts watching: the idle background says it does not need to
+  const job = await recording(b);
+  await b.settle();
+  assert.deepEqual(watches(), ["unwatch", "watch"]);
+  b.Resolver.cleanup(job);
+  await b.settle();
+  assert.deepEqual(watches(), ["unwatch", "watch", "unwatch"]);
+  // A quick unwatch then watch: the second waits for the first, the last wish wins.
+  const order = [];
+  let release;
+  b.Engine.call = (method) => { order.push(method); return method === "unwatch" ? new Promise((r) => { release = r; }) : Promise.resolve({}); };
+  b.get("uiPorts = 1");
+  b.get("syncWatch()");
+  await b.settle();
+  b.get("uiPorts = 0");
+  b.get("syncWatch()"); // the unwatch is in flight
+  b.get("uiPorts = 1");
+  b.get("syncWatch()"); // must not start a second call
+  await b.settle();
+  assert.deepEqual(order, ["watch", "unwatch"]);
+  release();
+  await b.settle();
+  assert.deepEqual(order, ["watch", "unwatch", "watch"]);
+});
+
+test("a container stays fenced until its remove resolved, and a failed remove is retried", async () => {
+  const b = load();
+  await b.settle();
+  b.connect();
+  const job = await recording(b);
+  const store = b.Resolver.containers.eth;
+  let fail = true;
+  b.browser.contextualIdentities.remove = () => (fail ? Promise.reject(new Error("busy")) : Promise.resolve());
+  b.Resolver.cleanup(job);
+  await b.settle();
+  assert.equal(b.Resolver.containers.eth, store, "kept after the failed remove");
+  assert.equal(b.listeners["proxy.onRequest"].length, 1, "still fenced");
+  fail = false;
+  b.Resolver.sweep();
+  await b.settle();
+  assert.equal(b.Resolver.containers.eth, undefined);
+  assert.equal((b.listeners["proxy.onRequest"] || []).length, 0);
+});

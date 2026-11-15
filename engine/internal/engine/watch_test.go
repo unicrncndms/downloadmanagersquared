@@ -128,6 +128,31 @@ func TestStuckClientDoesNotHoldUpThePush(t *testing.T) {
 	}
 }
 
+// The state a client gets on watch is queued in order, ahead of what follows
+// (and so ahead of the answer to watch): a latest-only picture would arrive
+// after it, and the client would take the old one as current meanwhile.
+func TestWatchStateComesInOrder(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	c, events := watcher(t, e)
+	if _, err := e.Call(c, "unwatch", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Call(c, "watch", nil); err != nil {
+		t.Fatal(err)
+	}
+	e.broadcast("after", nil)
+	if ev := next(t, events); ev != "state" {
+		t.Fatalf("got %q first, want the state", ev)
+	}
+	if ev := next(t, events); ev != "after" {
+		t.Fatalf("got %q second, want after", ev)
+	}
+}
+
 // A call that changes the list gets the clients the state within a moment, not
 // at the next tick; removeMany takes several at once.
 func TestCallsPushTheStateAtOnce(t *testing.T) {
