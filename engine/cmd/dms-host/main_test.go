@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"strings"
@@ -74,9 +75,53 @@ func TestAnOversizedFrameIsAnsweredToFirefoxByItsId(t *testing.T) {
 	}
 }
 
-func TestALineTooLongForFirefoxIsSkippedAndSaidSo(t *testing.T) {
+// A line over Firefox's limit arrives in chunks that join to the line, each
+// under the limit, with multi-byte text cut only between characters.
+func TestALineTooLongForFirefoxGoesInChunks(t *testing.T) {
+	big := `{"event":"state","data":"` + strings.Repeat(`é"\"x`, maxToFirefox/3) + `"}`
 	var in bytes.Buffer
-	in.WriteString(`{"event":"big","data":"` + strings.Repeat("x", maxToFirefox) + "\"}\n")
+	in.WriteString(big + "\n" + `{"id":1,"result":"ok"}` + "\n")
+	var out bytes.Buffer
+	relayOut(&in, &out)
+	var joined strings.Builder
+	n := 0
+	for {
+		var size uint32
+		if binary.Read(&out, binary.LittleEndian, &size) != nil {
+			t.Fatal("ran out of frames")
+		}
+		msg := make([]byte, size)
+		io.ReadFull(&out, msg)
+		if size > maxToFirefox {
+			t.Fatalf("a message of %d bytes", size)
+		}
+		var c struct {
+			Chunk, Of, ID int
+			Data          string
+		}
+		if json.Unmarshal(msg, &c) != nil || c.Of == 0 {
+			if string(msg) != `{"id":1,"result":"ok"}` {
+				t.Fatalf("unexpected %q", msg)
+			}
+			break
+		}
+		if c.Chunk != n || c.ID != 1 {
+			t.Fatalf("chunk %d id %d, want %d id 1", c.Chunk, c.ID, n)
+		}
+		n++
+		joined.WriteString(c.Data)
+	}
+	if joined.String() != big || n < 2 {
+		t.Fatalf("joined %d bytes in %d chunks, want %d", joined.Len(), n, len(big))
+	}
+}
+
+func TestALineTooLongForFirefoxIsSkippedAndSaidSo(t *testing.T) {
+	was := maxLine
+	maxLine = 1000
+	defer func() { maxLine = was }()
+	var in bytes.Buffer
+	in.WriteString(`{"event":"big","data":"` + strings.Repeat("x", maxLine) + "\"}\n")
 	in.WriteString(`{"id":1,"result":"ok"}` + "\n")
 	var out bytes.Buffer
 	relayOut(&in, &out)

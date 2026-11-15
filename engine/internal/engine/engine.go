@@ -286,7 +286,12 @@ func (e *Engine) Run() {
 			e.updateSnapshot(now.Sub(last))
 			last = now
 			// Only a state that changed: idle, the clients redraw nothing. A new
-			// client asks for the state itself (hello, getState).
+			// client asks for the state itself (hello, getState). With no client
+			// at all there is nothing to encode (the tray reads Snapshot).
+			if !e.hasClients() {
+				sent = nil // a client that connects now gets today's state itself
+				continue
+			}
 			if b, err := ipc.EncodeEvent("state", e.Snapshot()); err == nil && !bytes.Equal(b, sent) {
 				sent = b
 				e.sendAll(b)

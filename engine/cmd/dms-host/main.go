@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/sys/windows"
 
@@ -86,14 +87,59 @@ func relayIn(from io.Reader, to io.Writer, reply io.Writer, browser string) {
 	}
 }
 
+// maxLine is the longest engine line relayed at all, whole or in chunks; a
+// variable so the test needn't build one that long.
+var maxLine = 64 << 20
+
+// chunkSize is the slice of a long line one chunk message carries. A JSON
+// string at most doubles it (quotes, backslashes), so a message stays well
+// under maxToFirefox.
+const chunkSize = 256 << 10
+
+// chunks splits a line that Firefox would not take into messages
+// {"chunk":i,"of":n,"id":id,"data":"..."} that the extension joins again
+// (extension/lib/chunks.js). Cuts fall on rune boundaries, so each slice is
+// valid in a JSON string.
+func chunks(line []byte, id int) [][]byte {
+	var parts [][]byte
+	for len(line) > 0 {
+		n := min(chunkSize, len(line))
+		for n < len(line) && !utf8.RuneStart(line[n]) {
+			n--
+		}
+		parts = append(parts, line[:n])
+		line = line[n:]
+	}
+	out := make([][]byte, len(parts))
+	for i, p := range parts {
+		var b bytes.Buffer
+		enc := json.NewEncoder(&b)
+		enc.SetEscapeHTML(false)
+		enc.Encode(map[string]any{"chunk": i, "of": len(parts), "id": id, "data": string(p)})
+		out[i] = bytes.TrimSpace(b.Bytes())
+	}
+	return out
+}
+
 // relayOut passes the engine's lines to Firefox as messages, until either side
-// closes. A line too long for Firefox is skipped rather than costing the
-// connection, and Firefox is told so: a state too long would otherwise leave
-// the pages showing an old list with nothing to say why.
+// closes. A line over maxToFirefox goes in chunks (the lines that fit are sent
+// as before, so an older extension loses nothing). One over maxLine is skipped
+// rather than costing the connection, and Firefox is told so: a state too long
+// would otherwise leave the pages showing an old list with nothing to say why.
 func relayOut(from io.Reader, to io.Writer) {
 	r := bufio.NewReaderSize(from, 64<<10)
+	sent := 0 // lines chunked so far: each one's id
 	for {
-		line, err := ipc.ReadLine(r, maxToFirefox)
+		line, err := ipc.ReadLine(r, maxLine)
+		if err == nil && len(bytes.TrimSpace(line)) > maxToFirefox {
+			sent++
+			for _, m := range chunks(bytes.TrimSpace(line), sent) {
+				if writeFrame(to, m) != nil {
+					return
+				}
+			}
+			continue
+		}
 		if errors.Is(err, ipc.ErrTooLong) {
 			if writeFrame(to, []byte(`{"event":"tooLong"}`)) != nil {
 				return

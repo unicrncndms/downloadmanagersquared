@@ -12,6 +12,7 @@ const Engine = {
   state: null,
   autostart: false,
   rpc: rpcClient((m) => Engine.port.postMessage(m), (f, ms) => setTimeout(f, ms)),
+  join: chunkJoiner(),
   listeners: new Map(),
   retryDelay: 2000,
   retryCap: 30000,     // 3 s while the welcome page waits for the engine (fast)
@@ -39,6 +40,7 @@ const Engine = {
     if (this.port) return;
     const port = browser.runtime.connectNative("downloadmanagersquared");
     this.port = port;
+    this.join = chunkJoiner(); // the new host numbers its lines from 1 again
     port.onMessage.addListener((msg) => this.onMessage(msg));
     const lost = (msg) => {
       if (this.port !== port) return;
@@ -67,6 +69,10 @@ const Engine = {
   },
 
   onMessage(msg) {
+    if (msg.chunk !== undefined) { // a line over 1 MB, cut by dms-host
+      msg = this.join(msg);
+      if (!msg) return;
+    }
     if (msg.event) {
       if (msg.event === "engineUnavailable") {
         this.lastError = "engine could not start: " + msg.data;

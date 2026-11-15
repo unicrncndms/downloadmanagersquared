@@ -169,6 +169,12 @@ func (e *Engine) broadcast(name string, data any) {
 	}
 }
 
+func (e *Engine) hasClients() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.clients) > 0
+}
+
 // sendAll writes an encoded event to every client.
 func (e *Engine) sendAll(b []byte) {
 	e.mu.Lock()
