@@ -422,18 +422,14 @@ func (f *flusher) init() {
 
 // finish flushes Entry i's checked file out and then puts it in place (see
 // finish) on a goroutine of its own. It waits only while flushers files are
-// being flushed already. durable false skips the flush: only for an archive
-// that stays whole, where nothing is freed for the Entry (see Extractor.Keep).
-func (f *flusher) finish(i int, e Entry, out *os.File, path string, mark func(string), durable bool) {
+// being flushed already.
+func (f *flusher) finish(i int, e Entry, out *os.File, path string, mark func(string)) {
 	f.mu.Lock()
 	f.busy[i]++
 	f.mu.Unlock()
 	f.slot <- struct{}{}
 	go func() {
-		var err error
-		if durable {
-			err = syncFile(out)
-		}
+		err := syncFile(out)
 		if err != nil {
 			discard(out)
 		} else {
@@ -496,7 +492,7 @@ func (x *Extractor) extractFile(ctx context.Context, i int, e Entry, path string
 		discard(out)
 		return bad, err
 	}
-	x.fl.finish(i, e, out, path, x.Mark, !x.Keep)
+	x.fl.finish(i, e, out, path, x.Mark)
 	return "", nil
 }
 

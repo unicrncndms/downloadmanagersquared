@@ -116,7 +116,7 @@ func (x *Extractor) streamStep(ctx context.Context, i int, missing []Range, r *R
 		discard(out)
 		return end.bad, false, end.err
 	}
-	x.fl.finish(i, e, out, s.path, x.Mark, !x.Keep)
+	x.fl.finish(i, e, out, s.path, x.Mark)
 	return "", true, nil
 }
 
