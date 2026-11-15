@@ -14,7 +14,7 @@ func TestWriteJSONReplacesTheFile(t *testing.T) {
 	if err := WriteJSON(path, map[string]int{"a": 2}); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(path); string(b) != "{\n  \"a\": 2\n}" {
+	if b, _ := os.ReadFile(path); string(b) != `{"a":2}` {
 		t.Fatalf("file holds %q", b)
 	}
 	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
