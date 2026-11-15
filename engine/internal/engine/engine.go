@@ -95,7 +95,7 @@ type Engine struct {
 	stop     context.CancelFunc
 	maps     sync.WaitGroup // mapPorts, for Shutdown
 	quitOnce sync.Once
-	running  atomic.Bool   // Run was called
+	running  atomic.Bool // Run was called
 	// A client said unwatch: the next tick sends the badge again even if it is
 	// the one last sent, as that client's own may be a state older.
 	badgeStale atomic.Bool
@@ -103,10 +103,10 @@ type Engine struct {
 	// the tick stays, but a click's result doesn't wait for it.
 	pushReq     chan struct{}
 	pushPending atomic.Bool
-	keeping  atomic.Value  // the archiveKeeping setting, a string, for ArchiveKeeping
-	ran      chan struct{} // closed when Run returns
-	quitReq  chan struct{} // closed when a client asks the engine to quit
-	reqOnce  sync.Once
+	keeping     atomic.Value  // the archiveKeeping setting, a string, for ArchiveKeeping
+	ran         chan struct{} // closed when Run returns
+	quitReq     chan struct{} // closed when a client asks the engine to quit
+	reqOnce     sync.Once
 }
 
 // New claims the pipe (proving this is the only engine of this user) and loads

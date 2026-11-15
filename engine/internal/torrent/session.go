@@ -153,7 +153,7 @@ func (s *Session) newClient() (*atorrent.Client, storage.ClientImplCloser, error
 	// it is read here, when the first torrent joins, from the interfaces given by then.
 	c.EstablishedConnsPerTorrent *= max(1, len(s.want))
 	c.PieceHashersPerTorrent = 4 // the default 2 caps verifying a finished torrent on a fast disk
-	c.Seed = true // without it, peers are dropped on completion; Torrent decides how long to seed
+	c.Seed = true                // without it, peers are dropped on completion; Torrent decides how long to seed
 	c.TrackerDialContext = s.dialFirst
 	c.HTTPDialContext = s.dialFirst
 	c.TrackerListenPacket = func(network, _ string) (net.PacketConn, error) {
