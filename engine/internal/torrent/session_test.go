@@ -935,10 +935,12 @@ func TestFilesCanBeTickedAfterTheChoice(t *testing.T) {
 	}
 	tor.Start()
 	waitFor(t, "both files", 30*time.Second, func() bool { return tor.Status() == download.StatusCompleted })
+	// The storage renames a file's .part once its pieces are in, which can trail the status.
 	for _, p := range []string{"f0.bin", "f1.bin"} {
-		if _, err := os.Stat(filepath.Join(chosen, "pack", p)); err != nil {
-			t.Fatalf("file missing: %v", err)
-		}
+		waitFor(t, p, 10*time.Second, func() bool {
+			_, err := os.Stat(filepath.Join(chosen, "pack", p))
+			return err == nil
+		})
 	}
 }
 
