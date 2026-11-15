@@ -14,7 +14,8 @@ browser.runtime.onConnect.addListener((port) => {
     autostart: Engine.autostart,
     recipes: Resolver.recipes,
   });
-  const watching = ++uiPorts === 1 ? watch(true) : Promise.resolve();
+  uiPorts++;
+  const watching = syncWatch();
   // The downloads list shows what needs the user: that clears the "!" for it.
   // The state the engine sends on watch is newer than the cached one, so it is marked again then.
   if (String(port.sender && port.sender.url || "").endsWith("/popup.html")) {
@@ -32,7 +33,8 @@ browser.runtime.onConnect.addListener((port) => {
   port.onDisconnect.addListener(() => {
     offs.forEach((off) => off());
     if (welcome) Engine.fast(false);
-    if (--uiPorts === 0) watch(false);
+    uiPorts--;
+    syncWatch();
   });
 });
 
@@ -40,8 +42,26 @@ browser.runtime.onConnect.addListener((port) => {
 // open it sends the small badge event. An engine without watch/unwatch (older) answers with an
 // error and sends the state anyway, so the failure is ignored.
 let uiPorts = 0;
-const watch = (on) => (on ? Engine.call("watch") : Engine.call("unwatch")).catch(() => {});
-Engine.on("connection", ({ connected }) => { if (connected) watch(uiPorts > 0); });
+// One watch or unwatch call in flight at a time (the engine runs requests
+// concurrently, so two could apply in reverse); when it settles the latest
+// wish is sent if it differs. Watching is wanted while a page is open or the
+// resolver needs the state. told: what the engine was last told (null: unknown).
+let told = null;
+let telling = null;
+function syncWatch() {
+  if (telling) return telling;
+  const on = uiPorts > 0 || Resolver.needsState();
+  if (on === told) return Promise.resolve();
+  telling = (on ? Engine.call("watch") : Engine.call("unwatch")).catch(() => {}).then(() => {
+    told = on;
+    telling = null;
+    return syncWatch();
+  });
+  return telling;
+}
+Engine.on("connection", ({ connected }) => {
+  if (connected) (telling || Promise.resolve()).then(() => { told = null; return syncWatch(); });
+});
 
 // Only this extension's own pages (ui/) may ask for these; content scripts run in web pages.
 const fromUi = (sender) => !!sender && sender.id === browser.runtime.id && String(sender.url || "").startsWith(browser.runtime.getURL("ui/"));

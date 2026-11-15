@@ -16,6 +16,7 @@ Object.assign(Resolver, {
   },
 
   async ensureContainer(iface, name) {
+    if (this.removing.has(iface)) await this.removing.get(iface); // a container on its way out is not reused
     if (this.containers[iface]) return this.containers[iface];
     if (!this.creating.has(iface)) {
       const color = this.COLORS[Object.keys(this.containers).length % this.COLORS.length];
@@ -33,7 +34,11 @@ Object.assign(Resolver, {
 
   // The engine's proxy port for an interface, 0 if it has none to use now.
   // Both the proxy and the cancel listener decide by this.
+  // The port the engine named in the job's resolve event is newer than the
+  // state this background may hold.
   portFor(iface) {
+    const job = [...this.jobs.values()].find((j) => j.iface === iface && j.socksPort > 0);
+    if (job && Engine.connected) return job.socksPort;
     return containerPort(iface, Engine.connected, Engine.state && Engine.state.interfaces);
   },
 

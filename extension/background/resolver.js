@@ -11,6 +11,7 @@
 // recipe (the engine's Record recipe button) and reports no link.
 const Resolver = {
   containers: {},   // ifaceId -> cookieStoreId
+  removing: new Map(), // ifaceId -> the remove of its container in flight
   ifaceByStore: {}, // cookieStoreId -> ifaceId
   recipes: {},      // landing-page host -> recipe (lib/recipe.js)
   jobs: new Map(),  // "downloadId|ifaceId" -> job
@@ -62,7 +63,7 @@ const Resolver = {
   // user's own manual or PAC proxy). Sync, so no container request slips
   // through before they are there.
   fence() {
-    const want = !this.loaded || this.jobs.size > 0 || Object.keys(this.containers).length > 0;
+    const want = !this.loaded || this.needsState();
     const all = { urls: ["<all_urls>"] };
     this.onProxy = this.onProxy || ((d) => this.proxyFor(d));
     this.onCancel = this.onCancel || ((d) => this.cancelUnrouted(d));
@@ -73,6 +74,13 @@ const Resolver = {
       if (want && !ev.hasListener(f)) ev.addListener(f, ...args);
       else if (!want && ev.hasListener(f)) ev.removeListener(f);
     }
+    if (typeof syncWatch === "function") syncWatch();
+  },
+
+  // The background needs the engine's state (the ports) while a resolve or a
+  // container exists, popup open or not.
+  needsState() {
+    return this.jobs.size > 0 || Object.keys(this.containers).length > 0;
   },
 
   get session() {
@@ -102,8 +110,10 @@ const Resolver = {
     }
     const all = await browser.contextualIdentities.query({}).catch(() => []);
     const stale = staleContainers(s.containers, Object.values(keep), all, this.PREFIX);
-    for (const store of stale) await browser.contextualIdentities.remove(store).catch(() => {});
-    this.containers = { ...keep, ...this.containers };
+    // One that will not go stays in containers, fenced, and cleanup retries it.
+    const stuck = {};
+    for (const store of stale) await browser.contextualIdentities.remove(store).catch(() => { stuck[`stale:${store}`] = store; });
+    this.containers = { ...keep, ...stuck, ...this.containers };
     this.saveContainers();
     this.loaded = true;
     this.fence();
@@ -134,6 +144,7 @@ const Resolver = {
     }
     const job = {
       key, id: r.id, iface: r.iface, ifaceName: r.ifaceName || r.iface, pageUrl: r.pageUrl,
+      socksPort: r.socksPort || 0, // the proxy port the engine named for this job
       cookieStore: r.cookieStore || "", // where the download came from: its login is copied into the container
       host: hostOf(r.pageUrl), mode: "new", step: 0, recordFrom: 0, recorded: [], learn: !!r.learn,
       tabs: [], tabId: null, windowId: null, loading: false, skipped: false,
@@ -540,17 +551,28 @@ const Resolver = {
     if (job.windowId !== null) browser.windows.remove(job.windowId).catch(() => {});
     // The interface's container goes with its last running resolve, and its
     // tabs with it: nothing of it is left for session restore.
-    const store = this.containers[job.iface];
-    if (store && ![...this.jobs.values()].some((j) => j.iface === job.iface && j.mode !== "waiting")) {
-      delete this.containers[job.iface];
-      this.saveContainers();
-      browser.contextualIdentities.remove(store).catch(() => {});
-    }
+    this.sweep();
     this.fence();
     for (const j of [...this.jobs.values()]) {
       if (j.mode === "waiting" && j.host === job.host) quiet(this.startOrQueue(j));
     }
     this.save();
+  },
+
+  // Removes the containers no running resolve uses. A container leaves
+  // this.containers only once its remove has resolved: until then it stays
+  // fenced, and a failed remove is tried again at the next sweep.
+  sweep() {
+    for (const [iface, store] of Object.entries(this.containers)) {
+      if (this.removing.has(iface) || [...this.jobs.values()].some((j) => j.iface === iface && j.mode !== "waiting")) continue;
+      this.removing.set(iface, browser.contextualIdentities.remove(store).then(() => {
+        if (this.containers[iface] === store) {
+          delete this.containers[iface];
+          this.saveContainers();
+        }
+      }, (e) => console.warn("DMS² container not removed:", e && e.message))
+        .finally(() => this.removing.delete(iface)));
+    }
   },
 
   onWindowRemoved(wid) {

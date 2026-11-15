@@ -205,18 +205,22 @@ func (e *Engine) setWatching(c *ipc.Conn, on bool) error {
 	}
 	was := !cl.unwatch
 	cl.unwatch = !on
-	st := e.snapshot
-	e.mu.Unlock()
 	if !on {
+		e.mu.Unlock()
 		e.badgeStale.Store(true) // the client's badge is only as new as its last state
-	} else if !was {
-		b, err := ipc.EncodeEvent("state", st)
-		if err != nil {
-			return err
-		}
-		return c.WriteLatest(b)
+		return nil
 	}
-	return nil
+	defer e.mu.Unlock()
+	if was {
+		return nil
+	}
+	// Queued under the lock and in order: a push cannot slip a newer state in
+	// before this older one, and the answer to watch follows it.
+	b, err := ipc.EncodeEvent("state", e.snapshot)
+	if err != nil {
+		return err
+	}
+	return c.WriteRaw(b)
 }
 
 // sendAll queues an encoded event for every client.
