@@ -92,6 +92,22 @@ test("a tab a replayed click opened is judged on its updates and once when its m
   assert.equal(b.Resolver.newTabs.size, 0);
 });
 
+test("a resolve's tab does not fetch media or fonts, nor does anyone else's, and a captcha page gets all it asks for", async () => {
+  const b = load();
+  await b.settle();
+  b.connect();
+  const job = await recording(b);
+  const ask = async (d) => (await Promise.all(b.fire("webRequest.onBeforeRequest", { tabId: job.tabId, url: "https://x.test/a", ...d })))[0];
+  assert.deepEqual(await ask({ type: "media" }), { cancel: true });
+  assert.deepEqual(await ask({ type: "font" }), { cancel: true });
+  for (const type of ["image", "imageset", "stylesheet", "script", "sub_frame", "xmlhttprequest"]) assert.deepEqual(await ask({ type }), {}, type);
+  // The user's own tabs are never touched.
+  assert.deepEqual(await ask({ tabId: 5, type: "media" }), {});
+  job.captcha = true;
+  assert.deepEqual(await ask({ type: "media" }), {});
+  assert.deepEqual(await ask({ type: "font" }), {});
+});
+
 test("a click with no effect yet is judged by one timer for the wait that is left, not re-armed", async () => {
   const b = load();
   await b.settle();
