@@ -244,6 +244,13 @@ func (d *Download) Browser() string {
 	return d.st.Browser
 }
 
+// SourceURL is the link the download was added from.
+func (d *Download) SourceURL() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.st.URL
+}
+
 func (d *Download) State() State {
 	d.mu.Lock()
 	defer d.mu.Unlock()

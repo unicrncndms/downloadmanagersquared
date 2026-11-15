@@ -241,24 +241,48 @@ func (q *Queue) startIfListed(e Entry) {
 
 // Remove discards an entry and its saved state.
 func (q *Queue) Remove(id string, deleteFiles bool) error {
-	e, err := q.Get(id)
-	if err != nil {
+	if _, err := q.Get(id); err != nil {
 		return err
 	}
-	q.startMu.Lock()
-	q.mu.Lock()
-	delete(q.byID, id)
-	q.mu.Unlock()
-	q.startMu.Unlock()
-	e.Discard(deleteFiles)
+	q.RemoveMany([]string{id}, deleteFiles)
+	return nil
+}
+
+// RemoveMany discards the entries with these ids (an id in no row is skipped)
+// and their saved state, taking the save lock once and walking the order once.
+// It returns the ids it removed.
+func (q *Queue) RemoveMany(ids []string, deleteFiles bool) []string {
+	var gone []string
+	var entries []Entry
+	goneSet := map[string]bool{}
+	for _, id := range ids {
+		e, err := q.Get(id)
+		if err != nil {
+			continue
+		}
+		q.startMu.Lock()
+		q.mu.Lock()
+		delete(q.byID, id)
+		q.mu.Unlock()
+		q.startMu.Unlock()
+		e.Discard(deleteFiles)
+		gone, entries, goneSet[id] = append(gone, id), append(entries, e), true
+	}
+	if len(gone) == 0 {
+		return nil
+	}
 	q.saveMu.Lock()
 	defer q.saveMu.Unlock()
 	q.mu.Lock()
-	delete(q.dirty, id)
-	q.order = slices.DeleteFunc(q.order, func(x string) bool { return x == id })
+	for _, id := range gone {
+		delete(q.dirty, id)
+	}
+	q.order = slices.DeleteFunc(q.order, func(x string) bool { return goneSet[x] })
 	q.mu.Unlock()
-	os.Remove(q.statePath(e))
-	return nil
+	for _, e := range entries {
+		os.Remove(q.statePath(e))
+	}
+	return gone
 }
 
 func (q *Queue) Pause(id string) error {

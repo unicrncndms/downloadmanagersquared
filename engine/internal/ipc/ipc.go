@@ -51,10 +51,27 @@ type event struct {
 	Data  any    `json:"data,omitempty"`
 }
 
+// Conn is one client. Everything for it is written by one goroutine of its
+// own, so a client that doesn't read holds up only itself: writes here just
+// queue. Events and answers keep their order; the "latest" picture (the
+// state, the badge) is one slot that a newer one replaces.
 type Conn struct {
-	c   net.Conn
-	wmu sync.Mutex
+	c      net.Conn
+	mu     sync.Mutex // guards the queue
+	q      []queued
+	latest []byte
+	wake   chan struct{}
+	done   chan struct{}
+	once   sync.Once
 }
+
+type queued struct {
+	b    []byte
+	sync chan struct{} // closed when the writer reaches it (Sync)
+}
+
+// maxQueued is how many lines may wait for a client before it is hung up on.
+const maxQueued = 4096
 
 func (c *Conn) send(v any) error {
 	b, err := json.Marshal(v)
@@ -64,21 +81,107 @@ func (c *Conn) send(v any) error {
 	return c.WriteRaw(append(b, '\n'))
 }
 
-// WriteRaw sends an already encoded line, e.g. from EncodeEvent.
-func (c *Conn) WriteRaw(line []byte) error {
-	c.wmu.Lock()
-	defer c.wmu.Unlock()
+// WriteRaw queues an already encoded line, e.g. from EncodeEvent.
+func (c *Conn) WriteRaw(line []byte) error { return c.enqueue(queued{b: line}) }
+
+func (c *Conn) enqueue(q queued) error {
+	c.mu.Lock()
+	select {
+	case <-c.done:
+		c.mu.Unlock()
+		return net.ErrClosed
+	default:
+	}
+	if len(c.q) >= maxQueued {
+		c.mu.Unlock()
+		log.Printf("dropping a client that doesn't take events")
+		c.Close()
+		return net.ErrClosed
+	}
+	c.q = append(c.q, q)
+	c.mu.Unlock()
+	c.wakeUp()
+	return nil
+}
+
+// WriteLatest queues a picture of the current state: one not yet written when
+// the next comes is dropped.
+func (c *Conn) WriteLatest(line []byte) error {
+	c.mu.Lock()
+	c.latest = line
+	c.mu.Unlock()
+	c.wakeUp()
+	return nil
+}
+
+// Sync waits until what is queued now has been written, or d is over.
+func (c *Conn) Sync(d time.Duration) {
+	s := make(chan struct{})
+	if c.enqueue(queued{sync: s}) != nil {
+		return
+	}
+	select {
+	case <-s:
+	case <-c.done:
+	case <-time.After(d):
+	}
+}
+
+func (c *Conn) wakeUp() {
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (c *Conn) writer() {
+	for {
+		select {
+		case <-c.wake:
+		case <-c.done:
+			return
+		}
+		c.mu.Lock()
+		q, latest := c.q, c.latest
+		c.q, c.latest = nil, nil
+		c.mu.Unlock()
+		for _, it := range q {
+			if it.sync != nil {
+				close(it.sync)
+			} else if !c.write(it.b) {
+				return
+			}
+		}
+		if latest != nil && !c.write(latest) {
+			return
+		}
+	}
+}
+
+// write hangs up on a client that takes nothing for 10 s; it connects again
+// when it can.
+func (c *Conn) write(b []byte) bool {
 	c.c.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_, err := c.c.Write(line)
-	return err
+	if _, err := c.c.Write(b); err != nil {
+		c.Close()
+		return false
+	}
+	return true
 }
 
 // Close hangs up on the client: its serving ends as if it had left.
-func (c *Conn) Close() error { return c.c.Close() }
+func (c *Conn) Close() error {
+	c.once.Do(func() { close(c.done) })
+	return c.c.Close()
+}
 
 // NewConn wraps an accepted connection; Serve does this for each client, and
 // tests for one end of a net.Pipe.
-func NewConn(c net.Conn) *Conn { return &Conn{c: c} }
+func NewConn(c net.Conn) *Conn {
+	cn := &Conn{c: c, wake: make(chan struct{}, 1), done: make(chan struct{})}
+	go cn.writer()
+	return cn
+}
 
 // Emit pushes an event to this client.
 func (c *Conn) Emit(name string, data any) error { return c.send(event{name, data}) }
@@ -142,7 +245,7 @@ const maxAcceptFailures = 20
 func ServeConn(c net.Conn, h Handler) { serveConn(NewConn(c), h) }
 
 func serveConn(c *Conn, h Handler) {
-	defer c.c.Close()
+	defer c.Close()
 	h.Connected(c)
 	defer h.Disconnected(c)
 	r := bufio.NewReaderSize(c.c, 64<<10)

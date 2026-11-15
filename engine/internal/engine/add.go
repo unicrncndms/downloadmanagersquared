@@ -210,8 +210,9 @@ func (e *Engine) findURL(url string) string {
 		}
 	}
 	for _, d := range e.queue.List() {
-		if s := d.Summary(); s.URL == url {
-			return s.ID
+		// Not Summary: it builds the whole row for every download.
+		if s, ok := d.(interface{ SourceURL() string }); ok && s.SourceURL() == url {
+			return d.ID()
 		}
 	}
 	return ""

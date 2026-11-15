@@ -100,3 +100,61 @@ func TestUnwatchedClientsGetOnlyTheBadge(t *testing.T) {
 		t.Fatalf("after unwatch got %q, want badge", ev)
 	}
 }
+
+// A client that connects and never reads holds up neither the push nor the
+// other clients.
+func TestStuckClientDoesNotHoldUpThePush(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	ours, theirs := net.Pipe() // nobody reads theirs
+	t.Cleanup(func() { ours.Close(); theirs.Close() })
+	e.Connected(ipc.NewConn(ours))
+	_, events := watcher(t, e)
+
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		var sent lastSent
+		e.updateSnapshot(time.Second)
+		e.push(&sent)
+		if ev := next(t, events); ev != "state" {
+			t.Fatalf("got %q, want state", ev)
+		}
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("three pushes took %v with a client that reads nothing", d)
+	}
+}
+
+// A call that changes the list gets the clients the state within a moment, not
+// at the next tick; removeMany takes several at once.
+func TestCallsPushTheStateAtOnce(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	a, _ := e.Add(AddRequest{URL: "https://example.com/a.iso"})
+	b, _ := e.Add(AddRequest{URL: "https://example.com/b.iso"})
+	if id := e.findURL("https://example.com/b.iso"); id != b {
+		t.Fatalf("findURL gave %q, want %q", id, b)
+	}
+	c, events := watcher(t, e)
+	go e.Run()
+	time.Sleep(1500 * time.Millisecond)
+	for len(events) > 0 {
+		<-events
+	}
+	start := time.Now()
+	if _, err := e.Call(c, "removeMany", []byte(`{"ids":["`+a+`","`+b+`","gone"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if ev := next(t, events); ev != "state" || time.Since(start) > 500*time.Millisecond {
+		t.Fatalf("got %q after %v, want the state within 500 ms", ev, time.Since(start))
+	}
+	if n := len(e.Snapshot().Downloads); n != 0 {
+		t.Fatalf("%d downloads left", n)
+	}
+}

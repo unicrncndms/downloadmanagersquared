@@ -659,7 +659,9 @@ function makeGroupCard(gid) {
   const ids = () => (g ? g.items.map((i) => i.d.id) : []);
   const each = async (method, params, okText, pick) => {
     // All at once: a pause answers only once its connections have closed.
-    await Promise.all(g.items.map((i) => i.d).filter((d) => !pick || pick(d)).map((d) => call(method, { id: d.id, ...params }).catch((e) => toast(e.message, true))));
+    const ds = g.items.map((i) => i.d).filter((d) => !pick || pick(d));
+    if (method === "remove") await removeMany(ds.map((d) => d.id), params.deleteFile);
+    else await Promise.all(ds.map((d) => call(method, { id: d.id, ...params }).catch((e) => toast(e.message, true))));
     if (okText) toast(okText);
   };
 

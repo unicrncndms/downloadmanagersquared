@@ -99,6 +99,10 @@ type Engine struct {
 	// A client said unwatch: the next tick sends the badge again even if it is
 	// the one last sent, as that client's own may be a state older.
 	badgeStale atomic.Bool
+	// A call that changed the list asks for a state push soon (requestPush):
+	// the tick stays, but a click's result doesn't wait for it.
+	pushReq     chan struct{}
+	pushPending atomic.Bool
 	keeping  atomic.Value  // the archiveKeeping setting, a string, for ArchiveKeeping
 	ran      chan struct{} // closed when Run returns
 	quitReq  chan struct{} // closed when a client asks the engine to quit
@@ -196,6 +200,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		stop:      stop,
 		ran:       make(chan struct{}),
 		quitReq:   make(chan struct{}),
+		pushReq:   make(chan struct{}, 1),
 	}
 	e.keepingNow()
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
@@ -269,27 +274,60 @@ func (e *Engine) Run() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	last := time.Now()
-	n := 0
 	var sent lastSent
+	// Listing the adapters can take a while (many virtual NICs): not in the tick.
+	var listing sync.WaitGroup
+	defer listing.Wait()
+	listing.Add(1)
+	go func() {
+		defer listing.Done()
+		lt := time.NewTicker(10 * time.Second)
+		defer lt.Stop()
+		for {
+			select {
+			case <-e.quit:
+				return
+			case <-lt.C:
+				e.listInterfaces()
+			}
+		}
+	}()
 	for {
 		select {
 		case <-e.quit:
 			return
+		case <-e.pushReq:
+			now := time.Now()
+			e.updateSnapshot(now.Sub(last))
+			last = now
+			e.push(&sent)
 		case now := <-t.C:
-			n++
-			if n%10 == 0 {
-				e.listInterfaces() // a failed listing still ticks the VPN, as before
-			}
 			e.tickVPN(now)
 			e.syncTorrentIfaces()
 			e.checkUpdate(now)
 			e.syncSets()
 			e.schedule()
-			e.queue.Save()
 			e.updateSnapshot(now.Sub(last))
 			last = now
 			e.push(&sent)
+			e.queue.Save() // after the push: the disk never delays an update
 		}
+	}
+}
+
+// pushDelay gathers the calls of a click or two into one push.
+const pushDelay = 75 * time.Millisecond
+
+// requestPush has Run push the state in a moment instead of at the next tick.
+func (e *Engine) requestPush() {
+	if e.pushPending.CompareAndSwap(false, true) {
+		time.AfterFunc(pushDelay, func() {
+			e.pushPending.Store(false)
+			select {
+			case e.pushReq <- struct{}{}:
+			default:
+			}
+		})
 	}
 }
 
@@ -308,14 +346,14 @@ func (e *Engine) push(sent *lastSent) {
 		sent.state = nil // a client that watches from now on gets today's state itself
 	} else if b, err := ipc.EncodeEvent("state", snap); err == nil && !bytes.Equal(b, sent.state) {
 		sent.state = b
-		e.sendWhere(b, func(c *client) bool { return !c.unwatch })
+		e.sendWhere(b, true, func(c *client) bool { return !c.unwatch })
 	}
 	stale := e.badgeStale.Swap(false)
 	if others == 0 {
 		sent.badge = nil
 	} else if b, err := ipc.EncodeEvent("badge", badgeOf(snap.Downloads)); err == nil && (stale || !bytes.Equal(b, sent.badge)) {
 		sent.badge = b
-		e.sendWhere(b, func(c *client) bool { return c.unwatch })
+		e.sendWhere(b, true, func(c *client) bool { return c.unwatch })
 	}
 }
 
@@ -325,7 +363,21 @@ func (e *Engine) QuitRequested() <-chan struct{} { return e.quitReq }
 
 // QuitByUser tells the browsers the user quit the engine, so they don't start
 // it again by reconnecting. An upgrade's quit doesn't: its new engine is wanted.
-func (e *Engine) QuitByUser() { e.broadcast("quit", nil) }
+func (e *Engine) QuitByUser() {
+	e.broadcast("quit", nil)
+	e.mu.Lock()
+	cs := make([]*ipc.Conn, 0, len(e.clients))
+	for c := range e.clients {
+		cs = append(cs, c)
+	}
+	e.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, c := range cs { // the engine exits next: let the event out first
+		wg.Add(1)
+		go func() { defer wg.Done(); c.Sync(time.Second) }()
+	}
+	wg.Wait()
+}
 
 // Shutdown saves everything, then lets go of the pipe: whoever waits for the
 // pipe to be free finds the state on disk.
@@ -795,12 +847,24 @@ func (e *Engine) Remove(id string, deleteFile bool) error {
 	if err := e.queue.Remove(id, deleteFile); err != nil {
 		return err
 	}
+	e.forgetResolves([]string{id})
+	return nil
+}
+
+// RemoveMany removes these downloads in one pass; an id that is gone is skipped.
+func (e *Engine) RemoveMany(ids []string, deleteFile bool) {
+	e.forgetResolves(e.queue.RemoveMany(ids, deleteFile))
+}
+
+func (e *Engine) forgetResolves(ids []string) {
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	for k := range e.resolves {
-		if strings.HasPrefix(k, id+"|") {
-			delete(e.resolves, k)
+		for _, id := range ids {
+			if strings.HasPrefix(k, id+"|") {
+				delete(e.resolves, k)
+				break
+			}
 		}
 	}
-	e.mu.Unlock()
-	return nil
 }

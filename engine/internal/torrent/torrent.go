@@ -756,6 +756,13 @@ func (t *Torrent) Rejoins() bool {
 }
 
 // Added is when the torrent was added.
+// SourceURL is the magnet link the torrent was added from.
+func (t *Torrent) SourceURL() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.st.Magnet
+}
+
 func (t *Torrent) Added() time.Time { return t.st.Added } // fixed when added: no lock needed
 
 // Saved is the torrent's kind and the state that resumes it after a restart.

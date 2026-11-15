@@ -185,6 +185,7 @@ function predict(state, method, p) {
     case "resumeAll": return map(can("resume"), queued);
     case "startNow": return map((d) => d === me && d.status === "queued", (d) => ({ ...d, status: "running", section: "active", label: "Downloading", plain: true, tone: "" }));
     case "remove": return me ? { ...state, downloads: ds.filter((d) => d !== me) } : state;
+    case "removeMany": return ds.some((d) => (p.ids || []).includes(d.id)) ? { ...state, downloads: ds.filter((d) => !(p.ids || []).includes(d.id)) } : state;
     case "setLimit": return map((d) => d === me, (d) => ({ ...d, limit: p.limit }));
     case "setFolder": {
       // A split archive's parts have one switch and one folder.

@@ -18,7 +18,7 @@ import (
 type client struct {
 	extension bool
 	unwatch   bool   // said unwatch: gets a badge event, not the whole state
-	seq      int64  // higher = connected later
+	seq       int64  // higher = connected later
 	browser   string // the exe of the browser the extension runs in, from its hello
 	userAgent string // that browser's, from its hello
 	// The landing-page hosts that browser has a recipe for, from recipeHosts;
@@ -201,16 +201,22 @@ func (e *Engine) setWatching(c *ipc.Conn, on bool) error {
 	if !on {
 		e.badgeStale.Store(true) // the client's badge is only as new as its last state
 	} else if !was {
-		return c.Emit("state", st)
+		b, err := ipc.EncodeEvent("state", st)
+		if err != nil {
+			return err
+		}
+		return c.WriteLatest(b)
 	}
 	return nil
 }
 
-// sendAll writes an encoded event to every client.
-func (e *Engine) sendAll(b []byte) { e.sendWhere(b, func(*client) bool { return true }) }
+// sendAll queues an encoded event for every client.
+func (e *Engine) sendAll(b []byte) { e.sendWhere(b, false, func(*client) bool { return true }) }
 
-// sendWhere writes an encoded event to the clients keep accepts.
-func (e *Engine) sendWhere(b []byte, keep func(*client) bool) {
+// sendWhere queues an encoded event for the clients keep accepts: in order
+// with their other events, or, for latest (a picture of the state), replacing
+// one they have not yet taken. The tick never waits on a client.
+func (e *Engine) sendWhere(b []byte, latest bool, keep func(*client) bool) {
 	e.mu.Lock()
 	cs := make([]*ipc.Conn, 0, len(e.clients))
 	for c, cl := range e.clients {
@@ -220,11 +226,10 @@ func (e *Engine) sendWhere(b []byte, keep func(*client) bool) {
 	}
 	e.mu.Unlock()
 	for _, c := range cs {
-		if err := c.WriteRaw(b); err != nil {
-			// A client that takes nothing for 10 s would hold up every tick by
-			// that long: it is hung up on, and connects again when it can.
-			log.Printf("dropping a client that doesn't take events: %v", err)
-			c.Close()
+		if latest {
+			c.WriteLatest(b)
+		} else {
+			c.WriteRaw(b)
 		}
 	}
 }
