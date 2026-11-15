@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"downloadmanagersquared/engine/internal/dnscache"
 	"downloadmanagersquared/engine/internal/rate"
 )
 
@@ -36,7 +37,8 @@ type Binding struct {
 	client   *http.Client
 	families map[string]*http.Client // one client per family, on an interface with IPv6
 	nextDNS  atomic.Uint32
-	dns      []net.IP // the servers asked: the interface's, else public ones
+	names    dnscache.Cache // host and family to addresses
+	dns      []net.IP       // the servers asked: the interface's, else public ones
 }
 
 // DNSPort is where DNS servers are asked; tests point it elsewhere.
@@ -89,6 +91,8 @@ func NewHTTPClient(dial func(ctx context.Context, network, addr string) (net.Con
 	return &http.Client{
 		Transport: &http.Transport{
 			DialContext: dial,
+			// Reconnects resume the TLS session instead of a full handshake.
+			TLSClientConfig: &tls.Config{ClientSessionCache: tls.NewLRUClientSessionCache(64)},
 			// Force HTTP/1.1: with HTTP/2 every range request would share one TCP connection.
 			TLSNextProto:          map[string]func(string, *tls.Conn) http.RoundTripper{},
 			DisableCompression:    true,
@@ -321,7 +325,10 @@ func (b *Binding) lookup(ctx context.Context, host, family string) ([]net.IP, er
 	case family == "" && b.iface.IPv6 != nil:
 		network = "ip"
 	}
-	ips, err := b.resolver.LookupIP(ctx, network, host)
+	ips, err := b.names.Lookup(ctx, network+" "+host, func(ctx context.Context) ([]net.IP, error) {
+		return b.resolver.LookupIP(ctx, network, host)
+	})
+	// After the cache, which rotates: IPv4 first, each family in its rotation.
 	slices.SortStableFunc(ips, func(x, y net.IP) int { return len(y.To4()) - len(x.To4()) })
 	return ips, err
 }

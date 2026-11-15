@@ -245,3 +245,26 @@ func TestDualStackDialsIPv6FirstAndFallsBackToIPv4(t *testing.T) {
 		t.Error("an IPv4-only interface has family clients")
 	}
 }
+
+// A download's connections share one lookup per family; another binding has
+// its own.
+func TestLookupsAreCachedPerBinding(t *testing.T) {
+	asked := dnsServer(t, net.IPv4(192, 0, 2, 1), nil)
+	lo := loopback(t)
+	lo.DNS = []net.IP{net.IPv4(127, 0, 0, 1)}
+	b := NewBinding(lo, rate.NewShaper())
+	for range 8 {
+		if _, err := b.LookupIP(t.Context(), "files.example"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(asked()); n != 1 {
+		t.Fatalf("8 lookups sent %d queries, want 1", n)
+	}
+	if _, err := NewBinding(lo, rate.NewShaper()).LookupIP(t.Context(), "files.example"); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(asked()); n != 1 {
+		t.Fatalf("a second binding sent %d queries, want its own 1", n)
+	}
+}
