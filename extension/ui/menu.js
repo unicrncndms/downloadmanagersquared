@@ -129,7 +129,8 @@ function editable(facts, form, editBtn, fill) {
 const shownSig = new WeakMap();
 function fresh(node, sig, build) {
   const s = JSON.stringify(sig);
-  if (shownSig.get(node) === s) return;
+  if (shownSig.get(node) === s) return false;
   shownSig.set(node, s);
   node.replaceChildren(...build());
+  return true; // it changed
 }

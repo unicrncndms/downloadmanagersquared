@@ -6,6 +6,7 @@
 
 let latest = {};
 const cards = new Map(); // download id -> card controller
+let queue = { at: new Map(), len: 0 }; // each queued download's place in the whole queue, and its length (lib/rows.js)
 
 // Details shows one download beside the list (a wide window) or in a sheet
 // over its lower half (the popup): a row never grows, so the list keeps its
@@ -217,8 +218,9 @@ function renderStrip(s) {
   const idle = (i) => !!s.active && !(i.speed > 0);
   // Held back on some download right now: the server busy, or backing off.
   const busy = new Set((s.downloads || []).flatMap((d) => Object.keys(d.links || {}).filter((id) => d.links[id].tone === "warn")));
-  $("strip").classList.toggle("many", ifs.length > 2);
-  fresh($("strip"), ifs.map((i) => [i.id, i.name, Math.round((i.speed || 0) / 1e5), idle(i), busy.has(i.id), speedUnitLabel()]), () => ifs.map((i, n) => {
+  const many = ifs.length > 2, wasMany = $("strip").classList.contains("many");
+  $("strip").classList.toggle("many", many);
+  const changed = fresh($("strip"), ifs.map((i) => [i.id, i.name, Math.round((i.speed || 0) / 1e5), idle(i), busy.has(i.id), speedUnitLabel()]), () => ifs.map((i, n) => {
     const sq = el("i", { class: "dot" });
     sq.style.color = ifaceHue(i.id, s);
     // Busy is a ring on the square, as a row's busy connection tile; the word stays in the label.
@@ -230,7 +232,7 @@ function renderStrip(s) {
       el("span", { class: "muted num" }, isIdle ? "idle" : stripSpeed(i.speed || 0) + (n === 0 ? " " + speedUnitLabel() : "")),
       isBusy ? el("span", { class: "busy" }, "busy") : null);
   }));
-  fitStrip();
+  if (changed || many !== wasMany) fitStrip(); // measuring forces a layout: only when the strip changed (and on resize)
 }
 
 // fitStrip gives the window's strip the short names when the full ones
@@ -520,12 +522,15 @@ function renderDownloads(state) {
   }
   const want = []; // the list's nodes, in order
   shown = res.shown;
+  queue = res.queue;
   for (const s of res.sections) {
     const head = sectionHead(s.name);
     head.count.textContent = s.count;
     if (head.limit) head.limit.textContent = `${(latest.settings || {}).maxParallel || 1} at a time`;
     want.push(head.root);
     for (const row of s.rows) {
+      // A folded section draws nothing, so it updates nothing; the opened download's Details are drawn wherever its row is.
+      if (s.folded && !(row.d ? row.d.id === detail.id : row.items.some((i) => i.d.id === detail.id))) continue;
       let c;
       if (row.d) {
         c = cardFor(row.d.id);
