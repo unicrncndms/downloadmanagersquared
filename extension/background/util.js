@@ -58,8 +58,8 @@ async function copyCookies(url, from, to) {
   } catch (e) {
     try { cookies = await browser.cookies.getAll({ url, storeId: from }); } catch (e2) { return 0; }
   }
-  let n = 0;
-  for (const c of cookies) {
+  // In parallel: one round trip, not one per cookie.
+  const done = await Promise.all(cookies.map(async (c) => {
     const host = c.domain.replace(/^\./, "");
     const set = {
       url: `${c.secure ? "https" : "http"}://${host}${c.path || "/"}`,
@@ -72,10 +72,10 @@ async function copyCookies(url, from, to) {
     if (c.partitionKey) set.partitionKey = c.partitionKey;
     try {
       await browser.cookies.set(set);
-      n++;
-    } catch (e) { /* one the container refuses: the page may ask to log in */ }
-  }
-  return n;
+      return 1;
+    } catch (e) { return 0; /* one the container refuses: the page may ask to log in */ }
+  }));
+  return done.reduce((a, b) => a + b, 0);
 }
 
 // Fallback where no request passed by (context menu, browser downloads): the
