@@ -14,6 +14,9 @@ const (
 	handshakeLen  = len(plainProtocol) + 8 + 20 + 20 // protocol, reserved bits, info hash, peer id
 )
 
+// maxKept is the largest buffer a gate holds on to between writes.
+const maxKept = 64 << 10
+
 var errEncrypted = errors.New("an encrypted peer connection can't be kept from uploading")
 
 var (
@@ -43,7 +46,8 @@ type uploadGate struct {
 	nhdr      int
 	body      uint32 // the current message's bytes still to come
 	dropMsg   bool
-	unchoked  bool // the client unchoked the peer last, whether or not it was sent
+	unchoked  bool   // the client unchoked the peer last, whether or not it was sent
+	out       []byte // what a Write keeps to send, reused so a stream of pieces allocates nothing
 }
 
 func newUploadGate(c net.Conn, upload bool) *uploadGate {
@@ -96,7 +100,7 @@ func (g *uploadGate) Write(p []byte) (int, error) {
 	if g.encrypted {
 		return g.Conn.Write(p)
 	}
-	out := make([]byte, 0, len(p))
+	out := g.out[:0]
 	for b := p; len(b) > 0; {
 		switch {
 		case g.hs < len(plainProtocol):
@@ -145,6 +149,9 @@ func (g *uploadGate) Write(p []byte) (int, error) {
 				g.nhdr = 0
 			}
 		}
+	}
+	if cap(out) <= maxKept {
+		g.out = out
 	}
 	if len(out) > 0 {
 		if _, err := g.Conn.Write(out); err != nil {

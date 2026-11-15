@@ -148,6 +148,11 @@ func (s *Session) newClient() (*atorrent.Client, storage.ClientImplCloser, error
 	c.NoDefaultPortForwarding = true
 	c.DisableWebtorrent = true // WebRTC opens its own UDP sockets
 	c.ListenPort = 0
+	// Peers spread over the interfaces, and using several lines at once is the point,
+	// so the budget grows with them. The client has no way to change it while it runs:
+	// it is read here, when the first torrent joins, from the interfaces given by then.
+	c.EstablishedConnsPerTorrent *= max(1, len(s.want))
+	c.PieceHashersPerTorrent = 4 // the default 2 caps verifying a finished torrent on a fast disk
 	c.Seed = true // without it, peers are dropped on completion; Torrent decides how long to seed
 	c.TrackerDialContext = s.dialFirst
 	c.HTTPDialContext = s.dialFirst
