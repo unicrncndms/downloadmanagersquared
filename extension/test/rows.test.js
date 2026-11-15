@@ -95,3 +95,23 @@ test("the selection loses downloads that are gone, and says when the opened one 
   // A search hiding a selected row doesn't unselect it.
   assert.deepEqual([...listRows(state, ui({ selected: new Set(["b"]), query: "a" })).selected], ["b"]);
 });
+
+test("an untouched queued download is a light row; anything it shows makes it a card", () => {
+  const { isLight } = require("../lib/rows.js");
+  const form = (d, extra) => listRows({ downloads: [d] }, ui(extra)).sections[0].rows[0].form;
+  assert.equal(form(dl("q", "queued")), "light");
+  assert.equal(form(dl("q", "queued"), { selected: new Set(["q"]) }), "card");
+  assert.equal(form(dl("q", "queued"), { opened: "q" }), "card");
+  assert.equal(form(dl("run", "running")), "card");
+  for (const extra of [{ done: 5 }, { error: "x" }, { vpn: "on" }, { folder: { on: true } }, { hostKey: { host: "h" } }, { links: { eth: {} } }]) {
+    assert.equal(isLight(dl("q", "queued", extra)), false, JSON.stringify(extra));
+  }
+});
+
+test("the queue's places count all downloads, not only those the search leaves", () => {
+  const all = [dl("a", "queued"), dl("r", "running"), dl("b", "queued"), dl("c", "queued", { filename: "zzz" })];
+  const r = listRows({ downloads: all }, ui({ query: "zzz" }));
+  assert.deepEqual([...r.queue.at], [["a", 0], ["b", 1], ["c", 2]]);
+  assert.equal(r.queue.len, 3);
+  assert.equal(r.sections[0].rows[0].place, 1); // its place in what is listed
+});
