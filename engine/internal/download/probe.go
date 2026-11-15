@@ -258,7 +258,7 @@ func (d *Download) probe(ctx context.Context, ifc Iface, l Link) {
 		d.applyProbeLocked(ifc.ID, cur, res, err)
 	}
 	d.mu.Unlock()
-	d.env.Changed(d)
+	d.changed()
 }
 
 func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err error) {
