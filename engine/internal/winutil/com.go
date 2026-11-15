@@ -90,6 +90,16 @@ func wstr(s string) *uint16 {
 	return p
 }
 
+var pSHChangeNotify = shell32.NewProc("SHChangeNotify")
+
+// IconsChanged tells Explorer that icons may have changed. Explorer and the
+// taskbar cache an exe's icon by path, so an upgrade that replaces the exe
+// in place keeps showing the old icon until told (or until a reboot).
+func IconsChanged() {
+	const shcneAssocChanged, shcnfIDList = 0x08000000, 0
+	pSHChangeNotify.Call(shcneAssocChanged, shcnfIDList, 0, 0)
+}
+
 // CreateShortcut writes a .lnk at lnk that starts target, showing icon (an
 // .ico file; empty for the target's own).
 func CreateShortcut(lnk, target, workDir, desc, icon string) error {

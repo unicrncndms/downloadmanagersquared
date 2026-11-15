@@ -142,6 +142,7 @@ func (l Layout) Install(src, version string, first *Options) error {
 	} else if err := l.putFilesElevated(src); err != nil {
 		return err
 	}
+	winutil.IconsChanged()
 	if err := l.Register(); err != nil {
 		return fmt.Errorf("the files are in %s but DMS² could not be registered with the browser: %w", l.Dir, err)
 	}
