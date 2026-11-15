@@ -103,6 +103,8 @@ test("an untouched queued download is a light row; anything it shows makes it a 
   assert.equal(form(dl("q", "queued"), { selected: new Set(["q"]) }), "card");
   assert.equal(form(dl("q", "queued"), { opened: "q" }), "card");
   assert.equal(form(dl("run", "running")), "card");
+  const inGroup = listRows({ downloads: [dl("a", "queued", { group: "g" }), dl("b", "running", { group: "g" })], groups: [summary({ order: ["a", "b"] })] }, ui());
+  assert.deepEqual(inGroup.sections[0].rows[0].items.map((i) => i.form), ["light", "card"]);
   for (const extra of [{ done: 5 }, { error: "x" }, { vpn: "on" }, { folder: { on: true } }, { hostKey: { host: "h" } }, { links: { eth: {} } }]) {
     assert.equal(isLight(dl("q", "queued", extra)), false, JSON.stringify(extra));
   }

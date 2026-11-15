@@ -131,8 +131,10 @@ func (d *Download) complete(ctx context.Context) error {
 		if sparse {
 			winutil.SetSparse(f, false)
 		}
-		f.Sync()
-		f.Close()
+		// A write Windows still held back can fail only here: the file isn't whole then.
+		if err := errors.Join(f.Sync(), f.Close()); err != nil {
+			return fmt.Errorf("could not finish writing the file: %w", err)
+		}
 	}
 	for sha != "" || md != "" {
 		d.mu.Lock()

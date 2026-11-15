@@ -349,14 +349,18 @@ func (d *Download) ResolveFailed(ifaceID, msg string) {
 	d.changed()
 }
 
-// RetryLink gives a failed or mismatched interface another chance.
-func (d *Download) RetryLink(ifaceID string) {
+// RetryLink gives a failed or mismatched interface another chance. stopped:
+// the download had stopped by itself (failed, or paused with a reason), so the
+// caller resumes it too; a Retry that waits for a Resume click looks broken.
+func (d *Download) RetryLink(ifaceID string) (stopped bool) {
 	d.mu.Lock()
 	if l := d.st.Links[ifaceID]; l != nil {
 		l.retry()
 	}
+	stopped = !d.running && (d.st.Status == StatusFailed || d.st.Status == StatusPaused && d.st.Error != "")
 	d.mu.Unlock()
 	d.changed()
+	return stopped
 }
 
 // SetPageURL sets the landing page and retries interfaces that were waiting for one.

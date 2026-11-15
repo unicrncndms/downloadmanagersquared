@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,7 @@ type AddRequest struct {
 	Checksum  string `json:"checksum"` // a SHA-256 or MD5 the finished file is checked against (one link only)
 	File      string `json:"file"`     // a local .torrent or .meta4 file's bytes, base64: added in place of a link
 	FileName  string `json:"fileName"` // the local file's name, which says what it is
+	FilePath  string `json:"filePath"` // a .torrent or .meta4 file the browser saved (a page's blob: link): read in place of File
 	KeyFile   string `json:"keyFile"`  // SFTP: a private key file to log in with, in place of a password in the link
 	KeyPass   string `json:"keyPass"`  // its passphrase: never logged
 	CheckDup  bool   `json:"checkDup"` // asks before adding a link already in the list (the Add box); the list's id comes back instead
@@ -69,6 +71,18 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	var err error
 	if r.Dir, err = cleanDir(r.Dir); err != nil {
 		return "", err
+	}
+	if r.FilePath != "" {
+		f, err := os.Open(r.FilePath)
+		if err != nil {
+			return "", errors.New("that file could not be read")
+		}
+		b, err := io.ReadAll(io.LimitReader(f, maxSmallFile+1))
+		f.Close()
+		if err != nil {
+			return "", errors.New("that file could not be read")
+		}
+		r.File, r.FileName = base64.StdEncoding.EncodeToString(b), filepath.Base(r.FilePath)
 	}
 	if r.File != "" {
 		return e.addLocalFile(r)

@@ -188,7 +188,7 @@ func (s *Settings) folderDir() string {
 func defaultSettings() Settings {
 	return Settings{
 		Interfaces:         map[string]*IfaceSettings{},
-		ThresholdBytes:     100_000_000, // 100 MB, shown in GB on the settings page
+		ThresholdBytes:     100_000_000, // 100 MB, shown in MB on the settings page
 		SaveDir:            winutil.DownloadsFolder(),
 		MaxParallel:        1,
 		ETAWindowSec:       60,

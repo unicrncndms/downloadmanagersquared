@@ -114,10 +114,12 @@
       <div class="group">
         <h3>Where and when</h3>
         <div class="fields">
-          <div class="setting"><label for="sDir">Download folder</label>
+          <div class="setting"><label for="sDir">Download folder
+            <span class="info" tabindex="0" data-tip="Applies to downloads added from now on."></span></label>
             <span><span class="pathrow"><input type="text" id="sDir" data-setting aria-describedby="sDirErr"><button type="button" id="sBrowse">Browse…</button></span>
             <span class="field-error" id="sDirErr" role="alert" hidden></span></span></div>
-          <div class="setting"><label for="sParallel">Downloads at once</label>
+          <div class="setting"><label for="sParallel">Downloads at once
+            <span class="info" tabindex="0" data-tip="How many downloads run at the same time. The rest wait in the queue."></span></label>
             <input type="number" id="sParallel" min="1" max="16" required data-setting></div>
           <div class="setting"><label>Queue runs only between
             <span class="info" tabindex="0" data-tip="Per weekday, local time. Outside it nothing starts, running downloads pause and seeding stops; they resume when it begins. A download you start yourself still runs. Leave every day empty to run any time. An end before the start runs past midnight."></span></label>
@@ -128,6 +130,12 @@
           <div class="setting"><label for="sNever">Never take over downloads from
             <span class="info" tabindex="0" data-tip="Sites whose downloads stay with the browser, for example a bank or a site that breaks when DMS² takes over. Separate them with commas; a site includes its sub-domains."></span></label>
             <input type="text" id="sNever" placeholder="example.com, bank.example" autocomplete="off" data-setting></div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>General</h3>
+        <div class="fields">
           <div class="setting"><label for="sNotify">Notify when a download finishes or fails</label>
             <span><input type="checkbox" id="sNotify" data-setting></span></div>
           <div class="setting"><label for="sAwake">Keep the PC awake while downloading</label>
@@ -140,12 +148,14 @@
       <div class="group">
         <h3>Speed</h3>
         <div class="fields">
-          <div class="setting"><label for="sSpeedUnit">Show speeds in</label>
+          <div class="setting"><label for="sSpeedUnit">Show speeds in
+            <span class="info" tabindex="0" data-tip="Shows speeds and limits as MB/s or Mbit/s. Only the display changes."></span></label>
             <select id="sSpeedUnit" data-setting></select></div>
           <div class="setting"><label for="sDownLimit">Download limit, all connections (<span class="speedUnit">MB/s</span>)
             <span class="info" tabindex="0" data-tip="Caps everything DMS² receives, on top of each connection's own limit. Empty: none."></span></label>
             <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sDownLimit" placeholder="none" data-setting></div>
-          <div class="setting"><label for="sUpLimit">Upload limit, all connections (<span class="speedUnit">MB/s</span>)</label>
+          <div class="setting"><label for="sUpLimit">Upload limit, all connections (<span class="speedUnit">MB/s</span>)
+            <span class="info" tabindex="0" data-tip="Caps everything DMS² sends, on top of each connection's own limit. Empty: none."></span></label>
             <input type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*" class="dec" id="sUpLimit" placeholder="none" data-setting></div>
         </div>
       </div>
@@ -154,6 +164,7 @@
         <h3>Archives</h3>
         <div class="fields">
           <div class="setting"><label for="sFolder">Download archives as folders
+            <span class="info" tabindex="0" data-tip="Applies to downloads added from now on."></span>
             <span class="note">A .zip, .7z or .rar is extracted as it downloads: you get the folder, not the archive. <a href="#" data-guide="download-as-folder">More</a></span></label>
             <span><input type="checkbox" id="sFolder" data-setting></span></div>
           <div class="setting"><label for="sKeep">Keep the archive
@@ -165,7 +176,8 @@
       <details class="group adv" id="advanced">
         <summary>Advanced</summary>
         <div class="fields">
-          <div class="setting"><label for="sConns">Default requests per connection</label>
+          <div class="setting"><label for="sConns">Default requests per connection
+            <span class="info" tabindex="0" data-tip="A connection's own setting under Connections overrides this."></span></label>
             <input type="number" id="sConns" min="1" max="32" required data-setting></div>
           <div class="setting"><label for="sEta">Time-left averaging (seconds)
             <span class="info" tabindex="0" data-tip="Longer gives a steadier estimate; shorter reacts faster to speed changes."></span></label>
@@ -247,6 +259,9 @@
       <h2 class="mk">About</h2>
       <div class="fields">
         <div class="setting"><span>Version</span><span id="aboutVersion" class="muted"></span></div>
+        <div class="setting"><span>Updates</span>
+          <span class="buttons"><button id="checkUpdate">Check for updates</button><button id="updateNow" class="primary" hidden>Update now</button>
+            <button id="updateExt" hidden>Update the extension</button> <span id="updateStatus" class="muted" role="status"></span></span></div>
         <div class="setting"><span>Help</span>
           <span class="buttons"><button id="openLog">Open log</button><button id="openData">Open data folder</button>
             <a href="#" data-guide="">Guide</a><a href="#" data-releases>Release notes</a></span></div>

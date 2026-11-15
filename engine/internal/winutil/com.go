@@ -2,6 +2,8 @@ package winutil
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"unsafe"
@@ -94,9 +96,18 @@ var pSHChangeNotify = shell32.NewProc("SHChangeNotify")
 
 // IconsChanged tells Explorer that icons may have changed. Explorer and the
 // taskbar cache an exe's icon by path, so an upgrade that replaces the exe
-// in place keeps showing the old icon until told (or until a reboot).
-func IconsChanged() {
-	const shcneAssocChanged, shcnfIDList = 0x08000000, 0
+// in place keeps showing the old icon until told (or until a reboot). paths
+// are the files whose icon changed (the exe, its .ico, its shortcuts); the
+// shortcuts the user pinned to the taskbar are told too, as each keeps its
+// own cached icon.
+func IconsChanged(paths ...string) {
+	const shcneAssocChanged, shcneUpdateItem, shcnfIDList, shcnfPathW = 0x08000000, 0x2000, 0, 5
+	pinned, _ := filepath.Glob(filepath.Join(os.Getenv("APPDATA"), `Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\*.lnk`))
+	for _, p := range append(paths, pinned...) {
+		w := wstr(p)
+		pSHChangeNotify.Call(shcneUpdateItem, shcnfPathW, uintptr(unsafe.Pointer(w)), 0)
+		runtime.KeepAlive(w)
+	}
 	pSHChangeNotify.Call(shcneAssocChanged, shcnfIDList, 0, 0)
 }
 

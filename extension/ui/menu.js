@@ -20,6 +20,8 @@ function showMenu(menu, button, at) {
   const b = at ? { bottom: at.y - 4, right: at.x + menu.offsetWidth } : button.getBoundingClientRect();
   menu.style.top = Math.max(4, Math.min(b.bottom + 4, innerHeight - menu.offsetHeight - 4)) + "px";
   menu.style.left = Math.max(4, Math.min(b.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 4)) + "px";
+  const first = menuItems(menu)[0];
+  if (first) first.focus({ preventScroll: true }); // a scroll would close it
 }
 // A right-click on a card opens its "⋯" menu at the pointer; fields and links keep the browser's own.
 document.addEventListener("contextmenu", (e) => {
@@ -33,12 +35,22 @@ document.addEventListener("contextmenu", (e) => {
 });
 // A fixed menu would stay put while its row scrolls away.
 document.addEventListener("scroll", () => closeMenu(), true);
-// Escape closes it too, and gives the focus back to its "⋯" button.
+// Escape closes it too, and gives the focus back to its "⋯" button. The
+// arrows, Home and End go from item to item, as in any menu.
+const menuItems = (m) => [...m.querySelectorAll("button")].filter((b) => !b.hidden && !b.disabled);
 document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || !openMenu) return;
-  const more = openMenu.parentElement.querySelector("button.icon");
-  closeMenu();
-  if (more) more.focus();
+  if (!openMenu) return;
+  if (e.key === "Escape") {
+    const more = openMenu.parentElement.querySelector("button.icon");
+    closeMenu();
+    if (more) more.focus();
+    return;
+  }
+  const items = menuItems(openMenu);
+  const to = stepIndex(items.indexOf(document.activeElement), items.length, e.key);
+  if (to < 0) return;
+  e.preventDefault();
+  items[to].focus();
 });
 
 // Small line icons, drawn in the text colour.

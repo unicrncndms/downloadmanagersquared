@@ -221,7 +221,7 @@ function renderStrip(s) {
   const busy = new Set((s.downloads || []).flatMap((d) => Object.keys(d.links || {}).filter((id) => d.links[id].tone === "warn")));
   const many = ifs.length > 2, wasMany = $("strip").classList.contains("many");
   $("strip").classList.toggle("many", many);
-  const changed = fresh($("strip"), ifs.map((i) => [i.id, i.name, Math.round((i.speed || 0) / 1e5), idle(i), busy.has(i.id), speedUnitLabel()]), () => ifs.map((i, n) => {
+  const changed = fresh($("strip"), ifs.map((i) => [i.id, i.name, idle(i), busy.has(i.id), speedUnitLabel()]), () => ifs.map((i, n) => {
     const sq = el("i", { class: "dot" });
     sq.style.color = ifaceHue(i.id, s);
     // Busy is a ring on the square, as a row's busy connection tile; the word stays in the label.
@@ -233,7 +233,19 @@ function renderStrip(s) {
       el("span", { class: "muted num" }, isIdle ? "idle" : stripSpeed(i.speed || 0) + (n === 0 ? " " + speedUnitLabel() : "")),
       isBusy ? el("span", { class: "busy" }, "busy") : null);
   }));
-  if (changed || many !== wasMany) fitStrip(); // measuring forces a layout: only when the strip changed (and on resize)
+  // The speeds change every second: written into the chips as they are, so hover and focus stay.
+  let wider = false; // a digit more may no longer fit the header's line
+  if (!changed) ifs.forEach((i, n) => {
+    const chip = $("strip").children[n], isBusy = busy.has(i.id);
+    if (idle(i) && !isBusy) return;
+    const said = fmtSpeed(i.speed || 0) + (isBusy ? ", server busy" : "");
+    chip.title = `${i.name}: ${said}`;
+    chip.setAttribute("aria-label", `${i.name}, ${said}. Open Connections`);
+    const speed = chip.querySelector(".muted"), text = stripSpeed(i.speed || 0) + (n === 0 ? " " + speedUnitLabel() : "");
+    wider ||= text.length !== speed.textContent.length;
+    speed.textContent = text;
+  });
+  if (changed || wider || many !== wasMany) fitStrip(); // measuring forces a layout: only when the strip changed (and on resize)
 }
 
 // fitStrip gives the window's strip the short names when the full ones
@@ -303,19 +315,22 @@ $("addUrl").addEventListener("input", () => {
   $("addPage").parentElement.hidden = !v.page;
   $("addVpn").parentElement.hidden = !v.vpn;
   $("addNameRow").hidden = $("addSumRow").hidden = !single;
-  $("addKeyRow").hidden = $("addKeyPassRow").hidden = !(single && /^sftp:\/\//i.test($("addUrl").value.trim()));
+  const link = $("addUrl").value.trim();
+  $("addUserRow").hidden = $("addPassRow").hidden = !(single && /^(s?ftp|ftps):\/\//i.test(link));
+  $("addKeyRow").hidden = $("addKeyPassRow").hidden = !(single && /^sftp:\/\//i.test(link));
   $("addVpn").options[0].textContent = `As in settings (${VPN_TEXT[latest.settings.vpnHttp] || "Off"})`;
   $("addGo").textContent = v.label;
   $("addOptions").hidden = !(single || v.page || v.vpn);
   $("addDup").hidden = true;
   $("addUrl").rows = Math.min(5, Math.max(2, $("addUrl").value.split(/\n/).length)); // grows with the links, to five lines
-  $("addHint").textContent = plainFtpNote($("addUrl").value) || (v.bad ? `${plural(v.bad, "line")} that isn't a link will stay in the box.` : v.count ? "" : "Paste links here, or anywhere on the list with Ctrl+V.");
+  $("addHint").textContent = plainFtpNote(single ? withLogin(link, "", $("addPass").value) : $("addUrl").value) || (v.bad ? `${plural(v.bad, "line")} that isn't a link will stay in the box.` : v.count ? "" : "Paste links here, or anywhere on the list with Ctrl+V.");
   const c = addFolderChoice("", latest.settings);
   const show = addLines($("addUrl").value).urls.some((u) => zipLine(u.url));
   if (show === !$("addFolderRow").hidden) return; // leave a box the user ticked alone
   $("addFolderRow").hidden = !show;
   $("addFolder").checked = c.checked;
 });
+$("addPass").addEventListener("input", () => $("addUrl").dispatchEvent(new Event("input"))); // the ftp:// warning
 // Several links, one per line: each is added as if alone. Lines that fail
 // stay in the box, so they can be fixed and added again.
 // A link already in the list is not added: the box asks (Show it, Add again).
@@ -330,7 +345,7 @@ $("addBox").addEventListener("submit", async (e) => {
   const failed = bad.map((b) => ({ ...b, error: "not a link" }));
   const dups = [];
   for (const { line, url } of urls) {
-    const add = { url, pageUrl: $("addPage").value, vpn: $("addVpn").value, checkDup: !again };
+    const add = { url: many ? url : withLogin(url, $("addUser").value.trim(), $("addPass").value), pageUrl: $("addPage").value, vpn: $("addVpn").value, checkDup: !again };
     if (!many && $("addName").value.trim()) add.filename = $("addName").value.trim();
     if (!many && $("addSum").value.trim()) add.checksum = $("addSum").value.trim();
     if (!many && $("addKey").value.trim() && /^sftp:/i.test(url)) { add.keyFile = $("addKey").value.trim(); add.keyPass = $("addKeyPass").value; }
@@ -357,7 +372,7 @@ $("addBox").addEventListener("submit", async (e) => {
   }
   toast(added === 1 ? "Added" : `${added} downloads added`);
   $("addUrl").value = "";
-  $("addPage").value = $("addName").value = $("addSum").value = $("addKey").value = $("addKeyPass").value = "";
+  $("addPage").value = $("addName").value = $("addSum").value = $("addKey").value = $("addKeyPass").value = $("addUser").value = $("addPass").value = "";
   addDir.reset();
   $("addUrl").dispatchEvent(new Event("input"));
   openAdd(false);
@@ -651,13 +666,17 @@ function renderUpdate(m) {
     if (act === "show") {
       want = { key: "seen" + m.engineVersion, text: [`Updated to v${m.engineVersion}: `, link(releaseNotesURL(RELEASES_URL, m.engineVersion), "what's new")], save: { seenVersion: m.engineVersion } };
     } else if (u && u.version && u.version !== s.dismissedUpdate) {
-      want = { key: "new" + u.version, text: [`DMS² v${u.version} is available: `, link(u.url, "see the release")], save: { dismissedUpdate: u.version } };
+      want = { key: "new" + u.version, sig: `${u.installing}|${u.error}`, save: { dismissedUpdate: u.version },
+        text: [`DMS² v${u.version} is available: `,
+          el("button", { class: "primary small", disabled: !!u.installing, onclick: () => call("installUpdate", {}).catch((e) => toast(e.message, true)) }, u.installing ? "Downloading update…" : "Update now"),
+          " ", link(u.url, "see the release"), u.error ? el("div", { role: "alert" }, u.error) : null] };
     }
   }
   if (want && closedNotes.has(want.key)) want = null;
   note.hidden = !want;
-  if (!want || note.dataset.key === want.key) return;
+  if (!want || (note.dataset.key === want.key && note.dataset.sig === (want.sig || ""))) return;
   note.dataset.key = want.key;
+  note.dataset.sig = want.sig || "";
   note.replaceChildren(el("span", {}, ...want.text),
     iconButton("close", "Dismiss this note", () => {
       closedNotes.add(want.key);

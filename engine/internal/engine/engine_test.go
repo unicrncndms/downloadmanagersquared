@@ -243,6 +243,13 @@ func TestAddedTorrentFileGoesStraightToTheChoice(t *testing.T) {
 	if s.Status != torrent.StatusChoosing || len(s.Files) != 1 || s.Files[0].Path != "notes.txt" {
 		t.Fatalf("added torrent file is %q with files %+v, want choosing notes.txt", s.Status, s.Files)
 	}
+
+	// The same file where the browser saved it (a page's blob: link).
+	saved := filepath.Join(t.TempDir(), "t.torrent")
+	os.WriteFile(saved, buf.Bytes(), 0o644)
+	if _, err := e.Add(AddRequest{FilePath: saved}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestTorrentLinksAreRecognised(t *testing.T) {

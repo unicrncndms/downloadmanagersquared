@@ -42,6 +42,13 @@ function folderView(d, settings) {
   return { toggle, extracting: !done && !!f.locked, ask, password, move, keep, facts };
 }
 
+// folderSettled: switched on with nothing left to answer (no folder to
+// choose, no password to give). The card then shows only the progress; the
+// switch and the archive keeping move out of the way, into Details.
+function folderSettled(v) {
+  return !!(v && v.toggle && v.toggle.on && !v.ask && !v.password);
+}
+
 // The ways to keep a Download as folder's archive, as the engine names them
 // (ADR 0007), with what the select says of each.
 const KEEP_CHOICES = [
@@ -142,4 +149,4 @@ function addFolderParam(shown, checked, settings) {
   return checked;
 }
 
-if (typeof module !== "undefined") module.exports = { folderView, setFolderView, keepView, folderChoices, removeWording, addFolderChoice, addFolderParam, lastFolder };
+if (typeof module !== "undefined") module.exports = { folderView, folderSettled, setFolderView, keepView, folderChoices, removeWording, addFolderChoice, addFolderParam, lastFolder };

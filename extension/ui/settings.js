@@ -98,8 +98,8 @@ function ifaceRow(i, tun, settings) {
     c.addEventListener("change", () => set({ [key]: c.checked }));
     return c;
   };
-  const conns = el("input", { type: "number", min: 1, max: 32, value: i.connections, "aria-label": `Requests at once: ${i.name}` });
-  conns.addEventListener("change", () => set({ connections: Number(conns.value) }));
+  const conns = el("input", { type: "number", min: 0, max: 32, value: i.connections, title: "0 uses the default", "aria-label": `Requests at once: ${i.name}` });
+  conns.addEventListener("change", () => conns.reportValidity() && set({ connections: Number(conns.value) }));
   const limit = (bps, key, title) => {
     const input = el("input", { type: "text", inputmode: "decimal", pattern: DECIMAL, class: "dec", placeholder: "–", title: title + " (empty: none)", "aria-label": `${title} in ${speedUnitLabel()}: ${i.name}`, value: unitField(bps) });
     input.addEventListener("change", () => input.reportValidity() && set({ [key]: speedFromUnit(dec(input.value) || 0) }));
@@ -251,7 +251,7 @@ function fillWindow(s) {
 }
 
 // The checkboxes: the setting each one holds, and whether it is on when the engine sends none.
-const CHECKS = { sFolder: ["folderDefault", false], sParts: ["partsParallel", false], sNotify: ["notifyDone", true], sAwake: ["keepAwake", true] };
+const CHECKS = { sFolder: ["folderDefault", false], sParts: ["partsParallel", true], sNotify: ["notifyDone", true], sAwake: ["keepAwake", true] };
 
 // The download folder is checked by the engine: what it refuses is said at the field.
 function dirError(text) {
@@ -274,12 +274,13 @@ for (const [id, [key, , parse]] of Object.entries(FIELDS).filter(([id]) => id !=
   // Out of its min/max, or empty where a number is needed: say so, send nothing.
   $(id).addEventListener("change", () => $(id).reportValidity() && act("setSettings", { [key]: parse($(id).value) }, "Saved"));
 }
+$("sThreshold").addEventListener("input", () => $("sThreshold").setCustomValidity(dec($("sThreshold").value) >= 1 ? "" : "Enter 1 or more"));
 $("sVpnHttp").addEventListener("change", () => { $("vpnOnlyWarn").hidden = $("sVpnHttp").value !== "vpn"; });
 $("sAuto").addEventListener("change", () => act("setAutostart", { on: $("sAuto").checked }, "Saved"));
 for (const [id, [key]] of Object.entries(CHECKS)) $(id).addEventListener("change", () => act("setSettings", { [key]: $(id).checked }, "Saved"));
 // The engine shows Windows' folder picker and saves the choice; the field follows the settings it sends.
 $("sBrowse").addEventListener("click", () => act("pickSaveFolder", {}));
-$("sIPv6").addEventListener("change", () => act("setSettings", { ipv6: $("sIPv6").checked }, $("sIPv6").checked ? "IPv6 on" : "IPv6 off"));
+$("sIPv6").addEventListener("change", () => act("setSettings", { ipv6: $("sIPv6").checked }, $("sIPv6").checked ? "IPv6 on. Torrents use it after DMS² restarts." : "IPv6 off. Torrents stop using it after DMS² restarts."));
 
 // The accent: Follow the browser's theme, a preset, or any color (lib/accent.js).
 const setAccent = (c, said) => act("setSettings", { accent: c }, said);
@@ -377,7 +378,7 @@ $("piaSave").onclick = () => {
   act("setPia", { user, pass: $("piaPass").value, region: $("piaRegion").value }, user ? "Signed in to PIA" : "Region saved")
     .then(() => { $("piaPass").value = ""; });
 };
-$("piaRegion").addEventListener("change", () => piaSignedIn && act("setPia", { user: "", pass: "", region: $("piaRegion").value }, "Region saved"));
+$("piaRegion").addEventListener("change", () => act("setPia", { user: "", pass: "", region: $("piaRegion").value }, "Region saved"));
 $("piaClear").onclick = () => act("clearPia", {}, "Signed out of PIA");
 
 // --- learned sites ---
@@ -561,6 +562,33 @@ $("restoreYes").onclick = async () => {
 function renderAbout(m) {
   const engine = m.engineVersion || "unknown";
   $("aboutVersion").textContent = Host.openDownloads ? `DMS² ${engine}` : `Engine ${engine} · Extension ${Host.version}`;
+  const u = m.state && m.state.update;
+  $("updateNow").hidden = !u;
+  if (!u) return;
+  $("updateNow").disabled = !!u.installing;
+  $("updateNow").textContent = u.installing ? "Downloading update…" : `Update now (v${u.version})`;
+  if (u.installing) say("Downloading update…");
+  else if (u.error) say(u.error);
+}
+
+// Updates start only from a press: the engine downloads the release and checks it, and its upgrade asks before quitting.
+function say(t) { $("updateStatus").textContent = t; }
+$("checkUpdate").onclick = async () => {
+  say("Checking…");
+  try {
+    const u = await call("checkUpdate", {});
+    say(u ? `v${u.version} is available.` : "You have the newest version.");
+  } catch (e) { say(e.message); }
+};
+$("updateNow").onclick = () => call("installUpdate", {}).catch((e) => say(e.message));
+if (Host.updateExtension) {
+  $("updateExt").hidden = false;
+  $("updateExt").onclick = async () => {
+    try {
+      const r = await Host.updateExtension(RELEASES_URL + "/download/downloadmanagersquared.xpi");
+      say({ no_update: "The extension is up to date.", throttled: "The browser checked a moment ago. Try again later.", update_available: "An extension update is available; the browser installs it.", opened: "The browser offers the extension from the release." }[r] || "Asked the browser to update the extension.");
+    } catch (e) { say(e.message); }
+  };
 }
 if (Host.openDownloads) $("sThresholdText").textContent = "Take over downloads above (MB)";
 

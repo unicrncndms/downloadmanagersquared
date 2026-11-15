@@ -9,6 +9,7 @@
 //                                    engineVersion, state, settings, autostart, recipes }
 //   openSettings(hash)               show the settings page (hash like "#pia")
 //   openUrl(url)                     a link that leaves DMS²
+//   updateExtension(xpiUrl) → status ask the browser to update the extension (extension only)
 //   forgetRecipe(host)               drop a learned site
 //   startEngine()                    start the engine again after the user quit it (extension only)
 //   version                          this UI's version, compared with the engine's
@@ -27,6 +28,12 @@ function extensionHost(browser, navigator) {
     },
     openSettings: (hash) => browser.runtime.sendMessage({ type: "openSettings", hash: hash || "" }),
     openUrl: (url) => browser.tabs.create({ url }),
+    // Firefox updates extensions itself; this asks it now, or opens the xpi so it offers the install.
+    async updateExtension(xpiUrl) {
+      if (!browser.runtime.requestUpdateCheck) { await browser.tabs.create({ url: xpiUrl }); return "opened"; }
+      const r = await browser.runtime.requestUpdateCheck();
+      return (r && r.status) || "no_update";
+    },
     forgetRecipe: (host) => browser.runtime.sendMessage({ type: "forgetRecipe", host }),
     startEngine: () => browser.runtime.sendMessage({ type: "startEngine" }),
     version: browser.runtime.getManifest().version,

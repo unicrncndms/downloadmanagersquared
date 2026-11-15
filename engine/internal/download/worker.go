@@ -150,7 +150,7 @@ func (w *worker) run(ctx context.Context, seg *segment) {
 	defer w.dropConns()
 	buf := make([]byte, bufSize)
 	for seg != nil {
-		err := w.fetch(ctx, seg, buf)
+		err := w.fetch(ctx, &seg, buf)
 		d.mu.Lock()
 		d.plan.release(seg)
 		switch {
@@ -181,13 +181,26 @@ func (w *worker) dropConns() {
 	w.dropSFTP()
 }
 
-func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
+// fetch gets the bytes of chunk *segp. A sweep moves *segp on to each free
+// chunk its body passes, so the caller releases the one it ended on.
+func (w *worker) fetch(ctx context.Context, segp **segment, buf []byte) error {
 	d := w.d
+	isHTTP := !IsFTP(w.link.URL) && !IsSFTP(w.link.URL)
 	d.mu.Lock()
+	seg := *segp
 	start, end, ranged := seg.pos, seg.end, d.plan.splittable
 	size, ver, login := d.st.Size, d.st.Version, string(d.st.Login)
 	if d.mirrorLocked(w.link.URL) != nil {
 		ver = w.link.Version // each mirror's server has its own ETag and dates
+	}
+	sweep := start < end && ranged && isHTTP && d.plan.sweep && d.plan.sweeper == nil
+	if sweep {
+		d.plan.sweeper = w
+		defer func() {
+			d.mu.Lock()
+			d.plan.sweeper = nil
+			d.mu.Unlock()
+		}()
 	}
 	d.mu.Unlock()
 	if start >= end {
@@ -212,7 +225,7 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 	} else if IsSFTP(w.link.URL) {
 		body, err = w.openSFTP(ctx, rctx, start, end, ranged, size, ver)
 	} else {
-		body, err = w.openHTTP(rctx, start, end, ranged, size, ver)
+		body, err = w.openHTTP(rctx, start, end, ranged, sweep, size, ver)
 	}
 	if err != nil {
 		return err
@@ -220,8 +233,33 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 	defer body.Close()
 
 	ir := w.ir
+	r := stallReader{body, stall, [2]*atomic.Int64{&w.bytes, &ir.bytes}}
+	var at int64 // where a sweep's body is in the file
 	for {
-		n, rerr := io.ReadFull(stallReader{body, stall, [2]*atomic.Int64{&w.bytes, &ir.bytes}}, buf)
+		d.mu.Lock()
+		if seg.pos >= seg.end && sweep {
+			next := d.plan.after(at)
+			if next == nil {
+				d.mu.Unlock()
+				return nil
+			}
+			d.plan.release(seg)
+			next.owner, next.pos = w, next.written
+			*segp, seg = next, next
+		}
+		// Never read past the chunk: a sweep's next bytes may be another's.
+		skip, want := seg.pos-at, min(int64(len(buf)), seg.end-seg.pos)
+		d.mu.Unlock()
+		var n int
+		var rerr error
+		if sweep && skip > 0 {
+			var k int64
+			k, rerr = io.CopyN(io.Discard, r, skip)
+			at += k
+		} else {
+			n, rerr = io.ReadFull(r, buf[:want])
+			at += int64(n)
+		}
 		if n > 0 {
 			stall.Reset(stallTimeout)
 			d.mu.Lock()
@@ -246,14 +284,17 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 				return err
 			}
 			stall.Reset(stallTimeout)
-			if allowed < int64(n) {
+			if allowed < int64(n) && !sweep {
 				return nil
 			}
 		}
 		d.mu.Lock()
 		finished := seg.pos >= seg.end
+		if finished && ranged && !sweep {
+			d.plan.empty = 0
+		}
 		d.mu.Unlock()
-		if finished {
+		if finished && !sweep {
 			return nil
 		}
 		if rerr != nil {
@@ -270,6 +311,19 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 					d.mu.Unlock()
 					return nil
 				}
+				if isHTTP && ranged && !sweep {
+					d.mu.Lock()
+					if seg.written == start {
+						if d.plan.empty++; d.plan.empty >= sweepAfter {
+							d.plan.sweep = true
+						}
+					}
+					turned := d.plan.sweep
+					d.mu.Unlock()
+					if turned {
+						return nil // not the line's fault: let go, so run hands out the sweep
+					}
+				}
 				return &fetchError{kind: kindNet, msg: "connection closed early"}
 			}
 			return rerr
@@ -278,13 +332,14 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 }
 
 // openHTTP sends the range request for a chunk and checks the answer is the
-// right part of the right file; the body is what to read.
-func (w *worker) openHTTP(rctx context.Context, start, end int64, ranged bool, size int64, ver Version) (io.ReadCloser, error) {
+// right part of the right file; the body is what to read. A sweep asks for the
+// whole file instead, so its body starts at byte 0.
+func (w *worker) openHTTP(rctx context.Context, start, end int64, ranged, sweep bool, size int64, ver Version) (io.ReadCloser, error) {
 	req, err := newRequest(rctx, w.link, w.d.st.UserAgent)
 	if err != nil {
 		return nil, &fetchError{kind: kindRange, msg: err.Error()}
 	}
-	if ranged {
+	if ranged && !sweep {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end-1))
 	}
 	resp, err := w.client.Do(req)
@@ -308,7 +363,16 @@ func (w *worker) openHTTP(rctx context.Context, start, end int64, ranged bool, s
 		resp.Body.Close()
 		return nil, &fetchError{kind: kindExpired, msg: "link now leads to a web page, not the file"}
 	}
-	if ranged {
+	if sweep {
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, &fetchError{kind: kindRange, msg: "server sent part of the file when asked for all of it (" + resp.Status + ")"}
+		}
+		if size >= 0 && resp.ContentLength >= 0 && resp.ContentLength != size {
+			resp.Body.Close()
+			return nil, &fetchError{kind: kindChanged, msg: versionMsg}
+		}
+	} else if ranged {
 		if resp.StatusCode != http.StatusPartialContent {
 			resp.Body.Close()
 			return nil, &fetchError{kind: kindRange, msg: "server ignored the range request (" + resp.Status + ")"}

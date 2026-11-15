@@ -1,7 +1,8 @@
 # Builds the engine, the native-messaging shim and the extension package into dist\,
 # all stamped with one version: -Version, else the latest git tag, else 0.0.0.
 # -Repo owner/repo is where the engine sends people for the extension and releases.
-param([string]$Version, [string]$Repo)
+# -NoTests skips the Go and extension tests, for callers that already ran them.
+param([string]$Version, [string]$Repo, [switch]$NoTests)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
@@ -43,8 +44,10 @@ $bundle = Join-Path $root 'engine\internal\bundle\files'
 $pages = Join-Path $root 'engine\internal\ui\files'
 Push-Location (Join-Path $root 'engine')
 try {
-    & $go test ./...
-    if ($LASTEXITCODE) { throw 'tests failed' }
+    if (-not $NoTests) {
+        & $go test ./...
+        if ($LASTEXITCODE) { throw 'tests failed' }
+    }
     & $go build -trimpath -ldflags "$ldflags" -o "$dist\dms-host.exe" ./cmd/dms-host
     if ($LASTEXITCODE) { throw 'building dms-host failed' }
     Copy-Item "$dist\dms-host.exe", (Join-Path $root 'LICENSE'), "$dist\THIRD-PARTY-NOTICES" $bundle
@@ -61,7 +64,9 @@ try {
     Pop-Location
 }
 
-if (Get-Command node -ErrorAction SilentlyContinue) {
+if ($NoTests) {
+    Write-Host 'tests skipped (-NoTests)'
+} elseif (Get-Command node -ErrorAction SilentlyContinue) {
     node --test (Join-Path $root 'extension\test\*.test.js') # a glob: Node 24 doesn't take a folder
     if ($LASTEXITCODE) { throw 'extension tests failed' }
 } else {

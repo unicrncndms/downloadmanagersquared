@@ -53,7 +53,7 @@ jobs:
         run: npx --yes web-ext@10.8.0 lint --source-dir extension --ignore-files "test/**" "dev/**"
 
       - name: Build
-        run: ./build.ps1
+        run: ./build.ps1 -NoTests # the go test and node --test steps above already ran the suites
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

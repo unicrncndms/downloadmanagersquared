@@ -108,7 +108,8 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
 .num { font-variant-numeric: tabular-nums; }
 .bar { height: 6px; border-radius: 2px; background: var(--bar); overflow: hidden; }
-.bar > div { height: 100%; background: var(--accent); transition: width .4s; }
+/* The engine sends progress once a second: a bar that moves for that long never stops between two. */
+.bar > div { height: 100%; background: var(--accent); transition: width 1s linear; }
 .badge {
   display: inline-block;
   padding: 0 7px;
@@ -176,7 +177,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .toast.error button { color: inherit; flex: none; }
 .badge[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  .bar > div, .toast, .info::after, button { transition: none; }
+  .bar > div, .chunks i, .share i, .toast, .info::after, button { transition: none; }
   * { animation: none !important; }
 }
 /* Read by screen readers, not shown. */

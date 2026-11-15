@@ -294,6 +294,28 @@ test("a row's two numbers", () => {
   assert.deepEqual(rowNums(dl("u", "paused", { size: -1, done: 5e6 })), { main: "5.0 MB", sub: "" });
 });
 
+test("the arrows go round a menu's items, Home and End to its ends", () => {
+  const { stepIndex } = require("../lib/list.js");
+  assert.equal(stepIndex(0, 3, "ArrowDown"), 1);
+  assert.equal(stepIndex(2, 3, "ArrowDown"), 0);
+  assert.equal(stepIndex(0, 3, "ArrowUp"), 2);
+  assert.equal(stepIndex(-1, 3, "ArrowDown"), 0);
+  assert.equal(stepIndex(-1, 3, "ArrowUp"), 2);
+  assert.equal(stepIndex(1, 3, "Home"), 0);
+  assert.equal(stepIndex(1, 3, "End"), 2);
+  assert.equal(stepIndex(1, 3, "a"), -1);
+  assert.equal(stepIndex(-1, 0, "ArrowDown"), -1);
+});
+
+test("a login typed in the Add box goes into an ftp or sftp link, escaped", () => {
+  const { withLogin } = require("../lib/list.js");
+  assert.equal(withLogin("ftp://h.example/a.iso", "bob", "p@ss:w/rd"), "ftp://bob:p%40ss%3Aw%2Frd@h.example/a.iso");
+  assert.equal(withLogin("sftp://h.example:2222/a.iso", "bob", ""), "sftp://bob@h.example:2222/a.iso");
+  assert.equal(withLogin("ftps://old:pw@h.example/a.iso", "", "new"), "ftps://old:new@h.example/a.iso");
+  assert.equal(withLogin("ftp://h.example/a.iso", "", ""), "ftp://h.example/a.iso");
+  assert.equal(withLogin("https://h.example/a.iso", "bob", "pw"), "https://h.example/a.iso");
+});
+
 test("the Add box offers what applies to the links in it", () => {
   const { addView } = require("../lib/list.js");
   const { plainFtpNote } = require("../lib/list.js");

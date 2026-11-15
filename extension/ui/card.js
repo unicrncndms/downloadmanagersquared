@@ -364,7 +364,9 @@ function makeCard(id) {
     moveChange.box, moveWarn, moveErr);
   const foldKeep = keepSelect(() => id);
   const foldFacts = el("dl", { class: "facts" });
-  const foldSection = section("Folder", foldExtracting, foldMove, foldKeep.root, foldFacts);
+  // Once set up, the switch is here, not on the card (folderSettled).
+  const foldOn = folderSwitch(() => id, () => id);
+  const foldSection = section("Folder", foldOn.row, foldExtracting, foldMove, foldKeep.root, foldFacts);
 
   const fileFacts = el("dl", { class: "facts" });
   // Save folder of an unfinished HTTP download that is paused or queued: Change…
@@ -555,11 +557,14 @@ function makeCard(id) {
     // Download as folder: its switch and the step while it waits for a
     // folder on the card, the rest in its section in Details.
     const fv = folderView(d, latest.settings);
+    const settled = folderSettled(fv);
     fold.update(fv);
+    if (settled) fold.row.hidden = true;
+    foldOn.update(settled ? { toggle: fv.toggle } : null);
     menuAsFile.hidden = !fold.declinable(fv);
     if (fv && fv.ask) sub.hidden = true; // the engine's "choose a folder" says what the step shows
     if (fv && fv.password) sub.hidden = true; // the engine's "needs the archive's password" says what the form asks
-    foldSection.hidden = !fv || !(fv.extracting || fv.move || fv.keep || fv.facts.length);
+    foldSection.hidden = !fv || !(settled || fv.extracting || fv.move || fv.keep || fv.facts.length);
     foldKeep.update(fv && fv.keep);
     if (fv) {
       foldExtracting.hidden = !fv.extracting;
@@ -694,12 +699,21 @@ function makeGroupCard(gid) {
   const fold = folderSwitch(() => foldId, () => passId);
   const keep = keepSelect(() => foldId);
   const extract = extractBar();
-  const toggle = iconButton("chevron", "Show its files", () => { open = !open; update(g); });
+  // Once set up (folderSettled), the switch and the keeping fold away behind
+  // "Folder options", leaving the download's and the extraction's progress.
+  const optsSummary = el("summary", {}, "Folder options");
+  const opts = el("details", { class: "fold-opts", open: true }, optsSummary, fold.row, keep.root);
+  let wasSettled = false;
+  // Open, it draws its files a hundred at a time: a Metalink can list thousands.
+  const STEP = 100;
+  let limit = STEP;
+  const toggle = iconButton("chevron", "Show its files", () => { open = !open; limit = STEP; update(g); });
   const files = el("div", { class: "group-files" });
+  const moreFiles = el("button", { class: "small", onclick: () => { limit += STEP; update(g); } });
   const root = el("div", { class: "card group", tabindex: "-1", "data-group": gid },
     num, name, el("span", { class: "end" }, toggle, pause, resume, el("span", { class: "more" }, more, menu)),
     el("div", { class: "prog" }, bar), el("div", { class: "nums" }, numsMain), el("div", { class: "what" }, status, left),
-    extract.bar, extract.line, fold.row, fold.pass, fold.ask, keep.root, ask, files);
+    extract.bar, extract.line, opts, fold.pass, fold.ask, ask, files, moreFiles);
 
   function update(next) {
     g = next;
@@ -718,6 +732,11 @@ function makeGroupCard(gid) {
     extract.update(xv);
     fold.update(fv);
     keep.update(fv && fv.keep);
+    const settled = folderSettled(fv);
+    if (settled !== wasSettled) opts.open = !settled; // folds once, then stays as the user leaves it
+    wasSettled = settled;
+    optsSummary.hidden = !settled;
+    opts.hidden = fold.row.hidden && keep.root.hidden;
     menuAsFile.hidden = !fold.declinable(fv);
     menuRemove.textContent = v.partialFile ? "Remove all…" : "Remove all";
     menuRetry.hidden = !parts || g.summary.finished || !ds.some((d) => d.folder && d.folder.on);
@@ -731,8 +750,12 @@ function makeGroupCard(gid) {
     pause.hidden = !v.pause;
     resume.hidden = !v.resume;
     files.hidden = !open;
+    // Closed, its files draw nothing, so they update nothing: a Metalink can list a thousand.
     let i = 0;
-    for (const { d, form } of g.items) {
+    const hidden = open ? Math.max(0, g.items.length - limit) : 0;
+    moreFiles.hidden = !hidden;
+    moreFiles.textContent = `Show ${Math.min(STEP, hidden)} more (${hidden} not shown)`;
+    for (const { d, form } of open ? g.items.slice(0, limit) : []) {
       const c = cardFor(d.id);
       c.update(d, form);
       place(files, c.root, i++);

@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
-const { folderView, setFolderView, keepView, removeWording, addFolderChoice } = require("../lib/folder.js");
+const { folderView, folderSettled, setFolderView, keepView, removeWording, addFolderChoice } = require("../lib/folder.js");
 
 const SETTINGS = { saveDir: "C:\\Users\\you\\Downloads", folderDefault: false };
 const zip = (folder, extra) => ({ kind: "http", id: "z", filename: "big.zip", status: "running", folder, ...extra });
@@ -147,4 +147,13 @@ test("a split archive's archive keeping is fixed once any part is freed", () => 
   assert.equal(free.keep.disabled, false);
   const fixed = setFolderView([part(1, { on: true, into: "D:\\x" }, "completed"), part(2, { on: true, into: "D:\\x", keepFixed: true })], SETTINGS);
   assert.equal(fixed.keep.disabled, true);
+});
+
+test("once on and answered, the folder's switch leaves the card", () => {
+  assert.equal(folderSettled(null), false);
+  assert.equal(folderSettled({ toggle: { on: false }, ask: null, password: null }), false); // still an offer
+  assert.equal(folderSettled({ toggle: { on: true }, ask: { prefill: "D:\\" }, password: null }), false); // asks where
+  assert.equal(folderSettled({ toggle: { on: true }, ask: null, password: { wrong: false } }), false); // asks the password
+  assert.equal(folderSettled({ toggle: { on: true }, ask: null, password: null }), true);
+  assert.equal(folderSettled({ toggle: null, ask: null, password: null }), false); // locked: no switch at all
 });

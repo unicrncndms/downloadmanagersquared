@@ -43,7 +43,7 @@ jobs:
           node-version: 24
 
       - name: Build
-        run: ./build.ps1 -Version $env:TAG -Repo $env:GITHUB_REPOSITORY
+        run: ./build.ps1 -Version $env:TAG -Repo $env:GITHUB_REPOSITORY -NoTests # needs: ci already ran both suites
 
       # The exes as they go into the zip; release-signed.yml doesn't rebuild them.
       - name: Attest the exes

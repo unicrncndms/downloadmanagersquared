@@ -12,9 +12,6 @@ import (
 	"strings"
 )
 
-// maxFiles caps what one Metalink adds: each file becomes a download.
-const maxFiles = 1000
-
 // File is one file a Metalink describes. URLs are its mirrors, the preferred first.
 type File struct {
 	Name   string
@@ -51,9 +48,6 @@ func Parse(b []byte) ([]File, error) {
 	}
 	var out []File
 	for _, f := range d.Files {
-		if len(out) == maxFiles {
-			break
-		}
 		file := File{Name: strings.TrimSpace(f.Name), Size: max(f.Size, 0)}
 		for _, h := range f.Hashes {
 			v := strings.ToLower(strings.TrimSpace(h.Value))

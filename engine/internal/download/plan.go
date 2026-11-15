@@ -18,6 +18,8 @@ type segment struct {
 	owner   *worker
 }
 
+const sweepAfter = 2 // one empty answer may be the line, not the server
+
 // plan tracks which bytes of the file are still missing and who is fetching
 // them. Without range support it is a single chunk that can't be split and
 // starts over from byte 0 whenever its connection lets go of it.
@@ -53,6 +55,16 @@ type plan struct {
 	// extraction to reach it. A chunk is asked for exactly, to its end, so its
 	// connection is kept for the next one: ordering costs no speed.
 	ordered bool
+
+	// Some servers that make the file on request (a map server's GetMap)
+	// answer 206 and then send nothing for many ranges, yet send the whole file
+	// fast. After sweepAfter such answers in a row the plan sweeps: one
+	// connection asks for the whole file and writes every free chunk it passes,
+	// and no other connection claims work while it does. empty counts the
+	// answers, reset by a chunk that arrives whole.
+	empty   int
+	sweep   bool
+	sweeper *worker
 }
 
 // stride is how many seconds of fetching a connection's chunk is in an
@@ -101,6 +113,9 @@ func newPlan(size int64, rangeOK bool, remaining []Range) *plan {
 // the chunk that would take longest to finish. newSpeed is what the new
 // connection is expected to manage (bytes/s), 0 if unknown.
 func (p *plan) claim(newSpeed float64) *segment {
+	if p.sweeper != nil {
+		return nil
+	}
 	var free *segment
 	for _, s := range p.segs {
 		if s.owner == nil && s.written < s.end && (free == nil || p.before(s, free)) {
@@ -152,6 +167,18 @@ func (p *plan) claim(newSpeed float64) *segment {
 		return nil
 	}
 	return p.split(victim, balancedCut(victim, newSpeed))
+}
+
+// after is the lowest free chunk whose missing bytes start at byte at or later:
+// where a sweep that has read up to at goes on.
+func (p *plan) after(at int64) *segment {
+	var next *segment
+	for _, s := range p.segs {
+		if s.owner == nil && s.written < s.end && s.written >= at && (next == nil || s.written < next.written) {
+			next = s
+		}
+	}
+	return next
 }
 
 // canSplit: a chunk is being fetched and big enough to split in two.

@@ -4,6 +4,7 @@
   "short_name": "DMS²",
   "version": "0.0.0",
   "description": "Downloads large files over all your network connections at once, including sites that give each IP its own link.",
+  "homepage_url": "https://github.com/unicrncndms/downloadmanagersquared",
   "browser_specific_settings": {
     "gecko": {
       "id": "downloadmanagersquared@dms",

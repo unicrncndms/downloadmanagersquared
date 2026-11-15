@@ -72,3 +72,14 @@ func TestInflateRefusesBadInput(t *testing.T) {
 		}
 	}
 }
+
+// Any bytes at all end in output or an error: never a panic, never without end.
+// Run longer with: go test ./internal/archive/deflate64/ -fuzz FuzzInflate
+func FuzzInflate(f *testing.F) {
+	f.Add(deflated(&testing.T{}, flate.BestCompression, words()[:2000]))
+	f.Add([]byte{0x07})
+	f.Add([]byte{0x01, 0x05, 0x00, 0x00, 0x00, 'x'})
+	f.Fuzz(func(t *testing.T, in []byte) {
+		io.Copy(io.Discard, io.LimitReader(NewReader(bytes.NewReader(in)), 64<<20))
+	})
+}

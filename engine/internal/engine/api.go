@@ -273,7 +273,9 @@ var methods = map[string]handler{
 		if err != nil {
 			return nil, err
 		}
-		d.RetryLink(p.Iface)
+		if d.RetryLink(p.Iface) {
+			return nil, e.queue.Resume(p.ID)
+		}
 		return nil, nil
 	}),
 	"showInFolder": jobCall(func(e *Engine, j queue.Entry, _ idParams) (any, error) { return nil, winutil.ShowInFolder(j.Path()) }),
@@ -485,9 +487,11 @@ var methods = map[string]handler{
 		e.refreshInterfaces()
 		return nil, nil
 	}),
-	"getAutostart": bare(func(e *Engine) (any, error) { return winutil.Autostart(), nil }),
-	"version":      bare(func(e *Engine) (any, error) { return Version, nil }),
-	"setAutostart": ack(func(e *Engine, p onParams) error { return winutil.SetAutostart(p.On) }),
+	"getAutostart":  bare(func(e *Engine) (any, error) { return winutil.Autostart(), nil }),
+	"version":       bare(func(e *Engine) (any, error) { return Version, nil }),
+	"checkUpdate":   bare(func(e *Engine) (any, error) { return e.checkUpdateNow() }),
+	"installUpdate": ack(func(e *Engine, _ struct{}) error { return e.installUpdate() }),
+	"setAutostart":  ack(func(e *Engine, p onParams) error { return winutil.SetAutostart(p.On) }),
 	// An update asks before it has the engine quit.
 	"restartCost": func(e *Engine, c *ipc.Conn, _ json.RawMessage) (any, error) {
 		if e.fromExtension(c) {

@@ -81,6 +81,8 @@ type Engine struct {
 
 	upd         update.State // the last check for a newer release; under mu
 	updChecking bool         // a check is running; under mu
+	updInstall  bool         // an update is being downloaded; under mu
+	updErr      string       // why the last install failed; under mu
 
 	mapPort func(ctx context.Context, gw portmap.Gateway, port int, lifetime time.Duration) error
 	vpn     *vpn.Tunnels

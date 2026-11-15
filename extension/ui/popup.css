@@ -162,13 +162,16 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
    pulsing in its connection's colour. Whole pixels: every square one size. */
 .chunks { --sq: 8px; display: grid; grid-template: repeat(var(--rows), var(--sq)) / repeat(var(--cols), var(--sq)); grid-auto-flow: column;
   gap: 2px; justify-content: start; margin: 2px 0; }
-.chunks i { border-radius: 2px; background: var(--bar); transition: background .3s; }
+/* A square's share arrives once a second: registered as numbers, --p and --f glide to the next value over that second instead of stepping. */
+@property --p { syntax: "<number>"; inherits: false; initial-value: 0; }
+@property --f { syntax: "<number>"; inherits: false; initial-value: 0; }
+.chunks i { border-radius: 2px; background: var(--bar); transition: background .3s, opacity 1s linear, --p 1s linear, --f 1s linear; }
 .chunks i.on { background: var(--accent); }
 .chunks i.got { background: currentColor; }
 /* Partly written, no connection in it any more: the written share (--p, 0 to 1) in the colour that wrote it, never empty. */
-.chunks i.part { --p: 0; background: currentColor; opacity: calc(.3 + .65 * var(--p)); } /* the pulse of a front with the same share averages about this */
+.chunks i.part { background: currentColor; opacity: calc(.3 + .65 * var(--p)); } /* the pulse of a front with the same share averages about this */
 /* A slow pulse whose low point rises with how far the square is (--f, 0 to 1, from the engine's mapFill). */
-.chunks i.now { --f: 0; background: currentColor; animation: fetching 2.4s ease-in-out infinite alternate; }
+.chunks i.now { background: currentColor; animation: fetching 2.4s ease-in-out infinite alternate; }
 @keyframes fetching { from { opacity: calc(.15 + .75 * var(--f)); } to { opacity: calc(.45 + .55 * var(--f)); } }
 .idle .chunks i.on, .idle .chunks i.got { background: var(--muted); opacity: .6; }
 .idle .chunks i.part { background: var(--muted); opacity: calc(.2 + .4 * var(--p)); }
@@ -325,6 +328,7 @@ kbd { font: inherit; font-size: 11px; padding: 0 var(--s1); border: 1px solid va
   height: 4px; border-radius: 2px; background: var(--accent); }
 
 #addBox details summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.card .fold-opts > summary { cursor: pointer; font-size: 12px; color: var(--muted); }
 #addBox .add-opts { display: grid; gap: var(--s2); margin-top: var(--s1); }
 #addBox .add-opts [hidden] { display: none; }
 #addBox .add-opts label { display: grid; grid-template-columns: 5.5em 1fr; align-items: center; gap: var(--s2); font-size: 12px; }

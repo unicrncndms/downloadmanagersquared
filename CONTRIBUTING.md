@@ -23,6 +23,9 @@ This runs the tests and writes the exes, an unsigned `.xpi` and the release zip 
 
 Tests alone: `cd engine && go test ./...` and `node --test "extension/test/*.test.js"`. `extension/dev/` has a harness for the popup and settings page (`python extension/dev/serve.py 8765`) and a test site for per-IP links (`python extension/dev/landing.py 8780`). Terms used in the code and docs are in [CONTEXT.md](CONTEXT.md), decisions in [docs/adr/](docs/adr/).
 
+`powershell -ExecutionPolicy Bypass -File test-changed.ps1` runs only the tests for what changed (`-Base <ref>` compares against another commit than HEAD).
+`build.ps1 -NoTests` builds without them.
+
 Benchmarks: `cd engine && go test ./internal/<pkg>/ -run xxx -bench . -benchmem` (archive, engine, queue, torrent, tunnel). Profiling: start `dms-engine.exe` with the environment variable `DMS_PROFILE=1` and it writes `cpu.pprof` (start to quit), `heap.pprof` and `mutex.pprof` (at quit) to the data folder, and logs the slowest tick phases and the size of the state to `engine.log` every 10 s. Open them with `go tool pprof`. Off unless the variable is set; files only, no listener. The big UI fixtures are `?fixture=big-queue`, `big-finished` and `big-mixed` in the harness.
 
 The product mark is drawn in `engine/internal/mark` (the tray and setup icon) and mirrored in `extension/icons/icon.svg`. The exe's icon is the committed `engine/cmd/dms-engine/icon_windows_amd64.syso`; after changing the mark regenerate it with `cd engine/cmd/dms-engine && go run genicon.go`.

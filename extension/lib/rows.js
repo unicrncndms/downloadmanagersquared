@@ -98,9 +98,13 @@ function listRows(state, ui) {
     if (!cur || cur.name !== name) sections.push(cur = { name, count: 0, folded: ui.folded.has(name), rows: [] });
     cur.count++;
     const place = name === "Queue" ? cur.count : 0;
-    const form = e.d && formOf(e.d, ui.opened, false);
-    const row = e.d ? { d: e.d, form: form === "card" && isLight(e.d) && e.d.id !== ui.opened && !ui.selected.has(e.d.id) ? "light" : form, place }
-      : { group: e.group, summary: e.summary, items: e.items.map((d) => ({ d, form: formOf(d, ui.opened, true) })), place };
+    // A Metalink can list a thousand files: its queued ones are light rows too.
+    const formIn = (d, inGroup) => {
+      const form = formOf(d, ui.opened, inGroup);
+      return form === "card" && isLight(d) && d.id !== ui.opened && !ui.selected.has(d.id) ? "light" : form;
+    };
+    const row = e.d ? { d: e.d, form: formIn(e.d, false), place }
+      : { group: e.group, summary: e.summary, items: e.items.map((d) => ({ d, form: formIn(d, true) })), place };
     cur.rows.push(row);
     if (!cur.folded) shown.push(e.d ? [e.d.id] : e.items.map((d) => d.id));
   }

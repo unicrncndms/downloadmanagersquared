@@ -650,6 +650,15 @@ func TestPausesWhenNoInterfaceCanReachTheFile(t *testing.T) {
 	if n := resolves.Load(); n != 4 {
 		t.Fatalf("%d resolves after resuming, want each interface tried again", n)
 	}
+	// Retry on a download that paused itself resumes it; on one paused by hand, not.
+	if !d.RetryLink("eth") {
+		t.Error("Retry on a download that paused itself should resume it")
+	}
+	d.Start()
+	d.Stop(StatusPaused)
+	if d.RetryLink("eth") {
+		t.Error("Retry on a download paused by hand should leave it paused")
+	}
 }
 
 // A hotel Wi-Fi serves something else and answers first. The main interface's

@@ -438,6 +438,35 @@ function plainFtpNote(text) {
   return bad ? "An ftp:// link sends its password and the file unencrypted. Use ftps:// if the server has it." : "";
 }
 
+// stepIndex is where an arrow key moves the focus among n items from item i
+// (-1 for none of them): Down and Up wrap around, Home and End go to the
+// ends; -1 for any other key, or no items.
+function stepIndex(i, n, key) {
+  if (!n) return -1;
+  switch (key) {
+    case "ArrowDown": return i < 0 ? 0 : (i + 1) % n;
+    case "ArrowUp": return i < 0 ? n - 1 : (i - 1 + n) % n;
+    case "Home": return 0;
+    case "End": return n - 1;
+    default: return -1;
+  }
+}
+
+// withLogin puts the user and password typed in the Add box into an ftp, ftps
+// or sftp link; the engine takes them out again and keeps them encrypted. An
+// empty field keeps what the link has.
+function withLogin(url, user, pass) {
+  if (!/^(s?ftp|ftps):\/\//i.test(url) || (!user && !pass)) return url;
+  try {
+    const u = new URL(url);
+    if (user) u.username = user; // URL escapes them
+    if (pass) u.password = pass;
+    return u.href;
+  } catch {
+    return url; // the engine says what is wrong with the link
+  }
+}
+
 function addView(text) {
   const { urls, bad } = addLines(text);
   const web = urls.some((u) => /^https?:/i.test(u.url));
@@ -534,5 +563,5 @@ function pickTotal(sizes, ticked) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { fileFolders, pickTotal, addSubmits, linesNote, finishedVerdict, finishedSummary, badgeOf, seenAfter, addLines, addView, plainFtpNote, addFileCheck, matchesSearch, parseQuery, errorSource, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, progressText, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, seedLine, bulkActions, routerWarnings, routerGroups, lineResults, familyText, ipv6Hints };
+  module.exports = { fileFolders, pickTotal, addSubmits, linesNote, finishedVerdict, finishedSummary, badgeOf, seenAfter, addLines, addView, plainFtpNote, withLogin, stepIndex, addFileCheck, matchesSearch, parseQuery, errorSource, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, progressText, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, seedLine, bulkActions, routerWarnings, routerGroups, lineResults, familyText, ipv6Hints };
 }

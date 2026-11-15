@@ -2,6 +2,7 @@ package download
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -337,5 +338,38 @@ func TestSameVersion(t *testing.T) {
 		if got := c.a.same(c.b); got != c.same {
 			t.Errorf("%s: same = %v, want %v", c.name, got, c.same)
 		}
+	}
+}
+
+// A server that answers 206 and then sends nothing for most ranges, but sends
+// the whole file fine (a map server rendering on request): the missing chunks
+// are swept from one request for the whole file, and the file comes out right.
+func TestEmptyRangeAnswersAreSweptFromTheWholeFile(t *testing.T) {
+	data := randomData(16 << 20)
+	var whole atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rg := r.Header.Get("Range")
+		var from int64
+		if rg == "" {
+			whole.Add(1)
+		} else if _, err := fmt.Sscanf(rg, "bytes=%d-", &from); err == nil && from >= 4<<20 {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", from, len(data)-1, len(data)))
+			w.WriteHeader(http.StatusPartialContent) // and no body
+			return
+		}
+		http.ServeContent(w, r, "big.bin", t0, bytes.NewReader(data))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	env := &testEnv{ifaces: []Iface{iface("eth", 4, 0)}, main: "eth"}
+	d := runToEnd(t, env, State{ID: "s1", URL: srv.URL + "/big.bin", Dir: dir, Size: -1})
+	if s := d.Summary(); s.Status != StatusCompleted {
+		t.Fatalf("status %s: %s", s.Status, s.Error)
+	}
+	checkFile(t, filepath.Join(dir, "big.bin"), data)
+	// One sweep passes every missing chunk; a second only if one was taken back late.
+	if n := whole.Load(); n == 0 || n > 2 {
+		t.Errorf("%d requests for the whole file, want 1 or 2", n)
 	}
 }

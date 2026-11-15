@@ -116,6 +116,7 @@ const Capture = {
     if (this.bypass.delete(item.url) || this.bypass.delete(url)) return;
     const kind = captureDownload(item, Engine.settings.thresholdBytes);
     if (!kind || neverCaptured(Engine.settings.neverCapture, url, item.referrer)) return;
+    if (!isHttp(url)) return kind === "download" ? undefined : this.takeSaved(item, kind === "torrent");
     await discardDownload(item.id);
     this.handOff({
       torrent: kind === "torrent",
@@ -125,6 +126,29 @@ const Capture = {
       filename: (item.filename || "").split(/[\\/]/).pop(),
       cookieStoreId: item.cookieStoreId,
     });
+  },
+
+  // A .torrent or Metalink a page made itself (a blob: or data: link): only the
+  // browser can fetch it, so it saves the file and the engine reads that.
+  async takeSaved(item, torrent) {
+    const state = async () => ((await browser.downloads.search({ id: item.id }))[0] || { state: "interrupted" });
+    await new Promise((resolve) => {
+      const check = async () => {
+        if ((await state()).state === "in_progress") return;
+        browser.downloads.onChanged.removeListener(check);
+        resolve();
+      };
+      browser.downloads.onChanged.addListener(check);
+      check();
+    });
+    const saved = await state();
+    if (saved.state !== "complete") return;
+    try {
+      await Engine.call("add", { filePath: saved.filename, userAgent: navigator.userAgent, cookieStore: item.cookieStoreId || "" });
+      if (torrent) this.torrentAdded();
+    } catch (e) {
+      notify("DMS² couldn't take this file", `${e.message}. Firefox saved it as ${saved.filename}.`);
+    }
   },
 
   // The tab whose current page is url (a download's referrer), -1 if none:
