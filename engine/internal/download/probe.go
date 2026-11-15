@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"mime"
 	"net"
@@ -91,7 +92,15 @@ func probeLink(ctx context.Context, client *http.Client, l Link, ua string) (pro
 	if err != nil {
 		return probeResult{}, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Read to the end here, the connection is back in the pool before the
+		// first worker asks; Close alone drains in the background, too late.
+		// Never for a whole-file 200 body: that is the download.
+		if resp.StatusCode == http.StatusPartialContent || (resp.ContentLength >= 0 && resp.ContentLength <= 4096) {
+			io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		}
+		resp.Body.Close()
+	}()
 
 	r := probeResult{status: resp.StatusCode, size: -1, family: family}
 	r.isPage = isPageAnswer(resp.Header)
