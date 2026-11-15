@@ -140,7 +140,23 @@ const STRESS = { connected: true, settings: { ...SETTINGS, saveDir: "D:\\" + "Se
     { ...DOWNLOADS[2], id: "s5", filename: "x", size: 1 },
   ] } };
 
+// Big lists to time renderDownloads and count elements: ?fixture=big-queue, big-finished, big-mixed.
+const bigItem = (i, status) => status === "queued"
+  ? { ...DOWNLOADS[0], id: "b" + i, filename: `episode-${String(i + 1).padStart(4, "0")}.mkv`, url: `https://example.com/e/${i}`, status, done: 0, map: "", note: "Waiting in the queue",
+    speed: 0, eta: -1, label: "Queued", tone: "dim", links: {}, partialFile: false, actions: { remove: true, pause: true } }
+  : status === "completed"
+    ? { ...DOWNLOADS[0], id: "b" + i, filename: `archive-${String(i + 1).padStart(4, "0")}.zip`, url: `https://example.com/a/${i}`, status, size: 5e7 + i * 1e3, done: 5e7 + i * 1e3, map: "",
+      speed: 0, eta: -1, label: "Completed", tone: "ok", links: {}, partialFile: false, actions: { showInFolder: true, remove: true }, added: "2026-11-03T20:00:00Z", finished: "2026-11-03T21:00:00Z" }
+    : { ...DOWNLOADS[0], id: "b" + i, filename: `file-${String(i + 1).padStart(4, "0")}.bin`, url: `https://example.com/f/${i}`, status, size: 4e8, done: status === "paused" ? 1e8 : 0,
+      map: "", speed: 0, eta: -1, label: status === "paused" ? "Paused" : "Queued", links: {}, partialFile: status === "paused", actions: status === "paused" ? { resume: true, remove: true } : { remove: true, pause: true } };
+const bigFixture = (downloads) => ({ connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
+  state: { ...STATE, downloads, active: downloads.filter((d) => d.status === "running").length, speed: 0 } });
+const running5 = Array.from({ length: 5 }, (_, i) => ({ ...DOWNLOADS[0], id: "br" + i, filename: `running-${i + 1}.iso` }));
+
 const FIXTURES = {
+  "big-queue": bigFixture([...running5, ...Array.from({ length: 300 }, (_, i) => bigItem(i, "queued"))]),
+  "big-finished": bigFixture(Array.from({ length: 3000 }, (_, i) => bigItem(i, "completed"))),
+  "big-mixed": bigFixture(Array.from({ length: 5000 }, (_, i) => bigItem(i, ["queued", "completed", "completed", "paused", "completed"][i % 5]))),
   choosing: { connected: true, state: { ...STATE, downloads: [CHOOSING], active: 0 }, settings: SETTINGS, autostart: true, recipes: RECIPES,
     engineVersion: "0.3.0", files: { t: [{ path: "datasets/a.csv", size: 1e9, selected: true }, { path: "datasets/b.csv", size: 2e9, selected: false }] } },
   downloads: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
