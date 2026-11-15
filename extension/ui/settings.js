@@ -526,7 +526,13 @@ function markSection() {
     else a.removeAttribute("aria-current");
   }
 }
-addEventListener("scroll", markSection, { passive: true });
+// One pass per frame, however many scroll events come in.
+let markPending = false;
+addEventListener("scroll", () => {
+  if (markPending) return;
+  markPending = true;
+  requestAnimationFrame(() => { markPending = false; markSection(); });
+}, { passive: true });
 addEventListener("hashchange", showPage);
 $("find").addEventListener("input", showPage);
 // A section or page picked while searching shows it, not the search.
