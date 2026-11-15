@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -34,6 +35,9 @@ type fakeFTP struct {
 	maxLogins    int           // 0: no limit
 	delay        time.Duration // pause per 64 KiB sent
 	dropAt       int64         // the first RETR breaks after this many bytes
+	dropCtlAfter int           // the control connection is cut after this many transfers (0: never)
+	logins       int           // USER commands
+	sent         int           // transfers ended
 
 	mu         sync.Mutex
 	data       []byte
@@ -125,6 +129,7 @@ func (f *fakeFTP) session(raw net.Conn) {
 		case "USER":
 			f.mu.Lock()
 			f.user = arg
+			f.logins++
 			f.mu.Unlock()
 			say("331 password please")
 		case "PASS":
@@ -185,6 +190,13 @@ func (f *fakeFTP) session(raw net.Conn) {
 			say("150 opening data connection")
 			f.send(dc, rest, say)
 			rest = 0
+			f.mu.Lock()
+			f.sent++
+			cut := f.sent == f.dropCtlAfter
+			f.mu.Unlock()
+			if cut {
+				return
+			}
 		case "QUIT":
 			release() // before the answer: the next login must find the slot free
 			say("221 bye")
@@ -499,4 +511,77 @@ func TestFTPSUntrustedCertificateFailsTheLink(t *testing.T) {
 		}
 	}
 	t.Fatalf("the link did not fail: %+v", d.Summary().Links["eth"])
+}
+
+// chunkedState is a download half set up with its whole file missing in 1 MiB
+// pieces, so one connection fetches many chunks in a row.
+func chunkedState(t *testing.T, id, url string, size int64) (State, string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "big.bin"+partSuffix), make([]byte, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := ftpState(id, url, dir)
+	st.Filename, st.Size, st.Allocated, st.RangeOK = "big.bin", size, true, true
+	st.Version = Version{LastModified: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC).Format(http.TimeFormat)}
+	for at := int64(0); at < size; at += 1 << 20 {
+		st.Remaining = append(st.Remaining, Range{at, min(at+1<<20, size)})
+	}
+	return st, dir
+}
+
+func TestFTPKeepsItsLoginAcrossChunks(t *testing.T) {
+	data := randomData(8 << 20)
+	f := newFakeFTP(t, data)
+	f.start()
+	env := &testEnv{ifaces: []Iface{newDialLog().iface("eth", 1)}, main: "eth"}
+	st, dir := chunkedState(t, "f6", f.url("big.bin"), int64(len(data)))
+	d := runToEnd(t, env, st)
+	if s := d.Summary(); s.Status != StatusCompleted {
+		t.Fatalf("status %s: %s", s.Status, s.Error)
+	}
+	checkFile(t, filepath.Join(dir, "big.bin"), data)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.rests) < 8 || f.logins > 2 { // the probe, and the one connection
+		t.Errorf("%d transfers took %d logins", len(f.rests), f.logins)
+	}
+}
+
+func TestFTPChangedFileIsCaughtInALaterChunk(t *testing.T) {
+	data := randomData(8 << 20)
+	f := newFakeFTP(t, data)
+	f.onRetr = func(f *fakeFTP) {
+		f.mu.Lock()
+		if len(f.rests) == 3 {
+			f.mtime = "20260202000000"
+		}
+		f.mu.Unlock()
+	}
+	f.start()
+	env := &testEnv{ifaces: []Iface{newDialLog().iface("eth", 1)}, main: "eth"}
+	st, _ := chunkedState(t, "f7", f.url("big.bin"), int64(len(data)))
+	s := runToEnd(t, env, st).Summary()
+	if s.Status != StatusFailed || !strings.Contains(s.Error, "changed on the server") {
+		t.Fatalf("status %s: %q", s.Status, s.Error)
+	}
+}
+
+func TestFTPDroppedControlConnectionRecovers(t *testing.T) {
+	data := randomData(8 << 20)
+	f := newFakeFTP(t, data)
+	f.dropCtlAfter = 3
+	f.start()
+	env := &testEnv{ifaces: []Iface{newDialLog().iface("eth", 1)}, main: "eth"}
+	st, dir := chunkedState(t, "f8", f.url("big.bin"), int64(len(data)))
+	d := runToEnd(t, env, st)
+	if s := d.Summary(); s.Status != StatusCompleted {
+		t.Fatalf("status %s: %s", s.Status, s.Error)
+	}
+	checkFile(t, filepath.Join(dir, "big.bin"), data)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.logins != 3 { // the probe, the cut connection, its replacement
+		t.Errorf("%d logins", f.logins)
+	}
 }

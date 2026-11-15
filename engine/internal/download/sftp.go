@@ -19,6 +19,8 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -97,7 +99,18 @@ func sftpTarget(raw string) (hostport, user, name string, err error) {
 	return net.JoinHostPort(u.Hostname(), port), u.User.Username(), name, nil
 }
 
-func sftpAuth(login string) ([]ssh.AuthMethod, error) {
+// sftpKeyParses counts key files parsed, for the tests.
+var sftpKeyParses atomic.Int64
+
+// keyCache holds a download's parsed key files by login, so its connections
+// read a key, and decrypt a passphrase's bcrypt, once.
+type keyCache struct {
+	mu sync.Mutex
+	m  map[string]ssh.Signer
+}
+
+// sftpAuth builds the login methods; keys may be nil.
+func sftpAuth(login string, keys *keyCache) ([]ssh.AuthMethod, error) {
 	if login == "" {
 		return nil, errors.New("no saved login for this user and host: add the link again with a password or a key file")
 	}
@@ -111,11 +124,19 @@ func sftpAuth(login string) ([]ssh.AuthMethod, error) {
 			return as, nil
 		})}, nil
 	}
+	if keys != nil {
+		keys.mu.Lock() // held through the parse: a second connection waits for the first's result
+		defer keys.mu.Unlock()
+		if sg, ok := keys.m[login]; ok {
+			return []ssh.AuthMethod{ssh.PublicKeys(sg)}, nil
+		}
+	}
 	file, pass, _ := strings.Cut(body, "\n")
 	pem, err := os.ReadFile(file)
 	if err != nil {
 		return nil, errors.New("the key file can't be read: " + path.Base(strings.ReplaceAll(file, `\`, "/")))
 	}
+	sftpKeyParses.Add(1)
 	var signer ssh.Signer
 	if pass != "" {
 		signer, err = ssh.ParsePrivateKeyWithPassphrase(pem, []byte(pass))
@@ -125,12 +146,19 @@ func sftpAuth(login string) ([]ssh.AuthMethod, error) {
 	if err != nil {
 		return nil, errors.New("the key file is not usable (wrong passphrase?)")
 	}
+	if keys != nil {
+		if keys.m == nil {
+			keys.m = map[string]ssh.Signer{}
+		}
+		keys.m[login] = signer
+	}
 	return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
 }
 
 type sftpConn struct {
 	ssh  *ssh.Client
 	cl   *sftp.Client
+	f    *sftp.File // the file, open for as long as the session is kept
 	stop func() bool
 }
 
@@ -141,11 +169,11 @@ func (c *sftpConn) close() {
 }
 
 // sftpDial connects, checks the host key before any login is sent, logs in and opens the SFTP subsystem.
-func sftpDial(ctx context.Context, dial dialFunc, hostport, user string) (*sftpConn, error) {
+func sftpDial(ctx context.Context, dial dialFunc, hostport, user string, keys *keyCache) (*sftpConn, error) {
 	if dial == nil || SFTP == nil {
 		return nil, errors.New("no way out for SFTP on this connection")
 	}
-	auth, err := sftpAuth(string(SFTP.Login(hostport, user)))
+	auth, err := sftpAuth(string(SFTP.Login(hostport, user)), keys)
 	if err != nil {
 		return nil, &fetchError{kind: kindRange, msg: err.Error()}
 	}
@@ -175,7 +203,7 @@ func sftpDial(ctx context.Context, dial dialFunc, hostport, user string) (*sftpC
 	}
 	raw.SetDeadline(time.Time{})
 	sc := ssh.NewClient(cc, chans, reqs)
-	cl, err := sftp.NewClient(sc, sftp.MaxConcurrentRequestsPerFile(16))
+	cl, err := sftp.NewClient(sc, sftp.UseConcurrentReads(true))
 	if err != nil {
 		stop()
 		sc.Close()
@@ -242,7 +270,7 @@ func probeSFTP(ctx context.Context, dial dialFunc, l Link) (probeResult, error) 
 		}
 		return probeResult{status: 550, msg: fe.msg}, nil
 	}
-	c, err := sftpDial(ctx, dial, hostport, user)
+	c, err := sftpDial(ctx, dial, hostport, user, nil)
 	if err != nil {
 		return answer(err)
 	}
@@ -257,31 +285,48 @@ func probeSFTP(ctx context.Context, dial dialFunc, l Link) (probeResult, error) 
 	return probeResult{status: 200, size: fi.Size(), name: SanitizeFilename(path.Base(name)), version: sftpVersion(fi), rangeOK: true}, nil
 }
 
-// openSFTP is a chunk of an SFTP file: a session of its own, a check that the
-// file is still the one being downloaded, then reads at the chunk's offset.
-func (w *worker) openSFTP(ctx context.Context, start, end int64, ranged bool, size int64, ver Version) (io.ReadCloser, error) {
+// openSFTP is a chunk of an SFTP file. The worker keeps its session and the
+// open file from chunk to chunk; each chunk checks the file with one fstat, then
+// seeks and streams. A stale kept session is replaced once, silently. ctx is the
+// worker's (the session lives as long), rctx the chunk's.
+func (w *worker) openSFTP(ctx, rctx context.Context, start, end int64, ranged bool, size int64, ver Version) (io.ReadCloser, error) {
 	hostport, user, name, err := sftpTarget(w.link.URL)
 	if err != nil {
 		return nil, &fetchError{kind: kindRange, msg: err.Error()}
 	}
-	c, err := sftpDial(ctx, w.dial, hostport, user)
-	if err != nil {
-		return nil, sftpFetchError(err)
-	}
-	f, err := c.cl.Open(name)
-	if err == nil {
-		var fi os.FileInfo
-		if fi, err = f.Stat(); err == nil && ranged {
-			if size >= 0 && fi.Size() != size || !sftpVersion(fi).same(ver) {
-				f.Close()
-				c.close()
-				return nil, &fetchError{kind: kindChanged, msg: versionMsg}
-			}
+	for reused := w.sftp != nil; ; reused = false {
+		b, err := w.trySFTP(ctx, rctx, hostport, user, name, start, end, ranged, size, ver)
+		var fe *fetchError
+		if err != nil && reused && !(errors.As(err, &fe) && fe.kind == kindChanged) {
+			continue
 		}
+		return b, err
 	}
+}
+
+func (w *worker) trySFTP(ctx, rctx context.Context, hostport, user, name string, start, end int64, ranged bool, size int64, ver Version) (io.ReadCloser, error) {
+	c := w.sftp
+	if c == nil {
+		var err error
+		if c, err = sftpDial(ctx, w.dial, hostport, user, &w.d.keys); err != nil {
+			return nil, sftpFetchError(err)
+		}
+		if c.f, err = c.cl.Open(name); err != nil {
+			c.close()
+			return nil, sftpFetchError(err)
+		}
+		w.sftp = c
+	}
+	fail := func(err error) (io.ReadCloser, error) {
+		w.dropSFTP()
+		return nil, err
+	}
+	fi, err := c.f.Stat()
 	if err != nil {
-		c.close()
-		return nil, sftpFetchError(err)
+		return fail(sftpFetchError(err))
+	}
+	if ranged && (size >= 0 && fi.Size() != size || !sftpVersion(fi).same(ver)) {
+		return fail(&fetchError{kind: kindChanged, msg: versionMsg})
 	}
 	if !ranged {
 		start = 0
@@ -290,18 +335,65 @@ func (w *worker) openSFTP(ctx context.Context, start, end int64, ranged bool, si
 	if !ranged || end == unknownEnd {
 		n = 1<<62 - start
 	}
-	return &sftpBody{Reader: io.NewSectionReader(f, start, n), f: f, c: c}, nil
+	if _, err := c.f.Seek(start, io.SeekStart); err != nil {
+		return fail(sftpFetchError(err))
+	}
+	// WriteTo reads ahead with many requests in flight; the pipe's writer ends it at the chunk's end.
+	pr, pw := io.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, err := c.f.WriteTo(&capWriter{w: pw, n: n})
+		if err == errChunkEnd {
+			err = nil
+		}
+		pw.CloseWithError(err)
+	}()
+	// A stalled chunk closes the session; the worker ends on that error.
+	return &sftpBody{pr: pr, done: done, stop: context.AfterFunc(rctx, c.close)}, nil
+}
+
+func (w *worker) dropSFTP() {
+	if w.sftp != nil {
+		w.sftp.close()
+		w.sftp = nil
+	}
+}
+
+var errChunkEnd = errors.New("chunk end")
+
+// capWriter passes on n bytes, then stops the WriteTo that feeds it.
+type capWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *capWriter) Write(p []byte) (int, error) {
+	if int64(len(p)) >= c.n {
+		k, err := c.w.Write(p[:c.n])
+		if err == nil {
+			err = errChunkEnd
+		}
+		c.n -= int64(k)
+		return k, err
+	}
+	c.n -= int64(len(p))
+	return c.w.Write(p)
 }
 
 type sftpBody struct {
-	io.Reader
-	f *sftp.File
-	c *sftpConn
+	pr   *io.PipeReader
+	done chan struct{}
+	stop func() bool
 }
 
+func (b *sftpBody) Read(p []byte) (int, error) { return b.pr.Read(p) }
+
+// Close waits for the read-ahead to wind down, so the file is free for the next chunk's seek.
 func (b *sftpBody) Close() error {
-	b.f.Close()
-	b.c.close()
+	b.pr.Close()
+	<-b.done
+	b.stop()
 	return nil
 }
 

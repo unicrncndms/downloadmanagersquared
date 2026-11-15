@@ -176,6 +176,7 @@ type Download struct {
 	mvmu    sync.Mutex // held while the folder and the .part move; taken before mu
 	xmu     sync.Mutex // held while Entries are extracted and freed; taken before mu
 	workers map[*worker]struct{}
+	keys    keyCache // parsed SFTP key files by login, so the workers parse each once
 	ifs     map[string]*ifaceRun
 	probing map[string]bool
 

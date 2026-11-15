@@ -346,3 +346,79 @@ func TestSFTPStoreListsAndForgetsHostKeys(t *testing.T) {
 		t.Fatal("forgetting was not saved")
 	}
 }
+
+func TestSFTPKeepsItsSessionAcrossChunks(t *testing.T) {
+	useSFTPStore(t)
+	data := randomData(8 << 20)
+	f := newFakeSSH(t, data)
+	f.password = "pw"
+	f.start()
+	f.trust(t)
+	clean, user, host, login, _ := SplitSFTP("sftp://bob:pw@"+f.hostPort()+f.path(), "", "")
+	SFTP.SaveLogin(host, user, login)
+	env := &testEnv{ifaces: []Iface{newDialLog().iface("eth", 1)}, main: "eth"}
+	st, dir := chunkedState(t, "s6", clean, int64(len(data)))
+	d := runToEnd(t, env, st)
+	if s := d.Summary(); s.Status != StatusCompleted {
+		t.Fatalf("status %s: %s", s.Status, s.Error)
+	}
+	checkFile(t, filepath.Join(dir, "big.bin"), data)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.auths > 2 { // the probe, and the one connection for all eight chunks
+		t.Errorf("%d logins", f.auths)
+	}
+}
+
+func TestSFTPPassphraseKeyIsParsedOncePerDownload(t *testing.T) {
+	useSFTPStore(t)
+	data := randomData(4 << 20)
+	f := newFakeSSH(t, data)
+	signer, priv := newSigner(t)
+	f.clientKey = signer.PublicKey()
+	f.start()
+	f.trust(t)
+	blk, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "", []byte("pp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(t.TempDir(), "id_ed25519")
+	os.WriteFile(keyFile, pem.EncodeToMemory(blk), 0o600)
+	clean, user, host, login, _ := SplitSFTP(f.url("bob"), keyFile, "pp")
+	SFTP.SaveLogin(host, user, login)
+	env := &testEnv{ifaces: []Iface{newDialLog().iface("eth", 3)}, main: "eth"}
+	st, _ := chunkedState(t, "s7", clean, int64(len(data)))
+	before := sftpKeyParses.Load()
+	if s := runToEnd(t, env, st).Summary(); s.Status != StatusCompleted {
+		t.Fatalf("status %s: %s", s.Status, s.Error)
+	}
+	if n := sftpKeyParses.Load() - before; n > 2 { // the probe's, and the download's
+		t.Errorf("key parsed %d times", n)
+	}
+}
+
+func TestSFTPChangedFileIsCaughtInALaterChunk(t *testing.T) {
+	useSFTPStore(t)
+	data := randomData(16 << 20)
+	f := newFakeSSH(t, data)
+	f.password = "pw"
+	f.start()
+	f.trust(t)
+	clean, user, host, login, _ := SplitSFTP("sftp://bob:pw@"+f.hostPort()+f.path(), "", "")
+	SFTP.SaveLogin(host, user, login)
+	env := &testEnv{ifaces: []Iface{newDialLog().iface("eth", 1)}, main: "eth"}
+	st, _ := chunkedState(t, "s8", clean, int64(len(data)))
+	env.finished = make(chan struct{})
+	d := New(env, st)
+	d.Start()
+	waitSFTP(t, d, func(s Summary) bool { return s.Done >= 2<<20 }) // a few chunks through, then the file is replaced
+	os.Chtimes(filepath.Join(f.dir, "big.bin"), time.Now(), time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC))
+	select {
+	case <-env.finished:
+	case <-time.After(60 * time.Second):
+		t.Fatalf("no end: %+v", d.Summary())
+	}
+	if s := d.Summary(); s.Status != StatusFailed || !strings.Contains(s.Error, "changed on the server") {
+		t.Fatalf("status %s: %q", s.Status, s.Error)
+	}
+}
