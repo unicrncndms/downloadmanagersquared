@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.zx2c4.com/wireguard/conn"
 )
 
 // countingPC counts the datagrams a tunnel sends through the socket it was given.
@@ -267,5 +269,70 @@ func TestTunnelWithoutDNSDoesntStart(t *testing.T) {
 			tn.Close()
 		}
 		t.Fatalf("got %v, want ErrNoDNS", err)
+	}
+}
+
+// benchBind opens a packetBind on a loopback socket and returns it with that
+// socket's address and receive funcs. The socket is closed with the benchmark.
+func benchBind(b *testing.B) (*packetBind, *net.UDPAddr, []conn.ReceiveFunc) {
+	b.Helper()
+	pc, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		b.Fatal(err)
+	}
+	bind := &packetBind{listen: func() (net.PacketConn, error) { return pc, nil }}
+	fns, _, err := bind.Open(0)
+	if err != nil {
+		pc.Close()
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { bind.Close() })
+	return bind, pc.LocalAddr().(*net.UDPAddr), fns
+}
+
+// BenchmarkReceive is one datagram in and out of WireGuard's receive func.
+func BenchmarkReceive(b *testing.B) {
+	_, addr, fns := benchBind(b)
+	peer, err := net.DialUDP("udp4", nil, addr) // connected, so Write takes no address to allocate
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer peer.Close()
+	payload := make([]byte, 1400)
+	packets := [][]byte{make([]byte, 1500)}
+	sizes := make([]int, 1)
+	eps := make([]conn.Endpoint, 1)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := peer.Write(payload); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := fns[0](packets, sizes, eps); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkSend is one datagram through WireGuard's Send. Nothing reads the
+// far end, so its socket just fills and drops; only the send is measured.
+func BenchmarkSend(b *testing.B) {
+	bind, _, _ := benchBind(b)
+	sink, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer sink.Close()
+	ep, err := bind.ParseEndpoint(sink.LocalAddr().String())
+	if err != nil {
+		b.Fatal(err)
+	}
+	bufs := [][]byte{make([]byte, 1400)}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if err := bind.Send(bufs, ep); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
