@@ -275,6 +275,7 @@ func (e *Engine) Run() {
 	defer t.Stop()
 	last := time.Now()
 	var sent lastSent
+	var tm tickTimer
 	// Listing the adapters can take a while (many virtual NICs): not in the tick.
 	var listing sync.WaitGroup
 	defer listing.Wait()
@@ -302,15 +303,21 @@ func (e *Engine) Run() {
 			last = now
 			e.push(&sent)
 		case now := <-t.C:
+			tm.begin()
 			e.tickVPN(now)
 			e.syncTorrentIfaces()
 			e.checkUpdate(now)
 			e.syncSets()
 			e.schedule()
+			tm.phase(0)
 			e.updateSnapshot(now.Sub(last))
 			last = now
+			tm.phase(1)
 			e.push(&sent)
+			tm.phase(2)
 			e.queue.Save() // after the push: the disk never delays an update
+			tm.phase(3)
+			tm.log(e)
 		}
 	}
 }

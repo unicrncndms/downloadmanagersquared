@@ -125,6 +125,7 @@ func run(l install.Layout) {
 		fail(err)
 	}
 	setupLog(e.Dir())
+	stopProfile := startProfile(e.Dir())
 	log.Printf("engine %s starting", engine.Version)
 	if err := l.Register(); err != nil { // a browser can't start us without it
 		log.Printf("registering the native host: %v", err)
@@ -140,6 +141,7 @@ func run(l install.Layout) {
 	e.SetWindow(w)
 	go e.Run()
 	tray.Run(e, w)
+	stopProfile()
 	log.Printf("engine stopped")
 }
 
