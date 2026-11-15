@@ -183,8 +183,10 @@ func (c *ftpConn) startTLS(ctx context.Context) error {
 }
 
 // reply reads one reply, multi-line ones to their last line.
-func (c *ftpConn) reply() (*ftpReply, error) {
-	c.ctl.SetDeadline(time.Now().Add(ftpTimeout))
+func (c *ftpConn) reply() (*ftpReply, error) { return c.replyWithin(ftpTimeout) }
+
+func (c *ftpConn) replyWithin(d time.Duration) (*ftpReply, error) {
+	c.ctl.SetDeadline(time.Now().Add(d))
 	var r ftpReply
 	var lines []string
 	for range 200 {
@@ -410,10 +412,12 @@ func probeFTP(ctx context.Context, dial dialFunc, l Link, login string) (probeRe
 	return r, nil
 }
 
-// openFTP is a chunk of an FTP file: a control connection of its own, a check
-// that the file is still the one being downloaded, then REST and RETR. Its
-// Close ends the transfer (reading only the chunk's bytes) and the session.
-func (w *worker) openFTP(ctx context.Context, start, end int64, ranged bool, size int64, ver Version, login string) (io.ReadCloser, error) {
+// openFTP is a chunk of an FTP file. The worker keeps its control connection
+// from chunk to chunk: only the first chunk logs in. Each chunk still checks the
+// file is the one being downloaded, opens a data connection, then REST and RETR.
+// A kept connection that has gone stale is replaced once, silently. ctx is the
+// worker's (the control connection lives as long), rctx the chunk's.
+func (w *worker) openFTP(ctx, rctx context.Context, start, end int64, ranged bool, size int64, ver Version, login string) (io.ReadCloser, error) {
 	u, err := url.Parse(w.link.URL)
 	if err != nil {
 		return nil, &fetchError{kind: kindRange, msg: "not a usable FTP link"}
@@ -422,49 +426,77 @@ func (w *worker) openFTP(ctx context.Context, start, end int64, ranged bool, siz
 	if err != nil {
 		return nil, &fetchError{kind: kindRange, msg: err.Error()}
 	}
-	c, err := ftpDial(ctx, w.dial, u, login)
-	if err != nil {
-		return nil, ftpFetchError(err)
+	for reused := w.ftp != nil; ; reused = false {
+		b, err := w.tryFTP(ctx, rctx, u, name, start, end, ranged, size, ver, login)
+		var fe *fetchError
+		if err != nil && reused && !(errors.As(err, &fe) && fe.kind == kindChanged) {
+			continue
+		}
+		return b, err
+	}
+}
+
+func (w *worker) tryFTP(ctx, rctx context.Context, u *url.URL, name string, start, end int64, ranged bool, size int64, ver Version, login string) (io.ReadCloser, error) {
+	c := w.ftp
+	if c == nil {
+		var err error
+		if c, err = ftpDial(ctx, w.dial, u, login); err != nil {
+			return nil, ftpFetchError(err)
+		}
+		w.ftp = c
+	}
+	fail := func(err error) (io.ReadCloser, error) {
+		w.dropFTP()
+		return nil, err
 	}
 	if ranged {
 		gotSize, mtime, err := c.stat(name)
 		if err != nil {
-			c.quit()
-			return nil, ftpFetchError(err)
+			return fail(ftpFetchError(err))
 		}
 		if size >= 0 && gotSize >= 0 && gotSize != size || !(Version{LastModified: mtime}).same(ver) {
-			c.quit()
-			return nil, &fetchError{kind: kindChanged, msg: versionMsg}
+			return fail(&fetchError{kind: kindChanged, msg: versionMsg})
 		}
 	}
 	if !ranged {
 		start = 0
 	}
-	data, err := c.retr(ctx, name, start)
+	data, err := c.retr(rctx, name, start)
 	if err != nil {
-		c.quit()
-		return nil, ftpFetchError(err)
+		return fail(ftpFetchError(err))
 	}
-	b := &ftpBody{r: data, data: data, c: c}
+	b := &ftpBody{r: data, data: data, w: w}
 	if ranged && end != unknownEnd {
 		b.r = io.LimitReader(data, end-start)
 	}
-	b.stop = context.AfterFunc(ctx, func() { data.Close() })
+	b.stop = context.AfterFunc(rctx, func() { data.Close() })
 	return b, nil
+}
+
+func (w *worker) dropFTP() {
+	if w.ftp != nil {
+		w.ftp.quit()
+		w.ftp = nil
+	}
 }
 
 type ftpBody struct {
 	r    io.Reader
 	data net.Conn
-	c    *ftpConn
+	w    *worker
 	stop func() bool
 }
 
 func (b *ftpBody) Read(p []byte) (int, error) { return b.r.Read(p) }
 
+// Close ends the transfer: closing the data connection makes the server answer
+// the RETR (226, or 426 for a cut-off one). That answer is read so the control
+// connection is ready for the next chunk; if it does not come, the connection goes.
 func (b *ftpBody) Close() error {
 	b.stop()
 	b.data.Close()
-	b.c.quit()
+	if r, err := b.w.ftp.replyWithin(5 * time.Second); err != nil || r.code/100 == 1 {
+		b.w.dropFTP()
+	}
 	return nil
 }

@@ -19,7 +19,9 @@ type worker struct {
 	d       *Download
 	iface   string
 	client  *http.Client
-	dial    dialFunc // FTP's connections
+	dial    dialFunc  // FTP's connections
+	ftp     *ftpConn  // kept from chunk to chunk; closed when the worker ends
+	sftp    *sftpConn // same, with its file open
 	link    Link
 	ir      *ifaceRun
 	cancel  context.CancelFunc
@@ -145,6 +147,7 @@ func (w *worker) run(ctx context.Context, seg *segment) {
 	d := w.d
 	defer d.wg.Done()
 	defer w.cancel()
+	defer w.dropConns()
 	buf := make([]byte, bufSize)
 	for seg != nil {
 		err := w.fetch(ctx, seg, buf)
@@ -171,6 +174,11 @@ func (w *worker) run(ctx context.Context, seg *segment) {
 		}
 		d.mu.Unlock()
 	}
+}
+
+func (w *worker) dropConns() {
+	w.dropFTP()
+	w.dropSFTP()
 }
 
 func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
@@ -200,9 +208,9 @@ func (w *worker) fetch(ctx context.Context, seg *segment, buf []byte) error {
 	var body io.ReadCloser
 	var err error
 	if IsFTP(w.link.URL) {
-		body, err = w.openFTP(rctx, start, end, ranged, size, ver, login)
+		body, err = w.openFTP(ctx, rctx, start, end, ranged, size, ver, login)
 	} else if IsSFTP(w.link.URL) {
-		body, err = w.openSFTP(rctx, start, end, ranged, size, ver)
+		body, err = w.openSFTP(ctx, rctx, start, end, ranged, size, ver)
 	} else {
 		body, err = w.openHTTP(rctx, start, end, ranged, size, ver)
 	}
