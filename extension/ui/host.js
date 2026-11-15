@@ -59,7 +59,24 @@ function windowHost(win, bridge) {
     console.error(e);
     if (bridge.log) bridge.log(String((e && e.stack) || e));
   };
-  if (win.addEventListener) win.addEventListener("error", (ev) => report(ev.error || ev.message));
+  if (win.addEventListener) {
+    win.addEventListener("error", (ev) => report(ev.error || ev.message));
+    win.addEventListener("unhandledrejection", (ev) => report(ev.reason));
+  }
+
+  // What the page got and drew, at most once a minute: with DevTools off this
+  // is how engine.log tells "the state never arrived" from "it arrived and
+  // drew nothing" (the downloads the state holds against the rows in the list).
+  let lastNote = 0;
+  const note = (line, state) => {
+    const now = Date.now();
+    if (!bridge.log || now - lastNote < 60000) return;
+    lastNote = now;
+    const doc = win.document;
+    const list = doc && doc.getElementById && doc.getElementById("list");
+    bridge.log(`state: ${line.length} bytes, ${((state && state.downloads) || []).length} downloads, ` +
+      `${list ? list.children.length : "?"} nodes in the list, hidden=${doc ? doc.hidden : "?"}`);
+  };
 
   bridge.onLine = (line) => {
     let msg;
@@ -69,6 +86,7 @@ function windowHost(win, bridge) {
       if (msg.event !== "state" && msg.event !== "settings") return;
       latest[msg.event] = msg.data;
       if (latest.connected) emit();
+      if (msg.event === "state") note(line, msg.data);
       return;
     }
     rpc.answer(msg);
