@@ -375,7 +375,7 @@ func (x *Extractor) decodeBlock(ctx context.Context, i int) (bad string, err err
 			discard(out)
 			return bad, err
 		}
-		x.fl.finish(i, e, out, path, x.Mark)
+		x.fl.finish(i, e, out, path, x.Mark, !x.Keep)
 	}
 	return "", nil
 }
