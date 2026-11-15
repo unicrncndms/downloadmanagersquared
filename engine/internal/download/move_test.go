@@ -50,6 +50,20 @@ func waitCompleted(t *testing.T, env *testEnv, d *Download) {
 	}
 }
 
+// openExtracted opens one of files that is already extracted into out, as
+// another program would hold it. Entries may finish in any order, so not
+// necessarily the first.
+func openExtracted(t *testing.T, out string, files []zipFile) *os.File {
+	t.Helper()
+	for _, f := range files {
+		if h, err := os.Open(filepath.Join(out, filepath.FromSlash(f.name))); err == nil {
+			return h
+		}
+	}
+	t.Fatal("no file extracted yet")
+	return nil
+}
+
 func someExtracted(d *Download) bool {
 	f := d.State().Folder
 	return f != nil && len(f.Done) > 0 && len(f.Freed) > 0
@@ -98,13 +112,10 @@ func TestAMoveWithAFileHeldOpenChangesNothing(t *testing.T) {
 	d.Stop(StatusPaused)
 	before := d.State()
 	out := before.Folder.Out
-	held, err := os.Open(filepath.Join(out, filepath.FromSlash(files[0].name)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	held := openExtracted(t, out, files)
 	defer held.Close()
 
-	err = d.SetFolderInto(to)
+	err := d.SetFolderInto(to)
 	if err == nil || !strings.Contains(err.Error(), "in use") {
 		t.Fatalf("moving with a file open: %v", err)
 	}
@@ -363,10 +374,7 @@ func TestACrossDriveMoveWithAFileHeldOpenChangesNothing(t *testing.T) {
 	d := startUntil(t, env, State{ID: "m9", URL: srv.URL + "/dl", Dir: from, Size: -1, Folder: &Folder{On: true, Into: from}}, someExtracted)
 	d.Stop(StatusPaused)
 	out := d.State().Folder.Out
-	held, err := os.Open(filepath.Join(out, filepath.FromSlash(files[0].name)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	held := openExtracted(t, out, files)
 	defer held.Close()
 	if err := d.SetFolderInto(to); err != nil {
 		t.Fatal(err) // between drives it waits for the next run
