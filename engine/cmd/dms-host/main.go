@@ -206,8 +206,9 @@ func connect() (net.Conn, error) {
 		return nil, err
 	}
 	var lastErr error
-	for range 40 {
-		time.Sleep(250 * time.Millisecond)
+	// 50 ms steps, 200 tries: the same 10 s budget as the old 250 ms x 40.
+	for range 200 {
+		time.Sleep(50 * time.Millisecond)
 		c, err := ipc.Dial(time.Second)
 		if err == nil {
 			return c, nil

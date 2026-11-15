@@ -86,6 +86,8 @@ func onReady(e *engine.Engine, w Window) {
 	go func() {
 		used := map[string]time.Time{}
 		shown := iconIdle
+		// systray does not skip an unchanged tooltip: each call is a Shell_NotifyIcon.
+		tip := ""
 		for now := range time.Tick(time.Second) {
 			if d := winutil.AppsDark(); d != dark {
 				dark = d
@@ -104,7 +106,10 @@ func onReady(e *engine.Engine, w Window) {
 			resume.enable(m.Resume)
 
 			// Starts with the app name: balloons are named after the tooltip.
-			systray.SetTooltip(tooltip(winutil.AppName+"  "+m.Status, m.Rows))
+			if t := tooltip(winutil.AppName+"  "+m.Status, m.Rows); t != tip {
+				tip = t
+				systray.SetTooltip(t)
+			}
 		}
 	}()
 }
