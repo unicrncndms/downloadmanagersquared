@@ -261,6 +261,7 @@ test("a click shows at once: what a request will leave of the engine's state", (
   assert.deepEqual([s.downloads[3].status, s.downloads[3].error, s.downloads[3].actions], ["queued", "", { resume: false, pause: true }]);
   assert.equal(of(predict(state, "pauseAll")), "run:paused q1:paused q2:paused p:paused done:completed");
   assert.equal(of(predict(state, "resumeAll")), "run:running q1:queued q2:queued p:queued done:completed");
+  assert.equal(of(predict(state, "removeMany", { ids: ["run", "p", "nope"] })), "q1:queued q2:queued done:completed");
   assert.equal(of(predict(state, "remove", { id: "q1" })), "run:running q2:queued p:paused done:completed");
   assert.equal(predict(state, "setLimit", { id: "run", limit: 2e6 }).downloads[0].limit, 2e6);
 

@@ -155,6 +155,18 @@ function toast(text, error) {
   if (!error) toast.timer = setTimeout(() => t.classList.remove("show"), Math.min(15000, Math.max(2500, text.length * 60)));
 }
 
+// Removes many downloads in one call. An engine without removeMany (older than
+// this page) is asked per id, as before; a failure is a toast.
+async function removeMany(ids, deleteFile) {
+  if (!ids.length) return;
+  try {
+    await call("removeMany", { ids, deleteFile });
+  } catch (e) {
+    if (!/unknown method/.test(e.message)) return toast(e.message, true);
+    await Promise.all(ids.map((id) => call("remove", { id, deleteFile }).catch((err) => toast(err.message, true))));
+  }
+}
+
 // Calls the engine, reporting success or the error as a toast.
 async function act(method, params, okText) {
   try {

@@ -125,7 +125,8 @@ document.addEventListener("keydown", (e) => {
 // each sends one request for every selected download that pick takes, at once.
 async function each(method, params, pick, okText) {
   const ds = picked().filter(pick || (() => true));
-  await Promise.all(ds.map((d) => call(method, { id: d.id, ...params }).catch((err) => toast(err.message, true))));
+  if (method === "remove") await removeMany(ds.map((d) => d.id), params.deleteFile);
+  else await Promise.all(ds.map((d) => call(method, { id: d.id, ...params }).catch((err) => toast(err.message, true))));
   if (okText && ds.length) toast(okText);
 }
 function removeSelected() {
@@ -166,7 +167,7 @@ function flushUndo() {
   if (!undoing) return;
   const { ids } = undoing;
   endUndo();
-  Promise.all(ids.map((id) => call("remove", { id, deleteFile: false }).catch((err) => toast(err.message, true))))
+  removeMany(ids, false)
     .finally(() => { for (const id of ids) hiding.delete(id); });
 }
 addEventListener("pagehide", flushUndo);

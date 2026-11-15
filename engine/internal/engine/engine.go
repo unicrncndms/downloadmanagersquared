@@ -99,6 +99,10 @@ type Engine struct {
 	// A client said unwatch: the next tick sends the badge again even if it is
 	// the one last sent, as that client's own may be a state older.
 	badgeStale atomic.Bool
+	// A call that changed the list asks for a state push soon (requestPush):
+	// the tick stays, but a click's result doesn't wait for it.
+	pushReq     chan struct{}
+	pushPending atomic.Bool
 	keeping  atomic.Value  // the archiveKeeping setting, a string, for ArchiveKeeping
 	ran      chan struct{} // closed when Run returns
 	quitReq  chan struct{} // closed when a client asks the engine to quit
@@ -196,6 +200,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		stop:      stop,
 		ran:       make(chan struct{}),
 		quitReq:   make(chan struct{}),
+		pushReq:   make(chan struct{}, 1),
 	}
 	e.keepingNow()
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
@@ -291,6 +296,11 @@ func (e *Engine) Run() {
 		select {
 		case <-e.quit:
 			return
+		case <-e.pushReq:
+			now := time.Now()
+			e.updateSnapshot(now.Sub(last))
+			last = now
+			e.push(&sent)
 		case now := <-t.C:
 			e.tickVPN(now)
 			e.syncTorrentIfaces()
@@ -302,6 +312,22 @@ func (e *Engine) Run() {
 			e.push(&sent)
 			e.queue.Save() // after the push: the disk never delays an update
 		}
+	}
+}
+
+// pushDelay gathers the calls of a click or two into one push.
+const pushDelay = 75 * time.Millisecond
+
+// requestPush has Run push the state in a moment instead of at the next tick.
+func (e *Engine) requestPush() {
+	if e.pushPending.CompareAndSwap(false, true) {
+		time.AfterFunc(pushDelay, func() {
+			e.pushPending.Store(false)
+			select {
+			case e.pushReq <- struct{}{}:
+			default:
+			}
+		})
 	}
 }
 
@@ -821,12 +847,24 @@ func (e *Engine) Remove(id string, deleteFile bool) error {
 	if err := e.queue.Remove(id, deleteFile); err != nil {
 		return err
 	}
+	e.forgetResolves([]string{id})
+	return nil
+}
+
+// RemoveMany removes these downloads in one pass; an id that is gone is skipped.
+func (e *Engine) RemoveMany(ids []string, deleteFile bool) {
+	e.forgetResolves(e.queue.RemoveMany(ids, deleteFile))
+}
+
+func (e *Engine) forgetResolves(ids []string) {
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	for k := range e.resolves {
-		if strings.HasPrefix(k, id+"|") {
-			delete(e.resolves, k)
+		for _, id := range ids {
+			if strings.HasPrefix(k, id+"|") {
+				delete(e.resolves, k)
+				break
+			}
 		}
 	}
-	e.mu.Unlock()
-	return nil
 }

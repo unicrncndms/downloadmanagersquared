@@ -26,3 +26,7 @@ Two limits that cost nothing:
 ## Addendum: watch and unwatch
 
 The extension's background says `unwatch` after hello while no page of the extension is open, and `watch` when the first one opens. The engine sends the whole `state` event only to a client that watches (every client does until it says `unwatch`, so older extensions and the Downloads window are unchanged); a client that does not gets a small `badge` event (`running`, `needs`: the ids that need the user) when it changes. `watch` answers with the current state at once. An older engine answers both with an unknown-method error, which the background ignores. Neither method is version-gated (`relver`): a missing one only costs the saving.
+
+## Addendum: removeMany
+
+Removing a selection is one `removeMany` call (`ids`, `deleteFile`): the engine takes the queue's save lock once and walks the list once, and skips an id that is gone. An older engine answers it with an unknown-method error, and the page then calls `remove` per id as before; an older extension keeps calling `remove`. After a call that changes the list the engine also pushes the state within about 75 ms instead of waiting for the tick.

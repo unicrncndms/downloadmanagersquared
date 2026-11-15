@@ -370,3 +370,22 @@ func TestAnEntryBeingRemovedLeavesNoHoleInTheList(t *testing.T) {
 		}
 	}
 }
+
+// RemoveMany takes several in one pass and skips an id that is in no row.
+func TestRemoveManyRemovesTheListedAndSkipsTheRest(t *testing.T) {
+	a, b, c := queued(false), queued(false), queued(false)
+	q := New(t.TempDir(), nil)
+	q.Add(a)
+	q.Add(b)
+	q.Add(c)
+	gone := q.RemoveMany([]string{a.id, "nope", c.id}, false)
+	if len(gone) != 2 {
+		t.Fatalf("removed %v, want two", gone)
+	}
+	if l := q.List(); len(l) != 1 || l[0].ID() != b.id {
+		t.Fatalf("list after removing a and c: %v", l)
+	}
+	if err := q.Remove(a.id, false); err == nil {
+		t.Fatal("a removed entry can be removed again")
+	}
+}

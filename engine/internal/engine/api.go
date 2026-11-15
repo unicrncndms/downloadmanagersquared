@@ -260,6 +260,14 @@ var methods = map[string]handler{
 	"pause":    jobCall(func(e *Engine, _ queue.Entry, p idParams) (any, error) { return nil, e.queue.Pause(p.ID) }),
 	"resume":   jobCall(func(e *Engine, _ queue.Entry, p idParams) (any, error) { return nil, e.queue.Resume(p.ID) }),
 	"remove":   jobCall(func(e *Engine, _ queue.Entry, p idParams) (any, error) { return nil, e.Remove(p.ID, p.DeleteFile) }),
+	// Many at once: one pass and one save lock instead of a call per id. An id that is gone is skipped.
+	"removeMany": on(func(e *Engine, _ *ipc.Conn, p struct {
+		IDs        []string `json:"ids"`
+		DeleteFile bool     `json:"deleteFile"`
+	}) (any, error) {
+		e.RemoveMany(p.IDs, p.DeleteFile)
+		return nil, nil
+	}),
 	"retryLink": jobCall(func(e *Engine, _ queue.Entry, p idParams) (any, error) {
 		d, err := e.get(p.ID)
 		if err != nil {
@@ -538,7 +546,21 @@ func (e *Engine) Call(c *ipc.Conn, method string, raw json.RawMessage) (any, err
 	if !ok {
 		return nil, fmt.Errorf("unknown method %q", method)
 	}
-	return h(e, c, raw)
+	res, err := h(e, c, raw)
+	if err == nil && changesList[method] {
+		e.requestPush()
+	}
+	return res, err
+}
+
+// changesList are the methods whose result shows in the list: the clients get
+// the state soon after one, not only at the next tick.
+var changesList = map[string]bool{
+	"add": true, "startNow": true, "pause": true, "resume": true, "remove": true, "removeMany": true,
+	"retryLink": true, "deleteFile": true, "again": true, "setLimit": true, "move": true,
+	"chooseFiles": true, "setTorrentFiles": true, "pauseAll": true, "resumeAll": true,
+	"setHashes": true, "retryExtraction": true, "setFolder": true, "setDir": true,
+	"setPageUrl": true, "setArchivePassword": true,
 }
 
 // hello registers the caller as the browser extension and hands it anything it
