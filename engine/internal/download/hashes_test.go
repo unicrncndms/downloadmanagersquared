@@ -1,11 +1,13 @@
 package download
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,5 +136,53 @@ func TestChecksumChangedDuringVerificationIsChecked(t *testing.T) {
 	}
 	if r := d.State().HashResult; r == "match" {
 		t.Fatalf("HashResult %q for a value that was never checked", r)
+	}
+}
+
+func TestBothChecksumsAreRightWhenBothAreSet(t *testing.T) {
+	data := randomData(3*verifyBuf + 123) // several chunks, the last one short
+	path := filepath.Join(t.TempDir(), "f.bin")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sha, md := sha256.Sum256(data), md5.Sum(data)
+	wantSHA, wantMD5 := hex.EncodeToString(sha[:]), hex.EncodeToString(md[:])
+	ctx := context.Background()
+	if err := verify(ctx, path, wantSHA, wantMD5); err != nil {
+		t.Fatalf("both right: %v", err)
+	}
+	if err := verify(ctx, path, wantSHA, strings.Repeat("0", 32)); !errors.Is(err, errMismatch) || !strings.HasPrefix(err.Error(), "MD5") {
+		t.Fatalf("wrong MD5: %v", err)
+	}
+	if err := verify(ctx, path, strings.Repeat("0", 64), wantMD5); !errors.Is(err, errMismatch) || !strings.HasPrefix(err.Error(), "SHA-256") {
+		t.Fatalf("wrong SHA-256: %v", err)
+	}
+}
+
+// cancelAfterRead cancels the pass after its first read.
+type cancelAfterRead struct {
+	r      io.Reader
+	cancel context.CancelFunc
+	n      int
+}
+
+func (c *cancelAfterRead) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	c.cancel()
+	return n, err
+}
+
+func TestCancelStopsTheChecksumPass(t *testing.T) {
+	data := randomData(64 << 20)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	src := &cancelAfterRead{r: bytes.NewReader(data), cancel: cancel}
+	err := hashFile(ctxReader{ctx, src}, sha256.New(), md5.New())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("hashFile after cancel: %v, want context.Canceled", err)
+	}
+	if src.n >= len(data)/2 {
+		t.Fatalf("read %d of %d bytes after cancel", src.n, len(data))
 	}
 }

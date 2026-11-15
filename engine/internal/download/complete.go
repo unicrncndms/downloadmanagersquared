@@ -197,7 +197,7 @@ func verify(ctx context.Context, path, wantSHA, wantMD5 string) error {
 		return err
 	}
 	defer f.Close()
-	var hs []io.Writer
+	var hs []hash.Hash
 	var sh, mh hash.Hash
 	if wantSHA != "" {
 		sh = sha256.New()
@@ -207,7 +207,7 @@ func verify(ctx context.Context, path, wantSHA, wantMD5 string) error {
 		mh = md5.New()
 		hs = append(hs, mh)
 	}
-	if _, err := io.Copy(io.MultiWriter(hs...), ctxReader{ctx, f}); err != nil {
+	if err := hashFile(ctxReader{ctx, f}, hs...); err != nil {
 		return err
 	}
 	if sh != nil && hex.EncodeToString(sh.Sum(nil)) != wantSHA {
@@ -220,6 +220,36 @@ func verify(ctx context.Context, path, wantSHA, wantMD5 string) error {
 }
 
 var errMismatch = errors.New("does not match")
+
+// verifyBuf is the read size of a checksum pass. The reader is ctxReader, so
+// io.CopyBuffer cannot take os.File's fast path and ignore it.
+const verifyBuf = 1 << 20
+
+// hashFile reads r once and gives every chunk to each hash. Each hash runs in
+// its own goroutine, so with two hashes both work on a chunk at the same time.
+func hashFile(r io.Reader, hs ...hash.Hash) error {
+	ws := make([]io.Writer, len(hs))
+	pipes := make([]*io.PipeWriter, len(hs))
+	errs := make(chan error, len(hs))
+	for i, h := range hs {
+		pr, pw := io.Pipe()
+		pipes[i], ws[i] = pw, pw
+		go func() {
+			_, err := io.CopyBuffer(h, pr, make([]byte, verifyBuf))
+			errs <- err
+		}()
+	}
+	_, err := io.CopyBuffer(io.MultiWriter(ws...), r, make([]byte, verifyBuf))
+	for _, pw := range pipes {
+		pw.CloseWithError(err) // ends the hashes; a read error stops them too
+	}
+	for range hs {
+		if e := <-errs; err == nil {
+			err = e
+		}
+	}
+	return err
+}
 
 type ctxReader struct {
 	ctx context.Context
