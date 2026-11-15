@@ -445,8 +445,13 @@ func TestARemovedFolderPauses(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if err := os.RemoveAll(d.State().Folder.Out); err != nil {
-		t.Fatal(err)
+	// Windows refuses to delete a file the extraction has open: try again, as
+	// someone deleting it in Explorer would.
+	for err := os.RemoveAll(d.State().Folder.Out); err != nil; err = os.RemoveAll(d.State().Folder.Out) {
+		if time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	for d.Running() {
 		if time.Now().After(deadline) {
