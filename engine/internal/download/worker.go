@@ -106,7 +106,11 @@ func (d *Download) workerFailedLocked(w *worker, err error) {
 	switch fe.kind {
 	case kindExpired:
 		if l != nil && l.URL == w.link.URL && l.Status == LinkReady {
-			l.expired(fe.msg)
+			if d.st.PageURL != "" && d.mirrorLocked(l.URL) == nil {
+				d.needResolveLocked(w.iface, l, fe.msg) // the page is known: skip the probe of the old link
+			} else {
+				l.expired(fe.msg)
+			}
 		}
 	case kindBusy:
 		ir.backoff.pushedBack(now, fe.retryAfter)

@@ -34,9 +34,14 @@ function ownerOf({ tabJobs, jobs, ifaceByStore }, { tabId, windowId, cookieStore
 
 // What a new job does: "endLearn" (a learn job where a recipe already is),
 // "replay" (a recipe is there), "waiting" (another job is recording this site's
-// recipe first) or "record" (first visit to the site).
+// recipe first, or the site already has MAX_WINDOWS resolver windows open) or
+// "record" (first visit to the site).
+const MAX_WINDOWS = 2;
 function startChoice(job, hasRecipe, jobs) {
-  if (hasRecipe) return job.learn ? "endLearn" : "replay";
+  if (hasRecipe && job.learn) return "endLearn";
+  const open = [...jobs].filter((j) => j !== job && !j.done && j.host === job.host && (j.mode === "replay" || j.mode === "record")).length;
+  if (open >= MAX_WINDOWS) return "waiting";
+  if (hasRecipe) return "replay";
   const recording = [...jobs].some((j) => j !== job && j.host === job.host && j.mode === "record");
   return recording ? "waiting" : "record";
 }

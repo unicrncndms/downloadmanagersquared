@@ -583,9 +583,9 @@ func TestLandingPageAsLinkResolvesEverywhere(t *testing.T) {
 	}
 }
 
-// Wi-Fi gets a web page for the source URL while Ethernet is still answering.
-// Until Ethernet has answered nobody knows what that page means, so Wi-Fi's link
-// is still probing, not failed.
+// Ethernet is still answering for the source URL. Until it has, nobody knows
+// whether the link is the file or a landing page, so Wi-Fi's link waits (pending,
+// not failed) instead of probing the same URL too.
 func TestUndecidedWebPageIsStillProbing(t *testing.T) {
 	data := randomData(4 << 20)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -604,8 +604,8 @@ func TestUndecidedWebPageIsStillProbing(t *testing.T) {
 	d.Start()
 
 	time.Sleep(600 * time.Millisecond)
-	if l := d.Summary().Links["wifi"]; l.Status != LinkProbing {
-		t.Errorf("before Ethernet answered, wifi is %+v, want probing", l)
+	if l := d.Summary().Links["wifi"]; l.Status != LinkPending {
+		t.Errorf("before Ethernet answered, wifi is %+v, want pending", l)
 	}
 	select {
 	case <-env.finished:

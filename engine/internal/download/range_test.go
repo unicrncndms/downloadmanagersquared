@@ -102,7 +102,7 @@ func TestServerIgnoringRangeOnOneConnectionNeverCorrupts(t *testing.T) {
 	defer srv.Close()
 	srv.ignore["wifi"] = true
 	dir := t.TempDir()
-	env := &testEnv{ifaces: []Iface{iface("eth", 2, 2*time.Millisecond), iface("wifi", 2, 0)}, main: "eth"}
+	env := &testEnv{ifaces: []Iface{iface("eth", 2, 20*time.Millisecond), iface("wifi", 2, 0)}, main: "eth"} // wifi probes after eth now: eth must still be running
 	d := runToEnd(t, env, State{ID: "r1", URL: srv.URL + "/big.bin", Dir: dir, Size: -1})
 	s := d.Summary()
 	if s.Status != StatusCompleted {

@@ -38,6 +38,10 @@ test("startChoice: replay a known site, wait behind a recorder, else record; a l
   assert.equal(startChoice(job, false, [job]), "record");
   assert.equal(startChoice(job, false, [job, other("record")]), "waiting");
   assert.equal(startChoice(job, false, [job, other("record", "b.test"), other("waiting")]), "record");
+  // at most two windows per host; a finished one frees a place
+  assert.equal(startChoice(job, true, [job, other("replay"), other("replay")]), "waiting");
+  assert.equal(startChoice(job, true, [job, other("replay"), other("replay", "b.test"), { ...other("replay"), done: true }]), "replay");
+  assert.equal(startChoice({ ...job, learn: true }, true, [job, other("replay"), other("replay")]), "endLearn");
 });
 
 test("staleContainers: stored or DMS²-named ones not kept by a carrying-on job", () => {

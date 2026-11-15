@@ -348,7 +348,7 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 // If another interface got the file, the link is the file and those interfaces
 // need their own link from the landing page. Only if no interface got the file is
 // the link itself the landing page.
-func (d *Download) decidePageHitsLocked(usable map[string]Iface) {
+func (d *Download) decidePageHitsLocked(usable map[string]Iface, mainID string) {
 	var hits []string
 	for id, l := range d.st.Links {
 		if l.pageHit {
@@ -359,12 +359,21 @@ func (d *Download) decidePageHitsLocked(usable map[string]Iface) {
 		return
 	}
 	if !d.st.Probed && d.st.PageURL == "" {
+		mainHit := d.st.Links[mainID] != nil && d.st.Links[mainID].pageHit
+		var unprobed []string
 		for id := range usable {
-			if l := d.st.Links[id]; l == nil || l.answering() {
+			l := d.st.Links[id]
+			if mainHit && id != mainID && l != nil && l.Status == LinkPending {
+				// shortcut: a pending link counts as never probed; a retrying one woken meanwhile is misjudged, fixed by its own resolve
+				unprobed = append(unprobed, id)
+				continue
+			}
+			if l == nil || l.answering() {
 				return // still waiting on an interface that might get the file
 			}
 		}
 		d.st.PageURL = d.st.URL
+		hits = append(hits, unprobed...) // the main interface got the page: they need their own link, not a probe of it
 	}
 	for _, id := range hits {
 		l := d.st.Links[id]
