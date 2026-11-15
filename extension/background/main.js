@@ -14,17 +14,34 @@ browser.runtime.onConnect.addListener((port) => {
     autostart: Engine.autostart,
     recipes: Resolver.recipes,
   });
+  const watching = ++uiPorts === 1 ? watch(true) : Promise.resolve();
   // The downloads list shows what needs the user: that clears the "!" for it.
+  // The state the engine sends on watch is newer than the cached one, so it is marked again then.
   if (String(port.sender && port.sender.url || "").endsWith("/popup.html")) {
-    seen = seenAfter(Engine.state && Engine.state.downloads, seen, true);
-    paintBadge(Engine.state && Engine.state.downloads);
+    const opened = () => {
+      seen = seenAfter(Engine.state && Engine.state.downloads, seen, true);
+      paintBadge(Engine.state && Engine.state.downloads);
+    };
+    opened();
+    watching.then(opened);
   }
   const welcome = String(port.sender && port.sender.url || "").endsWith("/welcome.html");
   if (welcome) Engine.fast(true);
   send();
   const offs = ["state", "settings", "connection"].map((ev) => Engine.on(ev, send));
-  port.onDisconnect.addListener(() => { offs.forEach((off) => off()); if (welcome) Engine.fast(false); });
+  port.onDisconnect.addListener(() => {
+    offs.forEach((off) => off());
+    if (welcome) Engine.fast(false);
+    if (--uiPorts === 0) watch(false);
+  });
 });
+
+// The engine sends the whole state only to a client that watches: while a page is open. With none
+// open it sends the small badge event. An engine without watch/unwatch (older) answers with an
+// error and sends the state anyway, so the failure is ignored.
+let uiPorts = 0;
+const watch = (on) => Engine.call(on ? "watch" : "unwatch").catch(() => {});
+Engine.on("connection", ({ connected }) => { if (connected) watch(uiPorts > 0); });
 
 // Only this extension's own pages (ui/) may ask for these; content scripts run in web pages.
 const fromUi = (sender) => !!sender && sender.id === browser.runtime.id && String(sender.url || "").startsWith(browser.runtime.getURL("ui/"));
@@ -58,6 +75,12 @@ function paintBadge(downloads) {
 }
 Engine.on("state", (st) => {
   const ds = st && st.downloads;
+  seen = seenAfter(ds, seen, false);
+  paintBadge(ds);
+});
+// With no page open the engine sends only this: what badgeOf and seenAfter read of the downloads.
+Engine.on("badge", ({ running, needs }) => {
+  const ds = [...needs.map((id) => ({ id, section: "needs" })), ...Array.from({ length: running }, () => ({ status: "running" }))];
   seen = seenAfter(ds, seen, false);
   paintBadge(ds);
 });

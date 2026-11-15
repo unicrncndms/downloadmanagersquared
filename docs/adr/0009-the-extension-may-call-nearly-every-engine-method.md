@@ -22,3 +22,7 @@ Two limits that cost nothing:
 
 - A compromised extension can still change settings, add a login item, import a tunnel or change the PIA login, as the settings page can. Its install is the user's trust decision; Firefox's review of the extension is the protection.
 - A new method needs no entry in a list to work for the extension. `protocol.test.js` fails when the extension calls a name the engine does not have, and when the engine has a method nothing calls and that is not listed there as one for other clients.
+
+## Addendum: watch and unwatch
+
+The extension's background says `unwatch` after hello while no page of the extension is open, and `watch` when the first one opens. The engine sends the whole `state` event only to a client that watches (every client does until it says `unwatch`, so older extensions and the Downloads window are unchanged); a client that does not gets a small `badge` event (`running`, `needs`: the ids that need the user) when it changes. `watch` answers with the current state at once. An older engine answers both with an unknown-method error, which the background ignores. Neither method is version-gated (`relver`): a missing one only costs the saving.

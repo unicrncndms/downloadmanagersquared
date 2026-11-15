@@ -17,7 +17,8 @@ import (
 
 type client struct {
 	extension bool
-	seq       int64  // higher = connected later
+	unwatch   bool   // said unwatch: gets a badge event, not the whole state
+	seq      int64  // higher = connected later
 	browser   string // the exe of the browser the extension runs in, from its hello
 	userAgent string // that browser's, from its hello
 	// The landing-page hosts that browser has a recipe for, from recipeHosts;
@@ -169,18 +170,53 @@ func (e *Engine) broadcast(name string, data any) {
 	}
 }
 
-func (e *Engine) hasClients() bool {
+// audience is how many clients watch the list (every client does, until it
+// says unwatch) and how many do not.
+func (e *Engine) audience() (watchers, others int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return len(e.clients) > 0
+	for _, cl := range e.clients {
+		if cl.unwatch {
+			others++
+		} else {
+			watchers++
+		}
+	}
+	return
+}
+
+// setWatching is the watch and unwatch methods. A client that starts to watch
+// gets the current state at once.
+func (e *Engine) setWatching(c *ipc.Conn, on bool) error {
+	e.mu.Lock()
+	cl := e.clients[c]
+	if cl == nil {
+		e.mu.Unlock()
+		return nil
+	}
+	was := !cl.unwatch
+	cl.unwatch = !on
+	st := e.snapshot
+	e.mu.Unlock()
+	if !on {
+		e.badgeStale.Store(true) // the client's badge is only as new as its last state
+	} else if !was {
+		return c.Emit("state", st)
+	}
+	return nil
 }
 
 // sendAll writes an encoded event to every client.
-func (e *Engine) sendAll(b []byte) {
+func (e *Engine) sendAll(b []byte) { e.sendWhere(b, func(*client) bool { return true }) }
+
+// sendWhere writes an encoded event to the clients keep accepts.
+func (e *Engine) sendWhere(b []byte, keep func(*client) bool) {
 	e.mu.Lock()
 	cs := make([]*ipc.Conn, 0, len(e.clients))
-	for c := range e.clients {
-		cs = append(cs, c)
+	for c, cl := range e.clients {
+		if keep(cl) {
+			cs = append(cs, c)
+		}
 	}
 	e.mu.Unlock()
 	for _, c := range cs {

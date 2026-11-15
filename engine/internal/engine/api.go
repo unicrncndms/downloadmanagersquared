@@ -220,6 +220,11 @@ func (e *Engine) getTorrent(id string) (*torrent.Torrent, error) {
 var methods = map[string]handler{
 	"hello":    on(func(e *Engine, c *ipc.Conn, p helloParams) (any, error) { return e.hello(c, p), nil }),
 	"getState": bare(func(e *Engine) (any, error) { return e.Snapshot(), nil }),
+	// A client watches the list (gets every "state" event) until it says
+	// unwatch; then it gets a small "badge" event instead. Watching again sends
+	// the current state at once. docs/adr/0009.
+	"watch":   on(func(e *Engine, c *ipc.Conn, _ struct{}) (any, error) { return nil, e.setWatching(c, true) }),
+	"unwatch": on(func(e *Engine, c *ipc.Conn, _ struct{}) (any, error) { return nil, e.setWatching(c, false) }),
 	// The exes of the browsers whose extension has said hello; setup ticks them.
 	"extensionBrowsers": bare(func(e *Engine) (any, error) {
 		e.mu.Lock()

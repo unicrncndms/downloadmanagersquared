@@ -60,6 +60,26 @@ type StateEvent struct {
 	IPv6Only   []string                `json:"ipv6Only,omitempty"` // adapters left out because they have only IPv6 and IPv6 is off
 }
 
+// BadgeEvent is all the toolbar badge needs of the state: how many downloads
+// run and which need the user or failed (extension/lib/list.js badgeOf).
+type BadgeEvent struct {
+	Running int      `json:"running"`
+	Needs   []string `json:"needs"`
+}
+
+func badgeOf(sums []download.Summary) BadgeEvent {
+	b := BadgeEvent{Needs: []string{}}
+	for _, s := range sums {
+		if s.Status == download.StatusRunning {
+			b.Running++
+		}
+		if s.Section == "needs" || s.Status == download.StatusFailed {
+			b.Needs = append(b.Needs, s.ID)
+		}
+	}
+	return b
+}
+
 func (e *Engine) updateSnapshot(dt time.Duration) {
 	sums := []download.Summary{}
 	browsers := []string{} // each download's browser, for Record recipe

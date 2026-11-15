@@ -96,6 +96,9 @@ type Engine struct {
 	maps     sync.WaitGroup // mapPorts, for Shutdown
 	quitOnce sync.Once
 	running  atomic.Bool   // Run was called
+	// A client said unwatch: the next tick sends the badge again even if it is
+	// the one last sent, as that client's own may be a state older.
+	badgeStale atomic.Bool
 	keeping  atomic.Value  // the archiveKeeping setting, a string, for ArchiveKeeping
 	ran      chan struct{} // closed when Run returns
 	quitReq  chan struct{} // closed when a client asks the engine to quit
@@ -267,7 +270,7 @@ func (e *Engine) Run() {
 	defer t.Stop()
 	last := time.Now()
 	n := 0
-	var sent []byte // the state event last sent
+	var sent lastSent
 	for {
 		select {
 		case <-e.quit:
@@ -285,18 +288,34 @@ func (e *Engine) Run() {
 			e.queue.Save()
 			e.updateSnapshot(now.Sub(last))
 			last = now
-			// Only a state that changed: idle, the clients redraw nothing. A new
-			// client asks for the state itself (hello, getState). With no client
-			// at all there is nothing to encode (the tray reads Snapshot).
-			if !e.hasClients() {
-				sent = nil // a client that connects now gets today's state itself
-				continue
-			}
-			if b, err := ipc.EncodeEvent("state", e.Snapshot()); err == nil && !bytes.Equal(b, sent) {
-				sent = b
-				e.sendAll(b)
-			}
+			e.push(&sent)
 		}
+	}
+}
+
+// lastSent is the state and badge events last sent.
+type lastSent struct{ state, badge []byte }
+
+// push sends the clients what changed since sent. Only a state that changed:
+// idle, the clients redraw nothing. A new client asks for the state itself
+// (hello, getState, watch). Only clients that watch get the state; the others
+// get the small badge event. With no client of a kind there is nothing to
+// encode (the tray reads Snapshot).
+func (e *Engine) push(sent *lastSent) {
+	watchers, others := e.audience()
+	snap := e.Snapshot()
+	if watchers == 0 {
+		sent.state = nil // a client that watches from now on gets today's state itself
+	} else if b, err := ipc.EncodeEvent("state", snap); err == nil && !bytes.Equal(b, sent.state) {
+		sent.state = b
+		e.sendWhere(b, func(c *client) bool { return !c.unwatch })
+	}
+	stale := e.badgeStale.Swap(false)
+	if others == 0 {
+		sent.badge = nil
+	} else if b, err := ipc.EncodeEvent("badge", badgeOf(snap.Downloads)); err == nil && (stale || !bytes.Equal(b, sent.badge)) {
+		sent.badge = b
+		e.sendWhere(b, func(c *client) bool { return c.unwatch })
 	}
 }
 
