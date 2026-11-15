@@ -757,7 +757,7 @@ function makeLight(id, promote) {
   const num = el("span", { class: "n st-tile", role: "img" });
   const name = el("span", { class: "name", title: "" });
   const size = el("b", { class: "num" });
-  const root = el("div", { class: "card one idle", tabindex: "-1", "data-id": id }, num,
+  const root = el("div", { class: "card one idle", tabindex: "-1", draggable: "true", "data-id": id }, num,
     el("span", { class: "title" }, el("span", { class: "grip", title: "Drag onto another queued download to move it" }, icon("grip")), name),
     end, el("div", { class: "nums" }, size));
   for (const ev of ["pointerenter", "focusin"]) root.addEventListener(ev, promote);
