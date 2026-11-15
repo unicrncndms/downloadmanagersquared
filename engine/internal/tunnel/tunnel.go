@@ -363,16 +363,21 @@ type packetBind struct {
 	pc     net.PacketConn
 }
 
-type endpoint netip.AddrPort
+// endpoint is a peer's address. ua is the same address as WriteTo takes, so
+// Send does not convert it for every packet.
+type endpoint struct {
+	ap netip.AddrPort
+	ua *net.UDPAddr
+}
 
 func (e endpoint) ClearSrc()           {}
 func (e endpoint) SrcToString() string { return "" }
-func (e endpoint) DstToString() string { return netip.AddrPort(e).String() }
+func (e endpoint) DstToString() string { return e.ap.String() }
 func (e endpoint) DstToBytes() []byte {
-	b, _ := netip.AddrPort(e).MarshalBinary()
+	b, _ := e.ap.MarshalBinary()
 	return b
 }
-func (e endpoint) DstIP() netip.Addr { return netip.AddrPort(e).Addr() }
+func (e endpoint) DstIP() netip.Addr { return e.ap.Addr() }
 func (e endpoint) SrcIP() netip.Addr { return netip.Addr{} }
 
 func (b *packetBind) Open(uint16) ([]conn.ReceiveFunc, uint16, error) {
@@ -389,11 +394,12 @@ func (b *packetBind) Open(uint16) ([]conn.ReceiveFunc, uint16, error) {
 			if err != nil {
 				return 0, err
 			}
-			ap, perr := netip.ParseAddrPort(from.String())
-			if perr != nil {
+			ua, ok := from.(*net.UDPAddr)
+			if !ok {
 				continue
 			}
-			sizes[0], eps[0] = n, endpoint(netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port()))
+			ap := ua.AddrPort()
+			sizes[0], eps[0] = n, endpoint{ap: netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port()), ua: ua}
 			return 1, nil
 		}
 	}
@@ -432,7 +438,7 @@ func (b *packetBind) ParseEndpoint(s string) (conn.Endpoint, error) {
 	if err != nil {
 		return nil, err
 	}
-	return endpoint(ap), nil
+	return endpoint{ap: ap, ua: net.UDPAddrFromAddrPort(ap)}, nil
 }
 
 func (b *packetBind) Send(bufs [][]byte, ep conn.Endpoint) error {
@@ -442,7 +448,7 @@ func (b *packetBind) Send(bufs [][]byte, ep conn.Endpoint) error {
 	if pc == nil {
 		return net.ErrClosed
 	}
-	to := net.UDPAddrFromAddrPort(netip.AddrPort(ep.(endpoint)))
+	to := ep.(endpoint).ua
 	for _, buf := range bufs {
 		if _, err := pc.WriteTo(buf, to); err != nil {
 			return err
