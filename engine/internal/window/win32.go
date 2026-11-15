@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/jchv/go-webview2/pkg/edge"
 	"golang.org/x/sys/windows"
 
 	"downloadmanagersquared/engine/internal/winutil"
@@ -33,6 +34,8 @@ var (
 	pGetMonitorInfo        = user32.NewProc("GetMonitorInfoW")
 	pLoadCursor            = user32.NewProc("LoadCursorW")
 	pSetThreadDpiAwareness = user32.NewProc("SetThreadDpiAwarenessContext")
+	pSetClassLongPtr       = user32.NewProc("SetClassLongPtrW")
+	pCreateSolidBrush      = windows.NewLazySystemDLL("gdi32.dll").NewProc("CreateSolidBrush")
 	pGetDpiForSystem       = user32.NewProc("GetDpiForSystem")
 	pGetWindowRect         = user32.NewProc("GetWindowRect")
 	pIsZoomed              = user32.NewProc("IsZoomed")
@@ -58,6 +61,8 @@ const (
 	wmSetIcon       = 0x0080
 	wmMoving        = 0x0216
 	wmApp           = 0x8000
+
+	gclpHbrBackground = ^uintptr(9) // GCLP_HBRBACKGROUND (-10)
 )
 
 type point struct{ x, y int32 }
@@ -103,10 +108,14 @@ var (
 	classOnce sync.Once
 	classErr  error
 	minSize   atomic.Pointer[[2]int32] // the smallest the window may be dragged to, in pixels
+	// The client area's brushes, made once with the class: light or dark, as matchPage picks.
+	lightBgBrush, darkBgBrush uintptr
 )
 
 func registerClass() error {
 	classOnce.Do(func() {
+		lightBgBrush, _, _ = pCreateSolidBrush.Call(colorRef(lightBg))
+		darkBgBrush, _, _ = pCreateSolidBrush.Call(colorRef(darkBg))
 		var inst windows.Handle
 		windows.GetModuleHandleEx(0, nil, &inst)
 		name, _ := windows.UTF16PtrFromString(className)
@@ -146,6 +155,7 @@ func wndProc(hwnd, m, wp uintptr, lp unsafe.Pointer) uintptr {
 		}
 	case wmSettingChange: // maybe light or dark mode changed; the page follows by itself
 		matchTitleBar(hwnd)
+		matchPage(hwnd, v.chromium)
 	case wmClose:
 		v.savePlacement()
 		v.closeWebView()
@@ -197,6 +207,40 @@ func matchTitleBar(hwnd uintptr) {
 		winutil.SetTitleBar(hwnd, false, lightPanel, lightText)
 	}
 }
+
+// The page's background (ui.css --bg, light and dark), so the window's client
+// area and WebView2 are that colour before the page's first paint, not white.
+const (
+	lightBg = 0xf6f7f9
+	darkBg  = 0x15171b
+)
+
+// matchPage paints the client area with the page's background and, once c is
+// embedded (not nil and its controller made), sets WebView2's default background
+// to match. Before Embed, pass nil for c.
+func matchPage(hwnd uintptr, c *edge.Chromium) {
+	bg, brush := uint32(lightBg), lightBgBrush
+	if winutil.AppsDark() {
+		bg, brush = darkBg, darkBgBrush
+	}
+	pSetClassLongPtr.Call(hwnd, gclpHbrBackground, brush)
+	if c == nil {
+		return
+	}
+	ctl := c.GetController()
+	if ctl == nil {
+		return
+	}
+	c2 := ctl.GetICoreWebView2Controller2()
+	if c2 == nil {
+		return
+	}
+	c2.PutDefaultBackgroundColor(edge.COREWEBVIEW2_COLOR{A: 255, R: uint8(bg >> 16), G: uint8(bg >> 8), B: uint8(bg)})
+	(*comObject)(unsafe.Pointer(c2)).call(comRelease) // QueryInterface added a reference
+}
+
+// colorRef turns 0xRRGGBB into a COLORREF (0x00BBGGRR).
+func colorRef(c uint32) uintptr { return uintptr(c>>16&0xff | c&0xff00 | (c&0xff)<<16) }
 
 // noteNormal remembers the window's rectangle while it is neither maximised nor
 // minimised, so closing from either still saves where it normally sits.
