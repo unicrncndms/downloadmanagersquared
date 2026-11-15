@@ -517,6 +517,9 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 		if d.mainOnlyLocked(ifc.ID, mainID) {
 			continue // don't touch the others
 		}
+		if d.pageGuessLocked(ifc.ID, mainID, l, byID) {
+			continue // the main interface's answer says whether the source link is a page
+		}
 		d.probing[ifc.ID] = true
 		l.probing()
 		d.wg.Add(1)
@@ -525,7 +528,7 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 			d.probe(ctx, ifc, l)
 		}(*l)
 	}
-	d.decidePageHitsLocked(byID)
+	d.decidePageHitsLocked(byID, mainID)
 	d.settleHeldLocked(byID, mainID)
 	if d.nothingLeftLocked(byID, mainID) {
 		if d.allMismatchedLocked(byID, mainID) {
@@ -623,6 +626,17 @@ func mainOf(paths []Iface) string {
 		return ""
 	}
 	return paths[0].ID
+}
+
+// pageGuessLocked: the source link is probed on the main interface first. If it
+// is a landing page, the other interfaces would get the same page, N requests
+// for nothing. If it is the file, they probe right after.
+func (d *Download) pageGuessLocked(id, mainID string, l *Link, usable map[string]Iface) bool {
+	if id == mainID || l.URL != d.st.URL || d.st.Probed || d.st.PageURL != "" || d.mirrorLocked(l.URL) != nil || IsFTP(l.URL) || IsSFTP(l.URL) {
+		return false // only a web link can turn out to be a landing page
+	}
+	ml := d.st.Links[mainID]
+	return d.mainMayAnswerLocked(usable, mainID) || (ml != nil && ml.pageHit) // a page hit is settled by decidePageHitsLocked
 }
 
 // mainOnlyLocked: without range support only the main interface is used.

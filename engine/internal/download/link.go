@@ -94,8 +94,17 @@ func (l *Link) serverBusy(now time.Time, retryAfter time.Duration, msg string) {
 	l.Status, l.Error, l.retryAt = LinkRetrying, msg, now.Add(retryAfter)
 }
 
-// expired: the link stopped working mid-download; probe it again to find out why.
-func (l *Link) expired(msg string) { l.Status, l.Error = LinkPending, msg }
+// expired: the link stopped working mid-download; probe it again to find out
+// why. It counts as an HTTP error, so a link that probes fine but whose data is
+// always refused, with no landing page to resolve from, gives up.
+func (l *Link) expired(msg string) {
+	l.HTTPErrors++
+	if l.HTTPErrors >= maxHTTPErrors {
+		l.Status, l.Error = LinkFailed, fmt.Sprintf("%s; the link keeps being refused, gave up after %d tries", msg, maxHTTPErrors)
+		return
+	}
+	l.Status, l.Error = LinkPending, msg
+}
 
 // webPage: the source URL gave this interface a web page. It stays probing until
 // every interface has answered and decidePageHitsLocked decides what the page was.

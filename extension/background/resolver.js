@@ -155,9 +155,10 @@ const Resolver = {
   startOrQueue(job) {
     const choice = startChoice(job, !!this.recipes[job.host], this.jobs.values());
     if (choice === "waiting") {
-      job.mode = "waiting"; // first visit to this site: one job records the clicks, the others wait and replay them
+      job.mode = "waiting"; // first visit to this site (one job records, the others wait), or the site's window cap is reached
       return;
     }
+    if (choice !== "endLearn") job.mode = choice; // now, so jobs starting in this same turn count it
     return choice === "endLearn" ? this.endLearn(job) : this.launch(job, choice);
   },
 
