@@ -103,6 +103,8 @@ type Settings struct {
 	// theme's as the extension last saw it, else the pages' own.
 	Accent      string `json:"accent,omitempty"`      // "" = follow Firefox
 	ThemeAccent string `json:"themeAccent,omitempty"` // "" = Firefox's theme has none
+	// The pages' surfaces take a little of the accent; off: neutral grey.
+	TintBackground bool `json:"tintBackground,omitempty"`
 
 	// What the downloads page remembers, shared by the popup and the window.
 	DismissedUpdate string   `json:"dismissedUpdate,omitempty"` // the release whose "is available" note was closed

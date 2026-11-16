@@ -703,3 +703,34 @@ func TestArchiveKeepingIsSetThroughSetSettings(t *testing.T) {
 		t.Fatalf("an unknown value became %q, want %q", got, download.KeepAuto)
 	}
 }
+
+func TestTheBackgroundTintIsKeptAndRestoredOff(t *testing.T) {
+	dir := t.TempDir()
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := e.Call(nil, "setSettings", []byte(`{"tintBackground":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.(Settings).TintBackground {
+		t.Fatal("setSettings did not turn the tint on")
+	}
+	e.Shutdown()
+	e, err = open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	r, err = e.Call(nil, "getSettings", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.(Settings).TintBackground {
+		t.Fatal("the tint was not kept over a restart")
+	}
+	if r.(Settings).restored().TintBackground {
+		t.Fatal("restore defaults left the tint on")
+	}
+}
