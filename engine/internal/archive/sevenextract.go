@@ -182,7 +182,7 @@ func newSevenExtractor(x *Extractor, done []int64) (*Extractor, error) {
 		}
 		x.files++
 		if f.block >= 0 && x.done[f.block] {
-			x.extracted++
+			x.extracted.Add(1)
 		}
 	}
 	x.skipDone()
@@ -216,7 +216,7 @@ func (x *Extractor) prepare7z() error {
 				return err
 			}
 		}
-		x.extracted++
+		x.extracted.Add(1)
 	}
 	x.z.prepared = true
 	return nil
@@ -283,6 +283,7 @@ func (x *Extractor) extract7z(ctx context.Context, missing []Range) (r Result, e
 			continue
 		}
 		ready = append(ready, i)
+		x.pending.Add(int64(len(x.a.z.blocks[i])))
 	}
 	return r, nil
 }

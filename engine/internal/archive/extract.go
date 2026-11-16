@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/klauspost/compress/flate"
 	"github.com/klauspost/compress/zstd"
@@ -50,10 +51,11 @@ type Extractor struct {
 	dir       string
 	rel       []string // per Entry: its path under dir, '/'-separated; "" is dir itself
 	done      []bool
-	files     int // Entries that are files
-	extracted int // of those, done
-	first     int // Entries before this are all done
-	unordered int // top: 0 not checked, 1 Entries in order of their bytes, 2 not
+	files     int          // Entries that are files
+	extracted atomic.Int64 // of those, done; read by Progress from other goroutines
+	pending   atomic.Int64 // of those, written by the Extract call under way but not done until it settles
+	first     int          // Entries before this are all done
+	unordered int          // top: 0 not checked, 1 Entries in order of their bytes, 2 not
 
 	folders map[string]int // folder Entry path -> its index
 
@@ -167,7 +169,7 @@ func NewExtractorFrom(a *Archive, f File, dir string, done []int64) (*Extractor,
 		}
 		x.files++
 		if x.done[i] {
-			x.extracted++
+			x.extracted.Add(1)
 		}
 	}
 	for i, e := range a.Entries {
@@ -202,6 +204,9 @@ func (x *Extractor) skipDone() {
 
 // Progress is how many of the archive's files are extracted.
 // A RAR's files are only known as they come: of is 0 until it is finished.
+// For a zip or a 7z (of known from the start) it may be called while Extract
+// runs on another goroutine, and counts the files that call has written so far:
+// a whole archive on disk is extracted in one call.
 func (x *Extractor) Progress() (files, of int) {
 	if x.z != nil && x.z.rar != nil {
 		n := int(x.z.rar.files.Load())
@@ -210,7 +215,7 @@ func (x *Extractor) Progress() (files, of int) {
 		}
 		return n, 0
 	}
-	return x.extracted, x.files
+	return min(int(x.extracted.Load()+x.pending.Load()), x.files), x.files
 }
 
 // top is where Extract may stop looking: the first byte past all that is on
@@ -310,6 +315,9 @@ func (x *Extractor) Extract(ctx context.Context, missing []Range) (r Result, err
 			touched[p] = true
 		}
 		ready = append(ready, i)
+		if !e.Dir {
+			x.pending.Add(1)
+		}
 	}
 	return r, nil
 }
@@ -320,6 +328,7 @@ func (x *Extractor) Extract(ctx context.Context, missing []Range) (r Result, err
 // again, so its bytes would stay. If flushing or freeing fails, none of them
 // is done, and they are extracted again next time.
 func (x *Extractor) settle(ready []int, r *Result) error {
+	defer x.pending.Store(0) // counted in extracted now, or extracted again next time
 	if len(ready) == 0 {
 		return nil
 	}
@@ -344,9 +353,9 @@ func (x *Extractor) settle(ready []int, r *Result) error {
 		e := x.a.Entries[i]
 		switch {
 		case x.z != nil && x.z.rar == nil:
-			x.extracted += len(x.a.z.blocks[i]) // a 7z block's files
+			x.extracted.Add(int64(len(x.a.z.blocks[i]))) // a 7z block's files
 		case x.z == nil && !e.Dir:
-			x.extracted++
+			x.extracted.Add(1)
 		}
 		r.Done = append(r.Done, e)
 		if freed {

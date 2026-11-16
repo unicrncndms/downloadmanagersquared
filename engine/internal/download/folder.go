@@ -186,6 +186,9 @@ func (d *Download) folderSummaryLocked() *FolderSummary {
 	if fr := d.fold; fr != nil && s.On && s.Into != "" && d.set == nil && !fr.finished {
 		// A kept archive frees nothing: what is extracted is counted instead.
 		s.Extracted = max(sumRanges(d.st.Folder.Freed), fr.passed)
+		if x := fr.ex.live.Load(); x != nil && s.Of > 0 { // Of 0: a RAR, whose count is only safe to read between steps
+			s.Files, s.Of = x.Progress()
+		}
 		d.pace.add(time.Now(), s.Extracted)
 		switch {
 		case fr.arc == nil:

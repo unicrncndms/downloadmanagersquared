@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -137,6 +139,30 @@ func covered(missing []Range, e Entry) bool {
 		}
 	}
 	return true
+}
+
+func TestProgressCountsTheFilesWrittenWhileAWholeArchiveIsExtracted(t *testing.T) {
+	var files []goFile
+	for i := range 40 {
+		files = append(files, goFile{name: fmt.Sprintf("all/%02d.txt", i), data: random(2000)})
+	}
+	d := newDownload(t, goZip(t, "", files...))
+	a := d.tail()
+	d.arrive(0, int64(len(d.data)))
+	x := extractor(t, a, d.f, filepath.Join(t.TempDir(), "all"))
+	var most atomic.Int64
+	x.Mark = func(string) { // called on each file as it is written, during the one call
+		n, _ := x.Progress()
+		for m := most.Load(); int64(n) > m && !most.CompareAndSwap(m, int64(n)); m = most.Load() {
+		}
+	}
+	extract(t, x, d.missing)
+	if m := most.Load(); m < 20 {
+		t.Errorf("the most files counted while extracting: %d of 40, want most of them", m)
+	}
+	if n, of := x.Progress(); n != 40 || of != 40 {
+		t.Errorf("Progress after: %d of %d, want 40 of 40", n, of)
+	}
 }
 
 func TestEntriesAreExtractedAndFreedAsTheirBytesArriveInAnyOrder(t *testing.T) {

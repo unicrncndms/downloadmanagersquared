@@ -78,6 +78,10 @@ type Extraction struct {
 	// streaming is the bytes freed of the large Entry under way, which a stop
 	// now would have fetched again (Extractor.Streaming); read by RestartCost.
 	streaming atomic.Int64
+
+	// live is x for the owner's progress: a whole archive on disk is one long
+	// Extract call, and the files count saved when it returns would stay at 0.
+	live atomic.Pointer[archive.Extractor]
 }
 
 // saveFreed records rs, in the archive's offsets, as freed on the parts they
@@ -168,6 +172,7 @@ func (e *Extraction) step(ctx context.Context, parts []archivePart, missing []ar
 		}
 		x.Mark = e.mark
 		e.x, e.out = x, out
+		e.live.Store(x)
 		files, of := x.Progress()
 		parts[0].editFolder(func(f *Folder) bool {
 			f.Files, f.Of = files, of
@@ -410,6 +415,7 @@ func (e *Extraction) close() {
 		e.x.Close()
 		e.x = nil
 	}
+	e.live.Store(nil)
 	e.streaming.Store(0)
 }
 
