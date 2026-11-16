@@ -51,7 +51,7 @@ _Avoid_: Source, alternate
 A link the engine will try again by itself after a pause. An unreachable interface retries indefinitely; a repeated HTTP error becomes a failed link after five tries, unless data arrives in between. A server that pushes back sets the pause and costs no try. An engine restart retries it at once.
 
 **Needs landing page**:
-A link that has to be resolved, but no landing page is known yet, so it waits for the user to give one.
+A link that has to be resolved, but no landing page is known yet, so it waits for the user to give one. A link that has already fetched part of the file is refused five times, as *Retrying*, before it waits: one refusal is more likely passing, such as a VPN reconnect, than a dead link.
 
 **Failed link**:
 A link the engine has given up on, for example after three resolves or because its server refuses ranges. Only the user's retry brings it back.

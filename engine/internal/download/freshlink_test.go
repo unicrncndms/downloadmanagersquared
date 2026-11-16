@@ -66,7 +66,11 @@ func startExpiring(t *testing.T, srv *httptest.Server, expired *atomic.Bool, env
 	expired.Store(true)
 	for {
 		if d.Summary().Links["eth"].Status == LinkRetrying {
-			d.RetryLink("eth") // don't wait out the pause after the dropped connection
+			// Don't wait out the pause; not RetryLink, which would reset the tries
+			// a link with bytes gets before it asks for a landing page.
+			d.mu.Lock()
+			d.st.Links["eth"].retryAt = time.Time{}
+			d.mu.Unlock()
 		}
 		s := d.Summary()
 		if s.Status == StatusPaused && s.Links["eth"].Status == LinkNeedsPage {

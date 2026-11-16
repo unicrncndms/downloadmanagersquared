@@ -175,3 +175,28 @@ func TestRetryingHoldsFromEveryLinkWaitingUntilOneIsReady(t *testing.T) {
 		t.Fatal("a stopped download is not retrying")
 	}
 }
+
+// A link that has fetched part of the file, with no landing page known, and
+// gets an error page once (a VPN reconnect, a rate-limit page) tries again
+// later. Only a page on every try makes it wait for a landing page.
+func TestErrorPageOnALinkThatHadTheFileRetriesBeforeAskingForAPage(t *testing.T) {
+	env := &testEnv{ifaces: []Iface{iface("eth", 1, 0)}, main: "eth"}
+	env.resolve = func(id, ifc, page string) { t.Errorf("resolved with no landing page") }
+	url := "http://127.0.0.1/file"
+	l := &Link{URL: url, Status: LinkPending, Bytes: 50}
+	d := New(env, State{ID: "page", URL: url, Dir: t.TempDir(), Size: 100, Probed: true, Links: map[string]*Link{"eth": l}})
+	usable := map[string]Iface{"eth": env.ifaces[0]}
+	page := probeResult{status: 403, isPage: true}
+	for i := 1; i <= maxHTTPErrors; i++ {
+		l.probing()
+		d.applyProbeLocked("eth", l, page, nil)
+		d.decidePageHitsLocked(usable, "eth")
+		want := LinkRetrying
+		if i == maxHTTPErrors {
+			want = LinkNeedsPage
+		}
+		if l.Status != want {
+			t.Fatalf("page %d: %s (%s), want %s", i, l.Status, l.Error, want)
+		}
+	}
+}

@@ -300,6 +300,11 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 		switch {
 		case mirror:
 			l.fail(reason) // a mirror has no landing page: the next mirror is tried
+		case d.st.PageURL == "" && l.Bytes > 0 && l.HTTPErrors+1 < maxHTTPErrors:
+			// This interface fetched the file before, and no page is known to
+			// resolve from: more likely a passing refusal (a VPN reconnect, a
+			// rate-limit page) than a dead link. Only the last try asks for a page.
+			l.httpError(time.Now(), reason)
 		case r.isPage && d.st.PageURL == "" && l.URL == d.st.URL:
 			// Either the link is a landing page, or it is the file link and this
 			// interface got an error page for it. Decide once every interface has answered.
