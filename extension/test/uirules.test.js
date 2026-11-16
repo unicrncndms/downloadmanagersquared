@@ -65,3 +65,11 @@ test("a pulsing front shows what is written of its square, so it matches the til
   assert.equal(frontFill("3", null, false), 3 / 9); // an engine without mapPart
   assert.equal(frontFill(undefined, null, false), 0);
 });
+
+test("rowFill: full squares, one partly filled, then empty; out-of-range shares are clamped", () => {
+  const { rowFill } = require("../lib/uirules.js");
+  assert.deepEqual(rowFill(50, 4), [1, 1, 0, 0]);
+  assert.deepEqual(rowFill(62.5, 4), [1, 1, 0.5, 0]);
+  assert.deepEqual(rowFill(140, 2), [1, 1]);
+  assert.deepEqual(rowFill(undefined, 2), [0, 0]);
+});

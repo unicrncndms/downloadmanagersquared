@@ -65,4 +65,11 @@ function frontFill(digit, part, hasPart) {
   return hasPart ? (part ? part.n / 9 : 0) : (+digit || 0) / 9;
 }
 
-if (typeof module !== "undefined") module.exports = { frontFill, partTiles, shortName, stripSpeed, unitField, sameFolder, canMoveFolder, browserNames };
+// rowFill is a share (0 to 100) as n squares in a row, each 0 (empty) to 1
+// (full): the full ones, then one partly filled, then the empty ones.
+function rowFill(pct, n) {
+  const at = Math.max(0, Math.min(100, +pct || 0)) * n / 100;
+  return Array.from({ length: n }, (_, i) => Math.max(0, Math.min(1, at - i)));
+}
+
+if (typeof module !== "undefined") module.exports = { rowFill, frontFill, partTiles, shortName, stripSpeed, unitField, sameFolder, canMoveFolder, browserNames };

@@ -248,12 +248,12 @@ function renderStrip(s) {
   if (changed || wider || many !== wasMany) fitStrip(); // measuring forces a layout: only when the strip changed (and on resize)
 }
 
-// fitStrip gives the window's strip the short names when the full ones
-// don't fit on the header's line, and only the colours and speeds when the
-// short ones don't either (each still says its name on hover).
+// fitStrip keeps the strip on one line. The window's gets the short names
+// when the full ones don't fit, and only the colours and speeds when the
+// short ones don't either; the popup's, which has the short names already,
+// first drops "idle" and "busy", then the names (each still says its name on hover).
 function fitStrip() {
   const strip = $("strip");
-  if (!document.body.classList.contains("windowed")) return;
   // The chips reach 4px past the strip by design (their hover box); that is not running out of room.
   const over = () => strip.scrollWidth > strip.clientWidth + 5;
   strip.classList.remove("tight", "tighter");
@@ -261,6 +261,7 @@ function fitStrip() {
   if (over()) strip.classList.add("tighter");
 }
 addEventListener("resize", fitStrip);
+document.fonts.ready.then(fitStrip); // the first measure may come before Rubik: its letters are wider
 
 if (new URLSearchParams(location.search).has("window")) document.body.classList.add("windowed");
 
@@ -466,12 +467,12 @@ function sectionHead(name) {
       call("setSettings", { foldedSections: [...folded] }).catch(() => {}).finally(() => foldWrites--);
       renderDownloads(latest.state);
     } });
-    button.className = name === "Needs you" ? "mk bad" : "mk";
+    button.className = name === "Needs you" ? "mk bad" : name === "Finished" ? "mk ok" : "mk";
     h = { button, count: el("span", { class: "count num" }),
       // How many run at once, a link to the setting.
-      limit: name === "Queue" ? el("a", { href: "#downloads", title: "Downloads at once, in the settings", onclick: (e) => {
+      limit: name === "Queue" ? el("a", { href: "#queue", title: "Downloads at once, in the settings", onclick: (e) => {
         e.preventDefault();
-        Host.openSettings("#downloads");
+        Host.openSettings("#queue");
         if (!document.body.classList.contains("windowed")) window.close();
       } }) : null };
     button.append(name, h.count, icon("chevron"));

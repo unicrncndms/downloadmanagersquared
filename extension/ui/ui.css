@@ -1,23 +1,25 @@
 /* Rubik (SIL Open Font License 1.1, fonts/OFL.txt): one variable file for every weight, carried in the package. */
 @font-face { font-family: Rubik; src: url("fonts/Rubik.ttf") format("truetype"); font-weight: 300 900; font-display: block; }
 :root {
-  --bg: #f6f7f9;
-  --panel: #ffffff;
+  --bg0: #f6f7f9;
+  --panel0: #ffffff;
   --text: #16181d;
   --muted: #646b78;
-  --line: #e2e5ea;
+  --line0: #e2e5ea;
   --accent: #1d4ed8;
   --accent-soft: #e6eefe;
   --on-accent: #ffffff; /* text on --accent */
   --ok: #166534;
   --warn: #92400e;
   --bad: #b91c1c;
-  --bar: #dfe3ea;
+  --bar0: #dfe3ea;
   --r: 4px; /* corners: squared, not sharp */
   /* One spacing scale for every gap and padding. */
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px;
   /* Tiles: everything is built from the square. A status tile, a connection's tile, a button. */
   --tile: 30px; --tile-sm: 20px;
+  /* Motion: long enough to see what changed, short enough never to wait for. */
+  --t: .18s; --ease: cubic-bezier(.2, .8, .2, 1);
   /* A connection's colour, by its place among the connections (card.js ifaceHue). */
   /* Never a status hue (green, amber, red) nor the default accent blue. */
   --c0: #7c4ddb; --c1: #0e7c90; --c2: #c2377a; --c3: #8a6b45; --c4: #5d7a1f; --c5: #64748b;
@@ -27,39 +29,50 @@
 /* Dark: the system's choice, unless the settings say light (data-theme, set by common.js). */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #15171b;
-    --panel: #1d2026;
+    --bg0: #15171b;
+    --panel0: #1d2026;
     --text: #e8eaee;
     --muted: #9aa1ad;
-    --line: #2c3038;
+    --line0: #2c3038;
     --accent: #5b8cff;
     --accent-soft: #1f2a44;
     --on-accent: #0b1020;
     --ok: #4ade80;
     --warn: #fbbf24;
     --bad: #f87171;
-    --bar: #2c3038;
+    --bar0: #2c3038;
     --c0: #b197fc; --c1: #4fc8dc; --c2: #f17ec0; --c3: #c9a37a; --c4: #a8c95a; --c5: #a3aec2;
     --on-c: #0b1020;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #15171b;
-  --panel: #1d2026;
+  --bg0: #15171b;
+  --panel0: #1d2026;
   --text: #e8eaee;
   --muted: #9aa1ad;
-  --line: #2c3038;
+  --line0: #2c3038;
   --accent: #5b8cff;
   --accent-soft: #1f2a44;
   --on-accent: #0b1020;
   --ok: #4ade80;
   --warn: #fbbf24;
   --bad: #f87171;
-  --bar: #2c3038;
+  --bar0: #2c3038;
   --c0: #b197fc; --c1: #4fc8dc; --c2: #f17ec0; --c3: #c9a37a; --c4: #a8c95a; --c5: #a3aec2;
   --on-c: #0b1020;
   color-scheme: dark;
+}
+/* The surfaces are the neutrals (--bg0…). With "Tint the background" on (settings; data-tint,
+   set by common.js) each takes a little of the accent, so the page, its panels and its lines
+   belong to the colour chosen (lib/accent.js reads the accent against the tinted panel:
+   PANEL_TINT there is the 4% here). */
+:root { --bg: var(--bg0); --panel: var(--panel0); --line: var(--line0); --bar: var(--bar0); }
+:root[data-tint] {
+  --bg: color-mix(in srgb, var(--accent) 7%, var(--bg0));
+  --panel: color-mix(in srgb, var(--accent) 4%, var(--panel0));
+  --line: color-mix(in srgb, var(--accent) 18%, var(--line0));
+  --bar: color-mix(in srgb, var(--accent) 16%, var(--bar0));
 }
 * { box-sizing: border-box; }
 /* What the browser draws follows the palette too. */
@@ -81,10 +94,17 @@ button {
   border-radius: var(--r);
   padding: 5px 12px;
   cursor: pointer;
-  transition: background .12s, border-color .12s, color .12s, transform .08s;
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease), color var(--t) var(--ease), transform .1s;
 }
+/* What appears comes up into place; never something the pointer has to wait for. */
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+@keyframes drop { from { opacity: 0; transform: translateY(-6px); } }
+@keyframes pop { from { opacity: 0; transform: scale(.96); } }
+input, select, textarea { transition: border-color var(--t) var(--ease); }
+input:hover, select:hover, textarea:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 button:active:not(:disabled) { transform: scale(.96); }
-button:hover { border-color: var(--accent); }
+button:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+button.primary:hover { background: var(--accent); filter: brightness(1.12); }
 button:active { background: var(--accent-soft); }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 button.primary:active { background: var(--accent); filter: brightness(.9); }
@@ -107,9 +127,6 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .muted { color: var(--muted); }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
 .num { font-variant-numeric: tabular-nums; }
-.bar { height: 6px; border-radius: 2px; background: var(--bar); overflow: hidden; }
-/* The engine sends progress once a second: a bar that moves for that long never stops between two. */
-.bar > div { height: 100%; background: var(--accent); transition: width 1s linear; }
 .badge {
   display: inline-block;
   padding: 0 7px;
@@ -140,24 +157,36 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .engine-window header { grid-template-rows: var(--win-row1) var(--win-row2); gap: var(--win-gap) 16px; padding: var(--win-pad); }
 
 /* The Downloads window's tabs between the downloads and the settings. */
-.tabs { display: inline-flex; gap: var(--s1); }
-.tabs .tab { border: 0; background: transparent; color: var(--muted); padding: 4px var(--s3); border-radius: var(--r); font-size: 13px; font-weight: 500; text-decoration: none; }
-.tabs .tab:hover { color: var(--text); background: var(--bg); }
-.tabs .tab[aria-current] { background: var(--accent-soft); color: var(--accent); cursor: default; }
+/* Words with a line under the page shown, not boxes: a button (Add, under them) is something else. */
+.tabs { display: none; gap: var(--s4); }
+.engine-window .tabs { display: inline-flex; }
+/* Until the engine has answered, the window shows no badge: it would push the tabs aside for a moment. */
+.engine-window #conn.dim, .engine-window #openSettings { display: none; }
+.tabs .tab { transition: color var(--t) var(--ease), box-shadow var(--t) var(--ease); border: 0; border-radius: 0; background: transparent; color: var(--muted);
+  padding: 4px 1px; font-size: 14px; font-weight: 500; text-decoration: none; }
+.tabs .tab:hover { color: var(--text); background: transparent; box-shadow: inset 0 -2px var(--line); }
+.tabs .tab:active { transform: none; }
+/* The same weight as the others: a bolder word is wider, and the tabs would shift between the pages. */
+.tabs .tab[aria-current] { color: var(--text); cursor: default; box-shadow: inset 0 -2px var(--accent); }
 
 /* The name, after the mark (icons/icon.svg, the tray's and the toolbar's too). */
 .logo { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 16px; font-weight: 600; white-space: nowrap; }
 .logo img { width: 20px; height: 20px; }
+/* The Downloads window's title bar already shows the mark and the name. */
+.engine-window .logo { display: none; }
 /* A heading's mark: four small squares, two filled. */
 .mk::before { content: ""; flex: none; width: 4px; height: 4px; margin: 0 10px 0 0; transform: translateY(-3px); /* centred with its shadows */ border-radius: 1px; background: var(--accent);
   box-shadow: 6px 0 var(--accent), 0 6px var(--mk-dim), 6px 6px var(--mk-dim); --mk-dim: color-mix(in srgb, var(--accent) 35%, transparent); }
+.mk.ok::before { background: var(--ok); box-shadow: 6px 0 var(--ok), 0 6px var(--mk-dim), 6px 6px var(--mk-dim); --mk-dim: color-mix(in srgb, var(--ok) 35%, transparent); }
 .mk.bad::before { background: var(--bad); box-shadow: 6px 0 var(--bad), 0 6px var(--mk-dim), 6px 6px var(--mk-dim); --mk-dim: color-mix(in srgb, var(--bad) 35%, transparent); }
 /* A status tile: what a download is doing, as a square with an icon or its place in the queue. */
 .st-tile { width: var(--tile-sm); height: var(--tile-sm); border-radius: var(--r); display: grid; place-items: center; flex: none;
   font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--line); }
 .st-tile svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .st-tile.run { background: var(--accent); color: var(--on-accent); box-shadow: none; }
-.st-tile.seed, .st-tile.done { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
+.st-tile.seed { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
+/* Done is green wherever it is said: the tile, the Finished heading's mark, an extraction's squares. */
+.st-tile.done { background: color-mix(in srgb, var(--ok) 18%, var(--panel)); color: var(--ok); box-shadow: none; }
 .st-tile.pick { color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .st-tile.need { color: var(--bad); box-shadow: inset 0 0 0 1.5px var(--bad); }
 /* A connection's tile: its colour, how many connections or peers inside; its name on hover and to a screen reader. */
@@ -169,16 +198,15 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .toast {
   position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%);
   background: var(--text); color: var(--bg); padding: 6px 12px; border-radius: var(--r);
-  opacity: 0; transition: opacity .2s; pointer-events: none; font-size: 13px; z-index: 10;
+  opacity: 0; translate: 0 8px; transition: opacity var(--t) var(--ease), translate var(--t) var(--ease); pointer-events: none; font-size: 13px; z-index: 10;
   width: max-content; max-width: min(520px, calc(100vw - 32px)); line-height: 1.45;
 }
-.toast.show { opacity: 1; }
+.toast.show { opacity: 1; translate: 0 0; }
 .toast.error { background: var(--bad); color: #fff; pointer-events: auto; display: flex; align-items: flex-start; gap: var(--s2); }
 .toast.error button { color: inherit; flex: none; }
 .badge[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  .bar > div, .chunks i, .share i, .toast, .info::after, button { transition: none; }
-  * { animation: none !important; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 /* Read by screen readers, not shown. */
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -186,9 +214,10 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 /* An (i) that explains what it sits next to, on hover or keyboard focus. */
 .info {
   position: relative; display: inline-flex; align-items: center; justify-content: center;
-  width: 15px; height: 15px; margin-left: 5px; border-radius: 50%; vertical-align: 1px;
+  width: 15px; height: 15px; margin-left: 5px; border-radius: 3px; vertical-align: 1px;
   border: 1px solid var(--line); color: var(--muted); background: var(--panel);
-  font: italic 600 10px/1 Georgia, serif; cursor: help; user-select: none;
+  transition: color var(--t) var(--ease), border-color var(--t) var(--ease);
+  font: 600 10px/1 Rubik, system-ui, "Segoe UI", sans-serif; cursor: help; user-select: none;
 }
 .info::before { content: "i"; }
 .info:hover, .info:focus { color: var(--accent); border-color: var(--accent); }
@@ -201,6 +230,6 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
   pointer-events: none; display: none;
 }
 /* Hidden it takes no room, so a narrow page never scrolls sideways; common.js picks the side with room. */
-.info:hover::after, .info:focus::after { display: block; }
+.info:hover::after, .info:focus::after { display: block; animation: pop .14s var(--ease); transform-origin: 12px 0; }
 .info.terms::after { white-space: pre-line; }
 .info.left::after { left: auto; right: -8px; }

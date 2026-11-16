@@ -38,11 +38,13 @@ function applyAccent(settings) {
 }
 
 // The theme choice: light or dark overrides the system's (ui.css, data-theme); "" follows it.
+// And whether the surfaces take a tint of the accent (data-tint).
 function applyTheme(settings) {
   if (!settings) return;
   const t = settings.theme === "light" || settings.theme === "dark" ? settings.theme : "";
   if (t) document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
+  document.documentElement.toggleAttribute("data-tint", !!settings.tintBackground);
 }
 
 // An (i)'s note opens to the right, or to the left when the right has less room.
@@ -78,25 +80,13 @@ function renderConn(m) {
   conn.hidden = m.connected && document.body.classList.contains("engine-window"); // the window is the engine: only trouble is news
 }
 
-// In the Downloads window both pages share one header: the logo, the engine
-// badge, then tabs for Downloads, Connections and Settings. The settings page
-// has its own two (settings.js), and gets Downloads put in front. Returns
-// whether the page is in the window.
+// In the Downloads window both pages share one header: the engine badge
+// (only when there is trouble), then tabs for Downloads and Settings. The tabs
+// are in each page's HTML and early.js marks the window before anything is
+// drawn, so nothing in the header moves as a page loads. Returns whether the
+// page is in the window.
 function windowHeader() {
-  if (!Host.openDownloads) return false;
-  document.body.classList.add("windowed", "engine-window");
-  const tab = (label, go) => el("button", { class: "tab", onclick: go }, label);
-  const downloads = tab("Downloads", () => Host.openDownloads());
-  if ($("pages")) {
-    $("pages").prepend(downloads);
-    return true;
-  }
-  downloads.setAttribute("aria-current", "page");
-  downloads.onclick = null;
-  $("conn").after(el("nav", { class: "tabs", "aria-label": "Pages" }, downloads,
-    tab("Connections", () => Host.openSettings("#connections")),
-    tab("Settings", () => Host.openSettings("#downloads"))));
-  return true;
+  return document.body.classList.contains("engine-window");
 }
 
 // ifaceHue and IFACE_COLORS (the connection's colour) are in lib/iface.js.

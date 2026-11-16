@@ -41,15 +41,16 @@ A download's **Details → Checks → Edit** takes a SHA-256 or MD5. DMS² check
 
 ## Settings
 
+The sections are in the side bar; *Find a setting* searches all of them.
+
 - **Connections:** turn each on or off, set its parallel requests (4) and speed limit, and choose the main connection, used alone for servers that can't split a file. VPN adapters start off. *Enable IPv6 (experimental)* (off) uses IPv6 too; each connection shows a badge with what it has: IPv4, IPv6 or IPv4 + IPv6.
-- **Queue window:** optionally, per weekday, the hours the queue runs (an end before the start runs past midnight). Outside it nothing starts, running downloads pause and seeding torrents stop; they resume when it begins. A download you start or resume yourself still runs. No day set: no limit.
-- **Saving and speed:** takeover size (100 MB), sites never taken over, save folder, downloads at once (1), notifications, keep the PC awake, start with Windows.
-- **Speed:** the unit speeds are shown in (sizes and speeds use base 1000: 1 MB = 1,000,000 bytes), and a download and an upload limit for all connections together (none).
-- **Archives:** Download as folder for new archives (off), a split archive's parts at once (off), keep the archive (Automatic).
+- **VPN:** see below.
+- **Downloads:** save folder, Download as folder for new archives (off), keep the archive (Automatic), takeover size (100 MB), sites never taken over. Under *Advanced*: default requests per connection, a split archive's parts at once (off).
+- **Queue and speed:** downloads at once (1); the queue window: optionally, per weekday, the hours the queue runs (an end before the start runs past midnight). Outside it nothing starts, running downloads pause and seeding torrents stop; they resume when it begins. A download you start or resume yourself still runs. No day set: no limit. Then a download and an upload limit for all connections together (none), the unit speeds are shown in (sizes and speeds use base 1000: 1 MB = 1,000,000 bytes), and the time-left averaging.
 - **Torrents:** seed ratio (1), port for incoming peers.
-- **SFTP logins:** the logins and trusted server keys, removable.
-- **Learned sites:** the clicks remembered per site. *Forget* makes DMS² ask again.
-- **Appearance:** theme and accent colour.
+- **Sites and logins:** the learned sites (the clicks remembered per site; *Forget* makes DMS² ask again), and the SFTP logins and trusted server keys, removable.
+- **General:** start with Windows, notifications, keep the PC awake; theme, accent colour, and a background tinted with the accent (off).
+- **Keyboard:** the shortcuts of the downloads list.
 
 ### VPN
 

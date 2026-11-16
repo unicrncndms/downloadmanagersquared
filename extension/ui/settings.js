@@ -1,7 +1,7 @@
 "use strict";
 
-// Two pages in one: Connections (with the VPN), and Settings, chosen by the
-// address's #. Every change is saved as soon as it's made.
+// The settings page: its sections one at a time, chosen in the side bar or by
+// the address's #. Every change is saved as soon as it's made.
 
 const MB = 1e6;
 // Typed decimals: a point or a comma, whatever the system's locale.
@@ -180,9 +180,17 @@ function renderIfaces(state, settings) {
   $("uplinkWarn").replaceChildren(...warnings.map((t) => el("div", { class: "warn" }, t)));
   showTunnels(ifaces, tunnels, settings);
   const body = $("ifaces");
-  if (sig !== ifaceSig && !body.contains(document.activeElement)) {
+  // Not under the typing: a box being typed in keeps the list as it is. A
+  // button or checkbox that has the focus (a colour just picked, Use just
+  // ticked) does not: its change must show at once, and its row's tile gets the focus back.
+  const at = body.contains(document.activeElement) ? document.activeElement : null;
+  const typing = at && at.matches("input:not([type=checkbox]), select, textarea");
+  if (sig !== ifaceSig && !typing) {
     ifaceSig = sig;
+    const row = at && at.closest(".conn-row");
+    const focused = row && row.querySelector("[data-speed]").dataset.speed;
     body.replaceChildren(...ifaces.map((i) => ifaceRow(i, tunnels.get(i.id), settings)));
+    if (focused) for (const t of body.querySelectorAll("[data-speed]")) if (t.dataset.speed === focused) t.focus();
     const dflt = ifaces.find((i) => i.isDefault);
     $("mainSelect").replaceChildren(
       el("option", { value: "" }, dflt ? `Automatic (Windows' choice: ${dflt.name})` : "Automatic (Windows' choice)"),
@@ -234,7 +242,11 @@ const FIELDS = {
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const dayIndex = (n) => (n + 1) % 7;
 const winInputs = WEEKDAYS.map((day) => ["start", "end"].map((k) => el("input", { type: "time", "aria-label": `${day} ${k === "start" ? "from" : "until"}` })));
-$("qWindow").replaceChildren(...WEEKDAYS.map((day, n) => el("div", {}, el("span", { style: "display:inline-block;min-width:6em" }, day), winInputs[n][0], " to ", winInputs[n][1])));
+// Folded while no day has hours: its summary says how many do.
+const winSum = el("summary", {});
+const winFold = el("details", {}, winSum, WEEKDAYS.map((day, n) => el("div", {}, el("span", { style: "display:inline-block;min-width:6em" }, day), winInputs[n][0], " to ", winInputs[n][1])));
+let winSeen = false;
+$("qWindow").replaceChildren(winFold);
 for (const [a, b] of winInputs) for (const i of [a, b]) i.addEventListener("change", () => {
   // A day with only one time is not a window yet: nothing is sent until both are set or both cleared.
   if (!a.value !== !b.value) return;
@@ -243,6 +255,11 @@ for (const [a, b] of winInputs) for (const i of [a, b]) i.addEventListener("chan
   act("setSettings", { queueWindow: week }, "Saved");
 });
 function fillWindow(s) {
+  const set = (s.queueWindow || []).filter((w) => w && w.start && w.end).length;
+  winSum.textContent = set ? `${plural(set, "day")} with hours` : "Any time";
+  if (!winSeen) winFold.open = set > 0;
+  winSeen = true;
+  if ($("qWindow").contains(document.activeElement) && document.activeElement !== winSum) return; // not under the typing
   WEEKDAYS.forEach((_, n) => {
     const w = (s.queueWindow || [])[dayIndex(n)] || {};
     winInputs[n][0].value = w.start || "";
@@ -251,7 +268,7 @@ function fillWindow(s) {
 }
 
 // The checkboxes: the setting each one holds, and whether it is on when the engine sends none.
-const CHECKS = { sFolder: ["folderDefault", false], sParts: ["partsParallel", true], sNotify: ["notifyDone", true], sAwake: ["keepAwake", true] };
+const CHECKS = { sFolder: ["folderDefault", false], sParts: ["partsParallel", true], sNotify: ["notifyDone", true], sAwake: ["keepAwake", true], sTint: ["tintBackground", false] };
 
 // The download folder is checked by the engine: what it refuses is said at the field.
 function dirError(text) {
@@ -305,7 +322,7 @@ function fillSettings(s) {
   }
   for (const [id, [key, on]] of Object.entries(CHECKS)) $(id).checked = on ? s[key] !== false : !!s[key];
   $("sIPv6").checked = !!s.ipv6;
-  if (!$("qWindow").contains(document.activeElement)) fillWindow(s);
+  fillWindow(s);
   for (const e of document.querySelectorAll(".speedUnit")) e.textContent = speedUnitLabel();
 }
 
@@ -444,10 +461,9 @@ function speedTile(tile, speed) {
   tile.title = speed > 0 ? fmtSpeed(speed) : "Fetching nothing now";
 }
 
-// --- the pages: Connections with the VPN, and Settings, each one list; the
-// links under the tabs jump to a section and mark the one being read ---
+// --- the sections: one shown at a time, picked in the side bar (or by a
+// link's #section); a search shows what it finds in all of them ---
 
-const CONNECTIONS_PAGE = ["connections", "vpn", "pia"]; // #pia: the VPN's sign-in, from a torrent's card
 const sections = [...document.querySelectorAll("main > section")];
 const sectionLinks = [...$("sections").querySelectorAll("a")];
 
@@ -486,58 +502,32 @@ function found(section, q) {
   return any;
 }
 
-let page = ""; // "connections" or "settings", as last shown
 function showPage() {
-  const at = location.hash.slice(1);
   const q = $("find").value.trim().toLowerCase();
-  const was = page;
-  page = !at || CONNECTIONS_PAGE.includes(at) ? "connections" : "settings";
-  const mine = (id) => CONNECTIONS_PAGE.includes(id) === (page === "connections");
+  let at = location.hash.slice(1);
+  if (at === "pia") at = "vpn"; // the VPN's sign-in, from a torrent's card
+  if (!sections.some((s) => s.id === at)) at = "connections";
   let shown = 0;
   for (const s of sections) {
-    const on = q ? found(s, q) : mine(s.id);
+    const on = q ? found(s, q) : s.id === at;
     if (!q) found(s, "");
     s.hidden = !on;
     shown += on;
   }
-  for (const a of $("pages").querySelectorAll("a")) {
-    if (!q && (a.hash === "#connections") === (page === "connections")) a.setAttribute("aria-current", "page");
+  for (const a of sectionLinks) {
+    if (!q && a.hash === "#" + at) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
-  for (const a of sectionLinks) a.hidden = !!q || a.dataset.page !== page;
   // A folded group opens when the search finds something in it.
   if (q) for (const d of document.querySelectorAll("details.adv")) d.open = !!d.querySelector(".setting:not(.unfound)");
   $("notFound").hidden = shown > 0;
   $("notFound").textContent = `No setting matches “${$("find").value.trim()}”.`;
-  // Jump to the section asked for; a page's first section is its top.
-  const target = $(at === "pia" ? "vpn" : at);
-  if (q) scrollTo(0, 0);
-  else if (target && target.previousElementSibling && !target.previousElementSibling.hidden) target.scrollIntoView();
-  else if (page !== was || !target) scrollTo(0, 0);
-  markSection();
+  scrollTo(0, 0);
 }
-
-// The section being read: the last whose top has passed under the header.
-function markSection() {
-  const mine = sections.filter((s) => !s.hidden);
-  let cur = mine[0];
-  for (const s of mine) if (s.getBoundingClientRect().top <= 120) cur = s;
-  for (const a of sectionLinks) {
-    if (cur && a.hash === "#" + cur.id) a.setAttribute("aria-current", "location");
-    else a.removeAttribute("aria-current");
-  }
-}
-// One pass per frame, however many scroll events come in.
-let markPending = false;
-addEventListener("scroll", () => {
-  if (markPending) return;
-  markPending = true;
-  requestAnimationFrame(() => { markPending = false; markSection(); });
-}, { passive: true });
 addEventListener("hashchange", showPage);
 $("find").addEventListener("input", showPage);
-// A section or page picked while searching shows it, not the search.
-for (const a of [...sectionLinks, ...$("pages").querySelectorAll("a")]) {
+// A section picked while searching shows it, not the search.
+for (const a of sectionLinks) {
   a.addEventListener("click", () => { if ($("find").value) { $("find").value = ""; if (a.hash === location.hash) showPage(); } });
 }
 showPage();

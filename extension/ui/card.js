@@ -124,7 +124,8 @@ function folderSwitch(getId, getPassId) {
   const set = (params, okText) => act("setFolder", { id: getId(), ...params }, okText);
   const on = el("input", { type: "checkbox", onchange: () => set({ on: on.checked }) });
   const tag = el("span", { class: "badge dim" }, "unavailable");
-  const row = el("label", { class: "switch fold", hidden: true }, on, "Download as folder: extract it while it downloads", tag);
+  const row = el("label", { class: "switch fold", hidden: true }, on, "Download as folder", tag);
+  row.title = "Extract the archive while it downloads: you get the folder, not the archive";
   const into = el("b", { class: "path" });
   const change = folderChooser(getId, () => into.textContent, (dir) => set({ into: dir }, "Extracting into " + dir));
   const ask = el("div", { class: "extract fold", hidden: true },
@@ -185,18 +186,44 @@ function keepSelect(getId) {
   return { root, update };
 }
 
+// squareRow is a share (0 to 100) as one row of the file's squares, where
+// there is no map of a file to show: a group's sum, an extraction, a server
+// that sends none. The square at the front fills as the share grows.
+function squareRow(cls) {
+  const root = el("div", { class: "chunks flat " + cls, role: "img" }, Array.from({ length: 32 }, () => el("i")));
+  root.style.cssText = "--rows: 1; --cols: 32";
+  let shown = "";
+  return {
+    root,
+    set(pct) {
+      const fill = rowFill(pct, 32);
+      const sig = fill.map((p) => Math.round(p * 9)).join("");
+      if (sig === shown) return;
+      shown = sig;
+      root.setAttribute("aria-label", `${Math.round(+pct || 0)}%`);
+      fill.forEach((p, i) => {
+        const cell = root.children[i];
+        const c = p >= 1 ? "got" : p > 0 ? "part" : "";
+        if (cell.className !== c) cell.className = c;
+        cell.style.setProperty("--p", p);
+      });
+    },
+  };
+}
+
 // extractBar is a Download as folder's extraction under the download's own
-// bar: how far it is, and what it is doing or waiting for (extractView).
+// squares: how far it is, and what it is doing or waiting for (extractView).
 function extractBar() {
-  const fill = el("div");
-  const bar = el("div", { class: "bar xbar fold", hidden: true }, fill);
+  const row = squareRow("xrow fold");
+  const bar = row.root;
+  bar.hidden = true;
   const line = el("div", { class: "sub muted num fold", hidden: true });
   return {
     bar, line,
     update(v) {
       bar.hidden = line.hidden = !v;
       if (!v) return;
-      fill.style.width = v.percent + "%";
+      row.set(v.percent);
       line.textContent = v.text;
     },
   };
@@ -274,8 +301,8 @@ function makeCard(id) {
   const dropDone = iconButton("close", "Remove from list (files stay)", () => removeWithUndo([id]));
 
   const grid = chunkGrid(3);
-  const fill = el("div");
-  const bar = el("div", { class: "bar" }, fill); // where the engine sends no map of the file
+  const row = squareRow(""); // where the engine sends no map of the file
+  const bar = row.root;
   const prog = el("div", { class: "prog" }, grid.root, bar);
   const numsMain = el("b", { class: "num" });
   const numsSub = el("small", { class: "muted num" });
@@ -309,7 +336,9 @@ function makeCard(id) {
   const sub = el("span", { class: "muted num" });
   const via = el("span", { class: "via muted num" }); // which interfaces, how many connections each
   const mini = el("span", { class: "mini num" }); // the same in a narrow list: colours and counts by the name
-  const line = el("div", { class: "what" }, status, vpn, left, via, sub);
+  // A failed download's way on, in words where the reason is read; the play button would say Resume.
+  const retry = el("button", { class: "small primary", hidden: true, onclick: () => act("resume", { id }) }, "Retry");
+  const line = el("div", { class: "what" }, status, retry, vpn, left, via, sub);
   const extract = extractBar();
 
   // Popups can't show confirm dialogs, so removing an unfinished download asks
@@ -481,7 +510,7 @@ function makeCard(id) {
     bar.hidden = seeding || slim || !grid.root.hidden;
     prog.hidden = grid.root.hidden && bar.hidden;
     root.classList.toggle("idle", d.status !== "running");
-    fill.style.width = percent(d) + "%";
+    row.set(percent(d));
     bigGrid.update(details.open && !done ? d : null);
     bigSpeed.textContent = details.open ? nm.main : "";
     bigLeft.textContent = details.open ? [s.left, d.status === "running" ? `${fmtETA(d.eta)} left` : ""].filter(Boolean).join(" · ") : "";
@@ -529,7 +558,8 @@ function makeCard(id) {
     const can = d.actions || {};
     pause.hidden = !can.pause;
     pause.title = pause.ariaLabel = seeding ? "Stop seeding" : "Pause";
-    resume.hidden = !can.resume;
+    retry.hidden = !(can.resume && d.status === "failed");
+    resume.hidden = !can.resume || !retry.hidden;
     menuFolder.hidden = !can.showInFolder;
     menuRemove.hidden = !can.remove; // a torrent being added has its own Cancel
     menuRemove.textContent = d.partialFile ? "Remove…" : "Remove"; // the dots only where a question follows
@@ -676,8 +706,8 @@ function makeGroupCard(gid) {
   const count = el("span", { class: "badge dim" });
   const name = el("span", { class: "name" }, title, " ", count);
   const status = el("span", { class: "badge st" });
-  const fill = el("div");
-  const bar = el("div", { class: "bar" }, fill);
+  const row = squareRow("");
+  const bar = row.root;
   const left = el("span", { class: "muted num left" });
   const numsMain = el("b", { class: "num" });
   const pause = iconButton("pause", "Pause all files", () => each("pause", {}, "", (d) => d.actions && d.actions.pause));
@@ -742,8 +772,9 @@ function makeGroupCard(gid) {
     menuRetry.hidden = !parts || g.summary.finished || !ds.some((d) => d.folder && d.folder.on);
     status.textContent = v.label;
     status.className = "badge st " + v.tone;
-    paintTile(num, v.speed > 0 ? { kind: "run", icon: "down" } : queuePlace ? { kind: "", icon: "" } : { kind: "", icon: "pause" }, queuePlace, v.label);
-    fill.style.width = v.percent + "%";
+    paintTile(num, v.finished ? { kind: "done", icon: "check" } : v.speed > 0 ? { kind: "run", icon: "down" } : queuePlace ? { kind: "", icon: "" } : { kind: "", icon: "pause" }, queuePlace, v.label);
+    bar.parentElement.hidden = !!v.finished; // done: nothing left to show the progress of
+    row.set(v.percent);
     // Beside the extraction's bar, this one says it is the download's.
     left.textContent = (xv ? "Download · " : "") + v.left;
     numsMain.textContent = v.speed > 0 ? fmtSpeed(v.speed) : "";

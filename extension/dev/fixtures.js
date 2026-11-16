@@ -133,7 +133,7 @@ const STRESS = { connected: true, settings: { ...SETTINGS, saveDir: "D:\\" + "Se
     { ...DOWNLOADS[0], id: "s2", filename: "🎬 映画コレクション 2026 — 完全版.zip", links: { eth: DOWNLOADS[0].links.eth } },
     { ...DOWNLOADS[0], id: "s3", filename: "نسخة احتياطية كاملة للمشروع.7z", links: { wifi: DOWNLOADS[0].links.wifi } },
     { ...DOWNLOADS[1], id: "s4", status: "failed", speed: 0, eta: -1, label: "Failed", tone: "bad",
-      note: "The server refused every connection: 404 Not Found. The link may have expired; open the page again to get a new one.", actions: { remove: true, retry: true } },
+      note: "The server refused every connection: 404 Not Found. The link may have expired; open the page again to get a new one.", actions: { remove: true, resume: true } },
     ...Array.from({ length: 300 }, (_, i) => ({ ...DOWNLOADS[0], id: "q" + i, filename: `episode-${String(i + 1).padStart(3, "0")}.mkv`,
       url: `https://example.com/e/${i}`, status: "queued", done: 0, map: "", note: "Waiting in the queue", speed: 0, eta: -1, label: "Queued", tone: "dim",
       links: {}, partialFile: false, actions: { remove: true, pause: true } })),
@@ -224,7 +224,7 @@ const FIXTURES = {
         label: "Trust the server's key?", tone: "warn", actions: { remove: true }, partialFile: false, links: {},
         hostKey: { host: "files.example.com:22", fingerprint: "SHA256:Xv8dH2n5cR7LpQ1bT0aYw3sKfE9uJm4oZ6iN1gB2hCk" } },
       { ...DOWNLOADS[1], id: "k2", kind: "sftp", url: "sftp://backup.example.org:2222/backup.7z", filename: "backup.7z", status: "failed", speed: 0, eta: -1, label: "Failed", tone: "bad",
-        actions: { remove: true, retry: true }, links: { eth: { status: "failed", conns: 0, speed: 0, tone: "bad",
+        actions: { remove: true, resume: true }, links: { eth: { status: "failed", conns: 0, speed: 0, tone: "bad",
           label: "Failed: WARNING: the host key of backup.example.org:2222 changed (trusted SHA256:Zk3uQ0m1c2Yw0q8bq1m7Wk9o0JrJd2yq5G8Ew4T3t6A, server now sends SHA256:Qq1wE2rT3yU4iO5pA6sD7fG8hJ9kL0zX1cV2bN3mM4o). Not logging in: someone may be intercepting the connection, or the server was reinstalled. Only if you are sure, forget the trusted key under Settings > SFTP logins; the next link asks again." } } },
     ] } },
   // The Downloads window: no recipes or user agent here, and the versions always match.

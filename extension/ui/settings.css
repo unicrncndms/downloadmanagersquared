@@ -1,23 +1,32 @@
-/* Two lines: the logo, the engine and the pages; then a page's sections and
-   the search. In the window as tall as the downloads page's (--win-* in ui.css). */
-header {
+/* One line: the logo, the engine and, in the window, the tabs. The sections
+   are in the side bar, where a wide page has the room. */
+header, .engine-window header {
   position: sticky; top: 0; z-index: 30; display: grid; grid-template-columns: auto auto 1fr;
-  grid-template-rows: 30px 26px; gap: 8px 16px; padding: 12px 24px 10px; white-space: nowrap;
+  grid-template-rows: var(--win-row1); gap: 0 16px; padding: 12px 24px 10px; white-space: nowrap;
   background: var(--panel); border-bottom: 1px solid var(--line);
+  border-image: linear-gradient(90deg, var(--accent), var(--line) 60%) 1;
 }
 header > * { align-self: center; justify-self: start; }
 
-header .sections { grid-area: 2 / 1 / 3 / -1; margin-left: -10px; display: flex; gap: 2px; overflow: hidden; }
-header .sections a { padding: 3px 10px; border-radius: 3px; color: var(--muted); text-decoration: none; font-size: 13px; }
-header .sections a:hover { color: var(--text); }
-header .sections a[aria-current] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
-#find { grid-area: 2 / 3; justify-self: end; width: 220px; height: var(--tile); padding: 0 var(--s2); font-size: 12px; border: 1px solid var(--line);
+/* The side bar and the section it shows, together in the middle of a wide window. */
+.shell { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 0 var(--s4); max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+.side { position: sticky; top: 53px; align-self: start; display: grid; gap: 2px; padding: var(--s4) 0; max-height: calc(100vh - 53px); overflow-y: auto; }
+/* One left edge for the search's text, the categories and the icons; a line parts the categories. */
+.side h3 { margin: var(--s3) 0 var(--s1); padding: var(--s3) 10px 0; border-top: 1px solid var(--line); }
+.side a { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: var(--r); color: var(--muted); text-decoration: none; font-size: 13px;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease); }
+.side a svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.side a:hover { color: var(--text); background: var(--panel); }
+.side a[aria-current] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+#find { width: 100%; height: var(--tile); padding: 0 10px; font-size: 12px; border: 1px solid var(--line);
   border-radius: var(--r); background: var(--panel); }
-/* Too narrow for the sections and the search side by side: the search gets a row of its own. */
-@media (max-width: 640px) {
-  header, .engine-window header { grid-template-rows: var(--win-row1, 30px) 26px 30px; }
-  header .sections { overflow-x: auto; }
-  #find { grid-area: 3 / 1 / 4 / -1; justify-self: stretch; width: auto; }
+/* Too narrow for a side bar: the search, then the sections in one line that scrolls sideways. */
+@media (max-width: 760px) {
+  .shell { display: block; padding: 0 16px; }
+  .side { top: 53px; z-index: 20; display: flex; align-items: center; gap: var(--s1); padding: var(--s2) 0; overflow-x: auto; white-space: nowrap; background: var(--bg); }
+  .side h3, .side a svg { display: none; }
+  .side a { flex: none; }
+  #find { flex: none; width: 150px; }
 }
 .recipes { width: 100%; border-collapse: collapse; font-size: 13px; }
 .recipes tr { border-top: 1px solid var(--line); }
@@ -25,9 +34,11 @@ header .sections a[aria-current] { color: var(--accent); background: var(--accen
 .recipes td:first-child { padding-left: 0; }
 .recipes td:last-child { padding-right: 0; text-align: right; }
 .recipes .when { white-space: nowrap; }
-/* Room at the end, so a link can bring even the last section to the top. */
-main { max-width: 980px; margin: 0 auto; padding: 8px 24px calc(100vh - 140px); }
-section { scroll-margin-top: 104px; }
+main { min-width: 0; padding: 0 0 48px; }
+/* A link's #section is already at the top: the browser's own jump to it must not scroll past its heading. */
+section { scroll-margin-top: 140px; }
+/* A section comes in when picked (and what opens under a setting, when it opens). */
+main > section, .conn-more, .row-actions, .uplink, .setting ~ .warn, details.adv > .fields { animation: rise var(--t) var(--ease); }
 /* A section as in the downloads list: its name, then a line to the edge. No boxes. */
 h2 { display: flex; align-items: center; margin: 28px 0 var(--s2); font-size: 15px; font-weight: 600; }
 /* A group of settings: its name, then its rows in one box. */
@@ -69,6 +80,10 @@ h3 { display: flex; align-items: center; margin: 0 0 var(--s2); font-size: 12px;
 .conn-row .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
 .conn-row .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .conn-row .use { display: inline-flex; align-items: center; gap: 6px; }
+.setting, .conn-row { transition: background var(--t) var(--ease); }
+.setting:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+/* A group's name carries the accent's square, as a section's carries four. */
+main h3::before { content: ""; flex: none; width: 4px; height: 4px; margin-right: 6px; border-radius: 1px; background: var(--accent); }
 .conn-row button[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .conn-more { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; padding: 10px 12px;
   border-radius: var(--r); background: var(--bg); }
@@ -79,7 +94,13 @@ h3 { display: flex; align-items: center; margin: 0 0 var(--s2); font-size: 12px;
 .conn-row .who .swatches { margin-top: var(--s2); }
 .conn-more input.name { width: 150px; }
 .swatches[hidden] { display: none; }
-.tunnel-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 0; }
+/* The tunnels in one box, a line between them, like every other list of settings. */
+.tunnel-list { border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); padding: 0 var(--s4); font-size: 13px; }
+.tunnel-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 52px; padding: var(--s2) 0; }
+.tunnel-row + .tunnel-row { border-top: 1px solid var(--line); }
+/* The queue's hours fold away while no day has any. */
+#qWindow summary { cursor: pointer; line-height: var(--tile); }
+#qWindow details[open] summary { color: var(--muted); }
 .tunnel-row b { min-width: 140px; }
 .tunnel-row input.port { width: 72px; }
 .tunnel-row label { display: inline-flex; align-items: center; gap: 6px; }
@@ -102,8 +123,7 @@ h3 { display: flex; align-items: center; margin: 0 0 var(--s2); font-size: 12px;
 .swatches input[type=color] { width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--r); background: none; cursor: pointer; }
 .toast { bottom: 16px; }
 @media (max-width: 700px) {
-  header, main { padding-left: 16px; padding-right: 16px; }
-  #find { width: 140px; }
+  header { padding-left: 16px; padding-right: 16px; }
   .setting { grid-template-columns: 1fr; row-gap: var(--s2); }
 }
 /* The learned sites' table scrolls sideways where it must. */

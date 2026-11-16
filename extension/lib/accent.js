@@ -17,6 +17,7 @@ const ACCENT_PRESETS = [
 const LIGHT_PANEL = [255, 255, 255];
 const DARK_PANEL = [29, 32, 38];
 const AA = 4.6; // 4.5, with room for rounding to whole bytes
+const PANEL_TINT = 0.04; // how much of the accent the panel itself takes (ui.css --panel)
 
 // parseColor reads "#rgb", "#rrggbb", "rgb(r, g, b)" / "rgba(…)" or [r, g, b]
 // (Firefox theme colors come in all of these), else null.
@@ -53,7 +54,7 @@ function tokens(c, panel, to, soft) {
   let accent = to, accentSoft = mix(panel, to, soft);
   for (let t = 0; t <= 1; t += 0.02) {
     const a = mix(c, to, t), s = mix(panel, a, soft);
-    if (contrast(a, panel) >= AA && contrast(a, s) >= AA) { accent = a; accentSoft = s; break; }
+    if (contrast(a, mix(panel, a, PANEL_TINT)) >= AA && contrast(a, s) >= AA) { accent = a; accentSoft = s; break; }
   }
   const white = [255, 255, 255], ink = [11, 16, 32];
   const onAccent = contrast(white, accent) >= contrast(ink, accent) ? white : ink;
