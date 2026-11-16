@@ -24,7 +24,7 @@ import (
 type Entry interface {
 	ID() string
 	Status() download.Status
-	Running() bool // holds a slot
+	Running() bool // holds a slot, unless Retrying
 	Start()
 	Stop(as download.Status)
 	Path() string
@@ -43,6 +43,10 @@ type Entry interface {
 	Yields() bool
 	// Rejoins: should start now without taking a slot.
 	Rejoins() bool
+	// Retrying: running, but every link waits to retry. It keeps running
+	// without a slot, so a link that can't be reached doesn't hold up the
+	// queue; once it fetches again it holds one, and the newest give theirs back.
+	Retrying() bool
 	// Saved is the entry's kind, which names its state directory, and its state.
 	Saved() (kind string, state any)
 }
@@ -386,6 +390,7 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 			continue // outside the window nothing starts, a seeding torrent included
 		}
 		switch {
+		case e.Running() && e.Retrying():
 		case e.Running():
 			running++
 			if e.Yields() {

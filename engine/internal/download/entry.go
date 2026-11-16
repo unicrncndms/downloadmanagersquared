@@ -55,6 +55,36 @@ func (d *Download) Yields() bool { return false }
 // Rejoins is false: an HTTP download only runs in a slot.
 func (d *Download) Rejoins() bool { return false }
 
+// Retrying says the download is running but none of its links can fetch: each
+// waits to retry or for the user. It holds no slot then, so the queue starts
+// the next one. It says so until a link is ready again, also while a retry
+// probes, so a probe that fails again doesn't take the slot back for a moment.
+// Only the links decide it, never the speed: a slow download keeps its slot.
+func (d *Download) Retrying() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.running {
+		d.retrying = false
+		return false
+	}
+	waiting, pending := 0, false
+	for _, l := range d.st.Links {
+		switch l.Status {
+		case LinkReady:
+			d.retrying = false
+			return false
+		case LinkRetrying, LinkFailed, LinkNeedsPage:
+			waiting++
+		case LinkPending, LinkProbing, LinkResolving: // under way: it keeps what it said
+			pending = true
+		}
+	}
+	if waiting > 0 && !pending {
+		d.retrying = true
+	}
+	return d.retrying
+}
+
 // Added is when the download was added.
 func (d *Download) Added() time.Time { return d.st.Added } // fixed when added: no lock needed
 

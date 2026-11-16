@@ -90,7 +90,7 @@ The downloads list in the order added, or as the user moved them, deciding which
 Per weekday, the hours the queue runs (setting). Outside it nothing starts; running downloads pause and seeding torrents stop, and only those resume when it begins. A download the user starts or resumes by hand outside it still runs.
 
 **Slot**:
-One of the *Max parallel* places a running download holds. Seeding and fetching a torrent's metadata hold none.
+One of the *Max parallel* places a running download holds. Seeding and fetching a torrent's metadata hold none. Neither does an HTTP download whose links are all *Retrying* (or waiting on the user): it keeps trying, and the next one starts. Once one of its links is ready again it holds a slot, and the newest running download gives its slot back. Only link states decide this, never speed: a slow download keeps its slot.
 
 ### Torrents
 

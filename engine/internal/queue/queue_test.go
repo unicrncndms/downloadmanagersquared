@@ -14,15 +14,16 @@ import (
 
 // fake is a download or torrent as the queue sees it.
 type fake struct {
-	id      string
-	status  download.Status
-	running bool
-	yields  bool // a torrent
-	rejoins bool // seeding: runs without a slot
-	mode    paths.Mode
-	waitVPN bool
-	added   time.Time
-	deleted bool
+	id       string
+	status   download.Status
+	running  bool
+	yields   bool // a torrent
+	rejoins  bool // seeding: runs without a slot
+	retrying bool // every link waits to retry: runs without a slot
+	mode     paths.Mode
+	waitVPN  bool
+	added    time.Time
+	deleted  bool
 }
 
 func (f *fake) ID() string                { return f.id }
@@ -33,6 +34,7 @@ func (f *fake) Summary() download.Summary { return download.Summary{ID: f.id, St
 func (f *fake) VPN() paths.Mode           { return f.mode }
 func (f *fake) Yields() bool              { return f.yields }
 func (f *fake) Rejoins() bool             { return f.rejoins && !f.running }
+func (f *fake) Retrying() bool            { return f.retrying }
 func (f *fake) Added() time.Time          { return f.added }
 func (f *fake) WaitingForVPN() bool       { return f.status == download.StatusPaused && f.waitVPN }
 func (f *fake) Resume()                   { f.Stop(download.StatusQueued) }
@@ -409,5 +411,33 @@ func TestRemoveManyRemovesTheListedAndSkipsTheRest(t *testing.T) {
 	}
 	if err := q.Remove(a.id, false); err == nil {
 		t.Fatal("a removed entry can be removed again")
+	}
+}
+
+func TestARetryingDownloadGivesItsSlotToTheNextUntilItFetchesAgain(t *testing.T) {
+	stuck, next := queued(false), queued(false)
+	q := newQueue(t, stuck, next)
+	q.Schedule(1, lo)
+	stuck.retrying = true
+	q.Schedule(1, lo)
+	if !stuck.running || !next.running {
+		t.Fatalf("retrying %v, next %v; want both: the retrying one keeps trying without its slot", stuck.running, next.running)
+	}
+	stuck.retrying = false // a link is ready again: back over the limit
+	q.Schedule(1, lo)
+	if !stuck.running || next.running || next.status != download.StatusQueued {
+		t.Fatalf("recovered %v, next %v/%s; want the newest back in the queue", stuck.running, next.running, next.status)
+	}
+}
+
+func TestARetryingDownloadStartsNoMoreThanItsOwnSlotsWorth(t *testing.T) {
+	stuck, b, c := queued(false), queued(false), queued(false)
+	q := newQueue(t, stuck, b, c)
+	q.Schedule(1, lo)
+	stuck.retrying = true
+	q.Schedule(1, lo)
+	q.Schedule(1, lo)
+	if !b.running || c.running {
+		t.Fatalf("b %v, c %v; want one in the retrying download's slot only", b.running, c.running)
 	}
 }

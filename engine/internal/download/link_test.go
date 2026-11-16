@@ -147,3 +147,31 @@ func TestRestoredLinkIsDueAtOnce(t *testing.T) {
 		t.Fatalf("restored retrying link is %s, want pending", l.Status)
 	}
 }
+
+func TestRetryingHoldsFromEveryLinkWaitingUntilOneIsReady(t *testing.T) {
+	a, b := &Link{Status: LinkPending}, &Link{Status: LinkPending}
+	d := &Download{running: true, st: State{Links: map[string]*Link{"a": a, "b": b}}}
+	steps := []struct {
+		a, b LinkStatus
+		want bool
+		why  string
+	}{
+		{LinkProbing, LinkPending, false, "a first probe holds its slot"},
+		{LinkRetrying, LinkProbing, false, "one link still under way"},
+		{LinkRetrying, LinkRetrying, true, "every link waits to retry"},
+		{LinkProbing, LinkRetrying, true, "a retry's probe keeps it retrying"},
+		{LinkResolving, LinkFailed, true, "so does a resolve"},
+		{LinkReady, LinkRetrying, false, "a link is ready again"},
+		{LinkProbing, LinkRetrying, false, "and a later probe doesn't change that"},
+	}
+	for _, s := range steps {
+		a.Status, b.Status = s.a, s.b
+		if got := d.Retrying(); got != s.want {
+			t.Fatalf("%s/%s: Retrying %v, want %v (%s)", s.a, s.b, got, s.want, s.why)
+		}
+	}
+	d.running = false
+	if d.Retrying() {
+		t.Fatal("a stopped download is not retrying")
+	}
+}

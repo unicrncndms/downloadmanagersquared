@@ -747,6 +747,10 @@ func diskPaths(dir string, info *metainfo.Info) []string {
 // Yields is true: torrents queue behind HTTP downloads and give their slot to one.
 func (t *Torrent) Yields() bool { return true }
 
+// Retrying is false: a torrent with no peers yet still holds its slot, as it
+// gives it to any queued HTTP download anyway.
+func (t *Torrent) Retrying() bool { return false }
+
 // Rejoins is whether the torrent should rejoin the swarm without a slot:
 // seeding, or fetching its metadata.
 func (t *Torrent) Rejoins() bool {

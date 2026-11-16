@@ -159,6 +159,7 @@ type Download struct {
 	renameNext  time.Time // no new try before this
 	runStart    time.Time // when the run under way began, for State.Active
 	running     bool
+	retrying    bool // every link waited to retry, and none is ready since (Retrying)
 	checking    bool // a finished file is being checked against new checksums
 	cancel      context.CancelFunc
 	done        chan struct{}
