@@ -113,7 +113,16 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	resolving := e.resolvingIDsLocked()
+	noResolver := len(resolving) > 0 && e.onlyNonResolvingLocked()
 	for i := range sums {
+		if noResolver && resolving[sums[i].ID] {
+			for id, l := range sums[i].Links {
+				if l.Status == download.LinkResolving {
+					l.Label = "Needs Firefox or a Firefox-based browser open"
+					sums[i].Links[id] = l
+				}
+			}
+		}
 		sums[i].Actions.RecordRecipe = e.canRecordLocked(sums[i], browsers[i], resolving)
 		e.markLimitLocked(&sums[i], total, speeds)
 	}

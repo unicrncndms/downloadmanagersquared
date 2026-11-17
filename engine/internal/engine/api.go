@@ -101,6 +101,7 @@ type helloParams struct {
 	UserAgent string `json:"userAgent"` // the extension's navigator.userAgent
 	Version   string `json:"version"`   // the extension's version
 	Browser   string `json:"browser"`   // the browser's exe, added by dms-host
+	Resolves  *bool  `json:"resolves"`  // can run a resolve; missing = yes (older builds)
 }
 
 type hello struct {
@@ -580,6 +581,7 @@ func (e *Engine) hello(c *ipc.Conn, p helloParams) hello {
 	e.mu.Lock()
 	if cl := e.clients[c]; cl != nil {
 		cl.extension, cl.browser, cl.userAgent = true, p.Browser, p.UserAgent
+		cl.noResolve = p.Resolves != nil && !*p.Resolves
 	}
 	if p.UserAgent != "" {
 		e.userAgent = p.UserAgent

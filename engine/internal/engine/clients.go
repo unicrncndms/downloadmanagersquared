@@ -17,6 +17,7 @@ import (
 
 type client struct {
 	extension bool
+	noResolve bool   // said resolves: false (no proxy.onRequest or containers): never sent a resolve
 	unwatch   bool   // said unwatch: gets a badge event, not the whole state
 	seq       int64  // higher = connected later
 	browser   string // the exe of the browser the extension runs in, from its hello
@@ -158,15 +159,23 @@ var startBrowser = winutil.OpenBrowser
 
 // extensionLocked is the most recently connected browser extension. Only
 // OpenWindow's fallback (WebView2 missing) still needs it.
-func (e *Engine) extensionLocked() *ipc.Conn { return e.extensionForLocked("") }
+func (e *Engine) extensionLocked() *ipc.Conn { return e.pickLocked("", false) }
 
-// extensionForLocked is the most recently connected extension in the browser
-// at exe ("" = in any browser).
-func (e *Engine) extensionForLocked(exe string) *ipc.Conn {
+// extensionForLocked is the most recently connected extension that can run a
+// resolve, in the browser at exe ("" = in any browser). Every caller sends a
+// resolve (or needs one to be possible), so extensions that said they can't are skipped.
+func (e *Engine) extensionForLocked(exe string) *ipc.Conn { return e.pickLocked(exe, true) }
+
+// onlyNonResolvingLocked: some extension is connected and none can run a resolve.
+func (e *Engine) onlyNonResolvingLocked() bool {
+	return e.extensionLocked() != nil && e.extensionForLocked("") == nil
+}
+
+func (e *Engine) pickLocked(exe string, resolver bool) *ipc.Conn {
 	var best *ipc.Conn
 	var seq int64 = -1
 	for c, cl := range e.clients {
-		if cl.extension && cl.seq > seq && (exe == "" || strings.EqualFold(cl.browser, exe)) {
+		if cl.extension && cl.seq > seq && !(resolver && cl.noResolve) && (exe == "" || strings.EqualFold(cl.browser, exe)) {
 			best, seq = c, cl.seq
 		}
 	}
