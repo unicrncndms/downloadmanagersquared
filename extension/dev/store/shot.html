@@ -52,8 +52,9 @@
   h.textContent = s.h; p.textContent = s.p; t.textContent = s.title;
   if (s.popup) {
     const keep = f; // the id's global goes away while it is out of the page
+    t.style.display = "none"; v.style.height = "583px"; // the browser's own tab strip is the top edge
     v.innerHTML = document.getElementById("browser").innerHTML; v.append(keep);
-    f.style.cssText = "width:480px;height:481px;left:672px;top:74px;box-shadow:0 12px 32px rgba(0,0,0,.6);border-left:1px solid #343944";
+    f.style.cssText = "width:480px;height:509px;left:672px;top:74px;box-shadow:0 12px 32px rgba(0,0,0,.6);border-left:1px solid #343944";
   } else {
     const scale = 1166 / s.vw;
     f.style.cssText = `width:${s.vw}px;height:${Math.ceil(555 / scale) + s.y}px;transform:scale(${scale}) translate(${-s.x}px,${-s.y}px)`;
