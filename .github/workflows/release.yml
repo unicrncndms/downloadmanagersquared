@@ -70,8 +70,9 @@ jobs:
           AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: |
+          # A listed version needs a license (AMO answers 400 without one): .github/amo-metadata.json.
           # --approval-timeout 0: submit and return, the review takes far longer than a job should wait.
-          npx --yes web-ext@10.8.0 sign --channel=listed --source-dir dist/extension --artifacts-dir dist/signed --api-key $env:AMO_JWT_ISSUER --api-secret $env:AMO_JWT_SECRET --approval-timeout 0
+          npx --yes web-ext@10.8.0 sign --channel=listed --source-dir dist/extension --artifacts-dir dist/signed --api-key $env:AMO_JWT_ISSUER --api-secret $env:AMO_JWT_SECRET --amo-metadata .github/amo-metadata.json --approval-timeout 0
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           echo "::notice::$env:TAG is submitted to AMO for review. The release stays a draft. Once approved, run 'Publish with the AMO-signed extension' on this tag: gh workflow run release-signed.yml --ref $env:TAG -f tag=$env:TAG"
 
