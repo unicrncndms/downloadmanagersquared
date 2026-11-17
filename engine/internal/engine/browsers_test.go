@@ -22,6 +22,11 @@ type fakeExtension struct {
 
 func connectExtension(t *testing.T, e *Engine, exe, userAgent string) *fakeExtension {
 	t.Helper()
+	return connectExtensionWith(t, e, helloParams{UserAgent: userAgent, Browser: exe})
+}
+
+func connectExtensionWith(t *testing.T, e *Engine, hp helloParams) *fakeExtension {
+	t.Helper()
 	ours, theirs := net.Pipe()
 	t.Cleanup(func() { ours.Close(); theirs.Close() })
 	x := &fakeExtension{conn: ipc.NewConn(ours), events: make(chan string, 16), resolves: make(chan json.RawMessage, 16)}
@@ -48,7 +53,7 @@ func connectExtension(t *testing.T, e *Engine, exe, userAgent string) *fakeExten
 		}
 	}()
 	e.Connected(x.conn)
-	params, _ := json.Marshal(helloParams{UserAgent: userAgent, Browser: exe})
+	params, _ := json.Marshal(hp)
 	if _, err := e.Call(x.conn, "hello", params); err != nil {
 		t.Fatal(err)
 	}
@@ -200,5 +205,35 @@ func TestExtensionBrowsersListsTheOnesThatSaidHello(t *testing.T) {
 	got, err := e.Call(nil, "extensionBrowsers", nil)
 	if list, _ := got.([]string); err != nil || len(list) != 1 || list[0] != firefox {
 		t.Fatalf("extensionBrowsers = %v, %v", got, err)
+	}
+}
+
+// A browser that said resolves: false (Chromium) is never sent a resolve; a hello
+// without the field counts as able, so older Firefox builds keep working.
+func TestAResolveSkipsExtensionsThatCannotResolve(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	no := false
+	chrome := connectExtensionWith(t, e, helloParams{Browser: fakeBrowserExe(t, "chrome.exe"), Resolves: &no})
+	e.RequestResolve("d1", "eth", "https://example.com/a", "")
+	if chrome.next("resolve", 300*time.Millisecond) {
+		t.Fatal("a browser that can't resolve got a resolve")
+	}
+	e.mu.Lock()
+	only := e.onlyNonResolvingLocked()
+	e.mu.Unlock()
+	if !only {
+		t.Fatal("not reported as having no resolving extension")
+	}
+	ff := connectExtension(t, e, fakeBrowserExe(t, "firefox.exe"), "") // no resolves field
+	e.RequestResolve("d2", "eth", "https://example.com/b", "")
+	if !ff.next("resolve", 2*time.Second) {
+		t.Fatal("the Firefox-like extension got no resolve")
+	}
+	if chrome.next("resolve", 300*time.Millisecond) {
+		t.Fatal("a browser that can't resolve got a resolve")
 	}
 }

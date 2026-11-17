@@ -53,7 +53,9 @@ const Engine = {
       this.retryDelay = Math.min(this.retryDelay * 2, this.retryCap);
     };
     port.onDisconnect.addListener((p) => lost((p.error && p.error.message) || ""));
-    this.call("hello", { userAgent: navigator.userAgent, version: browser.runtime.getManifest().version })
+    // A resolve needs a proxied hidden window with its own container: only some browsers can.
+    const resolves = !!(browser.proxy?.onRequest && browser.contextualIdentities);
+    this.call("hello", { userAgent: navigator.userAgent, version: browser.runtime.getManifest().version, resolves })
       .then((h) => {
         this.settings = h.settings;
         this.state = h.state;
