@@ -153,7 +153,31 @@ const bigFixture = (downloads) => ({ connected: true, settings: SETTINGS, autost
   state: { ...STATE, downloads, active: downloads.filter((d) => d.status === "running").length, speed: 0 } });
 const running5 = Array.from({ length: 5 }, (_, i) => ({ ...DOWNLOADS[0], id: "br" + i, filename: `running-${i + 1}.iso` }));
 
+// Store screenshots (docs/img/store): three connections all busy, speeds 22 + 12 + 6 = 40 MB/s, one Download as folder extracting.
+const SIF = (id, color, name, description, ip, speed, port) => ({ id, color, name, description, ip, present: true, enabled: true, isDefault: id === "eth", isMain: id === "eth",
+  connections: 4, socksPort: port, speed, upload: true, uploadLimit: 0, downloadLimit: 0 });
+const STORE_IFACES = [SIF("eth", 0, "Ethernet", "Intel I225-V", "192.168.1.20", 22e6, 50001), SIF("wifi", 1, "Wi-Fi", "Intel AX211", "192.168.1.34", 12e6, 50002),
+  SIF("phone", 2, "Phone hotspot", "Remote NDIS based Internet Sharing Device", "192.168.42.129", 6e6, 50003)];
+const sLinks = (e, w, p, conns = 4) => ({ eth: { status: "ready", conns, speed: e, label: "Downloading", tone: "ok" },
+  wifi: { status: "ready", conns, speed: w, label: "Downloading", tone: "ok" }, phone: { status: "ready", conns: 2, speed: p, label: "Downloading", tone: "ok" } });
+// 81 squares: on disk by connection letter (a Ethernet, b Wi-Fi, c Phone hotspot), three being fetched, the rest missing.
+const sDl = (id, filename, size, done, speed, eta, map, links, extra) => ({ map, mapBy: ["eth", "wifi", "phone"], kind: "http", id, url: `https://downloads.example.com/${filename}`,
+  pageUrl: "https://downloads.example.com/", filename, dir: "C:\\Users\\you\\Downloads", size, done, status: "running", speed, eta, probed: true, rangeOk: true, label: "Downloading",
+  actions: { pause: true, showInFolder: true, remove: true }, partialFile: true, links, added: "2026-11-10T09:0" + (4 - id.slice(1)) + ":00Z", ...extra });
+// The list shows the last one first.
+const STORE_DOWNLOADS = [
+  sDl("s1", "ubuntu-24.04.2-desktop-amd64.iso", 6.1e9, 2.9e9, 24e6, 133,
+    "aaaaaccaaaaaaaaaaacbbbbaaaaaaaaabbaaabb000.......................................", sLinks(13e6, 7e6, 4e6)),
+  sDl("s2", "Blender-4.4-windows.zip", 1.4e9, 4.4e8, 10e6, 96, "aaaabbbbaaaaaabbaaaaaabbb000.....................................................", sLinks(6e6, 3e6, 1e6),
+    { folder: { on: true, into: "E:\\Data", out: "E:\\Data\\Blender-4.4-windows", keep: "auto", keeping: "free", files: 412, of: 1280, extracted: 4.6e8, phase: "Extracting as it downloads" },
+      note: "412 of 1,280 files extracted" }),
+  sDl("s3", "dataset-2026.tar", 9.4e9, 5.6e8, 6e6, 1470, "baaaa000.........................................................................", sLinks(3e6, 2e6, 1e6)),
+];
+const STORE_STATE = { downloads: [...STORE_DOWNLOADS].reverse(), interfaces: STORE_IFACES, pia: { state: "off" }, speed: 40e6, eta: 1470, active: 3 };
+const STORE_SETTINGS = { ...SETTINGS, theme: "dark", interfaces: { eth: { name: "Ethernet" }, wifi: { name: "Wi-Fi" }, phone: { name: "Phone hotspot" } }, maxParallel: 3 };
+
 const FIXTURES = {
+  store: { connected: true, state: STORE_STATE, settings: STORE_SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", host: { version: "0.3.0", userAgent: null, recipesHere: false, openDownloads: true } },
   "big-queue": bigFixture([...running5, ...Array.from({ length: 300 }, (_, i) => bigItem(i, "queued"))]),
   "big-finished": bigFixture(Array.from({ length: 3000 }, (_, i) => bigItem(i, "completed"))),
   "big-mixed": bigFixture(Array.from({ length: 5000 }, (_, i) => bigItem(i, ["queued", "completed", "completed", "paused", "completed"][i % 5]))),

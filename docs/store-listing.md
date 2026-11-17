@@ -4,12 +4,15 @@ Copy for the Chrome Web Store (CWS) and addons.mozilla.org (AMO). Fill each stor
 
 Screenshots (1280x800) and the small promo tile (440x280) are in `docs/img/store/`:
 
-- `downloads.png`: the Downloads window, with two downloads on several connections
-- `connections.png`: Connections page in settings
-- `popup.png`: the toolbar popup
+- `01-speed.png`: "Every connection adds speed": three connections busy, the header total is their sum
+- `02-map.png`: "See which connection fetched what": one download's map and per-connection speeds
+- `03-folder.png`: "Unpacks while it downloads": a Download as folder extracting while it downloads
+- `04-connections.png`: "All your connections, side by side": the Connections page
 - `promo-small-440x280.png`: CWS small promo tile (the mark and "DMS²" on the accent blue)
 
-Made with the UI harness (`python extension/dev/serve.py 8765`, fixture `downloads`; the Downloads window is `popup.html?fixture=window`, settings is `settings.html?fixture=downloads#connections`) and headless Edge `--headless=new --screenshot --window-size=1280,800`. The popup shot is the popup page in a 480x600 iframe on a plain page. The fixtures hold made-up names only. Regenerate the shots after a UI change.
+Use shots 1 to 4 on both stores. There is no per-IP-links shot: the UI only shows a small "own link" tag for it, which does not read in a screenshot.
+
+Made by `docs/img/store/src/render.ps1`: it starts the UI harness and renders `extension/dev/store/shot.html?s=<shot>` with headless Edge (`--window-size=1280,800 --force-device-scale-factor=1`). That page puts a caption and the real UI page (fixture `store`: made-up downloads, 22 + 12 + 6 = 40 MB/s over Ethernet, Wi-Fi and a phone hotspot) in a scaled, cropped iframe framed as a window, in the UI's own font and palette. It lives under `extension/dev/` because the harness server only serves that folder. Edit the captions and crops in `shot.html`, the data in the `store` fixture in `extension/dev/fixtures.js`, and run the script again after a UI change. The promo tile is separate.
 
 URLs used by both:
 
@@ -160,4 +163,4 @@ No account, no analytics, no telemetry. The add-on sends data only to the engine
 
 **Data collection:** already declared in `manifest.json` (`browsingActivity`, `websiteActivity`, `websiteContent`, all required; the data goes only to the local engine).
 
-**Screenshots:** the three PNGs in `docs/img/store/`.
+**Screenshots:** the four PNGs `01` to `04` in `docs/img/store/`.
