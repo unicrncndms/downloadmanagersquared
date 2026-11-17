@@ -1,10 +1,11 @@
-name: Attach the AMO-signed extension
+name: Publish with the AMO-signed extension
 
 # Run by hand on a release's tag once AMO has approved that version's listed
-# submission (release.yml submits it): fetches the approved .xpi from AMO and
-# attaches it to the release, with its hash in the notes. For v0.12.0 only it
-# also attaches the one updates.json that sends self-distributed builds to
-# that file (see .github/scripts/updates-json.ps1).
+# submission (release.yml submits it and leaves the release a draft): fetches
+# the approved .xpi from AMO, attaches it to the draft with its hash in the
+# notes, and publishes the release. For v0.12.0 only it also attaches the one
+# updates.json that sends self-distributed builds to that file (see
+# .github/scripts/updates-json.ps1).
 # Run it on the tag (only v* tags may use the release environment).
 
 on:
@@ -30,11 +31,11 @@ jobs:
           ref: ${{ inputs.tag }}
           fetch-depth: 0 # the release notes list the commits since the previous tag
 
-      - name: Check the release exists
+      - name: Check the release is a draft
         run: |
           if ($env:TAG -ne $env:GITHUB_REF_NAME) { throw "run this workflow on the tag $env:TAG, not $env:GITHUB_REF_NAME" }
-          gh release view $env:TAG --json tagName | Out-Null
-          if ($LASTEXITCODE) { throw "$env:TAG has no release" }
+          $draft = gh release view $env:TAG --json isDraft --jq .isDraft
+          if ($draft -ne 'true') { throw "$env:TAG is not a draft release" }
 
       - name: Fetch the approved extension from AMO
         env:
@@ -42,5 +43,5 @@ jobs:
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
         run: ./.github/scripts/amo-fetch.ps1 -Version $env:TAG.TrimStart('v') -Out signed.xpi
 
-      - name: Attach it
+      - name: Attach it and publish
         run: ./.github/scripts/attach.ps1 -Tag $env:TAG -Xpi (Resolve-Path signed.xpi).Path

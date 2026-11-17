@@ -1,6 +1,6 @@
-# Attaches the AMO-approved -Xpi to the already public release of -Tag (and, for
-# the one migration version, its updates.json: see updates-json.ps1) and adds
-# its SHA-256 to the release notes.
+# Attaches the AMO-approved -Xpi to the draft release of -Tag (and, for the one
+# migration version, its updates.json: see updates-json.ps1), adds its SHA-256
+# to the release notes and publishes the release: it is never public without its .xpi.
 param(
     [Parameter(Mandatory)][string]$Tag,
     [Parameter(Mandatory)][string]$Xpi
@@ -25,6 +25,6 @@ $notes = Join-Path $dir 'notes.md'
 $zips = @(Get-ChildItem (Join-Path $dir '*.zip') | ForEach-Object FullName)
 $text = & (Join-Path $PSScriptRoot 'release-notes.ps1') -Tag $Tag -Files ($zips + $asset)
 [IO.File]::WriteAllText($notes, $text, (New-Object Text.UTF8Encoding $false))
-gh release edit $Tag --notes-file $notes --repo $repo
-if ($LASTEXITCODE) { throw 'updating the release notes failed' }
-Write-Host "Attached the AMO-signed extension to $Tag"
+gh release edit $Tag --notes-file $notes --draft=false --latest --repo $repo
+if ($LASTEXITCODE) { throw 'publishing the release failed' }
+Write-Host "Attached the AMO-signed extension to $Tag and published it"

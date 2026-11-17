@@ -1,10 +1,11 @@
 name: Release
 
-# A tag vX.Y.Z publishes the release with the engine zip and the Chromium zip
+# A tag vX.Y.Z drafts the release with the engine zip and the Chromium zip
 # (both attested, as are the exes: gh attestation verify) and submits the
 # extension to addons.mozilla.org as a listed version. Mozilla reviews it, which
 # takes hours to days, so the workflow doesn't wait: once AMO has approved it,
-# run release-signed.yml on the tag to attach the AMO-signed .xpi.
+# run release-signed.yml on the tag, which attaches the AMO-signed .xpi and
+# publishes the draft. A release is never public without its .xpi.
 
 on:
   push:
@@ -54,15 +55,15 @@ jobs:
             dist/downloadmanagersquared-windows.zip
             dist/downloadmanagersquared-chromium.zip
 
-      # Before the release exists, so the updates.json it carries is the previous latest's.
+      # Reads the previous published latest release (a draft is never "latest").
       - name: Carry updates.json
         run: ./.github/scripts/updates-json.ps1 -Tag $env:TAG -Dir dist/updates
 
-      - name: Publish the release
+      - name: Draft the release
         run: |
           $files = @('dist/downloadmanagersquared-windows.zip', 'dist/downloadmanagersquared-chromium.zip') + @(Get-ChildItem dist/updates/updates.json -ErrorAction SilentlyContinue | ForEach-Object FullName)
           ./.github/scripts/release-notes.ps1 -Tag $env:TAG -Files $files[0], $files[1] | Out-File -Encoding utf8 notes.md
-          gh release create $env:TAG @files --verify-tag --latest --title $env:TAG --notes-file notes.md
+          gh release create $env:TAG @files --draft --verify-tag --title $env:TAG --notes-file notes.md
 
       - name: Submit the extension to AMO (listed)
         env:
@@ -72,8 +73,8 @@ jobs:
           # --approval-timeout 0: submit and return, the review takes far longer than a job should wait.
           npx --yes web-ext@10.8.0 sign --channel=listed --source-dir dist/extension --artifacts-dir dist/signed --api-key $env:AMO_JWT_ISSUER --api-secret $env:AMO_JWT_SECRET --approval-timeout 0
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          echo "::notice::$env:TAG is submitted to AMO for review. Once approved, run 'Attach the AMO-signed extension' on this tag: gh workflow run release-signed.yml --ref $env:TAG -f tag=$env:TAG"
+          echo "::notice::$env:TAG is submitted to AMO for review. The release stays a draft. Once approved, run 'Publish with the AMO-signed extension' on this tag: gh workflow run release-signed.yml --ref $env:TAG -f tag=$env:TAG"
 
       # TODO(Robin): upload dist/downloadmanagersquared-chromium.zip to the Chrome Web Store
       # here (needs OAuth client secrets and a refresh token as repository secrets). Until
-      # then the zip on the release is uploaded to the dashboard by hand.
+      # then the Chromium zip on the release is uploaded to the dashboard by hand.
