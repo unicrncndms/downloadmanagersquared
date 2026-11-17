@@ -2,7 +2,7 @@
 <meta charset="utf-8">
 <title>Store screenshot</title>
 <!-- Composes one store screenshot (docs/img/store): a caption, and a real UI page in an iframe, scaled and cropped, framed as a window.
-     ?s=<shot>; the shots are listed below. render.ps1 (docs/img/store/src) renders them all. -->
+     ?s=<shot>; the shots are listed below. render.ps1 (docs/img/store/src) renders them all, at 1x and 2x. -->
 <style>
   @font-face { font-family: Rubik; src: url("/ui/fonts/Rubik.ttf") format("truetype"); font-weight: 300 900; font-display: block; }
   * { box-sizing: border-box; margin: 0; }
@@ -18,25 +18,46 @@
   .bar { height: 28px; background: #1d2026; border-bottom: 1px solid #2c3038; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; color: #9aa1ad; }
   .view { position: relative; width: 1166px; height: 555px; overflow: hidden; }
   iframe { position: absolute; border: 0; transform-origin: 0 0; background: #15171b; }
+  /* The toolbar shot: a generic browser top bar over a blurred page. */
+  .tabs { height: 34px; background: #15171b; display: flex; align-items: flex-end; padding-left: 10px; }
+  .tab { width: 190px; height: 28px; background: #272b33; border-radius: 8px 8px 0 0; padding: 6px 12px; font-size: 12px; color: #c4c9d2; }
+  .tools { height: 40px; background: #272b33; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid #343944; }
+  .addr { flex: 1; height: 26px; border-radius: 13px; background: #1c1f26; padding: 5px 14px; font-size: 12px; color: #9aa1ad; }
+  .tb { width: 28px; height: 28px; border-radius: 6px; background: #343944; display: flex; align-items: center; justify-content: center; }
+  .tb img { width: 18px; height: 18px; }
+  .page { position: absolute; left: 0; top: 74px; right: 0; bottom: 0; background: #20242b; overflow: hidden; }
+  .blur { position: absolute; inset: -20px; filter: blur(9px); }
+  .blur b { position: absolute; display: block; background: #2e333c; border-radius: 6px; }
 </style>
 <div class="cap"><div class="tiles"><i style="background:#b197fc"></i><i style="background:#4fc8dc"></i><i style="background:#f17ec0"></i></div><h1 id="h"></h1><p id="p"></p></div>
-<div class="win"><div class="bar" id="t"></div><div class="view"><iframe id="f"></iframe></div></div>
+<div class="win"><div class="bar" id="t"></div><div class="view" id="v"><iframe id="f"></iframe></div></div>
+<template id="browser"><div class="tabs"><div class="tab">Example page</div></div><div class="tools"><div class="addr">example.com/downloads</div><div class="tb"><img src="/icons/icon-32.png" alt=""></div></div>
+  <div class="page"><div class="blur"><b style="left:60px;top:60px;width:380px;height:26px"></b><b style="left:60px;top:110px;width:560px;height:12px"></b><b style="left:60px;top:132px;width:520px;height:12px"></b><b style="left:60px;top:154px;width:470px;height:12px"></b>
+    <b style="left:60px;top:200px;width:250px;height:150px"></b><b style="left:330px;top:200px;width:250px;height:150px"></b><b style="left:60px;top:380px;width:520px;height:12px"></b><b style="left:60px;top:402px;width:430px;height:12px"></b></div></div></template>
 <script>
   // page: the UI page; vw: its width before scaling (the scale is the view's width over vw); x, y: what is cut off the left and top; open: click Details on the nth card.
   const SHOTS = {
     speed: { h: "Every connection adds speed", p: "Ethernet, Wi-Fi and a phone hotspot download one file together: 22 + 12 + 6 = 40 MB/s.",
       title: "DMS² Downloads", page: "popup.html?fixture=store", vw: 1000, x: 0, y: 0 },
+    popup: { h: "Right there in your toolbar", p: "Click the icon to see every download and the speed of each connection.",
+      title: "", page: "popup.html?fixture=store-popup", popup: true },
     map: { h: "See which connection fetched what", p: "Each square of the file shows the connection that downloaded it.",
       title: "DMS² Downloads", page: "popup.html?fixture=store", vw: 860, x: 0, y: 92, open: 0 },
     folder: { h: "Unpacks while it downloads", p: "Download as folder extracts a zip as it arrives and frees the space.",
-      title: "DMS² Downloads", page: "popup.html?fixture=store", vw: 860, x: 0, y: 92, open: 1 },
+      title: "DMS² Downloads", page: "popup.html?fixture=store", vw: 800, x: 0, y: 238 },
     connections: { h: "All your connections, side by side", p: "Use every connection at once, and see what each one adds.",
       title: "DMS² Settings", page: "settings.html?fixture=store#connections", vw: 1100, x: 0, y: 60 },
   };
   const q = new URLSearchParams(location.search), s = SHOTS[q.get("s")];
   h.textContent = s.h; p.textContent = s.p; t.textContent = s.title;
-  const scale = 1166 / s.vw;
-  f.style.cssText = `width:${s.vw}px;height:${Math.ceil(555 / scale) + s.y}px;transform:scale(${scale}) translate(${-s.x}px,${-s.y}px)`;
+  if (s.popup) {
+    const keep = f; // the id's global goes away while it is out of the page
+    v.innerHTML = document.getElementById("browser").innerHTML; v.append(keep);
+    f.style.cssText = "width:480px;height:481px;left:672px;top:74px;box-shadow:0 12px 32px rgba(0,0,0,.6);border-left:1px solid #343944";
+  } else {
+    const scale = 1166 / s.vw;
+    f.style.cssText = `width:${s.vw}px;height:${Math.ceil(555 / scale) + s.y}px;transform:scale(${scale}) translate(${-s.x}px,${-s.y}px)`;
+  }
   f.src = "/ui/" + s.page;
   f.onload = () => { if (s.open != null) setTimeout(() => f.contentDocument.querySelectorAll('button[title="Details"], button[aria-label="Details"]')[s.open]?.click(), 300); };
 </script>

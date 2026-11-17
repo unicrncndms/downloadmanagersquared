@@ -4,15 +4,16 @@ Copy for the Chrome Web Store (CWS) and addons.mozilla.org (AMO). Fill each stor
 
 Screenshots (1280x800) and the small promo tile (440x280) are in `docs/img/store/`:
 
-- `01-speed.png`: "Every connection adds speed": three connections busy, the header total is their sum
-- `02-map.png`: "See which connection fetched what": one download's map and per-connection speeds
-- `03-folder.png`: "Unpacks while it downloads": a Download as folder extracting while it downloads
-- `04-connections.png`: "All your connections, side by side": the Connections page
+- `01-speed.png`: "Every connection adds speed": the Downloads window, three connections busy, the header total is their sum
+- `02-toolbar.png`: "Right there in your toolbar": the toolbar popup dropping down from the icon in a generic browser bar
+- `03-map.png`: "See which connection fetched what": one download's map and per-connection speeds (the only one with the details pane)
+- `04-folder.png`: "Unpacks while it downloads": a Download as folder extracting while it downloads, and a finished one
+- `05-connections.png`: "All your connections, side by side": the Connections page
 - `promo-small-440x280.png`: CWS small promo tile (the mark and "DMS²" on the accent blue)
 
-Use shots 1 to 4 on both stores. There is no per-IP-links shot: the UI only shows a small "own link" tag for it, which does not read in a screenshot.
+Two sets of the same five: `docs/img/store/*.png` at 1280x800 go to the Chrome Web Store (it takes exactly that size, at most 5); `docs/img/store/hd/*.png` at 2560x1600 go to AMO. No per-IP-links shot: the UI only shows a small "own link" tag for it, which does not read in a screenshot.
 
-Made by `docs/img/store/src/render.ps1`: it starts the UI harness and renders `extension/dev/store/shot.html?s=<shot>` with headless Edge (`--window-size=1280,800 --force-device-scale-factor=1`). That page puts a caption and the real UI page (fixture `store`: made-up downloads, 22 + 12 + 6 = 40 MB/s over Ethernet, Wi-Fi and a phone hotspot) in a scaled, cropped iframe framed as a window, in the UI's own font and palette. It lives under `extension/dev/` because the harness server only serves that folder. Edit the captions and crops in `shot.html`, the data in the `store` fixture in `extension/dev/fixtures.js`, and run the script again after a UI change. The promo tile is separate.
+Made by `docs/img/store/src/render.ps1`: it starts the UI harness and renders `extension/dev/store/shot.html?s=<shot>` with headless Edge (`--window-size=1280,800`, device scale factor 1 and 2). That page puts a caption and the real UI page (fixtures `store` and `store-popup`: made-up downloads, 22 + 12 + 6 = 40 MB/s over Ethernet, Wi-Fi and a phone hotspot) in a scaled, cropped iframe framed as a window, in the UI's own font and palette on a plain background. It lives under `extension/dev/` because the harness server only serves that folder. Edit the captions and crops in `shot.html`, the data in `extension/dev/fixtures.js`, and run the script again after a UI change. The promo tile is separate.
 
 URLs used by both:
 
@@ -163,4 +164,4 @@ No account, no analytics, no telemetry. The add-on sends data only to the engine
 
 **Data collection:** already declared in `manifest.json` (`browsingActivity`, `websiteActivity`, `websiteContent`, all required; the data goes only to the local engine).
 
-**Screenshots:** the four PNGs `01` to `04` in `docs/img/store/`.
+**Screenshots:** the five PNGs in `docs/img/store/hd/` (2560x1600).

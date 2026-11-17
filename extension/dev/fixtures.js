@@ -171,6 +171,10 @@ const STORE_DOWNLOADS = [
   sDl("s2", "Blender-4.4-windows.zip", 1.4e9, 4.4e8, 10e6, 96, "aaaabbbbaaaaaabbaaaaaabbb000.....................................................", sLinks(6e6, 3e6, 1e6),
     { folder: { on: true, into: "E:\\Data", out: "E:\\Data\\Blender-4.4-windows", keep: "auto", keeping: "free", files: 412, of: 1280, extracted: 4.6e8, phase: "Extracting as it downloads" },
       note: "412 of 1,280 files extracted" }),
+  sDl("s4", "Blender-4.3-windows.zip", 1.3e9, 1.3e9, 0, -1, "", {}, { status: "completed", section: "done", label: "Completed", tone: "ok", partialFile: false, speed: 0, probed: true,
+    links: { eth: { bytes: 8.1e8, status: "ready", conns: 0 }, wifi: { bytes: 3.6e8, status: "ready", conns: 0 }, phone: { bytes: 1.3e8, status: "ready", conns: 0 } },
+    actions: { open: true, showInFolder: true, deleteFile: true, again: true, remove: true }, finished: "2026-11-09T18:04:10Z", active: 40, mapBy: undefined, map: undefined,
+    folder: { on: true, into: "E:\Data", out: "E:\Data\Blender-4.3-windows", files: 1210, of: 1210, extracted: 1.3e9 } }),
   sDl("s3", "dataset-2026.tar", 9.4e9, 5.6e8, 6e6, 1470, "baaaa000.........................................................................", sLinks(3e6, 2e6, 1e6)),
 ];
 const STORE_STATE = { downloads: [...STORE_DOWNLOADS].reverse(), interfaces: STORE_IFACES, pia: { state: "off" }, speed: 40e6, eta: 1470, active: 3 };
@@ -257,6 +261,7 @@ const FIXTURES = {
 };
 
 // The Downloads window with the SFTP states.
+FIXTURES["store-popup"] = { ...FIXTURES.store, host: { version: "0.3.0", userAgent: null, recipesHere: false } };
 FIXTURES.windowSftp = { ...FIXTURES.sftp, recipes: null, host: { version: "0.3.0", userAgent: null, recipesHere: false, openDownloads: true } };
 
 // What the real engine adds to every download and to each group of them (Present
