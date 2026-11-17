@@ -252,7 +252,7 @@ func TestRemoveLaterKeepsWhatTheUserPutInTheFolder(t *testing.T) {
 	}
 	run := func() {
 		cmd := exec.Command(filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe"))
-		cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd.exe ` + strings.ReplaceAll(l.removeCommand(), "ping -n 3", "ping -n 1")}
+		cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd.exe ` + strings.ReplaceAll(l.removeCommand(), "ping -n 2", "ping -n 1")}
 		cmd.Run() // its exit code is the last rmdir's, which fails while the folder isn't empty
 	}
 	run()
@@ -326,5 +326,34 @@ func TestInstallWithoutAnyHostSaysWhatIsMissing(t *testing.T) {
 	}
 	if _, err := os.Stat(l.Dir); err == nil {
 		t.Error("the install folder was made anyway")
+	}
+}
+
+// Windows asks for administrator rights while the uninstall window is still
+// open, so the removal starts before the engine has exited: it keeps trying
+// until the engine's exe can go.
+func TestRemoveLaterWaitsForTheEngineToExit(t *testing.T) {
+	l := testLayout(t)
+	l.Icon = []byte("icon")
+	if err := l.Install(release(t, "v1"), "0.3.0", &Options{}); err != nil {
+		t.Fatal(err)
+	}
+	inUse, err := os.Open(l.Engine()) // like the running exe: it can't be deleted
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe"))
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd.exe ` + l.removeCommand()}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Second) // longer than the few tries it used to make
+	if _, err := os.Stat(l.Engine()); err != nil {
+		t.Fatalf("the exe in use is gone already: %v", err)
+	}
+	inUse.Close()
+	cmd.Wait()
+	if _, err := os.Stat(l.Dir); err == nil {
+		t.Fatal("the folder is still there once the exe was let go")
 	}
 }

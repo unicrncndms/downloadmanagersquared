@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -62,7 +63,7 @@ func installFrom(l install.Layout, src string, first *install.Options) error {
 // downloads.
 func uninstall(l install.Layout) {
 	data, _ := engine.DataDir()
-	done := setup.RunUninstall(tray.Icon(), setup.Steps{
+	setup.RunUninstall(tray.Icon(), setup.Steps{
 		Version:  engine.Version,
 		Browsers: winutil.FirefoxBrowsers,
 		OpenAddons: func(b winutil.Browser) {
@@ -78,23 +79,21 @@ func uninstall(l install.Layout) {
 				}
 			}
 			errs := []error{l.Unregister()}
+			// Started now, so Windows asks before the window says it is done; the
+			// files go once this process, which runs from the folder, has exited.
+			if err := l.RemoveLater(); err != nil {
+				if errors.Is(err, winutil.ErrElevationDeclined) {
+					// The files stay, so the extension and Windows' uninstall must still find them.
+					err = errors.Join(err, l.Restore(engine.Version))
+				}
+				errs = append(errs, fmt.Errorf("could not remove %s: %w", l.Dir, err))
+			}
 			if wipe && data != "" {
 				errs = append(errs, os.RemoveAll(data))
 			}
 			return errors.Join(errs...)
 		},
 	}, setup.UninstallInfo{DataDir: data, Unfinished: unfinishedFolders(data)})
-	if !done {
-		return
-	}
-	// Last, as this exe lives in the folder: it can only go once this process has exited.
-	if err := l.RemoveLater(); err != nil {
-		if errors.Is(err, winutil.ErrElevationDeclined) {
-			// The files stay, so the extension and Windows' uninstall must still find them.
-			err = errors.Join(err, l.Restore(engine.Version))
-		}
-		winutil.MessageBox(title, "Could not remove "+l.Dir+": "+err.Error())
-	}
 }
 
 // unfinishedFolders are the folders that hold an unfinished download's

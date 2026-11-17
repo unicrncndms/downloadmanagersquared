@@ -379,8 +379,9 @@ func (l Layout) Restore(version string) error {
 
 // RemoveLater deletes the install's files once this process (which runs from
 // the folder) has exited, then the folder if nothing else is left in it: a
-// cmd waits a few seconds and tries a few times while a file is still in use
-// (a dms-host still exiting). It runs as administrator if the folder needs it.
+// cmd keeps trying while a file is still in use (see removeCommand). It runs
+// as administrator if the folder needs it, so Windows asks now, not once the
+// process has exited.
 func (l Layout) RemoveLater() error {
 	cmdExe := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
 	if !winutil.CanWrite(l.Dir) {
@@ -408,14 +409,21 @@ func (l Layout) RemoveLater() error {
 
 // removeCommand is cmd's arguments for RemoveLater. It deletes the install's
 // own files by name, and the folder without /s, so it never takes anything
-// the user keeps there.
+// the user keeps there. It tries each second while an exe is still there:
+// the uninstall window that started it may stay open a while (up to ten
+// minutes), and a dms-host may still be exiting. Once both are gone it no
+// longer waits.
 func (l Layout) removeCommand() string {
-	try := `ping -n 3 127.0.0.1 >nul & del /f /q`
+	try := ""
+	for _, exe := range []string{l.Engine(), l.Host()} {
+		try += `(if exist "` + exe + `" ping -n 2 127.0.0.1 >nul) & `
+	}
+	try += `del /f /q`
 	for _, f := range l.files() {
 		try += ` "` + f + `"`
 	}
 	try += ` 2>nul & rmdir "` + l.Dir + `" 2>nul`
-	return `/d /c ` + try + ` & ` + try + ` & ` + try + ` & ` + try
+	return `/d /c for /l %i in (1,1,600) do @(` + try + `)`
 }
 
 func setValue(key, name, v string) error {
