@@ -1,7 +1,10 @@
 //go:build ignore
 
-// Regenerate the exe icon: cd engine/cmd/dms-engine && go run genicon.go
-// writes icon_windows_amd64.syso (RT_ICON/RT_GROUP_ICON resources; `go build` links it in).
+// Regenerate the exe resources: cd engine/cmd/dms-engine && go run genicon.go
+// writes icon_windows_amd64.syso (RT_ICON/RT_GROUP_ICON and RT_VERSION) and
+// ../dms-host/version_windows_amd64.syso (RT_VERSION); `go build` links them in.
+// The version resource names the exe: Windows heads its notifications, Task
+// Manager and Installed apps with FileDescription, else with the file name.
 package main
 
 import (
@@ -9,6 +12,7 @@ import (
 	"encoding/binary"
 	"log"
 	"os"
+	"unicode/utf16"
 
 	"downloadmanagersquared/engine/internal/mark"
 )
@@ -38,16 +42,81 @@ func main() {
 		binary.Write(&group, binary.LittleEndian, uint32(len(imgs[i])))
 		binary.Write(&group, binary.LittleEndian, uint16(i+1))
 	}
-	type leaf struct {
-		typ, id uint32
-		data    []byte
-	}
 	var leaves []leaf
 	for i := range sizes {
 		leaves = append(leaves, leaf{3, uint32(i + 1), imgs[i]})
 	}
 	leaves = append(leaves, leaf{14, 1, group.Bytes()})
+	leaves = append(leaves, leaf{16, 1, versionInfo("DMS²", "dms-engine.exe")})
+	writeSyso("icon_windows_amd64.syso", leaves)
+	writeSyso("../dms-host/version_windows_amd64.syso", []leaf{{16, 1, versionInfo("DMS² browser connector", "dms-host.exe")}})
+}
 
+type leaf struct {
+	typ, id uint32
+	data    []byte
+}
+
+// versionInfo is a VS_VERSIONINFO naming the exe. Its numbers stay 0: the
+// syso is checked in, and the version is set when building.
+func versionInfo(desc, file string) []byte {
+	le := binary.LittleEndian
+	var fixed bytes.Buffer // VS_FIXEDFILEINFO
+	binary.Write(&fixed, le, [13]uint32{0xFEEF04BD, 0x00010000, 0, 0, 0, 0, 0x3F, 0, 0x40004 /* VOS_NT_WINDOWS32 */, 1 /* VFT_APP */, 0, 0, 0})
+	var strs [][]byte
+	for _, kv := range [][2]string{
+		{"CompanyName", "downloadmanagersquared"},
+		{"FileDescription", desc},
+		{"InternalName", file},
+		{"LegalCopyright", "MIT licence"},
+		{"OriginalFilename", file},
+		{"ProductName", "DMS²"},
+	} {
+		v := utf16z(kv[1])
+		strs = append(strs, verBlock(kv[0], v, 1, len(v)/2))
+	}
+	table := verBlock("040904B0", nil, 1, 0, strs...) // en-US, Unicode
+	trans := verBlock("Translation", []byte{0x09, 0x04, 0xB0, 0x04}, 0, 4)
+	return verBlock("VS_VERSION_INFO", fixed.Bytes(), 0, fixed.Len(),
+		verBlock("StringFileInfo", nil, 1, 0, table),
+		verBlock("VarFileInfo", nil, 1, 0, trans))
+}
+
+// verBlock is one block of a version resource: its length, the length of its
+// value (in WCHARs for text), its type (1 text, 0 binary), its key, then the
+// value and the children, each starting on a 4-byte boundary.
+func verBlock(key string, value []byte, typ, valueLen int, children ...[]byte) []byte {
+	var b bytes.Buffer
+	binary.Write(&b, binary.LittleEndian, [3]uint16{0, uint16(valueLen), uint16(typ)})
+	b.Write(utf16z(key))
+	pad4(&b)
+	b.Write(value)
+	for _, c := range children {
+		pad4(&b)
+		b.Write(c)
+	}
+	out := b.Bytes()
+	binary.LittleEndian.PutUint16(out, uint16(len(out)))
+	return out
+}
+
+func pad4(b *bytes.Buffer) {
+	for b.Len()%4 != 0 {
+		b.WriteByte(0)
+	}
+}
+
+func utf16z(s string) []byte {
+	var b bytes.Buffer
+	for _, r := range utf16.Encode([]rune(s)) {
+		binary.Write(&b, binary.LittleEndian, r)
+	}
+	b.Write([]byte{0, 0})
+	return b.Bytes()
+}
+
+// writeSyso writes leaves as a COFF object holding one .rsrc section.
+func writeSyso(path string, leaves []leaf) {
 	// Layout of .rsrc: root dir(2 types), per-type dir, per-name dir, data entries, data.
 	le := binary.LittleEndian
 	var types []uint32
@@ -142,7 +211,7 @@ func main() {
 	out.Write([]byte{3, 0})                 // static, no aux
 	binary.Write(&out, le, uint32(4))       // empty string table
 
-	if err := os.WriteFile("icon_windows_amd64.syso", out.Bytes(), 0o644); err != nil {
+	if err := os.WriteFile(path, out.Bytes(), 0o644); err != nil {
 		log.Fatal(err)
 	}
 }
