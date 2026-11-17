@@ -78,14 +78,11 @@ func TestPickFolderSetsTheFolderToExtractInto(t *testing.T) {
 	waitFor(t, "the chosen folder", 5*time.Second, func() bool {
 		d, _ := e.get(id)
 		f := d.State().Folder
-		return f != nil && f.Into == chosen
+		e.mu.Lock()
+		last := e.settings.FolderDir // set just after the download's folder
+		e.mu.Unlock()
+		return f != nil && f.Into == chosen && last == chosen
 	})
-	e.mu.Lock()
-	last := e.settings.FolderDir
-	e.mu.Unlock()
-	if last != chosen {
-		t.Fatalf("last folder %q, want %q", last, chosen)
-	}
 
 	// Cancelled: nothing changes.
 	pick = ""
