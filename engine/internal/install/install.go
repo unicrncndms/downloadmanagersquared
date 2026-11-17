@@ -31,7 +31,7 @@ const (
 	// ChromiumExtensionID is the ID Chromium derives from the key in
 	// extension/dev/chromium.js: SHA-256 of the DER public key, first 32 hex
 	// digits with 0-9a-f mapped to a-p.
-	ChromiumExtensionID = "aekopambcpicillpllfbhfejfbanagbl"
+	ChromiumExtensionID = "lolpolhdlianfdogddkkdoldkpehihdc"
 )
 
 // Repo is the GitHub owner/repo releases come from, set at build time

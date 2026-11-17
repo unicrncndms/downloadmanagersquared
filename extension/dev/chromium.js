@@ -3,8 +3,8 @@
 const fs = require("fs");
 const path = require("path");
 
-// Public half of .secrets/chromium-extension.pem: fixes the extension ID (install.go ChromiumExtensionID).
-const KEY = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAopOGNtrEdRIGnC+IYm6e20lmMR/bVZJ2XMINYIe1M27dY8WxHxiM9d5D0g2l8KfejlCRDoqjk2CbMH9QVjqLQmIqtS9htB7Nkdtq64pUJNXDlJLEvTseoYfOcCYHWlhyFGqKR28Xcunkt5Z4HChUq82VXXklaX+O0DOWTK1jGfF09989gMuUAxkgtiR8OFuKZJrShbTWIk/3p6bfh9weohjg4tjzH0CJ9An3N1Iri/VBmlMyibc+Bm27c5z/Fmm3dk0VNXYtrpvmc+HuT7rUGlyeSRhZros3xcMeHcOHbV7edQtLIysvpACkndnJnQbvPS0QS6u/MDSlFHdN7KeeUwIDAQAB";
+// The Chrome Web Store item's public key (dashboard, Package tab): fixes the extension ID of an unpacked build (install.go ChromiumExtensionID).
+const KEY = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3+6VoGeKL9v9YFClbUmphT3vQXeVY9Cb8yCb2ruNTjXiys8Vr1paPiXu4aYDcwrgKaCXTJlBC+G/9Xr8kx4cxdSYwQsRniVjM2pkTubTtcnUGe2ROeFvOv6qgWk68E1ZLxrNN/zT/Ua3VZyQOsTph7tE7CDPpYw30vBAq80hA8qiJvIZfkOoKCq5H+eSb7s9wmTF94/GIzlOHK34neJzs/IW6/89m+TePJ28JAQTFgfFNdl9c3AZws3LEgzHpXvPOWag+3mSPoRQ32QXKVeViObLOSZz2Jl1weyxJLkdM8HU2xIGmrig20LScYU58G5daLcfamzdA2kwLrOvYojxOQIDAQAB";
 const SHIM = "lib/browser-shim.js";
 // Chrome can't resolve per-IP links yet, so its description must not claim it. Also the store summary (docs/store-listing.md).
 const DESCRIPTION = "Download big files over all your network connections at once. Needs the free Windows engine from GitHub.";
