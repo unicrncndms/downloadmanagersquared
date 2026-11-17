@@ -565,6 +565,9 @@ func groupNotice(group []download.Summary) (title, msg string, ok bool) {
 // notify shows a tray balloon, running click when it is clicked; tests switch it off.
 var notify = winutil.NotifyClick
 
+// isForeground says whether a window is the one in front (winutil.IsForeground); tests set it.
+var isForeground = winutil.IsForeground
+
 // openFile and recycleFile act on a finished download's file; tests switch them off.
 var (
 	openFile    = winutil.OpenFile
@@ -695,11 +698,15 @@ func (e *Engine) chooseTorrentVPN(id, vpn string) (*torrent.Torrent, error) {
 	return nt, nil
 }
 
-// pickerOwnerLocked is the Downloads window a folder picker opens over, 0 when
-// it has none.
+// pickerOwnerLocked is the Downloads window a picker opens over, 0 when it
+// has none. Only while it is in front, so the click came from it: open behind
+// the browser, it would come up with the picker asked for from the toolbar
+// popup, and that picker didn't take clicks.
 func (e *Engine) pickerOwnerLocked() uintptr {
 	if h, ok := e.window.(windowHandle); ok {
-		return h.Handle()
+		if w := h.Handle(); w != 0 && isForeground(w) {
+			return w
+		}
 	}
 	return 0
 }

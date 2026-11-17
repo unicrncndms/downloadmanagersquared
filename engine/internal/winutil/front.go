@@ -101,3 +101,9 @@ func pointerOr(near windows.Handle) (int32, int32) {
 	pGetCursorPos.Call(uintptr(unsafe.Pointer(&p)))
 	return p.X, p.Y
 }
+
+// IsForeground: h is the window in front.
+func IsForeground(h uintptr) bool {
+	fg, _, _ := pGetForegroundWindow.Call()
+	return fg != 0 && fg == h
+}

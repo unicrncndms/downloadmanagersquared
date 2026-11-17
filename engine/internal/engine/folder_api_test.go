@@ -121,7 +121,10 @@ func TestPickFolderSetsTheFolderToExtractInto(t *testing.T) {
 	}
 }
 
-// handleWindow is a Downloads window that is open, with this handle.
+// A test's Downloads window counts as in front: the picker opens over it.
+func init() { isForeground = func(uintptr) bool { return true } }
+
+// handleWindow is a Downloads window that is open and in front, with this handle.
 type handleWindow uintptr
 
 func (handleWindow) Open(string) error { return nil }
