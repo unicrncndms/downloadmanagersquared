@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -55,11 +57,24 @@ func Hidden(cmd *exec.Cmd) *exec.Cmd {
 	return cmd
 }
 
-// ShowInFolder opens Explorer with the file selected.
+// ShowInFolder opens Explorer with the file selected, in front. Asked for
+// from the toolbar popup, Firefox is in front, and Windows keeps what a
+// background process opens behind it: the engine takes the foreground for a
+// moment (frontOwner) and hands it on to Explorer.
 func ShowInFolder(path string) error {
-	cmd := exec.Command("explorer.exe")
-	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `explorer.exe /select,"` + path + `"`}
-	return cmd.Start()
+	errc := make(chan error, 1)
+	go func() {
+		runtime.LockOSThread() // the owner window belongs to this thread until done
+		defer runtime.UnlockOSThread()
+		_, done := frontOwner(0)
+		defer done()
+		AllowForeground()
+		cmd := exec.Command("explorer.exe")
+		cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `explorer.exe /select,"` + path + `"`}
+		errc <- cmd.Start()
+		time.Sleep(3 * time.Second) // Explorer takes a moment to show its window; the foreground is ours to give until then
+	}()
+	return <-errc
 }
 
 func Autostart() bool {
