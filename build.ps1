@@ -105,6 +105,24 @@ try {
 $magic = [IO.File]::ReadAllBytes($xpi)[0..1]
 if ($magic[0] -ne 0x50 -or $magic[1] -ne 0x4B) { throw "$xpi is not a zip" }
 
+# The Chromium MV3 package: the same sources, a manifest generated from the Firefox one
+# (extension\dev\chromium.js) and the namespace shim in the pages. dist\chromium is for "Load unpacked".
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'node is needed to generate the Chromium manifest' }
+$chromium = Join-Path $dist 'chromium'
+Remove-Item -Recurse -Force $chromium -ErrorAction SilentlyContinue
+Copy-Item -Recurse $stage $chromium
+node (Join-Path $root 'extension\dev\chromium.js') $chromium $Version
+if ($LASTEXITCODE) { throw 'generating the Chromium package failed' }
+$crx = Join-Path $dist 'downloadmanagersquared-chromium.zip'
+Remove-Item $crx -ErrorAction SilentlyContinue
+Push-Location $chromium
+try {
+    & $tar --format zip -c -f $crx (Get-ChildItem -Name)
+    if ($LASTEXITCODE) { throw 'packing the Chromium extension failed' }
+} finally {
+    Pop-Location
+}
+
 # The release zip: the two exes and what goes with them.
 $zipStage = Join-Path $dist 'zip'
 Remove-Item -Recurse -Force $zipStage -ErrorAction SilentlyContinue
