@@ -10,8 +10,9 @@ const SHIM = "lib/browser-shim.js";
 const DESCRIPTION = "Download big files over all your network connections at once. Needs the free Windows engine from GitHub.";
 const DROP = ["contextualIdentities", "proxy", "webRequestBlocking", "theme", "menus"];
 
-function chromiumManifest(ff) {
-  const m = { ...ff, manifest_version: 3, key: KEY };
+// store: the Chrome Web Store copy, without `key` (the store refuses it and signs with its own).
+function chromiumManifest(ff, store = false) {
+  const m = { ...ff, manifest_version: 3, ...(store ? {} : { key: KEY }) };
   m.description = DESCRIPTION;
   delete m.browser_specific_settings;
   delete m.browser_action;
@@ -40,9 +41,9 @@ function chromiumPage(name, html) {
 }
 
 if (require.main === module) {
-  const [dir, version] = process.argv.slice(2);
+  const [dir, version, mode] = process.argv.slice(2);
   const ff = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
-  const m = chromiumManifest(ff);
+  const m = chromiumManifest(ff, mode === "store");
   m.version = version;
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(m, null, 2));
   const ui = path.join(dir, "ui");

@@ -109,9 +109,15 @@ Remove-Item -Recurse -Force $chromium -ErrorAction SilentlyContinue
 Copy-Item -Recurse $stage $chromium
 node (Join-Path $root 'extension\dev\chromium.js') $chromium $Version
 if ($LASTEXITCODE) { throw 'generating the Chromium package failed' }
+# The zip is the Chrome Web Store upload: the same, but without the manifest's key, which the store refuses.
+$store = Join-Path $dist 'chromium-store'
+Remove-Item -Recurse -Force $store -ErrorAction SilentlyContinue
+Copy-Item -Recurse $stage $store
+node (Join-Path $root 'extension\dev\chromium.js') $store $Version store
+if ($LASTEXITCODE) { throw 'generating the Chromium store package failed' }
 $crx = Join-Path $dist 'downloadmanagersquared-chromium.zip'
 Remove-Item $crx -ErrorAction SilentlyContinue
-Push-Location $chromium
+Push-Location $store
 try {
     & $tar --format zip -c -f $crx (Get-ChildItem -Name)
     if ($LASTEXITCODE) { throw 'packing the Chromium extension failed' }

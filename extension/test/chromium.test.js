@@ -70,3 +70,11 @@ test("the popup gets the Chromium popup fix after its last stylesheet; other pag
   }
   assert.ok(fs.existsSync(path.join(ext, "ui", "chromium.css")));
 });
+
+test("the Chrome Web Store copy has no key, and is otherwise the same", () => {
+  const s = chromiumManifest(ff, true);
+  assert.equal(s.key, undefined);
+  assert.equal(m.key, KEY);
+  const { key, ...rest } = m;
+  assert.deepEqual(s, rest);
+});
