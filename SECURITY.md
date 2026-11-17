@@ -9,7 +9,7 @@ Supported: the latest release only.
 ## In scope
 
 - The engine (`dms-engine.exe`), the native-messaging relay (`dms-host.exe`) and the browser extension
-- The installer and the release pipeline (what ends up in the zip and the signed `.xpi`)
+- The installer and the release pipeline (what ends up in the zip and the `.xpi` Mozilla signs)
 - How DMS² stores your settings, download list, cookies, WireGuard configs and PIA login
 
 Out of scope: the sites you download from, your VPN provider, and the libraries DMS² uses, unless DMS² uses them unsafely (report those upstream too).
@@ -22,6 +22,6 @@ DMS² doesn't protect you from programs running as your own user, or from the PC
 
 ## Updates
 
-The extension updates itself from this repository's [releases](https://github.com/unicrncndms/downloadmanagersquared/releases); every update is signed by Mozilla, and Firefox won't install one that isn't. To decide on updates yourself, open `about:addons`, choose downloadmanagersquared, and set **Allow automatic updates** to **Off**. The engine updates only when you press **Update now**: it downloads the release zip from github.com over HTTPS, checks it against the SHA-256 GitHub lists for that file (no checksum, no install), takes only `dms-engine.exe` out of it and runs it, which upgrades the install the usual way and asks before quitting the running engine. Nothing is ever installed automatically; the binaries are not code-signed, and you can still run a newer `dms-engine.exe` yourself instead.
+The extension updates itself from addons.mozilla.org; every update is signed by Mozilla, and Firefox won't install one that isn't. (Builds before 0.12.0 updated from this repository's releases and move to addons.mozilla.org with 0.12.0.) To decide on updates yourself, open `about:addons`, choose downloadmanagersquared, and set **Allow automatic updates** to **Off**. The engine updates only when you press **Update now**: it downloads the release zip from github.com over HTTPS, checks it against the SHA-256 GitHub lists for that file (no checksum, no install), takes only `dms-engine.exe` out of it and runs it, which upgrades the install the usual way and asks before quitting the running engine. Nothing is ever installed automatically; the binaries are not code-signed, and you can still run a newer `dms-engine.exe` yourself instead.
 
 To check that a release's zip, `dms-engine.exe` or `dms-host.exe` was built by this repository's release workflow from the tagged source, run `gh attestation verify <file> --repo unicrncndms/downloadmanagersquared`. It shows the workflow run and commit; it doesn't mean the build is reproducible.

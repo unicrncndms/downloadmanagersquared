@@ -54,7 +54,7 @@ All three are required: `browsingActivity` (pages that led to a download), `webs
 
 ## Trying it
 
-1. Download `downloadmanagersquared-windows.zip` from the GitHub release and run `dms-engine.exe` on Windows 10 or 11. Setup installs the engine, registers the native host and starts the engine in the tray. Its **Add to …** step installs the GitHub build of the add-on; skip it if you install this one.
+1. Download `downloadmanagersquared-windows.zip` from the GitHub release and run `dms-engine.exe` on Windows 10 or 11. Setup installs the engine, registers the native host and starts the engine in the tray. Its **Add to …** step opens this add-on's page on addons.mozilla.org; skip it if you install it another way.
 2. Install the add-on. The popup lists the PC's network connections.
 3. Download any file larger than the threshold (lower it in the settings page to test with a small one). The engine takes it over and the popup shows it running.
 

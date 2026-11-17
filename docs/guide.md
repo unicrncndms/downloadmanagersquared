@@ -67,6 +67,6 @@ Settings and the download list live in DMS² itself, so every browser shares the
 
 ## Upgrade and uninstall
 
-**Upgrade:** run `dms-engine.exe` from a newer zip. It updates the existing install and keeps everything. The extension updates itself from this repository's releases, signed by Mozilla; to decide yourself, set **Allow automatic updates** to **Off** for it in `about:addons`.
+**Upgrade:** run `dms-engine.exe` from a newer zip. It updates the existing install and keeps everything. The extension updates itself from addons.mozilla.org; to decide yourself, set **Allow automatic updates** to **Off** for it in `about:addons`.
 
 **Uninstall:** *Settings → Apps → Installed apps → downloadmanagersquared*. Downloaded files are always kept; you choose whether settings and the download list go. Then remove the extension in your browser.
