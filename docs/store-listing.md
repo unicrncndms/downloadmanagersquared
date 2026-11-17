@@ -109,7 +109,7 @@ Why the data is handled: only to carry out the user-facing feature. It goes to t
 
 **Name:** downloadmanagersquared (DMS²)
 
-**Summary** (under 250 characters; this one is 181):
+**Summary** (under 250 characters; this one is 178):
 
 > Needs the free Windows engine from GitHub; does nothing without it. Downloads big files over all your network connections at once, including sites that give each IP its own link.
 
