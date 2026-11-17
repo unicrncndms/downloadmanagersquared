@@ -54,6 +54,9 @@ type Layout struct {
 	StartMenuDir string // the user's Start menu programs folder
 	DesktopDir   string
 	MozillaKey   string // the native-messaging host for the Firefox family
+	// ChromiumKeys are the native-messaging host keys of Chrome, Edge, Brave
+	// and Chromium, each pointing at the Chromium host manifest.
+	ChromiumKeys []string
 	RunKey       string // holds the start-at-login value
 	UninstallKey string // the Installed apps entry
 	Icon         []byte // the app icon (ICO), written next to the exes for the shortcuts
@@ -84,6 +87,12 @@ func Default() (Layout, error) {
 		StartMenuDir: dirs[1],
 		DesktopDir:   dirs[2],
 		MozillaKey:   `Software\Mozilla\NativeMessagingHosts\` + Name,
+		ChromiumKeys: []string{
+			`Software\Google\Chrome\NativeMessagingHosts\` + Name,
+			`Software\Microsoft\Edge\NativeMessagingHosts\` + Name,
+			`Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\` + Name,
+			`Software\Chromium\NativeMessagingHosts\` + Name,
+		},
 		RunKey:       `Software\Microsoft\Windows\CurrentVersion\Run`,
 		UninstallKey: `Software\Microsoft\Windows\CurrentVersion\Uninstall\` + Name,
 	}, nil
@@ -103,12 +112,13 @@ func (l Layout) Find() (Layout, bool) {
 	return l, true
 }
 
-func (l Layout) Engine() string        { return filepath.Join(l.Dir, "dms-engine.exe") }
-func (l Layout) Host() string          { return filepath.Join(l.Dir, "dms-host.exe") }
-func (l Layout) StartMenuLink() string { return filepath.Join(l.StartMenuDir, Name+".lnk") }
-func (l Layout) DesktopLink() string   { return filepath.Join(l.DesktopDir, Name+".lnk") }
-func (l Layout) manifest() string      { return filepath.Join(l.Dir, "native-host.json") }
-func (l Layout) iconFile() string      { return filepath.Join(l.Dir, "dms.ico") }
+func (l Layout) Engine() string           { return filepath.Join(l.Dir, "dms-engine.exe") }
+func (l Layout) Host() string             { return filepath.Join(l.Dir, "dms-host.exe") }
+func (l Layout) StartMenuLink() string    { return filepath.Join(l.StartMenuDir, Name+".lnk") }
+func (l Layout) DesktopLink() string      { return filepath.Join(l.DesktopDir, Name+".lnk") }
+func (l Layout) manifest() string         { return filepath.Join(l.Dir, "native-host.json") }
+func (l Layout) chromiumManifest() string { return filepath.Join(l.Dir, "native-host-chromium.json") }
+func (l Layout) iconFile() string         { return filepath.Join(l.Dir, "dms.ico") }
 
 // Notices are the licence files the release zip carries next to the exes. The
 // install folder gets them too, so the installed copy keeps its notices.
@@ -117,7 +127,7 @@ var Notices = []string{"LICENSE", "THIRD-PARTY-NOTICES"}
 // files are everything an install puts in its folder. Uninstalling removes
 // only these, as the folder may be one the user keeps other things in.
 func (l Layout) files() []string {
-	out := []string{l.Engine(), l.Host(), l.manifest(), l.iconFile()}
+	out := []string{l.Engine(), l.Host(), l.manifest(), l.chromiumManifest(), l.iconFile()}
 	for _, f := range Notices {
 		out = append(out, filepath.Join(l.Dir, f))
 	}
@@ -182,7 +192,7 @@ func (l Layout) PutFiles(src string) error {
 			return err
 		}
 	}
-	return l.writeManifest()
+	return l.writeManifests()
 }
 
 // FlagPutFiles makes dms-engine.exe run PutFiles from its own folder into the
@@ -295,29 +305,41 @@ func copyFile(src, dst string) error {
 
 // Register makes every supported browser find the native host, rewriting what
 // is missing or points elsewhere: the one HKCU Mozilla key that Firefox,
-// LibreWolf, Waterfox and Floorp all read points at the host manifest. It
-// rewrites the manifest too if that is missing or points elsewhere, which in a
-// folder only an administrator can write to only the install does.
+// LibreWolf, Waterfox and Floorp all read points at the Firefox host manifest,
+// and the Chrome, Edge, Brave and Chromium keys at the Chromium one (the two
+// browsers reject each other's manifest keys). It rewrites the manifests too
+// if missing or pointing elsewhere, which in a folder only an administrator
+// can write to only the install does.
 func (l Layout) Register() error {
-	err := l.writeManifest()
+	err := l.writeManifests()
 	if err != nil && !errors.Is(err, fs.ErrPermission) {
 		return err
 	}
-	return errors.Join(err, setValue(l.MozillaKey, "", l.manifest()))
+	errs := []error{err, setValue(l.MozillaKey, "", l.manifest())}
+	for _, key := range l.ChromiumKeys {
+		errs = append(errs, setValue(key, "", l.chromiumManifest()))
+	}
+	return errors.Join(errs...)
 }
 
-func (l Layout) writeManifest() error {
+func (l Layout) writeManifests() error {
+	return errors.Join(
+		l.writeManifest(l.manifest(), "allowed_extensions", ExtensionID),
+		l.writeManifest(l.chromiumManifest(), "allowed_origins", "chrome-extension://"+ChromiumExtensionID+"/"))
+}
+
+func (l Layout) writeManifest(file, allowKey, allowed string) error {
 	want, _ := json.MarshalIndent(map[string]any{
-		"name":               Name,
-		"description":        "downloadmanagersquared engine",
-		"path":               l.Host(),
-		"type":               "stdio",
-		"allowed_extensions": []string{ExtensionID},
+		"name":        Name,
+		"description": "downloadmanagersquared engine",
+		"path":        l.Host(),
+		"type":        "stdio",
+		allowKey:      []string{allowed},
 	}, "", "  ")
-	if have, err := os.ReadFile(l.manifest()); err == nil && string(have) == string(want) {
+	if have, err := os.ReadFile(file); err == nil && string(have) == string(want) {
 		return nil
 	}
-	return atomicfile.Write(l.manifest(), want, 0o644)
+	return atomicfile.Write(file, want, 0o644)
 }
 
 func (l Layout) setRun() error {
@@ -366,7 +388,7 @@ func (l Layout) Unregister() error {
 			errs = append(errs, err)
 		}
 	}
-	for _, key := range []string{l.MozillaKey, l.UninstallKey} {
+	for _, key := range append([]string{l.MozillaKey, l.UninstallKey}, l.ChromiumKeys...) {
 		if err := registry.DeleteKey(registry.CURRENT_USER, key); err != nil && !errors.Is(err, registry.ErrNotExist) {
 			errs = append(errs, err)
 		}

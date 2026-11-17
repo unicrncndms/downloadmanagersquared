@@ -1,4 +1,4 @@
-// dms-host is the native-messaging shim Firefox starts. It relays messages
+// dms-host is the native-messaging shim the browser starts. It relays messages
 // between the extension (length-prefixed JSON on stdio) and the engine (JSON
 // lines on the named pipe), starting the engine if it isn't running.
 package main
@@ -24,10 +24,10 @@ import (
 )
 
 func main() {
-	// Started by hand (stdin is a console, not Firefox's pipe): explain instead of relaying.
+	// Started by hand (stdin is a console, not the browser's pipe): explain instead of relaying.
 	var mode uint32
 	if windows.GetConsoleMode(windows.Handle(os.Stdin.Fd()), &mode) == nil {
-		os.Stdout.WriteString("dms-host.exe is the helper Firefox starts to talk to the download engine.\n" +
+		os.Stdout.WriteString("dms-host.exe is the helper the browser starts to talk to the download engine.\n" +
 			"There is no need to run it yourself. The engine is dms-engine.exe (it runs in the tray).\n")
 		return
 	}
@@ -43,7 +43,7 @@ func main() {
 		browser = ""
 	}
 
-	// Both relays write to Firefox: one write per frame, one writer at a time.
+	// Both relays write to the browser: one write per frame, one writer at a time.
 	out := &lockedWriter{w: os.Stdout}
 	done := make(chan struct{}, 2)
 	go func() { relayIn(os.Stdin, conn, out, browser); done <- struct{}{} }()
@@ -51,13 +51,13 @@ func main() {
 	<-done
 }
 
-// maxToFirefox is the largest message Firefox takes from a native app; a
+// maxToBrowser is the largest message a browser takes from a native app (Firefox and Chrome alike); a
 // longer one makes it drop the connection.
-const maxToFirefox = 1 << 20
+const maxToBrowser = 1 << 20
 
-// relayIn passes Firefox's messages to the engine as JSON lines, until either
+// relayIn passes the browser's messages to the engine as JSON lines, until either
 // side closes. Messages that aren't JSON are skipped; one longer than the
-// engine reads is answered to Firefox (reply) with an error, if its id shows.
+// engine reads is answered to the browser (reply) with an error, if its id shows.
 func relayIn(from io.Reader, to io.Writer, reply io.Writer, browser string) {
 	for {
 		msg, err := readFrame(from, ipc.MaxMessage-1) // -1: the newline
@@ -76,7 +76,7 @@ func relayIn(from io.Reader, to io.Writer, reply io.Writer, browser string) {
 		}
 		if m := method(msg); m == "pickFolder" || m == "pickSaveFolder" || m == "pickDir" || m == "browseFolder" {
 			// The engine runs in the background, so Windows would put its
-			// folder picker behind Firefox. Firefox started this host and is
+			// folder picker behind the browser. The browser started this host and is
 			// in front, so the host may let the engine come forward.
 			allowForeground()
 		}
@@ -93,10 +93,10 @@ var maxLine = 64 << 20
 
 // chunkSize is the slice of a long line one chunk message carries. A JSON
 // string at most doubles it (quotes, backslashes), so a message stays well
-// under maxToFirefox.
+// under maxToBrowser.
 const chunkSize = 256 << 10
 
-// chunks splits a line that Firefox would not take into messages
+// chunks splits a line that the browser would not take into messages
 // {"chunk":i,"of":n,"id":id,"data":"..."} that the extension joins again
 // (extension/lib/chunks.js). Cuts fall on rune boundaries, so each slice is
 // valid in a JSON string.
@@ -121,17 +121,17 @@ func chunks(line []byte, id int) [][]byte {
 	return out
 }
 
-// relayOut passes the engine's lines to Firefox as messages, until either side
-// closes. A line over maxToFirefox goes in chunks (the lines that fit are sent
+// relayOut passes the engine's lines to the browser as messages, until either side
+// closes. A line over maxToBrowser goes in chunks (the lines that fit are sent
 // as before, so an older extension loses nothing). One over maxLine is skipped
-// rather than costing the connection, and Firefox is told so: a state too long
+// rather than costing the connection, and the browser is told so: a state too long
 // would otherwise leave the pages showing an old list with nothing to say why.
 func relayOut(from io.Reader, to io.Writer) {
 	r := bufio.NewReaderSize(from, 64<<10)
 	sent := 0 // lines chunked so far: each one's id
 	for {
 		line, err := ipc.ReadLine(r, maxLine)
-		if err == nil && len(bytes.TrimSpace(line)) > maxToFirefox {
+		if err == nil && len(bytes.TrimSpace(line)) > maxToBrowser {
 			sent++
 			for _, m := range chunks(bytes.TrimSpace(line), sent) {
 				if writeFrame(to, m) != nil {
