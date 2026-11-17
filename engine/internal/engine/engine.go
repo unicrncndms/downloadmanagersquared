@@ -783,6 +783,24 @@ func (e *Engine) BrowseFolder(start string) string {
 	return dir
 }
 
+// AddFromFiles is the Add box's File…: Windows' file picker for .torrent and
+// Metalink files, over the Downloads window when it is open, and each file
+// chosen added with vpn and dir as the box has them. It returns at once (the
+// toolbar popup closes as soon as the picker opens): what is added shows in
+// the list, and a file that can't be, in a notification.
+func (e *Engine) AddFromFiles(vpn, dir string) {
+	e.mu.Lock()
+	owner := e.pickerOwnerLocked()
+	e.mu.Unlock()
+	go func() {
+		for _, f := range winutil.PickFiles(windows.Handle(owner), "Add .torrent or Metalink files", "Torrent and Metalink files", "*.torrent;*.meta4;*.metalink") {
+			if _, err := e.Add(AddRequest{FilePath: f, VPN: vpn, Dir: dir}); err != nil {
+				notify("Not added", filepath.Base(f)+": "+err.Error(), nil)
+			}
+		}
+	}()
+}
+
 // PickDir shows the picker for an unfinished download's save folder and moves
 // it there. Like PickFolder it returns at once and the result shows in the
 // download's state.

@@ -416,7 +416,7 @@ function showDup(dups) {
   $("addDup").hidden = false;
 }
 
-// Local .torrent and Metalink files: from the File button or dropped on the list.
+// Local .torrent and Metalink files dropped on the list.
 // Their bytes go to the engine as base64.
 async function addFiles(files) {
   let added = 0, failed = false;
@@ -441,15 +441,9 @@ async function addFiles(files) {
   }
   if (added && !failed) toast(added === 1 ? "Added" : `${added} downloads added`);
 }
-$("addFileBtn").onclick = () => {
-  // Firefox closes the toolbar popup when a file dialog opens, so the popup hands over to a tab.
-  const inPopup = !document.body.classList.contains("windowed") && !new URLSearchParams(location.search).has("tab") && typeof browser !== "undefined";
-  if (!inPopup) return $("addFile").click();
-  Host.openUrl(new URL("popup.html?tab#addfile", location.href).href);
-  window.close();
-};
-if (location.hash === "#addfile") openAdd(true);
-$("addFile").onchange = () => { addFiles([...$("addFile").files]); $("addFile").value = ""; };
+// Windows' file picker, which the engine shows and adds from: Firefox closes
+// the toolbar popup when a dialog opens, so a page's own file input can't.
+$("addFileBtn").onclick = () => act("addFromFiles", { vpn: $("addVpn").value, dir: addDir.get() });
 // Dropped on the page: files are added, links go into the Add box. A row being dragged is the queue's own.
 const dropsHere = (e) => latest.state && !e.dataTransfer.types.includes(DRAG_TYPE)
   && ["Files", "text/uri-list", "text/plain"].some((t) => e.dataTransfer.types.includes(t));

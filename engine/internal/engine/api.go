@@ -85,6 +85,11 @@ type sftpLoginParams struct {
 	User string `json:"user"`
 }
 
+type addFilesParams struct {
+	VPN string `json:"vpn"` // as for add
+	Dir string `json:"dir"`
+}
+
 type folderParams struct {
 	ID   string  `json:"id"`
 	On   *bool   `json:"on"`
@@ -396,6 +401,7 @@ var methods = map[string]handler{
 	"pickSaveFolder": bare(func(e *Engine) (any, error) { e.PickSaveFolder(); return nil, nil }),
 	"setDir":         ack(func(e *Engine, p dirParams) error { return e.SetDir(p.ID, p.Dir) }),
 	"pickDir":        ack(func(e *Engine, p idParams) error { return e.PickDir(p.ID) }),
+	"addFromFiles":   ack(func(e *Engine, p addFilesParams) error { e.AddFromFiles(p.VPN, p.Dir); return nil }),
 	"browseFolder": with(func(e *Engine, p startParams) (any, error) {
 		return map[string]string{"dir": e.BrowseFolder(p.Start)}, nil
 	}),

@@ -32,6 +32,7 @@
     </div>
     <form id="addBox" hidden>
       <textarea id="addUrl" rows="2" aria-label="Links to add, one per line" placeholder="File link, landing page, magnet, .torrent, ftp:// or sftp:// link (one per line)" required spellcheck="false"></textarea>
+      <button type="button" id="addFileBtn" class="add-file">Or add a .torrent or Metalink file from this PC…</button>
       <details id="addOptions">
         <summary>Options</summary>
         <div class="add-opts">
@@ -52,8 +53,7 @@
       </details>
       <div id="addDup" class="add-dup" role="status" hidden></div>
       <label id="addFolderRow" class="check" hidden><input type="checkbox" id="addFolder"> Download as folder: extract it while it downloads</label>
-      <div class="add-end"><span class="muted" id="addHint">Paste links here, or anywhere on the list with Ctrl+V.</span><button type="button" id="addFileBtn" title="Add a .torrent or Metalink file from this PC">File…</button><button class="primary" id="addGo">Add</button></div>
-      <input type="file" id="addFile" accept=".torrent,.meta4,.metalink" multiple hidden>
+      <div class="add-end"><span class="muted" id="addHint">Paste links here, or anywhere on the list with Ctrl+V.</span><button class="primary" id="addGo">Add</button></div>
     </form>
   </header>
   <div class="body">

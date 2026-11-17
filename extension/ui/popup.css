@@ -81,6 +81,8 @@ body:not(.windowed) .strip.many .nm.short { display: inline; }
 #addBox .add-opts label, #addBox .check, #addBox .add-dup, .version-warn { animation: drop var(--t) var(--ease); }
 #addBox[hidden] { display: none; }
 #addUrl { resize: vertical; min-height: 2.6em; }
+/* The other way in, under the links box: a link, not a second Add. */
+#addBox .add-file { justify-self: start; margin-top: calc(-1 * var(--s1)); padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 12px; text-decoration: underline; cursor: pointer; }
 
 .body { flex: 1; min-height: 0; display: flex; }
 main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); container-type: inline-size; }

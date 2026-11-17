@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Just enough COM for a shortcut and the folder picker: objects are called
+// Just enough COM for a shortcut and the folder and file pickers: objects are called
 // through their vtables by method index, as the Windows headers declare them.
 
 var (
@@ -37,17 +37,21 @@ const (
 	mShellLinkSetPath             = 20
 	mPersistFileSave              = 6
 
-	mDialogShow       = 3
-	mDialogSetOptions = 9
-	mDialogGetOptions = 10
-	mDialogSetFolder  = 12
-	mDialogSetTitle   = 17
-	mDialogGetResult  = 20
-	mItemDisplayName  = 5
+	mDialogShow           = 3
+	mDialogSetFileTypes   = 4
+	mDialogSetOptions     = 9
+	mDialogGetOptions     = 10
+	mDialogSetFolder      = 12
+	mDialogSetTitle       = 17
+	mItemDisplayName      = 5
+	mOpenDialogGetResults = 27 // IFileOpenDialog, after IFileDialog's methods
+	mItemArrayGetCount    = 7
+	mItemArrayGetItemAt   = 8
 
-	fosPickFolders     = 0x20
-	fosForceFileSystem = 0x40
-	sigdnFileSysPath   = 0x80058000
+	fosPickFolders      = 0x20
+	fosAllowMultiSelect = 0x200
+	fosForceFileSystem  = 0x40
+	sigdnFileSysPath    = 0x80058000
 )
 
 type comObject struct{ vtbl *[32]uintptr }
@@ -144,19 +148,43 @@ func CreateShortcut(lnk, target, workDir, desc, icon string) error {
 // PickFolder shows Windows' folder picker over owner, opened at start. False
 // if the user cancelled.
 func PickFolder(owner windows.Handle, start, title string) (string, bool) {
-	var path string
+	paths := pick(owner, start, title, fosPickFolders, nil)
+	if len(paths) == 0 {
+		return "", false
+	}
+	return paths[0], true
+}
+
+// PickFiles shows Windows' file picker over owner for files matching spec
+// (such as "*.torrent;*.meta4"), described as kind. Several can be chosen;
+// none if the user cancelled.
+func PickFiles(owner windows.Handle, title, kind, spec string) []string {
+	return pick(owner, "", title, fosAllowMultiSelect, func(d *comObject) {
+		filter := [2]*uint16{wstr(kind), wstr(spec)} // one COMDLG_FILTERSPEC
+		d.call(mDialogSetFileTypes, 1, uintptr(unsafe.Pointer(&filter)))
+		runtime.KeepAlive(filter)
+	})
+}
+
+// pick shows the file open dialog with opts added, in front even when the
+// engine is in the background (frontOwner), and returns the paths chosen.
+func pick(owner windows.Handle, start, title string, opts uint32, setup func(d *comObject)) []string {
+	var paths []string
 	withCOM(func() error {
 		d, err := createInstance(&clsidFileOpenDialog, &iidFileOpenDialog)
 		if err != nil {
 			return err
 		}
 		defer d.release()
-		var opts uint32
-		if err := d.call(mDialogGetOptions, uintptr(unsafe.Pointer(&opts))); err != nil {
+		var have uint32
+		if err := d.call(mDialogGetOptions, uintptr(unsafe.Pointer(&have))); err != nil {
 			return err
 		}
-		if err := d.call(mDialogSetOptions, uintptr(opts|fosPickFolders|fosForceFileSystem)); err != nil {
+		if err := d.call(mDialogSetOptions, uintptr(have|opts|fosForceFileSystem)); err != nil {
 			return err
+		}
+		if setup != nil {
+			setup(d)
 		}
 		t, s := wstr(title), wstr(start)
 		d.call(mDialogSetTitle, uintptr(unsafe.Pointer(t)))
@@ -170,24 +198,33 @@ func PickFolder(owner windows.Handle, start, title string) (string, bool) {
 		}
 		runtime.KeepAlive(t)
 		runtime.KeepAlive(s)
-		// In front even when the engine is in the background (frontOwner).
 		front, done := frontOwner(owner)
 		defer done()
 		if err := d.call(mDialogShow, uintptr(front)); err != nil {
 			return err // cancelled, mostly
 		}
-		var item *comObject
-		if err := d.call(mDialogGetResult, uintptr(unsafe.Pointer(&item))); err != nil {
+		var items *comObject
+		if err := d.call(mOpenDialogGetResults, uintptr(unsafe.Pointer(&items))); err != nil {
 			return err
 		}
-		defer item.release()
-		var p *uint16
-		if err := item.call(mItemDisplayName, sigdnFileSysPath, uintptr(unsafe.Pointer(&p))); err != nil {
+		defer items.release()
+		var n uint32
+		if err := items.call(mItemArrayGetCount, uintptr(unsafe.Pointer(&n))); err != nil {
 			return err
 		}
-		path = windows.UTF16PtrToString(p)
-		windows.CoTaskMemFree(unsafe.Pointer(p))
+		for i := range n {
+			var item *comObject
+			if items.call(mItemArrayGetItemAt, uintptr(i), uintptr(unsafe.Pointer(&item))) != nil {
+				continue
+			}
+			var p *uint16
+			if item.call(mItemDisplayName, sigdnFileSysPath, uintptr(unsafe.Pointer(&p))) == nil {
+				paths = append(paths, windows.UTF16PtrToString(p))
+				windows.CoTaskMemFree(unsafe.Pointer(p))
+			}
+			item.release()
+		}
 		return nil
 	})
-	return path, path != ""
+	return paths
 }
