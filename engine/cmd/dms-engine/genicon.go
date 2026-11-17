@@ -1,6 +1,7 @@
 //go:build ignore
 
 // Regenerate the exe resources: cd engine/cmd/dms-engine && go run genicon.go
+// also writes extension/icons/icon-{16,32,48,128}.png (Chromium) and
 // writes icon_windows_amd64.syso (RT_ICON/RT_GROUP_ICON and RT_VERSION) and
 // ../dms-host/version_windows_amd64.syso (RT_VERSION); `go build` links them in.
 // The version resource names the exe: Windows heads its notifications, Task
@@ -10,6 +11,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"log"
 	"os"
 	"unicode/utf16"
@@ -24,6 +26,12 @@ func main() {
 		imgs[i] = mark.PNG(mark.Draw(n, nil))
 	}
 
+	// Chromium takes no SVG for manifest icons.
+	for _, n := range []int{16, 32, 48, 128} {
+		if err := os.WriteFile(fmt.Sprintf("../../../extension/icons/icon-%d.png", n), mark.PNG(mark.Draw(n, nil)), 0o644); err != nil {
+			log.Fatal(err)
+		}
+	}
 	if err := os.WriteFile("../../../extension/icons/icon.svg", []byte(mark.SVG), 0o644); err != nil {
 		log.Fatal(err)
 	}

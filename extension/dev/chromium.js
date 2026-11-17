@@ -12,7 +12,9 @@ function chromiumManifest(ff) {
   const m = { ...ff, manifest_version: 3, key: KEY };
   delete m.browser_specific_settings;
   delete m.browser_action;
-  m.action = ff.browser_action;
+  const png = (sizes) => Object.fromEntries(sizes.map((n) => [n, "icons/icon-" + n + ".png"]));
+  m.action = { ...ff.browser_action, default_icon: png([16, 32]) };
+  m.icons = png([16, 32, 48, 128]);
   m.background = { service_worker: "background/sw.js" };
   m.permissions = ff.permissions.filter((p) => p !== "<all_urls>" && !DROP.includes(p));
   m.host_permissions = ["<all_urls>"];

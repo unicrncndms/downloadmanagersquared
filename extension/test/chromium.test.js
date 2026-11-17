@@ -24,6 +24,12 @@ test("MV3 keys, no Firefox-only permissions", () => {
   assert.equal(ff.manifest_version, 2);
 });
 
+test("icons are PNGs that exist", () => {
+  const paths = [...Object.values(m.icons), ...Object.values(m.action.default_icon)];
+  assert.equal(paths.length, 6);
+  for (const p of paths) assert.ok(p.endsWith(".png") && fs.existsSync(path.join(ext, p)), p);
+});
+
 test("sw.js imports the shim, then background.scripts in order", () => {
   const sw = fs.readFileSync(path.join(ext, "background/sw.js"), "utf8");
   const got = [...sw.matchAll(/^\s*"([^"]+)",?$/gm)].map((x) => path.posix.normalize("background/" + x[1]));
