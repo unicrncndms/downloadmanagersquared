@@ -65,9 +65,13 @@ func uninstall(l install.Layout) {
 	data, _ := engine.DataDir()
 	setup.RunUninstall(tray.Icon(), setup.Steps{
 		Version:  engine.Version,
-		Browsers: winutil.FirefoxBrowsers,
+		Browsers: winutil.Browsers,
 		OpenAddons: func(b winutil.Browser) {
-			if err := winutil.OpenBrowser(b.Exe, "about:addons"); err != nil {
+			page := "about:addons"
+			if b.Chromium {
+				page = "chrome://extensions" // Edge and Brave open it as their own
+			}
+			if err := winutil.OpenBrowser(b.Exe, page); err != nil {
 				winutil.MessageBox(title, "Could not open "+b.Name+": "+err.Error())
 			}
 		},

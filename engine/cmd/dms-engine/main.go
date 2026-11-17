@@ -68,7 +68,7 @@ func main() {
 				l.Dir = c.Dir
 				return installFrom(l, src, &install.Options{StartMenu: c.StartMenu, Desktop: c.Desktop, Autostart: c.Autostart})
 			},
-			Browsers: winutil.FirefoxBrowsers,
+			Browsers: winutil.Browsers,
 			Version:  engine.Version,
 			Connected: func() []string {
 				res, err := ipc.Call("extensionBrowsers")
@@ -84,7 +84,7 @@ func main() {
 				}
 			},
 			AddExtension: func(b winutil.Browser) {
-				if err := winutil.OpenBrowser(b.Exe, extensionTarget(src)); err != nil {
+				if err := winutil.OpenBrowser(b.Exe, browserTarget(b, src)); err != nil {
 					winutil.MessageBox(title, "Could not open "+b.Name+": "+err.Error())
 				}
 			},
@@ -98,6 +98,15 @@ func main() {
 		return
 	}
 	run(l)
+}
+
+// browserTarget is what a browser opens to add the extension: Chromium
+// browsers only install from the Chrome Web Store, the Firefox family takes the .xpi.
+func browserTarget(b winutil.Browser, src string) string {
+	if b.Chromium {
+		return install.ChromiumStoreURL()
+	}
+	return extensionTarget(src)
 }
 
 // extensionTarget is the signed extension the release zip carries: the browser

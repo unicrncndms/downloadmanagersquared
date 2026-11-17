@@ -1,6 +1,9 @@
 package winutil
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBrowserLaunchByPath(t *testing.T) {
 	for _, c := range []struct {
@@ -49,11 +52,42 @@ func TestFirefoxFamilyByExe(t *testing.T) {
 	}
 }
 
-func TestFirefoxBrowsersFindsOnlyExistingFirefoxFamily(t *testing.T) {
-	for _, b := range FirefoxBrowsers() {
-		if !isFirefoxFamily(b.Exe) || b.Name == "" {
+func TestBrowsersFindsOnlyExistingKnownFamilies(t *testing.T) {
+	for _, b := range Browsers() {
+		if !(isFirefoxFamily(b.Exe) || isChromiumFamily(b.Exe)) || b.Chromium != isChromiumFamily(b.Exe) || b.Name == "" {
 			t.Errorf("found %+v", b)
 		}
 		t.Logf("found %s at %s", b.Name, b.Exe)
+	}
+}
+
+func TestChromiumFamilyByExe(t *testing.T) {
+	for exe, want := range map[string]bool{
+		`C:\Program Files\Google\Chrome\Application\chrome.exe`:        true,
+		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`: true,
+		`C:\Program Files\Mozilla Firefox\firefox.exe`:                 false,
+		``: false,
+	} {
+		if got := isChromiumFamily(exe); got != want {
+			t.Errorf("isChromiumFamily(%q) = %v", exe, got)
+		}
+	}
+}
+
+func TestSortBrowsersFirefoxFamilyThenChromium(t *testing.T) {
+	got := []Browser{
+		{"Microsoft Edge", `C:\e\msedge.exe`, true},
+		{"Waterfox", `C:\w\waterfox.exe`, false},
+		{"Google Chrome", `C:\c\chrome.exe`, true},
+		{"Floorp", `C:\f\floorp.exe`, false},
+		{"Firefox", `C:\x\firefox.exe`, false},
+	}
+	sortBrowsers(got)
+	var names []string
+	for _, b := range got {
+		names = append(names, b.Name)
+	}
+	if want := "Firefox Floorp Waterfox Google Chrome Microsoft Edge"; strings.Join(names, " ") != want {
+		t.Errorf("order = %v, want %s", names, want)
 	}
 }

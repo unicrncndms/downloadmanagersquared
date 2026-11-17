@@ -13,16 +13,22 @@ import (
 type Browser struct {
 	Name string // as the browser registers itself, e.g. "Firefox Developer Edition"
 	Exe  string
+
+	Chromium bool // a Chrome-family browser: it gets the extension from the Chrome Web Store, not the .xpi
 }
 
 // firefoxFamily are the exes of browsers that run Firefox extensions and read
 // Firefox's native-messaging registration.
 var firefoxFamily = []string{"firefox.exe", "librewolf.exe", "waterfox.exe", "floorp.exe"}
 
-// FirefoxBrowsers are the Firefox-family browsers installed for this user or
-// the machine, found as Windows' default-apps settings list browsers. Firefox
-// comes first.
-func FirefoxBrowsers() []Browser {
+// chromiumFamily are the exes of browsers that run Chrome extensions and read
+// Chrome's native-messaging registration.
+var chromiumFamily = []string{"chrome.exe", "msedge.exe", "brave.exe", "chromium.exe"}
+
+// Browsers are the Firefox- and Chromium-family browsers installed for this
+// user or the machine, found as Windows' default-apps settings list browsers.
+// The Firefox family comes first, Firefox itself first among them.
+func Browsers() []Browser {
 	var out []Browser
 	seen := map[string]bool{}
 	add := func(name, exe string) {
@@ -34,7 +40,7 @@ func FirefoxBrowsers() []Browser {
 			return
 		}
 		seen[key] = true
-		out = append(out, Browser{strings.TrimPrefix(name, "Mozilla "), exe})
+		out = append(out, Browser{strings.TrimPrefix(name, "Mozilla "), exe, isChromiumFamily(exe)})
 	}
 	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
 		for _, path := range []string{`SOFTWARE\Clients\StartMenuInternet`, `SOFTWARE\WOW6432Node\Clients\StartMenuInternet`} {
@@ -50,7 +56,7 @@ func FirefoxBrowsers() []Browser {
 				if name == "" {
 					name = sub
 				}
-				if isFirefoxFamily(exe) {
+				if isFirefoxFamily(exe) || isChromiumFamily(exe) {
 					add(name, exe)
 				}
 			}
@@ -63,7 +69,19 @@ func FirefoxBrowsers() []Browser {
 			add("Firefox", filepath.Join(local, `Microsoft\WindowsApps\firefox.exe`))
 		}
 	}
+	sortBrowsers(out)
+	return out
+}
+
+// sortBrowsers puts the Firefox family first, Firefox itself first of it, the rest by name.
+func sortBrowsers(out []Browser) {
 	slices.SortStableFunc(out, func(a, b Browser) int {
+		if a.Chromium != b.Chromium {
+			if a.Chromium {
+				return 1
+			}
+			return -1
+		}
 		af, bf := strings.EqualFold(filepath.Base(a.Exe), "firefox.exe"), strings.EqualFold(filepath.Base(b.Exe), "firefox.exe")
 		switch {
 		case af && !bf:
@@ -73,11 +91,14 @@ func FirefoxBrowsers() []Browser {
 		}
 		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
-	return out
 }
 
 func isFirefoxFamily(exe string) bool {
 	return exe != "" && slices.Contains(firefoxFamily, strings.ToLower(filepath.Base(exe)))
+}
+
+func isChromiumFamily(exe string) bool {
+	return exe != "" && slices.Contains(chromiumFamily, strings.ToLower(filepath.Base(exe)))
 }
 
 // commandExe is the program a registered command line starts:

@@ -46,6 +46,12 @@ func ExtensionURL() string {
 	return "https://github.com/" + Repo + "/releases/latest/download/downloadmanagersquared.xpi"
 }
 
+// ChromiumStoreURL is the extension's Chrome Web Store page, where Chrome,
+// Edge, Brave and Chromium all add it from.
+func ChromiumStoreURL() string {
+	return "https://chromewebstore.google.com/detail/" + ChromiumExtensionID
+}
+
 // Layout is where an install lives: its folder, its shortcuts and its
 // registry entries under HKEY_CURRENT_USER. Tests point it at temp folders
 // and a test key.

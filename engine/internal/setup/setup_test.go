@@ -10,7 +10,7 @@ import (
 )
 
 func TestShownBrowsersIsTheSameListEveryTime(t *testing.T) {
-	w.steps.Browsers = func() []winutil.Browser { return make([]winutil.Browser, 6) }
+	w.steps.Browsers = func() []winutil.Browser { return make([]winutil.Browser, 8) }
 	got := shownBrowsers()
 	if len(got) != maxBrowsers || !slices.Equal(got, shownBrowsers()) {
 		t.Errorf("shownBrowsers = %d browsers, want %d, equal on a second call", len(got), maxBrowsers)

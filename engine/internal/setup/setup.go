@@ -68,7 +68,7 @@ const (
 
 // Layout, in 96-DPI pixels.
 const (
-	width, height = 520, 364
+	width, height = 520, 404
 	pad           = 24
 	footer        = 64 // the band with the buttons at the bottom
 )
@@ -256,9 +256,9 @@ func choosePage(d Choice) {
 	pSendMessage.Call(uintptr(w.dir), emSetSel, 0, ^uintptr(0))
 }
 
-// maxBrowsers is how many browsers the finished page has room for; the link
-// to the extension file covers the rest.
-const maxBrowsers = 4
+// maxBrowsers is how many browsers the finished page has room for (three rows
+// of two); the link to the extension file covers the rest.
+const maxBrowsers = 6
 
 // shownBrowsers are the browsers the finished page lists: the first maxBrowsers.
 // Compare with this, not with Browsers(), or five browsers rebuild the page on every activation.
@@ -287,7 +287,7 @@ func donePage() {
 	header("DMS² is installed", "It runs in the tray. If you do not see its icon, look behind the arrow next to the clock.")
 	var first windows.Handle
 	if len(w.browsers) == 0 {
-		addLabel(rect{pad, 100, width - pad, 160}, "DMS² works through Firefox or a browser based on it, such as LibreWolf, Waterfox or Floorp, "+
+		addLabel(rect{pad, 100, width - pad, 160}, "DMS² works in Firefox, Chrome, Edge or a browser based on them, "+
 			"and none is installed. Install one, then come back to this window.", w.fontBody, text, dtWordBreak)
 		first = addButton("Download Firefox", idGetFirefox, primary, rect{pad, 170, pad + 170, 202})
 		addButton("Uninstall DMS²", idUninstall, button, rect{pad + 178, 170, pad + 348, 202})
@@ -395,13 +395,17 @@ func removedPage(err error) {
 		for i, b := range w.browsers {
 			names[i] = b.Name
 		}
-		addLabel(rect{pad, 100, width - pad, 138}, "The extension stays in "+strings.Join(names, ", ")+" until you remove it under Add-ons.",
+		addLabel(rect{pad, 100, width - pad, 138}, "The extension stays in "+strings.Join(names, ", ")+" until you remove it under Add-ons or Extensions.",
 			w.fontBody, func() uint32 { return w.pal.text }, dtWordBreak)
 		const bw, gap = (width - 2*pad - 8) / 2, 8
 		y := int32(142)
 		for i, b := range w.browsers {
 			x := int32(pad + (i%2)*(bw+gap))
-			addButton("Open add-ons in "+b.Name, idBrowser+i, button, rect{x, y, x + bw, y + 32})
+			what := "add-ons"
+			if b.Chromium {
+				what = "extensions"
+			}
+			addButton("Open "+what+" in "+b.Name, idBrowser+i, button, rect{x, y, x + bw, y + 32})
 			if i%2 == 1 {
 				y += 40
 			}
