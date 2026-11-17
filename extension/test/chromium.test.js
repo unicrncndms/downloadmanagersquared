@@ -24,6 +24,12 @@ test("MV3 keys, no Firefox-only permissions", () => {
   assert.equal(ff.manifest_version, 2);
 });
 
+test("description is within 132 chars and claims no per-IP resolving; Firefox keeps its own", () => {
+  assert.ok(m.description.length <= 132, m.description.length);
+  assert.ok(!/own link|per.?IP|each IP/i.test(m.description));
+  assert.match(ff.description, /own link/);
+});
+
 test("icons are PNGs that exist", () => {
   const paths = [...Object.values(m.icons), ...Object.values(m.action.default_icon)];
   assert.equal(paths.length, 6);
