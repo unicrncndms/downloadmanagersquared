@@ -67,7 +67,7 @@ Source code and issues: https://github.com/unicrncndms/downloadmanagersquared
 
 - `nativeMessaging`: The only channel to the engine (`dms-host.exe`). Every download, setting and list update goes through it; nothing is sent anywhere else.
 - `downloads`: Cancels and erases the browser's own download after the engine has taken it over. Catches downloads (`downloads.onCreated`) and gives one back to the browser when the engine can't take it.
-- `webRequest`: Non-blocking. Reads a request's `Cookie` and `Referer` headers (`onSendHeaders`) so the engine can fetch the file as the user's browser would. No request is changed or blocked.
+- `webRequest`: Non-blocking. Reads a page request's `Referer` header (`onSendHeaders`) so the engine can fetch the file as the user's browser would. No request is changed or blocked.
 - `webNavigation`: Records which pages a tab showed (including history-state changes) to find the page a download started on. The engine needs it for sites that serve the file from a landing page.
 - `cookies`: Reads the cookies the browser would send for a download's URL when no request header is available (downloads from the context menu or the browser's own download list), so protected files can be fetched with the user's session. They go to the local engine only.
 - `tabs`: Reads the open tabs at startup and a new tab's opener, to keep the page history of each tab. Opens the settings page and the one-time welcome page.
