@@ -29,6 +29,11 @@ const Resolver = {
   // Registers every listener before anything is awaited (an MV3 worker only
   // gets the event that woke it if they are), then reads the state back.
   init() {
+    // A resolve needs a proxy per request and containers: without them (Chromium) none is ever sent, so nothing is registered.
+    if (!browser.proxy?.onRequest || !browser.contextualIdentities) {
+      this.loaded = true;
+      return (this.ready = Promise.resolve());
+    }
     // They start registered: until the state is read back nobody knows whether
     // a container is left. Once it is, fence() drops them if none is.
     this.fence();

@@ -104,14 +104,15 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 });
 
 // The toolbar button shows what is running, or "!" when a download needs you and the list has not shown it; it follows the engine, so it outlives the popup.
+const action = browser.action || browser.browserAction; // MV3 renamed it
 let badge = "";
 let seen = new Set(); // ids that need the user and that the downloads list has shown (in memory: the background page is persistent)
 function paintBadge(downloads) {
   const b = badgeOf(downloads, seen);
   if (b.text + b.color === badge) return;
   badge = b.text + b.color;
-  browser.browserAction.setBadgeBackgroundColor({ color: b.color });
-  browser.browserAction.setBadgeText({ text: b.text });
+  action.setBadgeBackgroundColor({ color: b.color });
+  action.setBadgeText({ text: b.text });
 }
 Engine.on("state", (st) => {
   const ds = st && st.downloads;
@@ -124,7 +125,7 @@ Engine.on("badge", ({ running, needs }) => {
   seen = seenAfter(ds, seen, false);
   paintBadge(ds);
 });
-Engine.on("connection", ({ connected }) => { if (!connected) { badge = ""; browser.browserAction.setBadgeText({ text: "" }); } });
+Engine.on("connection", ({ connected }) => { if (!connected) { badge = ""; action.setBadgeText({ text: "" }); } });
 
 const SETTINGS_URL = browser.runtime.getURL("ui/settings.html");
 const DOWNLOADS_URL = browser.runtime.getURL("ui/popup.html");
@@ -151,12 +152,12 @@ Engine.on("connection", ({ connected }) => {
 // The accent follows Firefox's theme: the engine keeps its color, so the
 // Downloads window (which can't read the theme) gets it too.
 async function sendThemeAccent() {
-  if (!Engine.connected || !Engine.settings) return;
+  if (!browser.theme || !Engine.connected || !Engine.settings) return; // Chromium has no theme API
   const c = themeAccent(await browser.theme.getCurrent().catch(() => null));
   if (c !== (Engine.settings.themeAccent || "")) await Engine.call("setSettings", { themeAccent: c }).catch(() => {});
 }
 Engine.on("connection", ({ connected }) => { if (connected) sendThemeAccent(); });
-browser.theme.onUpdated.addListener(() => { sendThemeAccent(); });
+if (browser.theme) browser.theme.onUpdated.addListener(() => { sendThemeAccent(); });
 
 // The engine shows the downloads and settings in its own Downloads window. It
 // asks this extension only when that window can't be created (WebView2

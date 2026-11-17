@@ -10,11 +10,13 @@ const Capture = {
   bypass: new Set(),   // URLs we handed back to Firefox after the engine refused them
 
   init() {
-    browser.webRequest.onHeadersReceived.addListener(
-      (d) => this.onHeaders(d),
-      { urls: ["<all_urls>"], types: ["main_frame", "sub_frame"] },
-      ["blocking", "responseHeaders"],
-    );
+    if (canBlock()) {
+      browser.webRequest.onHeadersReceived.addListener(
+        (d) => this.onHeaders(d),
+        { urls: ["<all_urls>"], types: ["main_frame", "sub_frame"] },
+        ["blocking", "responseHeaders"],
+      );
+    }
     browser.downloads.onCreated.addListener((item) => this.onDownload(item));
     // Every page a tab shows, including ones served from cache, Back/Forward and
     // in-page navigation; network responses alone miss those.
@@ -39,6 +41,19 @@ const Capture = {
       this.pagesById = s.pagesById || {};
     }).catch(() => {});
 
+    // Firefox menus do not persist: made at every start. Chromium's do, and creating an id twice fails: made once, on install.
+    if (browser.runtime.getManifest().manifest_version === 3) browser.runtime.onInstalled.addListener(() => this.createMenus());
+    else this.createMenus();
+    browser.contextMenus.onClicked.addListener((info, tab) => {
+      if (info.menuItemId === "dms-link") {
+        this.handOff({ url: info.linkUrl, pageUrl: tab.url, cookieStoreId: tab.cookieStoreId });
+      } else if (info.menuItemId === "dms-page") {
+        this.handOff({ url: tab.url, pageUrl: tab.url, cookieStoreId: tab.cookieStoreId });
+      }
+    });
+  },
+
+  createMenus() {
     browser.contextMenus.create({ id: "dms-link", title: "Download with DMS²", contexts: ["link"] });
     // The page item means something only on a file's own address or a learned site: Firefox asks
     // again each time the menu opens (menus.onShown); without that hook it always shows.
@@ -53,13 +68,6 @@ const Capture = {
         browser.menus.refresh();
       });
     }
-    browser.contextMenus.onClicked.addListener((info, tab) => {
-      if (info.menuItemId === "dms-link") {
-        this.handOff({ url: info.linkUrl, pageUrl: tab.url, cookieStoreId: tab.cookieStoreId });
-      } else if (info.menuItemId === "dms-page") {
-        this.handOff({ url: tab.url, pageUrl: tab.url, cookieStoreId: tab.cookieStoreId });
-      }
-    });
   },
 
   pageMenuShown: false,
@@ -206,8 +214,9 @@ const Capture = {
       // Don't lose the download: give it back to Firefox.
       this.bypass.add(url);
       // A server-chosen filename Firefox rejects must not lose the download: retry without it.
-      browser.downloads.download({ url, filename: filename || undefined, cookieStoreId })
-        .catch((err) => { if (!filename) throw err; return browser.downloads.download({ url, cookieStoreId }); })
+      const store = cookieStoreId ? { cookieStoreId } : {}; // Chromium rejects the key where there are no containers
+      browser.downloads.download({ url, filename: filename || undefined, ...store })
+        .catch((err) => { if (!filename) throw err; return browser.downloads.download({ url, ...store }); })
         .then(() => notify("DMS² couldn't take this download", `${e.message}. Firefox will download it instead.`),
           () => { this.bypass.delete(url); notify("DMS² couldn't take this download", `${e.message}. Firefox couldn't download it either.`); });
     }

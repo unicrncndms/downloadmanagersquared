@@ -31,13 +31,18 @@ function storageArea(data) {
 // shared: what outlives a restart of the background (storage, open windows).
 // cookieJar: the cookies each store holds, by store id; cookies.getAll hands
 // out the asked store's (the real browser also filters them by URL).
-function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: { v: 100 } }, scripts, session = true, now = 1000000, cookieJar = {} } = {}) {
+function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: { v: 100 } }, scripts, session = true, now = 1000000, cookieJar = {}, chromium = false } = {}) {
   const listeners = {};
   const calls = [];
+  const specs = {}; // webRequest extraInfoSpec each event was given
   const engine = [];
   const clock = { now, timers: [] };
   const ev = (name) => ({
-    addListener: (f) => (listeners[name] = listeners[name] || []).push(f),
+    addListener: (f, filter, extra) => {
+      if (chromium && (extra || []).includes("blocking")) throw new Error("You do not have permission to use blocking webRequest listeners");
+      specs[name] = extra;
+      (listeners[name] = listeners[name] || []).push(f);
+    },
     removeListener: (f) => { listeners[name] = (listeners[name] || []).filter((g) => g !== f); },
     hasListener: (f) => (listeners[name] || []).includes(f),
   });
@@ -104,6 +109,19 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
     },
   };
 
+  if (chromium) { // what MV3 Chromium has: no proxy, containers, theme, menus; the action API; strict calls
+    for (const k of ["proxy", "theme", "menus", "contextualIdentities"]) delete browser[k];
+    browser.action = browser.browserAction;
+    delete browser.browserAction;
+    browser.runtime.getManifest = () => ({ version: "0.0.0", manifest_version: 3, permissions: ["webRequest"] });
+    const made = new Set();
+    const create = browser.contextMenus.create;
+    browser.contextMenus.create = (o) => { if (made.has(o.id)) throw new Error("Cannot create item with duplicate id " + o.id); made.add(o.id); return create(o); };
+    const strict = (name, bad) => { const f = browser[name.split(".")[0]][name.split(".")[1]]; browser[name.split(".")[0]][name.split(".")[1]] = (...a) => { if (bad(a[0] || {})) throw new Error("Unexpected property in " + name); return f(...a); }; };
+    strict("cookies.getAll", (q) => "firstPartyDomain" in q || "partitionKey" in q || q.storeId === undefined && "storeId" in q);
+    strict("downloads.download", (q) => "cookieStoreId" in q);
+    browser.webRequest.OnSendHeadersOptions = { EXTRA_HEADERS: "extraHeaders" };
+  }
   const ctx = vm.createContext({
     browser, console: { log() {}, warn() {}, error() {}, info() {} }, URL, URLSearchParams, Promise,
     navigator: { userAgent: "test" }, screen: { availWidth: 1920, availHeight: 1080, availLeft: 0, availTop: 0 },
@@ -145,7 +163,7 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
     clock.now = until;
   };
 
-  return { browser, listeners, calls, engine, clock, shared, fire, settle, advance, get, connect, Engine: E, Resolver: get("Resolver"), Capture: get("Capture") };
+  return { browser, listeners, specs, calls, engine, clock, shared, fire, settle, advance, get, connect, Engine: E, Resolver: get("Resolver"), Capture: get("Capture") };
 }
 
 module.exports = { load };

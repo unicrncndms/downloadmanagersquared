@@ -3,6 +3,13 @@
 // The browser.* seams the background scripts share. The pure rules they use
 // are in lib/.
 
+// Chromium MV3 without the webRequestBlocking permission cannot register a blocking listener (it throws):
+// there downloads.onCreated does the whole capture. Firefox and MV2 always can.
+const canBlock = () => {
+  const m = browser.runtime.getManifest();
+  return m.manifest_version !== 3 || (m.permissions || []).includes("webRequestBlocking");
+};
+
 // For a promise nobody waits on: its failure is logged, not an unhandled rejection.
 const quiet = (p) => Promise.resolve(p).catch((e) => console.error(e));
 
@@ -30,10 +37,10 @@ const SentCookies = {
         if (n === "cookie") cookie = x.value;
         else if (n === "referer") referer = x.value;
       }
-      if (cookie !== undefined) this.byRequest.set(d.requestId, cookie);
+      if (cookie !== undefined && canBlock()) this.byRequest.set(d.requestId, cookie);
       else this.byRequest.delete(d.requestId);
       if (d.type === "main_frame") Capture.noteReferer(d, referer);
-    }, filter, ["requestHeaders"]);
+    }, filter, ["requestHeaders", ...(browser.webRequest.OnSendHeadersOptions?.EXTRA_HEADERS ? ["extraHeaders"] : [])]); // Chromium hides Referer and Cookie without extraHeaders
     browser.webRequest.onErrorOccurred.addListener((d) => this.byRequest.delete(d.requestId), filter);
   },
 
@@ -82,10 +89,12 @@ async function copyCookies(url, from, to) {
 // cookies this container holds for the URL, first-party filtered.
 async function cookieHeader(url, storeId) {
   let cookies = [];
+  // Chromium rejects an undefined storeId key and firstPartyDomain; only a browser with containers has the latter.
+  const q = { url, ...(storeId !== undefined && { storeId }) };
   try {
-    cookies = await browser.cookies.getAll({ url, storeId, firstPartyDomain: null });
+    cookies = await browser.cookies.getAll(browser.contextualIdentities ? { url, storeId, firstPartyDomain: null } : q);
   } catch (e) {
-    try { cookies = await browser.cookies.getAll({ url, storeId }); } catch (e2) { /* none */ }
+    try { cookies = await browser.cookies.getAll(q); } catch (e2) { /* none */ }
   }
   return cookieHeaderFor(cookies, hostOf(url));
 }
