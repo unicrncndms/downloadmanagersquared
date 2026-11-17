@@ -27,6 +27,15 @@ function withShim(html) {
   return html.replace("<head>", '<head>\n  <script src="../' + SHIM + '"></script>');
 }
 
+// The popup's height fix (ui/chromium.css), after the page's last stylesheet so it wins. The popup only.
+function chromiumPage(name, html) {
+  if (name !== "popup.html") return html;
+  const links = [...html.matchAll(/<link rel="stylesheet"[^>]*>/g)];
+  const last = links[links.length - 1];
+  const at = last.index + last[0].length;
+  return html.slice(0, at) + '\n  <link rel="stylesheet" href="chromium.css">' + html.slice(at);
+}
+
 if (require.main === module) {
   const [dir, version] = process.argv.slice(2);
   const ff = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
@@ -36,8 +45,8 @@ if (require.main === module) {
   const ui = path.join(dir, "ui");
   for (const f of fs.readdirSync(ui).filter((f) => f.endsWith(".html"))) {
     const p = path.join(ui, f);
-    fs.writeFileSync(p, withShim(fs.readFileSync(p, "utf8")));
+    fs.writeFileSync(p, chromiumPage(f, withShim(fs.readFileSync(p, "utf8"))));
   }
 }
 
-module.exports = { chromiumManifest, withShim, KEY };
+module.exports = { chromiumManifest, withShim, chromiumPage, KEY };

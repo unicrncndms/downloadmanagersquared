@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { chromiumManifest, withShim, KEY } = require("../dev/chromium.js");
+const { chromiumManifest, withShim, chromiumPage, KEY } = require("../dev/chromium.js");
 
 const ext = path.join(__dirname, "..");
 const ff = JSON.parse(fs.readFileSync(path.join(ext, "manifest.json"), "utf8"));
@@ -50,4 +50,17 @@ test("ID from key equals ChromiumExtensionID in install.go", () => {
   const id = [...hex].map((c) => String.fromCharCode(97 + parseInt(c, 16))).join("");
   const go = fs.readFileSync(path.join(ext, "../engine/internal/install/install.go"), "utf8");
   assert.equal(go.match(/ChromiumExtensionID = "([a-p]{32})"/)[1], id);
+});
+
+test("the popup gets the Chromium popup fix after its last stylesheet; other pages don't", () => {
+  const read = (f) => fs.readFileSync(path.join(ext, "ui", f), "utf8");
+  const popup = chromiumPage("popup.html", read("popup.html"));
+  const link = '<link rel="stylesheet" href="chromium.css">';
+  assert.equal(popup.split(link).length - 1, 1);
+  assert.ok(popup.indexOf(link) > popup.indexOf('href="popup.css"'));
+  assert.ok(!popup.slice(popup.indexOf(link) + link.length).includes('rel="stylesheet"'));
+  for (const f of ["settings.html", "welcome.html"]) {
+    assert.equal(chromiumPage(f, read(f)), read(f), f);
+  }
+  assert.ok(fs.existsSync(path.join(ext, "ui", "chromium.css")));
 });

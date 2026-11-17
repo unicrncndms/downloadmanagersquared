@@ -1,0 +1,2 @@
+/* The Chromium build's popup fix, injected into the staged popup.html by extension/dev/chromium.js only. Chrome sizes a popup from its content, so the 100% height in popup.css gives the list 0 px. */
+html:has(> body:not(.windowed)), body:not(.windowed) { height: auto; }
