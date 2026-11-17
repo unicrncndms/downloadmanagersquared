@@ -7,11 +7,11 @@ import (
 	"downloadmanagersquared/engine/internal/winutil"
 )
 
-func TestBrowserTargetIsTheStoreForChromiumAndTheXpiForFirefox(t *testing.T) {
-	if got := browserTarget(winutil.Browser{Name: "Microsoft Edge", Chromium: true}, t.TempDir()); !strings.HasPrefix(got, "https://chromewebstore.google.com/detail/") {
+func TestBrowserTargetIsTheStoreForChromiumAndAMOForFirefox(t *testing.T) {
+	if got := browserTarget(winutil.Browser{Name: "Microsoft Edge", Chromium: true}); !strings.HasPrefix(got, "https://chromewebstore.google.com/detail/") {
 		t.Errorf("Chromium target = %q", got)
 	}
-	if got := browserTarget(winutil.Browser{Name: "Firefox"}, t.TempDir()); !strings.HasSuffix(got, ".xpi") {
+	if got := browserTarget(winutil.Browser{Name: "Firefox"}); got != "https://addons.mozilla.org/firefox/addon/downloadmanagersquared/" {
 		t.Errorf("Firefox target = %q", got)
 	}
 }

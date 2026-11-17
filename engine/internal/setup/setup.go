@@ -34,7 +34,7 @@ type Steps struct {
 	Uninstall    func()                   // removes the install again, when there is no browser for it
 	Version      string                   // shown in the footer
 	Connected    func() []string          // exes of the browsers whose extension has said hello to the installed engine; slow, runs off the window's thread
-	OpenFile     func()                   // opens the extension file, for a browser the window doesn't list
+	OpenFile     func()                   // opens the extension's AMO page, for a browser the window doesn't list
 	Remove       func(wipe bool) error    // uninstalling: removes the install (and the data, if wipe); off the window's thread
 	OpenAddons   func(winutil.Browser)    // uninstalling: opens the browser's add-ons page
 }

@@ -65,6 +65,9 @@ function link(url, text) {
 // Where the engine and the extension are released (build.ps1 -Repo sets the repo).
 const RELEASES_URL = "https://github.com/unicrncndms/downloadmanagersquared/releases/latest";
 
+// The extension's page on addons.mozilla.org (must match the listing's slug; install.AMOListingURL in the engine).
+const AMO_URL = "https://addons.mozilla.org/firefox/addon/downloadmanagersquared/";
+
 // The engine zip as one stable asset of the latest release: a download, not the release page.
 const ENGINE_ZIP_URL = RELEASES_URL + "/download/downloadmanagersquared-windows.zip";
 

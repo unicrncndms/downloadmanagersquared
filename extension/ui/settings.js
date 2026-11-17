@@ -575,8 +575,8 @@ if (Host.updateExtension) {
   $("updateExt").hidden = false;
   $("updateExt").onclick = async () => {
     try {
-      const r = await Host.updateExtension(RELEASES_URL + "/download/downloadmanagersquared.xpi");
-      say({ no_update: "The extension is up to date.", throttled: "The browser checked a moment ago. Try again later.", update_available: "An extension update is available; the browser installs it.", opened: "The browser offers the extension from the release." }[r] || "Asked the browser to update the extension.");
+      const r = await Host.updateExtension(AMO_URL);
+      say({ no_update: "The extension is up to date.", throttled: "The browser checked a moment ago. Try again later.", update_available: "An extension update is available; the browser installs it.", opened: "The browser offers the extension from addons.mozilla.org." }[r] || "Asked the browser to update the extension.");
     } catch (e) { say(e.message); }
   };
 }

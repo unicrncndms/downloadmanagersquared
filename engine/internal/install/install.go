@@ -41,9 +41,10 @@ var Repo = "unicrncndms/downloadmanagersquared"
 // ReleasesURL is the page listing the releases.
 func ReleasesURL() string { return "https://github.com/" + Repo + "/releases/latest" }
 
-// ExtensionURL is the latest signed extension.
-func ExtensionURL() string {
-	return "https://github.com/" + Repo + "/releases/latest/download/downloadmanagersquared.xpi"
+// AMOListingURL is the extension's page on addons.mozilla.org, where Firefox
+// and its forks add it from. The slug must match the one set on the AMO listing.
+func AMOListingURL() string {
+	return "https://addons.mozilla.org/firefox/addon/downloadmanagersquared/"
 }
 
 // ChromiumStoreURL is the extension's Chrome Web Store page, where Chrome,

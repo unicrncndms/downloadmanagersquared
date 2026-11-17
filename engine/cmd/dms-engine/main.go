@@ -79,12 +79,12 @@ func main() {
 				return exes
 			},
 			OpenFile: func() {
-				if err := winutil.ShellOpen(extensionTarget(src)); err != nil {
-					winutil.MessageBox(title, "Could not open the extension file: "+err.Error())
+				if err := winutil.ShellOpen(install.AMOListingURL()); err != nil {
+					winutil.MessageBox(title, "Could not open the extension page: "+err.Error())
 				}
 			},
 			AddExtension: func(b winutil.Browser) {
-				if err := winutil.OpenBrowser(b.Exe, browserTarget(b, src)); err != nil {
+				if err := winutil.OpenBrowser(b.Exe, browserTarget(b)); err != nil {
 					winutil.MessageBox(title, "Could not open "+b.Name+": "+err.Error())
 				}
 			},
@@ -101,22 +101,12 @@ func main() {
 }
 
 // browserTarget is what a browser opens to add the extension: Chromium
-// browsers only install from the Chrome Web Store, the Firefox family takes the .xpi.
-func browserTarget(b winutil.Browser, src string) string {
+// browsers install from the Chrome Web Store, the Firefox family from AMO.
+func browserTarget(b winutil.Browser) string {
 	if b.Chromium {
 		return install.ChromiumStoreURL()
 	}
-	return extensionTarget(src)
-}
-
-// extensionTarget is the signed extension the release zip carries: the browser
-// asks once to add it. A build without one gets it from the release.
-func extensionTarget(src string) string {
-	target := filepath.Join(src, "downloadmanagersquared.xpi")
-	if _, err := os.Stat(target); err != nil {
-		return install.ExtensionURL()
-	}
-	return target
+	return install.AMOListingURL()
 }
 
 // run is the installed engine.
