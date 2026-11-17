@@ -3,6 +3,7 @@ package download
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math/rand"
@@ -461,5 +462,27 @@ func TestARemovedFolderPauses(t *testing.T) {
 	}
 	if s := d.Summary(); s.Status != StatusPaused || !strings.Contains(s.Error, "folder was removed") {
 		t.Fatalf("status %s: %q", s.Status, s.Error)
+	}
+}
+
+// Deleting the folder in Explorer removes what is in it first: a file or
+// subfolder of it not found counts as the folder removed, not as a failure.
+func TestGoneInsideTellsAPartlyDeletedFolder(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "big")
+	in := filepath.Join(out, "dir1", "file029.bin")
+	renamed := os.Rename(in+".dms.part", in) // the case from CI
+	opened := func() error { _, err := os.Open(filepath.Join(t.TempDir(), "x")); return err }()
+	for _, c := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"rename inside", renamed, true},
+		{"open elsewhere", opened, false},
+		{"another error", errors.New("disk full"), false},
+	} {
+		if got := goneInside(c.err, out); got != c.want {
+			t.Errorf("%s: goneInside(%v) = %v", c.name, c.err, got)
+		}
 	}
 }

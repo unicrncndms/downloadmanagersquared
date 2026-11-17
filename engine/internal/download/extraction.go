@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -207,10 +208,30 @@ func (e *Extraction) step(ctx context.Context, parts []archivePart, missing []ar
 	if errors.Is(xerr, archive.ErrWrongPassword) {
 		return e.askPassword(parts[0], true)
 	}
-	if xerr != nil && !exists(e.out) {
+	if xerr != nil && (!exists(e.out) || goneInside(xerr, e.out)) {
 		xerr = errFolderRemoved
 	}
 	return res.More, xerr
+}
+
+// goneInside: err is a file or folder inside out not being found. Deleting
+// the folder in Explorer removes what is in it first, so the extraction can
+// miss a subfolder while out itself is still there.
+func goneInside(err error, out string) bool {
+	if !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	var p string
+	var pe *fs.PathError
+	var le *os.LinkError
+	switch {
+	case errors.As(err, &le):
+		p = le.New
+	case errors.As(err, &pe):
+		p = pe.Path
+	}
+	rel, rerr := filepath.Rel(out, p)
+	return p != "" && rerr == nil && rel != "." && !strings.HasPrefix(rel, "..")
 }
 
 // mayFree is the one place that says whether the archive's bytes may be
