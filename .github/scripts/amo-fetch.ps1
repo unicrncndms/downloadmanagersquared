@@ -1,6 +1,6 @@
-# Downloads the AMO-signed .xpi of -Version (unlisted) to -Out, once AMO has
-# signed it. Fails while it is still in review. Needs AMO_JWT_ISSUER and
-# AMO_JWT_SECRET in the environment.
+# Downloads the AMO-signed .xpi of the listed version -Version to -Out, once AMO
+# has reviewed and approved it. Fails while it is still in review. Needs
+# AMO_JWT_ISSUER and AMO_JWT_SECRET in the environment.
 param(
     [Parameter(Mandatory)][string]$Version,
     [Parameter(Mandatory)][string]$Out

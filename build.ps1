@@ -1,6 +1,6 @@
 # Builds the engine, the native-messaging shim and the extension package into dist\,
 # all stamped with one version: -Version, else the latest git tag, else 0.0.0.
-# -Repo owner/repo is where the engine sends people for the extension and releases.
+# -Repo owner/repo is where the engine sends people for releases.
 # -NoTests skips the Go and extension tests, for callers that already ran them.
 param([string]$Version, [string]$Repo, [switch]$NoTests)
 $ErrorActionPreference = 'Stop'
@@ -82,10 +82,6 @@ $parts = 'lib', 'background', 'content', 'ui', 'icons', 'resolver-content.js'
 foreach ($p in $parts) { Copy-Item -Recurse (Join-Path $root "extension\$p") $stage }
 $manifest = Get-Content -Raw -Encoding UTF8 (Join-Path $root 'extension\manifest.json')
 $manifest = $manifest -replace '"version":\s*"[^"]*"', "`"version`": `"$Version`""
-if ($Repo) {
-    # Firefox updates a self-hosted extension from the latest release's updates.json.
-    $manifest = $manifest -replace '("id":\s*"downloadmanagersquared@dms",)', "`$1`n      `"update_url`": `"https://github.com/$Repo/releases/latest/download/updates.json`","
-}
 [IO.File]::WriteAllText((Join-Path $stage 'manifest.json'), $manifest, (New-Object Text.UTF8Encoding $false))
 if ($Repo) { Set-PageRepo (Join-Path $stage 'ui\common.js') }
 
