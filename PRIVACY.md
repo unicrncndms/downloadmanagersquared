@@ -1,20 +1,20 @@
 # Privacy
 
-DMS² has no server of its own and collects nothing. **It talks only to the sites and torrent swarms you download from, and to the few services listed under *Who else DMS² contacts* below**, through your own connections (and through your VPN, if you set one up). There is no telemetry and no crash reporting. The engine asks GitHub once a day whether a newer release exists; it downloads nothing unless you press *Update now* (see below). The developer receives no data of any kind, and nothing is sold or shared. Firefox updates the extension from addons.mozilla.org, or from the project's GitHub releases if you installed it from there.
+DMS² has no server of its own and collects nothing. **It talks only to the sites and torrent swarms you download from, and to the few services listed under *Who else DMS² contacts* below**, through your own connections (and through your VPN, if you set one up). There is no telemetry and no crash reporting. The engine asks GitHub once a day whether a newer release exists; it downloads nothing unless you press *Update now* (see below). The developer receives no data of any kind, and nothing is sold or shared. Your browser updates the extension from its store (addons.mozilla.org or the Chrome Web Store), or from the project's GitHub releases if you installed it from there.
 
 ## What the extension tells the engine
 
-The Firefox extension talks only to the DMS² engine on the same PC (through Firefox's native messaging and a named pipe that only your Windows user can open). For each download it takes over, it sends:
+The browser extension (Firefox, or Chrome and other Chromium browsers) talks only to the DMS² engine on the same PC (through the browser's native messaging and a named pipe that only your Windows user can open). For each download it takes over, it sends:
 
 - the download's URL, file name and size, and the pages that led to it (the page you started it on and the ones before, to find the landing page);
 - the Referer and your browser's User-Agent, so the site sees the same browser;
 - the cookies your browser sent for that download (or, failing that, the cookies it would send for that URL in that container). They go to the local engine only. The engine keeps them in your Windows profile, encrypted with Windows so only your user can read them, until the download completes or you remove it, and sends them only to that site and its subdomains.
 
-The extension also keeps, in Firefox's own storage, the clicks it learned per site (button texts and positions, and how long each took), and which pages led to recent downloads.
+The extension also keeps, in the browser's own storage, the clicks it learned per site (button texts and positions, and how long each took), and which pages led to recent downloads.
 
 ## Pages DMS² opens
 
-Pages DMS² opens to fetch a link run in a temporary container that only reaches the internet through the chosen connection, and is removed with its cookies when the link is fetched. It starts with a copy of the cookies your browser would send to that page, so you are logged in there too (never from a private window). That site then sees your session from that connection's IP address as well; a site that ties a login to one address may log you out. If the engine isn't running, those requests are blocked.
+In Firefox, pages DMS² opens to fetch a link run in a temporary container that only reaches the internet through the chosen connection, and is removed with its cookies when the link is fetched. It starts with a copy of the cookies your browser would send to that page, so you are logged in there too (never from a private window). That site then sees your session from that connection's IP address as well; a site that ties a login to one address may log you out. If the engine isn't running, those requests are blocked.
 
 ## What the engine keeps
 
@@ -41,7 +41,7 @@ Questions about privacy: open an issue at https://github.com/unicrncndms/downloa
 
 ## Extension permissions
 
-The extension asks for these permissions:
+The Firefox extension asks for these permissions. The Chrome build asks for the same, except `proxy`, `contextualIdentities`, `webRequestBlocking`, `menus` and `theme`, which the Chrome build leaves out; `<all_urls>` is a host permission there. It does not open temporary containers (so the *Pages DMS² opens* section is Firefox only).
 
 | Permission | What DMS² uses it for |
 |---|---|
