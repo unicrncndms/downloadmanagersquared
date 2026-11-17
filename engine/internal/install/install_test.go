@@ -25,6 +25,10 @@ func testLayout(t *testing.T) Layout {
 		StartMenuDir: t.TempDir(),
 		DesktopDir:   t.TempDir(),
 		MozillaKey:   base + `\Mozilla\NativeMessagingHosts\downloadmanagersquared`,
+		ChromiumKeys: []string{
+			base + `\Chrome\NativeMessagingHosts\downloadmanagersquared`,
+			base + `\Edge\NativeMessagingHosts\downloadmanagersquared`,
+		},
 		RunKey:       base + `\Run`,
 		UninstallKey: base + `\Uninstall\downloadmanagersquared`,
 	}
@@ -127,6 +131,38 @@ func TestAnUpgradeLeavesStartAtLoginAlone(t *testing.T) {
 	}
 }
 
+func TestRegisterWritesAChromiumManifestForTheChromiumKeys(t *testing.T) {
+	l := testLayout(t)
+	if err := l.Install(release(t, "v1"), "0.3.0", &Options{}); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(l.Dir, "native-host-chromium.json")
+	for _, k := range l.ChromiumKeys {
+		if got := value(t, k, ""); got != want {
+			t.Errorf("%s points at %q", k, got)
+		}
+	}
+	b, _ := os.ReadFile(want)
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	origins, _ := m["allowed_origins"].([]any)
+	if m["name"] != Name || m["path"] != l.Host() || m["type"] != "stdio" || len(origins) != 1 || origins[0] != "chrome-extension://"+ChromiumExtensionID+"/" || m["allowed_extensions"] != nil {
+		t.Fatalf("Chromium manifest: %s", b)
+	}
+	b, _ = os.ReadFile(l.manifest())
+	if strings.Contains(string(b), "allowed_origins") || !strings.Contains(string(b), `"allowed_extensions"`) {
+		t.Fatalf("Firefox manifest: %s", b)
+	}
+	if err := l.Unregister(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(l.files(), "|"); !strings.Contains(got, want) || !strings.Contains(got, l.manifest()) {
+		t.Errorf("an uninstall removes only %s", got)
+	}
+}
+
 func TestRegisterRestoresAMissingOrMovedRegistration(t *testing.T) {
 	l := testLayout(t)
 	if err := l.Install(release(t, "v1"), "0.3.0", &Options{Autostart: true}); err != nil {
@@ -159,7 +195,7 @@ func TestUnregisterRemovesEveryEntry(t *testing.T) {
 	if err := l.Unregister(); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{l.MozillaKey, l.UninstallKey} {
+	for _, k := range append([]string{l.MozillaKey, l.UninstallKey}, l.ChromiumKeys...) {
 		if key, err := registry.OpenKey(registry.CURRENT_USER, k, registry.QUERY_VALUE); err == nil {
 			key.Close()
 			t.Errorf("%s is still there", k)

@@ -45,7 +45,7 @@ func frame(msg []byte) []byte {
 	return b.Bytes()
 }
 
-func TestAnOversizedFrameFromFirefoxIsSkipped(t *testing.T) {
+func TestAnOversizedFrameFromTheBrowserIsSkipped(t *testing.T) {
 	var in bytes.Buffer
 	in.Write(frame(bytes.Repeat([]byte("x"), ipc.MaxMessage+1)))
 	in.Write([]byte{0xff, 0xff, 0xff, 0xff}) // claims 4 GB, then ends
@@ -66,7 +66,7 @@ func TestAnOversizedFrameFromFirefoxIsSkipped(t *testing.T) {
 	}
 }
 
-func TestAnOversizedFrameIsAnsweredToFirefoxByItsId(t *testing.T) {
+func TestAnOversizedFrameIsAnsweredToTheBrowserByItsId(t *testing.T) {
 	var in, out, reply bytes.Buffer
 	in.Write(frame(append([]byte(`{"id":7,"method":"add","params":"`), bytes.Repeat([]byte("x"), ipc.MaxMessage)...)))
 	relayIn(&in, &out, &reply, "")
@@ -75,10 +75,10 @@ func TestAnOversizedFrameIsAnsweredToFirefoxByItsId(t *testing.T) {
 	}
 }
 
-// A line over Firefox's limit arrives in chunks that join to the line, each
+// A line over the browser's limit arrives in chunks that join to the line, each
 // under the limit, with multi-byte text cut only between characters.
-func TestALineTooLongForFirefoxGoesInChunks(t *testing.T) {
-	big := `{"event":"state","data":"` + strings.Repeat(`é"\"x`, maxToFirefox/3) + `"}`
+func TestALineTooLongForTheBrowserGoesInChunks(t *testing.T) {
+	big := `{"event":"state","data":"` + strings.Repeat(`é"\"x`, maxToBrowser/3) + `"}`
 	var in bytes.Buffer
 	in.WriteString(big + "\n" + `{"id":1,"result":"ok"}` + "\n")
 	var out bytes.Buffer
@@ -92,7 +92,7 @@ func TestALineTooLongForFirefoxGoesInChunks(t *testing.T) {
 		}
 		msg := make([]byte, size)
 		io.ReadFull(&out, msg)
-		if size > maxToFirefox {
+		if size > maxToBrowser {
 			t.Fatalf("a message of %d bytes", size)
 		}
 		var c struct {
@@ -116,7 +116,7 @@ func TestALineTooLongForFirefoxGoesInChunks(t *testing.T) {
 	}
 }
 
-func TestALineTooLongForFirefoxIsSkippedAndSaidSo(t *testing.T) {
+func TestALineTooLongForTheBrowserIsSkippedAndSaidSo(t *testing.T) {
 	was := maxLine
 	maxLine = 1000
 	defer func() { maxLine = was }()
@@ -131,8 +131,8 @@ func TestALineTooLongForFirefoxIsSkippedAndSaidSo(t *testing.T) {
 	}
 }
 
-// Before the engine shows the folder picker, the host passes on Firefox's
-// right to bring a window to the front, so the picker isn't behind Firefox.
+// Before the engine shows the folder picker, the host passes on the browser's
+// right to bring a window to the front, so the picker isn't behind the browser.
 func TestPickFolderLetsTheEngineComeToTheFront(t *testing.T) {
 	was := allowForeground
 	t.Cleanup(func() { allowForeground = was })
