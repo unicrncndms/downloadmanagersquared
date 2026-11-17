@@ -16,6 +16,10 @@
 //   userAgent                        sent with "Add download"; null leaves it to the engine
 //   recipesHere                      whether learned sites can be shown and forgotten here
 //   openDownloads()                  back to the downloads (only in the Downloads window)
+//   pickFolderKeeping(start, draft) → { dir }  Windows' folder picker for the toolbar popup,
+//                                    which closes behind it: the background keeps draft
+//                                    and the folder picked (extension only)
+//   takeDraft() → draft | null       that draft, once, with dir set if one was picked (extension only)
 
 // In the extension: the background page talks to the engine.
 function extensionHost(browser, navigator) {
@@ -36,6 +40,8 @@ function extensionHost(browser, navigator) {
     },
     forgetRecipe: (host) => browser.runtime.sendMessage({ type: "forgetRecipe", host }),
     startEngine: () => browser.runtime.sendMessage({ type: "startEngine" }),
+    pickFolderKeeping: (start, draft) => browser.runtime.sendMessage({ type: "pickFolderKeeping", start, draft }),
+    takeDraft: () => browser.runtime.sendMessage({ type: "takeDraft" }),
     version: browser.runtime.getManifest().version,
     userAgent: navigator.userAgent,
     recipesHere: true,

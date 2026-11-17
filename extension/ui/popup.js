@@ -276,8 +276,32 @@ $("openSettings").onclick = () => {
 $("pauseAll").onclick = () => act("pauseAll");
 $("resumeAll").onclick = () => act("resumeAll");
 // The Add box: closed again by + Add or Escape.
-const addDir = folderControl();
+// What the Add box holds, kept while Windows' folder picker closes the popup. No passwords.
+const addDraft = () => ({
+  url: $("addUrl").value, page: $("addPage").value, vpn: $("addVpn").value,
+  name: $("addName").value, sum: $("addSum").value, folder: $("addFolder").checked, dir: addDir.get(),
+});
+const addDir = folderControl(undefined, addDraft);
 $("addFolderRow").after(addDir.root);
+// Back from that picker: the Add box as it was, in the folder picked. Once,
+// when the engine's settings are in (the box reads them).
+let draftTaken = !Host.takeDraft;
+function restoreAddDraft() {
+  if (draftTaken) return;
+  draftTaken = true;
+  Host.takeDraft().then((d) => {
+    if (!d) return;
+    $("addUrl").value = d.url || "";
+    $("addPage").value = d.page || "";
+    $("addVpn").value = d.vpn || "";
+    $("addName").value = d.name || "";
+    $("addSum").value = d.sum || "";
+    openAdd(true);
+    $("addUrl").dispatchEvent(new Event("input"));
+    $("addFolder").checked = !!d.folder; // after input, which sets the default
+    if (d.dir) addDir.set(d.dir);
+  }, () => {});
+}
 function openAdd(on) {
   if (on) addDir.paint(); // the download folder may have changed
   $("addBox").hidden = !on;
@@ -750,6 +774,7 @@ function render(m) {
     return;
   }
   if ($("list").querySelector(".offline")) $("list").replaceChildren();
+  if (m.settings) restoreAddDraft();
   const s = m.state;
   fresh($("total"), s.active ? [fmtSpeed(s.speed), fmtETA(s.eta)] : [], () => s.active
     ? [el("b", {}, fmtSpeed(s.speed)), el("small", {}, `${fmtETA(s.eta)} left`)]

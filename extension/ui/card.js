@@ -72,20 +72,20 @@ function makeLine(id) {
   return { root, update };
 }
 
-// folderChooser is Change…: the recent folders, chosen here, and Other folder…
-// for Windows' picker, which the engine shows and applies itself (the toolbar
-// popup closes as soon as it opens). current is the folder not to offer;
-// chosen gets the folder picked from the list. other is what Other folder…
-// does (the engine's picker for the download getId() by default); null: it is
-// not offered.
+// folderChooser is Change…: Choose folder… first, for Windows' picker, which
+// the engine shows and applies itself (the toolbar popup closes as soon as it
+// opens), then the recent folders, chosen here. current is the folder not to
+// offer; chosen gets the folder picked from the list. other is what Choose
+// folder… does (the engine's picker for the download getId() by default);
+// null: it is not offered.
 function folderChooser(getId, current, chosen, other) {
   const box = el("div", { class: "choices", hidden: true });
   const toggle = () => {
     if (!box.hidden) { box.hidden = true; return; }
     box.replaceChildren(
+      ...(other === null ? [] : [el("button", { class: "choice other", type: "button", onclick: () => { box.hidden = true; (other || (() => act("pickFolder", { id: getId() })))(); } }, "Choose folder…")]),
       ...folderChoices(latest.settings, current()).map((dir) =>
-        el("button", { class: "choice", type: "button", title: dir, onclick: () => { box.hidden = true; chosen(dir); } }, dir)),
-      ...(other === null ? [] : [el("button", { class: "choice other", type: "button", onclick: () => { box.hidden = true; (other || (() => act("pickFolder", { id: getId() })))(); } }, "Other folder…")]));
+        el("button", { class: "choice", type: "button", title: dir, onclick: () => { box.hidden = true; chosen(dir); } }, dir)));
     box.hidden = false;
   };
   return { box, button: el("button", { class: "small", type: "button", onclick: toggle }, "Change…") };
@@ -93,26 +93,30 @@ function folderChooser(getId, current, chosen, other) {
 
 // folderControl is the save folder as the Add box and a torrent's add step
 // ask for it: the folder (the download folder until another is chosen: get()
-// is "" then, meaning no override) and Change…. Other folder… needs the
-// answer back in the page, which only the Downloads window outlives (the
-// toolbar popup closes behind the picker), so the popup offers the recent
-// folders alone.
-function folderControl(start) {
+// is "" then, meaning no override) and Change…. Choose folder… needs the
+// answer back in the page. The Downloads window outlives the picker; the
+// toolbar popup closes behind it, so there it is offered only with keep: what
+// to hand the background (Host.pickFolderKeeping), which holds it and the
+// folder picked for the popup's next opening. Without keep the popup offers
+// the recent folders alone.
+function folderControl(start, keep) {
   const saveDir = () => (latest.settings && latest.settings.saveDir) || "";
   let dir = sameFolder(start, saveDir()) ? "" : start || "";
   const path = el("b", { class: "path" });
   const paint = () => { path.textContent = dir || saveDir(); };
   const pick = (d) => { dir = sameFolder(d, saveDir()) ? "" : d; paint(); };
   const windowed = document.body.classList.contains("windowed");
-  const change = folderChooser(null, () => dir || saveDir(), pick, windowed ? async () => {
+  const kept = !windowed && keep && Host.pickFolderKeeping;
+  const change = folderChooser(null, () => dir || saveDir(), pick, windowed || kept ? async () => {
     try {
-      const r = await call("browseFolder", { start: dir || saveDir() });
+      const r = kept ? await Host.pickFolderKeeping(dir || saveDir(), keep()) : await call("browseFolder", { start: dir || saveDir() });
+      if (kept) Host.takeDraft(); // the popup stayed open: the answer is here, not for the next opening
       if (r && r.dir) pick(r.dir);
     } catch (e) { toast(e.message, true); }
   } : null);
   paint();
   const root = el("div", {}, el("div", { class: "row" }, el("span", { class: "muted" }, "Save to"), path, change.button), change.box);
-  return { root, get: () => dir, reset() { dir = ""; paint(); }, paint };
+  return { root, get: () => dir, set: pick, reset() { dir = ""; paint(); }, paint };
 }
 
 // folderSwitch is Download as folder on a card: the switch (row), once

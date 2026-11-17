@@ -220,7 +220,8 @@ button.icon[aria-expanded] svg { transition: transform var(--t) var(--ease); }
 .choices .choice { border: 0; background: transparent; text-align: left; padding: 4px 8px; border-radius: 3px; font-size: 12px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .choices .choice:hover { background: var(--accent-soft); }
-.choices .other { color: var(--muted); }
+/* Choose folder… heads the list: an action, not a recent folder. */
+.choices .other { color: var(--accent); font-weight: 600; border-bottom: 1px solid var(--line); border-radius: 3px 3px 0 0; padding-bottom: 6px; margin-bottom: 2px; }
 .bad { color: var(--bad); }
 .card .actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .card .ask { align-items: center; }

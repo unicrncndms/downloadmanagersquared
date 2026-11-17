@@ -65,7 +65,25 @@ Engine.on("connection", ({ connected }) => {
 
 // Only this extension's own pages (ui/) may ask for these; content scripts run in web pages.
 const fromUi = (sender) => !!sender && sender.id === browser.runtime.id && String(sender.url || "").startsWith(browser.runtime.getURL("ui/"));
-const PRIVILEGED = new Set(["call", "startEngine", "forgetRecipe", "openSettings"]);
+const PRIVILEGED = new Set(["call", "startEngine", "forgetRecipe", "openSettings", "pickFolderKeeping", "takeDraft"]);
+
+// The popup's Add box while Windows' folder picker is open (the popup closes
+// behind it), with the folder picked: the popup's next opening takes it back.
+// In memory (the background page is persistent), and no older than ten minutes.
+let addDraft = null;
+function pickFolderKeeping(start, draft) {
+  const mine = { ...draft, at: Date.now() };
+  addDraft = mine;
+  return Engine.call("browseFolder", { start }).then((r) => {
+    if (r && r.dir && addDraft === mine) mine.dir = r.dir;
+    return r;
+  });
+}
+function takeDraft() {
+  const d = addDraft;
+  addDraft = null;
+  return Promise.resolve(d && Date.now() - d.at < 10 * 60000 ? d : null);
+}
 
 browser.runtime.onMessage.addListener((msg, sender) => {
   if (!msg || msg.resolver) return undefined;
@@ -78,6 +96,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     return p;
   }
   if (msg.type === "startEngine") return Engine.start();
+  if (msg.type === "pickFolderKeeping") return pickFolderKeeping(msg.start, msg.draft);
+  if (msg.type === "takeDraft") return takeDraft();
   if (msg.type === "forgetRecipe") return Resolver.forgetRecipe(msg.host);
   if (msg.type === "openSettings") return openSettings(msg.hash || "");
   return undefined;

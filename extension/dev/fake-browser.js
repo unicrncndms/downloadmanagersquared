@@ -52,6 +52,9 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
     get openDownloads() { return hostFixture().openDownloads ? () => record({ openDownloads: true }) : undefined; },
     forgetRecipe: (host) => record({ forgetRecipe: host }),
     startEngine: () => record({ startEngine: true }),
+    // The toolbar popup's folder picker: answers at once, as if the popup had stayed open.
+    pickFolderKeeping: (start, draft) => record({ pickFolderKeeping: start, draft }).then(() => ({ dir: "D:\\Picked" })),
+    takeDraft: () => Promise.resolve(null),
     get version() { return hostFixture().version; },
     get userAgent() { return hostFixture().userAgent; },
     get recipesHere() { return hostFixture().recipesHere; },
