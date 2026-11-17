@@ -253,12 +253,15 @@ func (s *Server) readRequest(c net.Conn, v6 bool) (host, port string, asked6, ok
 	}
 	switch req[3] {
 	case 4:
-		if !v6 {
-			reply(c, repAddrNotSupported)
-			return "", "", false, false
-		}
 		var ip [16]byte
 		if _, err := io.ReadFull(c, ip[:]); err != nil {
+			return "", "", false, false
+		}
+		if !v6 {
+			// The port read too: closing with it unread, Windows resets the
+			// connection and the reply can be lost.
+			io.ReadFull(c, ip[:2])
+			reply(c, repAddrNotSupported)
 			return "", "", false, false
 		}
 		host = net.IP(ip[:]).String()
