@@ -1,13 +1,17 @@
-# downloadmanagersquared (DMS²)
+<p align="center"><img src="extension/icons/icon-128.png" width="96" alt=""></p>
 
-**Download one file over all your internet connections at once, and their speeds add up.**
+<h1 align="center">downloadmanagersquared (DMS²)</h1>
 
-[![Latest release](https://img.shields.io/github/v/release/unicrncndms/downloadmanagersquared)](https://github.com/unicrncndms/downloadmanagersquared/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/unicrncndms/downloadmanagersquared/total)](https://github.com/unicrncndms/downloadmanagersquared/releases)
-[![CI](https://github.com/unicrncndms/downloadmanagersquared/actions/workflows/ci.yml/badge.svg)](https://github.com/unicrncndms/downloadmanagersquared/actions/workflows/ci.yml)
-[![Licence: MIT](https://img.shields.io/github/license/unicrncndms/downloadmanagersquared)](LICENSE)
+<p align="center"><b>Download one file over all your internet connections at once, and their speeds add up.</b></p>
 
-**[Download for Windows](https://github.com/unicrncndms/downloadmanagersquared/releases/latest)** · [Install](#install) · [Guide](docs/guide.md) · [Benchmarks](docs/benchmarks/README.md)
+<p align="center">
+<a href="https://github.com/unicrncndms/downloadmanagersquared/releases/latest"><img src="https://img.shields.io/github/v/release/unicrncndms/downloadmanagersquared" alt="Latest release"></a>
+<a href="https://github.com/unicrncndms/downloadmanagersquared/releases"><img src="https://img.shields.io/github/downloads/unicrncndms/downloadmanagersquared/total" alt="Downloads"></a>
+<a href="https://github.com/unicrncndms/downloadmanagersquared/actions/workflows/ci.yml"><img src="https://github.com/unicrncndms/downloadmanagersquared/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/unicrncndms/downloadmanagersquared" alt="Licence: MIT"></a>
+</p>
+
+<p align="center"><b><a href="https://github.com/unicrncndms/downloadmanagersquared/releases/latest">Download for Windows</a></b> · <a href="#install">Install</a> · <a href="docs/guide.md">Guide</a> · <a href="docs/benchmarks/README.md">Benchmarks</a></p>
 
 <p align="center"><img src="docs/img/hero.gif" width="672" alt="Three links added to DMS²: each file fills with squares in four colours, one per connection, and the speeds add up to about 30 MB/s"></p>
 
@@ -20,13 +24,15 @@ For Windows 10/11 with Firefox, LibreWolf, Waterfox or Floorp. Free and open sou
 **1. It adds up connections, per file.**
 Other download managers open many requests over one connection. DMS² fetches the pieces of one file over every connection you have, at the same time. A faster connection takes over more of the work, nothing is downloaded twice, and a download survives crashes, sleep and restarts.
 
+<p align="center"><img src="docs/img/store/hd/01-speed.png" width="800" alt="Downloads window: Ethernet, Wi-Fi and a phone hotspot each fetch squares of the same files, 22 + 12 + 6 = 40 MB/s"></p>
+
 **2. It works with file hosts that give each IP address its own link.**
 Most managers fail here, because a link fetched over one connection doesn't work over another. DMS² opens the site once per connection, repeats the clicks you made the first time, and takes each connection's own link.
 
 **3. It extracts archives while they download, and needs far less disk space.**
 With *Download as folder*, a `.zip`, `.7z` or `.rar` is unpacked as its bytes arrive, and each extracted part of the archive is deleted at once. You get the folder, never the archive. A 100 GB archive that extracts to 140 GB needs about 140 GB of free space instead of 240 GB. Split archives (`.part1.rar`, `.7z.001`, `.z01` …) extract as one, part after part.
 
-<p align="center"><img src="docs/img/folder.png" width="480" alt="Download as folder: a second bar shows the archive being extracted while it downloads"></p>
+<p align="center"><img src="docs/img/store/hd/04-folder.png" width="800" alt="Download as folder: under the download's squares, a green bar shows the zip being extracted while it downloads, 412 of 1,280 files done"></p>
 
 **4. A VPN per connection, without admin rights.**
 Each connection can get its own WireGuard tunnel. The tunnels run inside DMS², so no driver is installed and your other programs aren't affected.
@@ -37,6 +43,8 @@ Only if your connections are really separate lines: your home connection plus a 
 
 - Wi‑Fi and Ethernet to the same router share one line. Together they are no faster than either.
 - A download can't go faster than the server sends. A server that limits each download to a slow speed limits each connection to it too, though DMS² opens several requests per connection.
+
+<p align="center"><img src="docs/img/store/hd/05-connections.png" width="800" alt="Connections settings: Ethernet, Wi-Fi and a phone hotspot listed with their speeds and a Use box each, and a Test if they are separate lines button"></p>
 
 **Measured:** a 1.3 GB file, a Wi‑Fi line and a 5G phone tethered by USB, DMS² 0.8.0.
 
@@ -61,7 +69,7 @@ DMS² then runs in the tray. The extension asks to enable containers, which it u
 
 Then download a file of 100 MB or more as usual, or use *Download with DMS²* on a link's menu. Everything else is in the **[guide](docs/guide.md)**: sites with a link per IP, Download as folder, checksums, settings, VPN, upgrade and uninstall.
 
-<p align="center"><img src="docs/img/settings.png" width="720" alt="Connections & settings: each network connection with its speed, a Use switch and its own settings"></p>
+<p align="center"><img src="docs/img/store/hd/02-toolbar.png" width="800" alt="The DMS² toolbar button opens a panel with every download, its square map and the speed of each connection"></p>
 
 ## Everything else it does
 
@@ -73,6 +81,8 @@ Then download a file of 100 MB or more as usual, or use *Download with DMS²* on
 - **Checksums.** Paste a SHA-256 or MD5, and the file is checked when it finishes.
 - **A queue you control.** Drag downloads into order or use the arrows. Drop a waiting download on a running one to take its place.
 - **IPv6 (experimental, off by default).** A connection with only IPv6, such as some phone tethers, is added up too. Never tried on a real carrier network with NAT64/DNS64 or 464XLAT.
+
+<p align="center"><img src="docs/img/store/hd/03-map.png" width="800" alt="A download's details: each square of the file is coloured by the connection that fetched it, with each connection's requests and speed"></p>
 
 ## Limitations
 
