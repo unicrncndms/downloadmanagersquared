@@ -2,6 +2,7 @@ package resolver
 
 import (
 	"encoding/json"
+	"log"
 	"slices"
 	"sync"
 	"time"
@@ -81,6 +82,7 @@ type job struct {
 	tab                string // the tab the job works in
 	loading, skipped   bool
 	captcha, minimized bool
+	noRecorder         bool // the page script couldn't start recording: what it saved is no recipe
 	timers             map[string]*timer
 	clicked            *clicked
 	mark, lastClick    time.Time
@@ -538,8 +540,12 @@ func (r *Resolver) onLoaded(tab, url string) {
 }
 
 func (r *Resolver) drive(j *job) {
-	if r.d == nil || r.d.Drive(j.tab) != nil {
-		return // e.g. an error page; the overall timer catches a stuck job
+	if r.d == nil {
+		return
+	}
+	if err := r.d.Drive(j.tab); err != nil {
+		log.Printf("resolver: no page script in %s's page: %v", j.host, err) // e.g. an error page; the overall timer catches a stuck job
+		return
 	}
 	switch j.mode {
 	case "record":
@@ -572,13 +578,30 @@ func (r *Resolver) sendRecord(j *job) {
 		prev = j.pages[i-1]
 	}
 	n, of := r.learningPlace(j)
-	r.send(j, map[string]any{"cmd": "record", "ifaceName": j.ifaceName, "prev": prev, "n": n, "of": of, "learn": j.learn, "tokens": j.tokens})
+	tokens := j.tokens
+	if tokens == nil {
+		tokens = defaultTokens // the record bar needs colours (resolver-content.js BAR_CSS)
+	}
+	if err := r.send(j, map[string]any{"cmd": "record", "ifaceName": j.ifaceName, "prev": prev, "n": n, "of": of, "learn": j.learn, "tokens": tokens}); err != nil {
+		log.Printf("resolver: recording on %s didn't start: %v", j.host, err)
+		j.noRecorder = true
+	} else {
+		j.noRecorder = false
+	}
 }
 
-func (r *Resolver) send(j *job, msg any) {
-	if r.d != nil {
-		r.d.Send(j.tab, msg)
+// defaultTokens are lib/accent.js accentTokens("#1d4ed8"), the record bar's
+// colours when the download's browser didn't say its accent.
+var defaultTokens = map[string]map[string]string{
+	"light": {"accent": "#1d4ed8", "accentSoft": "#e8edfb", "onAccent": "#ffffff"},
+	"dark":  {"accent": "#809ce9", "accentSoft": "#2d3445", "onAccent": "#0b1020"},
+}
+
+func (r *Resolver) send(j *job, msg any) error {
+	if r.d == nil {
+		return nil
 	}
+	return r.d.Send(j.tab, msg)
 }
 
 // captchaShown: a captcha needs a person; show the window and hold the timeouts.
@@ -806,6 +829,9 @@ func (r *Resolver) correctPage(j *job) {
 }
 
 func (r *Resolver) saveRecipe(j *job) {
+	if j.noRecorder && len(j.recorded) == 0 {
+		return // nothing was watched: the next connection records again
+	}
 	var wait int64
 	if !j.lastClick.IsZero() {
 		wait = r.clock().Sub(j.lastClick).Milliseconds()

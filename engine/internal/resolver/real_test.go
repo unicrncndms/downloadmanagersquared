@@ -355,3 +355,102 @@ func traced(t *testing.T, ev Events) Events {
 		Message: func(a, b string) { t.Logf("message %s %s", a, b); ev.Message(a, b) },
 	}
 }
+
+// Record in a real browser: the record bar shows (default colours: no accent
+// from the browser), a trusted click on the page's link is recorded as a
+// step, and the caught download ends the job with that recipe saved.
+func TestARealRecording(t *testing.T) {
+	exe, dir := os.Getenv("DMS_CDP_EXE"), os.Getenv("DMS_PAGE_SCRIPT_DIR")
+	if exe == "" || dir == "" {
+		t.Skip("set DMS_CDP_EXE and DMS_PAGE_SCRIPT_DIR")
+	}
+	was := pageScript
+	t.Cleanup(func() { pageScript = was })
+	pageScript = func() (string, error) {
+		ready, err := os.ReadFile(filepath.Join(dir, "lib", "ready.js"))
+		if err != nil {
+			return "", err
+		}
+		content, err := os.ReadFile(filepath.Join(dir, "resolver-content.js"))
+		return prelude + string(ready) + "\n" + string(content), err
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/f":
+			fmt.Fprint(w, `<html><body style="margin:0"><p style="margin-top:200px">Your file</p><a id=go href="/file" style="display:block;width:200px;height:60px;background:#ddd">Free download</a></body></html>`)
+		case "/file":
+			w.Header().Set("Content-Type", "application/zip")
+			w.Header().Set("Content-Disposition", `attachment; filename="f.zip"`)
+			w.Header().Set("Content-Length", fmt.Sprint(20<<20))
+			w.Write(make([]byte, 1<<20))
+		}
+	}))
+	defer srv.Close()
+	port, _ := testSocks(t, srv.Listener.Addr().String())
+	base := "http://dms.test:" + strings.Split(srv.Listener.Addr().String(), ":")[1]
+
+	recipes, _ := OpenRecipes(filepath.Join(t.TempDir(), "recipes.json"))
+	done := make(chan string, 2)
+	opened := make(chan string, 4)
+	var drv *Driver
+	profile := t.TempDir()
+	r := &Resolver{
+		Recipes: recipes, Idle: time.Second,
+		Start: func(ev Events) (*Driver, Browser, error) {
+			ev = traced(t, ev)
+			open := ev.Opened
+			ev.Opened = func(a, b, c string) { opened <- a; open(a, b, c) }
+			d, b, err := Start(exe, profile, ev)
+			drv = d
+			return d, b, err
+		},
+		Hooks: Hooks{
+			Resolved: func(id, iface, url, cookie, referer string) { done <- "resolved " + url },
+			Failed:   func(id, iface, why string) { done <- "failed " + why },
+		},
+	}
+	defer r.Close()
+	r.Request(Request{ID: "d1", Iface: "eth", IfaceName: "Ethernet", PageURL: base + "/f", SocksPort: port})
+	var tab string
+	select {
+	case tab = <-opened:
+	case <-time.After(30 * time.Second):
+		t.Fatal("no window opened")
+	}
+	eval := func(js string) string {
+		res, err := drv.call(drv.session(tab), "Runtime.evaluate", map[string]any{"expression": js, "returnByValue": true})
+		if err != nil {
+			return ""
+		}
+		var v struct {
+			Result struct{ Value any } `json:"result"`
+		}
+		json.Unmarshal(res, &v)
+		return fmt.Sprint(v.Result.Value)
+	}
+	for end := time.Now().Add(20 * time.Second); eval(`!!document.getElementById("dms-resolver-bar")`) != "true"; time.Sleep(200 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("the record bar never showed")
+		}
+	}
+	var rect struct{ X, Y, Width, Height float64 }
+	json.Unmarshal([]byte(eval(`JSON.stringify(document.getElementById("go").getBoundingClientRect())`)), &rect)
+	x, y := rect.X+rect.Width/2, rect.Y+rect.Height/2
+	for _, typ := range []string{"mousePressed", "mouseReleased"} {
+		if _, err := drv.call(drv.session(tab), "Input.dispatchMouseEvent", map[string]any{"type": typ, "x": x, "y": y, "button": "left", "clickCount": 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case s := <-done:
+		if s != "resolved "+base+"/file" {
+			t.Fatal(s)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("no end in 30 s")
+	}
+	rec := recipes.Get("dms.test")
+	if rec == nil || len(rec.Steps) != 1 || rec.Steps[0].ID != "go" {
+		t.Fatalf("recipe %+v, want the one click on #go", rec)
+	}
+}

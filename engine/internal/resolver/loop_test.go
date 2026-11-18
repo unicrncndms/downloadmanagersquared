@@ -248,6 +248,38 @@ func TestAFirstVisitRecordsTheRecipeAndReportsTheLink(t *testing.T) {
 	}
 }
 
+// Without the browser's accent the record bar gets the default colours (the
+// page script can't draw it without them); a page script that can't start
+// recording leaves no recipe, so the next connection records again.
+func TestRecordingWithoutAnAccentAndWithABrokenPageScript(t *testing.T) {
+	g := newRig(t)
+	g.r.Request(req("d1", "wifi", "https://host.example/f"))
+	g.load("tab1", "ctx1", "https://host.example/f")
+	tok, _ := g.sent()["tokens"].(map[string]any)
+	if light, _ := tok["light"].(map[string]any); light["accent"] != "#1d4ed8" {
+		t.Fatalf("record tokens %v, want the default accent", g.sent()["tokens"])
+	}
+
+	g2 := newRig(t)
+	inner := g2.f.reply
+	g2.f.reply = func(m string, p map[string]any) (string, error) {
+		if js, _ := p["expression"].(string); m == "Runtime.evaluate" && strings.Contains(js, `"cmd":"record"`) {
+			return `{"exceptionDetails":{"text":"Uncaught","exception":{"description":"TypeError: x"}}}`, nil
+		}
+		return inner(m, p)
+	}
+	g2.r.Request(req("d1", "wifi", "https://host.example/f"))
+	g2.load("tab1", "ctx1", "https://host.example/f")
+	g2.ev.Caught("tab1", Catch{URL: "https://cdn.example/f.zip"})
+	g2.sync()
+	if !strings.Contains(g2.said(), "resolved d1") {
+		t.Fatal("the link was lost")
+	}
+	if rec := g2.r.Recipes.Get("host.example"); rec != nil {
+		t.Fatalf("saved %+v from a recording that never watched", rec)
+	}
+}
+
 func recipeFor(g *rig, host string, waits ...int64) {
 	rec := &Recipe{DownloadWait: 5000}
 	for i, w := range waits {
