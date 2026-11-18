@@ -130,6 +130,7 @@ type pageInfo struct {
 	Cookies []resolver.Cookie `json:"cookies"`
 	Pages   []string          `json:"pages"`
 	Tokens  json.RawMessage   `json:"tokens"`
+	Error   string            `json:"error,omitempty"` // the browser couldn't say: why
 }
 
 // pageInfoWait is how long a resolve waits for the browser's pageInfo.
@@ -188,6 +189,10 @@ func (e *Engine) askPageInfo(browser, id, pageURL, store string) (pageInfo, bool
 	c.Emit("pageInfo", map[string]string{"id": id, "pageUrl": pageURL, "cookieStore": store})
 	select {
 	case info := <-ch:
+		if info.Error != "" {
+			log.Printf("no page info for %s from its browser (%s): resolving with the download's cookies", id, info.Error)
+			return pageInfo{}, false
+		}
 		return info, true
 	case <-time.After(pageInfoWait):
 		log.Printf("no page info for %s from its browser: resolving with the download's cookies", id)

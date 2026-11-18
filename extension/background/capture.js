@@ -38,7 +38,8 @@ const Capture = {
     // The engine resolves this browser's downloads in a browser of its own
     // (Chromium): it asks for the landing page's login and the record bar's
     // way back, and says where a recorded first click was.
-    Engine.on("pageInfo", (r) => this.pageInfo(r).catch(() => {}));
+    // A failure is said, so the engine logs why and goes on at once with the download's cookies.
+    Engine.on("pageInfo", (r) => this.pageInfo(r).catch((e) => Engine.call("pageInfo", { id: r.id, error: String((e && e.message) || e) }).catch(() => {})));
     Engine.on("stepBack", ({ id, url }) => this.stored.then(() => this.learnStepBack(id, url)));
     // handOff waits for it: a read finishing late would replace the pages it just recorded.
     this.stored = browser.storage.local.get(["stepBacks", "pagesById"]).then((s) => {
