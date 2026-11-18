@@ -76,6 +76,4 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           echo "::notice::$env:TAG is submitted to AMO for review. The release stays a draft. Once approved, run 'Publish with the AMO-signed extension' on this tag: gh workflow run release-signed.yml --ref $env:TAG -f tag=$env:TAG"
 
-      # TODO(Robin): upload dist/downloadmanagersquared-chromium.zip to the Chrome Web Store
-      # here (needs OAuth client secrets and a refresh token as repository secrets). Until
-      # then the Chromium zip on the release is uploaded to the dashboard by hand.
+      # The Chrome Web Store gets the Chromium zip from release-signed.yml, once the release is public.
