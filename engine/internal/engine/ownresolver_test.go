@@ -29,6 +29,18 @@ func (f *fakeOwn) got() []resolver.Request {
 	return append([]resolver.Request{}, f.reqs...)
 }
 
+// await is the resolver's requests once there are n, within 3 s.
+func (f *fakeOwn) await(t *testing.T, n int) []resolver.Request {
+	t.Helper()
+	for end := time.Now().Add(3 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		if r := f.got(); len(r) >= n {
+			return r
+		}
+	}
+	t.Fatalf("the engine's resolver got %d requests, want %d", len(f.got()), n)
+	return nil
+}
+
 // With only Chrome connected a resolve runs in the engine's browser, with the
 // download's cookies as the page's login; a Firefox download with Firefox
 // connected still goes to Firefox, and Firefox's hello doesn't take the
@@ -52,16 +64,41 @@ func TestChromiumDownloadsResolveInTheEnginesBrowser(t *testing.T) {
 	}
 	id := res.(map[string]string)["id"]
 
+	// Chrome is asked for the page's login, way back and accent, and its answer goes to the resolver.
 	e.RequestResolve(id, "eth", "https://site.test/a", chromeExe)
-	reqs := own.got()
-	if len(reqs) != 1 || reqs[0].ID != id || reqs[0].PageURL != "https://site.test/a" {
+	if !chrome.next("pageInfo", 2*time.Second) {
+		t.Fatal("Chrome's extension wasn't asked for the page's cookies")
+	}
+	info, _ := json.Marshal(pageInfo{ID: id, Cookies: []resolver.Cookie{{Name: "login", Value: "x", URL: "https://site.test/"}},
+		Pages: []string{"https://site.test/", "https://site.test/a"}, Tokens: json.RawMessage(`{"accent":"#123456"}`)})
+	if _, err := e.Call(chrome.conn, "pageInfo", info); err != nil {
+		t.Fatal(err)
+	}
+	reqs := own.await(t, 1)
+	if reqs[0].ID != id || reqs[0].PageURL != "https://site.test/a" {
 		t.Fatalf("the engine's resolver got %+v", reqs)
 	}
-	if c := reqs[0].Cookies; len(c) != 2 || c[0].Name != "sid" || c[0].Value != "1" || c[0].Domain != "site.test" {
-		t.Fatalf("cookies %+v, want the download's for site.test", c)
+	if c := reqs[0].Cookies; len(c) != 1 || c[0].Name != "login" || len(reqs[0].Pages) != 2 || string(reqs[0].Tokens.(json.RawMessage)) != `{"accent":"#123456"}` {
+		t.Fatalf("got cookies %+v, pages %v, tokens %v: want Chrome's", c, reqs[0].Pages, reqs[0].Tokens)
 	}
 	if chrome.next("resolve", 300*time.Millisecond) {
 		t.Fatal("Chrome's extension got a resolve")
+	}
+
+	// Without an answer in time, the download's own cookies are the login.
+	old := pageInfoWait
+	pageInfoWait = 100 * time.Millisecond
+	t.Cleanup(func() { pageInfoWait = old })
+	e.RequestResolve(id, "wifi", "https://site.test/a", chromeExe)
+	reqs = own.await(t, 2)
+	if c := reqs[1].Cookies; len(c) != 2 || c[0].Name != "sid" || c[0].Value != "1" || c[0].Domain != "site.test" {
+		t.Fatalf("cookies %+v, want the download's for site.test", c)
+	}
+
+	// A recorded first click on an earlier page goes back to Chrome's capture.
+	e.ownHooks().LearnStepBack(id, "https://site.test/")
+	if !chrome.next("stepBack", 2*time.Second) {
+		t.Fatal("Chrome wasn't told where the first click was")
 	}
 
 	firefox := fakeBrowserExe(t, "firefox.exe")
@@ -73,7 +110,7 @@ func TestChromiumDownloadsResolveInTheEnginesBrowser(t *testing.T) {
 	if !ff.next("resolve", 2*time.Second) {
 		t.Fatal("Firefox's extension didn't get its download's resolve")
 	}
-	if n := len(own.got()); n != 1 {
+	if n := len(own.got()); n != 2 {
 		t.Fatalf("the engine's resolver got %d resolves, want only Chrome's", n)
 	}
 

@@ -67,10 +67,11 @@ type Engine struct {
 	own         ownResolver
 	ownLearning map[string]bool
 	ownHosts    map[string]bool
-	started     map[string]time.Time // browsers started for a resolve, by exe, so not twice at once
-	ipv6Only    []string             // adapters with only IPv6, left out while IPv6 is off: Settings hints at them
-	userAgent   string               // the browser's, from its latest hello; not saved
-	browser     string               // the browser's exe, from its latest hello; not saved
+	pageInfos   map[string][]chan pageInfo // download id -> the resolves waiting for its browser's pageInfo
+	started     map[string]time.Time       // browsers started for a resolve, by exe, so not twice at once
+	ipv6Only    []string                   // adapters with only IPv6, left out while IPv6 is off: Settings hints at them
+	userAgent   string                     // the browser's, from its latest hello; not saved
+	browser     string                     // the browser's exe, from its latest hello; not saved
 
 	// Also under mu.
 	window       Window // the Downloads window; nil until SetWindow
@@ -203,6 +204,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		groupSaid:   map[string]bool{},
 		learning:    map[string]*ipc.Conn{},
 		ownLearning: map[string]bool{},
+		pageInfos:   map[string][]chan pageInfo{},
 		started:     map[string]time.Time{},
 		mapPort:     portmap.Map,
 		quit:        make(chan struct{}),

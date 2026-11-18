@@ -422,6 +422,7 @@ var methods = map[string]handler{
 		e.mu.Unlock()
 		return nil
 	}),
+	"pageInfo": ack(func(e *Engine, p pageInfo) error { e.gotPageInfo(p); return nil }),
 	"recipeHosts": on(func(e *Engine, c *ipc.Conn, p recipeHostsParams) (any, error) {
 		hosts := make(map[string]bool, len(p.Hosts))
 		for _, h := range p.Hosts {

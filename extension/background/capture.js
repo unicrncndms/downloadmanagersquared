@@ -35,6 +35,11 @@ const Capture = {
       const h = tab.openerTabId !== undefined && this.history.get(tab.openerTabId);
       if (h) this.history.set(tab.id, h.slice());
     });
+    // The engine resolves this browser's downloads in a browser of its own
+    // (Chromium): it asks for the landing page's login and the record bar's
+    // way back, and says where a recorded first click was.
+    Engine.on("pageInfo", (r) => this.pageInfo(r).catch(() => {}));
+    Engine.on("stepBack", ({ id, url }) => this.stored.then(() => this.learnStepBack(id, url)));
     // handOff waits for it: a read finishing late would replace the pages it just recorded.
     this.stored = browser.storage.local.get(["stepBacks", "pagesById"]).then((s) => {
       this.stepBacks = s.stepBacks || {};
@@ -193,6 +198,24 @@ const Capture = {
     if (n === null) return;
     this.stepBacks[hostOf(pages[pages.length - 1])] = n;
     browser.storage.local.set({ stepBacks: this.stepBacks });
+  },
+
+  // pageInfo answers the engine: this browser's cookies for the landing page
+  // (none from a private window: its login stays in it), the download's page
+  // history and the accent.
+  async pageInfo({ id, pageUrl, cookieStore }) {
+    await this.stored;
+    let cookies = [];
+    if (cookieStore !== "1" && cookieStore !== "firefox-private") {
+      const q = { url: pageUrl, ...(cookieStore && { storeId: cookieStore }) };
+      try {
+        cookies = await browser.cookies.getAll({ ...q, partitionKey: {} });
+      } catch (e) {
+        try { cookies = await browser.cookies.getAll(q); } catch (e2) { /* none */ }
+      }
+    }
+    const tokens = accentTokens(pageAccent(Engine.settings)) || accentTokens("#1d4ed8");
+    await Engine.call("pageInfo", { id, cookies: cookies.map(cdpCookie), pages: this.pagesById[id] || [], tokens });
   },
 
   // cookie: the header the browser sent with the download's request; without

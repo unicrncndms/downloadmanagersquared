@@ -74,3 +74,46 @@ test("Firefox: menus are still made at every start, and the blocking hook is reg
   assert.deepEqual(named(b, "contextMenus.create").map((c) => c[1].id), ["dms-link", "dms-page"]);
   assert.ok(b.listeners["webRequest.onHeadersReceived"]);
 });
+
+// The engine resolves Chrome's downloads in a browser of its own: Chrome hands it the landing page's
+// login (a host-only cookie by its address), the download's page history and the accent.
+test("Chromium: pageInfo answers with the page's cookies, pages and accent; a private window's login stays", async () => {
+  const jar = { 0: [
+    { name: "sid", value: "1", domain: "site.test", hostOnly: true, path: "/", secure: true, httpOnly: true, expirationDate: 2000000000 },
+    { name: "pref", value: "x", domain: ".site.test", hostOnly: false, path: "/" },
+  ] };
+  const b = load({ chromium: true, cookieJar: jar });
+  await b.settle();
+  b.Capture.pagesById.d1 = ["https://site.test/", "https://site.test/get"];
+  b.Engine.emit("pageInfo", { id: "d1", pageUrl: "https://site.test/get", cookieStore: "0" });
+  await b.settle();
+  const said = b.engine.filter((c) => c.method === "pageInfo");
+  assert.equal(said.length, 1);
+  const p = said[0].params;
+  assert.equal(p.id, "d1");
+  assert.deepEqual(p.cookies, [
+    { name: "sid", value: "1", path: "/", secure: true, httpOnly: true, expires: 2000000000, url: "https://site.test/" },
+    { name: "pref", value: "x", path: "/", secure: false, httpOnly: false, domain: ".site.test" },
+  ]);
+  assert.deepEqual(p.pages, ["https://site.test/", "https://site.test/get"]);
+  assert.ok(p.tokens && Object.keys(p.tokens).length > 0, "no accent tokens");
+
+  b.Engine.emit("pageInfo", { id: "d1", pageUrl: "https://site.test/get", cookieStore: "1" });
+  await b.settle();
+  assert.deepEqual(b.engine.filter((c) => c.method === "pageInfo")[1].params.cookies, []);
+});
+
+test("Chromium: a stepBack from the engine is learned as a recording in this browser would be", async () => {
+  const b = load({ chromium: true });
+  await b.settle();
+  b.Capture.pagesById.d1 = ["https://site.test/", "https://site.test/a", "https://site.test/get"];
+  b.Engine.emit("stepBack", { id: "d1", url: "https://site.test/" });
+  await b.settle();
+  const want = { ...b.Capture.stepBacks };
+  const c = load({ chromium: true });
+  await c.settle();
+  c.Capture.pagesById.d1 = b.Capture.pagesById.d1;
+  c.Capture.learnStepBack("d1", "https://site.test/");
+  assert.deepEqual(want, c.Capture.stepBacks);
+  assert.ok(Object.keys(want).length === 1, "nothing learned");
+});

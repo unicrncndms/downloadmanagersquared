@@ -87,6 +87,17 @@ async function copyCookies(url, from, to) {
 
 // Fallback where no request passed by (context menu, browser downloads): the
 // cookies this container holds for the URL, first-party filtered.
+// A cookie as the DevTools protocol sets it in the engine's own browser: a
+// host-only one by its address, so it isn't widened to the domain's subdomains.
+function cdpCookie(c) {
+  const host = c.domain.replace(/^\./, "");
+  const out = { name: c.name, value: c.value, path: c.path || "/", secure: !!c.secure, httpOnly: !!c.httpOnly };
+  if (c.expirationDate) out.expires = c.expirationDate;
+  if (c.hostOnly) out.url = `${c.secure ? "https" : "http"}://${host}${c.path || "/"}`;
+  else out.domain = c.domain;
+  return out;
+}
+
 async function cookieHeader(url, storeId) {
   let cookies = [];
   // Chromium rejects an undefined storeId key and firstPartyDomain; only a browser with containers has the latter.

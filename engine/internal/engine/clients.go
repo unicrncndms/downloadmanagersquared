@@ -71,7 +71,7 @@ func (e *Engine) RequestResolve(id, ifaceID, pageURL, browser string) {
 	log.Printf("resolve %s via %s", id, req.IfaceName)
 	switch {
 	case req.Own:
-		own.Request(e.ownRequest(req))
+		go e.startOwn(own, req)
 	case c != nil:
 		c.Emit("resolve", req)
 	case start:
@@ -113,7 +113,7 @@ func (e *Engine) RecordRecipe(id string) error {
 		own := e.own
 		e.mu.Unlock()
 		log.Printf("recording a recipe for %s via %s in the engine's browser", id, req.IfaceName)
-		own.Request(e.ownRequest(req))
+		go e.startOwn(own, req)
 		return nil
 	}
 	c := e.extensionForLocked(st.Browser)

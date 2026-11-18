@@ -213,6 +213,7 @@ func (d *Driver) Show(target string, b Bounds, focus bool) error {
 type Cookie struct {
 	Name     string  `json:"name"`
 	Value    string  `json:"value"`
+	URL      string  `json:"url,omitempty"` // a host-only cookie: set for this address, not its domain
 	Domain   string  `json:"domain,omitempty"`
 	Path     string  `json:"path,omitempty"`
 	Secure   bool    `json:"secure,omitempty"`
