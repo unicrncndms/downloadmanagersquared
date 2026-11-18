@@ -7,6 +7,9 @@
 const EFFECT_WAIT = 2000; // ms a click has to show an effect
 const MAX_CLICKS = 5;     // per step, before asking for help
 const POPUP_GRACE = 4000; // ms a new tab on another site has to start a download
+// ms the page after a load has to report a captcha again before the captcha
+// counts as solved: longer than resolver-content.js's CAPTCHA_GRACE (5 s).
+const CAPTCHA_SETTLE = 8000;
 
 // Whether an element can be clicked now, from generic DOM state only (never
 // its text): visible and not covered by another element, not disabled (also

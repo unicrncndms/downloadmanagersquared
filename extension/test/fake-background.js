@@ -95,7 +95,7 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
         return w;
       }),
       get: (wid) => (shared.windows.has(wid) ? Promise.resolve(shared.windows.get(wid)) : Promise.reject(new Error("no window"))),
-      update: rec("windows.update"),
+      update: rec("windows.update", (wid, o) => { const w = shared.windows.get(wid); if (w && o.state) w.state = o.state; }),
       remove: rec("windows.remove", (wid) => { shared.windows.delete(wid); }),
       getLastFocused: rec("windows.getLastFocused", null),
       onRemoved: ev("windows.onRemoved"),

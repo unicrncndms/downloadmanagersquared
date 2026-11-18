@@ -377,6 +377,50 @@ func TestACaptchaShowsTheWindowAndHoldsTheBudgetUntilSolved(t *testing.T) {
 	}
 }
 
+// A challenge page that reloads itself while a person solves it: the window
+// is never moved, sized, raised or minimized under them, and there is one
+// notification. Only a page that reports no captcha in time counts as solved.
+func TestACaptchaThatReloadsIsLeftAlone(t *testing.T) {
+	// Recording: the window is the person's from the start.
+	g := newRig(t)
+	g.r.Request(req("d1", "wifi", "https://host.example/f"))
+	g.load("tab1", "ctx1", "https://host.example/f")
+	g.said()
+	bounds, raised := g.count("Browser.setWindowBounds"), g.count("Target.activateTarget")
+	for range 3 {
+		g.msg("tab1", map[string]any{"type": "captcha"})
+		g.load("tab1", "ctx1", "https://host.example/f")
+		g.advance(6 * time.Second)
+	}
+	if g.count("Browser.setWindowBounds") != bounds || g.count("Target.activateTarget") != raised {
+		t.Fatal("the record window was touched during the captcha")
+	}
+	if s := g.said(); strings.Count(s, "solve a captcha") != 1 {
+		t.Fatalf("notifications: %q, want one", s)
+	}
+
+	// Replaying: shown once for the captcha, then left alone until a page has none.
+	g = newRig(t)
+	recipeFor(g, "host.example", 1000)
+	g.r.Request(req("d1", "wifi", "https://host.example/f"))
+	g.load("tab1", "ctx1", "https://host.example/f")
+	g.msg("tab1", map[string]any{"type": "captcha"})
+	bounds = g.count("Browser.setWindowBounds")
+	for range 3 {
+		g.load("tab1", "ctx1", "https://host.example/f")
+		g.advance(6 * time.Second)
+		g.msg("tab1", map[string]any{"type": "captcha"})
+	}
+	if g.count("Browser.setWindowBounds") != bounds || g.count("Target.activateTarget") != 1 {
+		t.Fatal("the captcha window was moved or minimized while the challenge reloaded")
+	}
+	g.load("tab1", "ctx1", "https://host.example/g")
+	g.advance(9 * time.Second)
+	if g.count("Browser.setWindowBounds") != bounds+1 {
+		t.Fatal("not minimized once a page came without a captcha")
+	}
+}
+
 func TestAClickThatOpensAnAdTabClosesItAndOneOnTheSameSiteIsFollowed(t *testing.T) {
 	g := newRig(t)
 	recipeFor(g, "host.example", 1000, 1000)

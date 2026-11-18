@@ -190,8 +190,12 @@ const Resolver = {
     };
   },
 
+  // Brings a minimized window out, once. A window already shown is the
+  // person's: it isn't moved, sized or raised again (a captcha breaks under that).
   async show(job, extra) {
     try {
+      const win = await browser.windows.get(job.windowId);
+      if (win.state !== "minimized") return;
       await browser.windows.update(job.windowId, { state: "normal" });
       await browser.windows.update(job.windowId, { ...this.shownBounds(), focused: true, ...extra });
     } catch (e) { /* window already closed */ }
@@ -331,9 +335,10 @@ const Resolver = {
       job.lastUrl = tab.url;
       job.mark = Date.now();
       if (job.mode === "record") this.touch(job);
-      // A new page means the captcha (if any) is behind us; the new page's script
-      // reports straight away if there is another one.
-      if (job.captcha) this.captchaDone(job);
+      // A new page may mean the captcha is behind us, or be the challenge
+      // reloading itself: done only if the new page reports none in time.
+      // Meanwhile the window stays as it is.
+      if (job.captcha) this.setTimer(job, "captchaGone", CAPTCHA_SETTLE, "captchaGone");
       this.drive(job);
     }
     this.save();
@@ -368,7 +373,7 @@ const Resolver = {
 
   // A captcha needs a person: show the window and hold all timeouts until it's solved.
   captchaShown(job) {
-    if (job.captcha) return;
+    if (job.captcha) return this.clearTimer(job, "captchaGone"); // the page after a reload has it still
     job.captcha = true;
     this.clearTimer(job, "budget");
     this.clearTimer(job, "effect");
@@ -378,7 +383,12 @@ const Resolver = {
     notify("DMS² needs you to solve a captcha", `${job.host} asks for a captcha on ${job.ifaceName}. The window is open; DMS² continues once it's solved.`);
   },
 
+  captchaGone(job) {
+    if (job.captcha) this.captchaDone(job);
+  },
+
   captchaDone(job) {
+    this.clearTimer(job, "captchaGone");
     job.captcha = false;
     if (job.mode !== "replay") {
       this.touch(job);

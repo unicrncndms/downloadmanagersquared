@@ -414,8 +414,10 @@ func (r *Resolver) touch(j *job, why string) {
 	r.setTimer(j, "overall", recordIdle, func() { r.fail(j, why) })
 }
 
+// show brings a minimized window out, once. A window already shown is the
+// person's: it isn't moved, sized or raised again (a captcha breaks under that).
 func (r *Resolver) show(j *job, focus bool) {
-	if r.d != nil {
+	if r.d != nil && j.minimized {
 		r.d.Show(j.tab, r.screen(), focus)
 		j.minimized = false
 	}
@@ -533,9 +535,16 @@ func (r *Resolver) onLoaded(tab, url string) {
 	if j.mode == "record" {
 		r.touch(j, "")
 	}
-	// A new page means the captcha (if any) is behind us; its script says if there is another.
+	// A new page may mean the captcha is behind us, or be the challenge
+	// reloading itself: done only if the new page reports none in time (its
+	// script waits CAPTCHA_GRACE before it does). Meanwhile the window stays
+	// as it is: moving or minimizing it under the person solving breaks it.
 	if j.captcha {
-		r.captchaDone(j)
+		r.setTimer(j, "captchaGone", captchaSettle, func() {
+			if j.captcha {
+				r.captchaDone(j)
+			}
+		})
 	}
 	r.drive(j)
 }
@@ -609,6 +618,7 @@ func (r *Resolver) send(j *job, msg any) error {
 // captchaShown: a captcha needs a person; show the window and hold the timeouts.
 func (r *Resolver) captchaShown(j *job) {
 	if j.captcha {
+		r.clearTimer(j, "captchaGone") // the page after a reload has it still
 		return
 	}
 	j.captcha = true
@@ -632,6 +642,7 @@ func (r *Resolver) markCaptcha(j *job) {
 }
 
 func (r *Resolver) captchaDone(j *job) {
+	r.clearTimer(j, "captchaGone")
 	j.captcha = false
 	r.markCaptcha(j)
 	if j.mode != "replay" {

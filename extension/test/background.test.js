@@ -490,3 +490,51 @@ test("a container stays fenced until its remove resolved, and a failed remove is
   assert.equal(b.Resolver.containers.eth, undefined);
   assert.equal((b.listeners["proxy.onRequest"] || []).length, 0);
 });
+
+// A challenge page that reloads itself while a person solves it: the window is
+// never moved, raised or minimized under them. Only a page that reports no
+// captcha in time counts as solved (as engine/internal/resolver's loop does).
+test("a captcha that reloads is left alone, recording or replaying", async () => {
+  const b = load();
+  await b.settle();
+  b.connect();
+  const updates = () => b.calls.filter((c) => c[0] === "windows.update").map((c) => c[2]);
+  const reload = async (job) => { b.fire("tabs.onUpdated", job.tabId, { status: "complete" }, { id: job.tabId, url: PAGE }); await b.settle(); };
+
+  const rec = await recording(b);
+  for (let i = 0; i < 3; i++) {
+    message(b, rec, { type: "captcha" });
+    await reload(rec);
+    b.advance(6000);
+    await b.settle();
+  }
+  assert.deepEqual(updates(), [], "the record window was touched");
+  assert.equal(b.calls.filter((c) => c[0] === "notifications.create" && /captcha/.test(c[1].title)).length, 1);
+
+  const c = load();
+  await c.settle();
+  c.connect();
+  c.Resolver.recipes["site.test"] = { steps: [{ tag: "a", text: "Next", wait: 1000 }], downloadWait: 1000 };
+  c.Engine.emit("resolve", { id: "d2", iface: "eth", ifaceName: "Ethernet", pageUrl: PAGE });
+  await c.settle();
+  const job = c.Resolver.jobs.get("d2|eth");
+  assert.equal(job.mode, "replay");
+  const cupdates = () => c.calls.filter((x) => x[0] === "windows.update").map((x) => x[2].state).filter(Boolean);
+  message(c, job, { type: "captcha" });
+  await c.settle();
+  assert.deepEqual(cupdates(), ["normal", "normal"], "shown once for the captcha");
+  for (let i = 0; i < 3; i++) {
+    c.fire("tabs.onUpdated", job.tabId, { status: "complete" }, { id: job.tabId, url: PAGE });
+    await c.settle();
+    c.advance(6000);
+    await c.settle();
+    message(c, job, { type: "captcha" });
+    await c.settle();
+  }
+  assert.deepEqual(cupdates(), ["normal", "normal"], "moved or minimized while the challenge reloaded");
+  c.fire("tabs.onUpdated", job.tabId, { status: "complete" }, { id: job.tabId, url: PAGE });
+  await c.settle();
+  c.advance(9000);
+  await c.settle();
+  assert.deepEqual(cupdates(), ["normal", "normal", "minimized"], "not minimized once a page came without a captcha");
+});
