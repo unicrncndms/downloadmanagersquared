@@ -24,6 +24,9 @@ var flags = []string{
 	"--disable-background-timer-throttling",
 	"--disable-renderer-backgrounding",
 	"--disable-backgrounding-occluded-windows",
+	// The replayed clicks are the page script's, not the user's: without this a
+	// click that opens a tab is blocked (18). Only this browser, never the user's.
+	"--disable-popup-blocking",
 }
 
 // Exe picks the browser to drive: Chrome, else Edge (every Windows 10/11 has
