@@ -50,7 +50,9 @@ function applyTheme(settings) {
 // An (i)'s note opens to the right, or to the left when the right has less room.
 function sideInfo(e) {
   const i = e.target.closest && e.target.closest(".info");
-  if (i) { const r = i.getBoundingClientRect(); i.classList.toggle("left", innerWidth - r.left < r.right); }
+  // By the body's width, not the window's: Chrome sizes a popup to its content, so a tip that
+  // stuck out would widen the window, flip the side and shrink it again, many times a second.
+  if (i) { const r = i.getBoundingClientRect(); i.classList.toggle("left", document.body.clientWidth - r.left < r.right); }
 }
 addEventListener("pointerover", sideInfo);
 addEventListener("focusin", sideInfo);
