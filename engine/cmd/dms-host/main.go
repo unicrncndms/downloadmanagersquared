@@ -202,6 +202,15 @@ func connect() (net.Conn, error) {
 	if c, err := ipc.Dial(time.Second); err == nil {
 		return c, nil
 	}
+	// An update or uninstall quit the engine: starting the old exe now would
+	// lock it against the copy or the removal. An update starts the new
+	// engine itself; after an uninstall there is none to start.
+	if winutil.WaitUpdate(updateWait) {
+		if c, err := ipc.Dial(time.Second); err == nil {
+			return c, nil
+		}
+		return nil, errors.New("DMS² was being updated or removed: reconnect to the new engine")
+	}
 	if err := startEngine(); err != nil {
 		return nil, err
 	}
@@ -217,6 +226,9 @@ func connect() (net.Conn, error) {
 	}
 	return nil, lastErr
 }
+
+// updateWait is how long the host waits for an update before giving up.
+const updateWait = 60 * time.Second
 
 // startEngine launches dms-engine.exe from this directory, breaking away from
 // the browser's job object so the engine survives the browser closing.

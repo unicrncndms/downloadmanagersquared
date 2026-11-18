@@ -42,6 +42,7 @@ func installFrom(l install.Layout, src string, first *install.Options) error {
 	if first == nil && !updateNow() {
 		return winutil.ErrShown // later: nothing is touched
 	}
+	defer winutil.HoldUpdate()() // no dms-host restarts the old engine before the copy
 	if !quitEngine() && len(winutil.ProcessesOf(l.Engine())) > 0 {
 		// An engine from before the quit method and the per-user pipe.
 		winutil.Dialog(title, "An older DMS² engine is running. Quit it from its tray icon (right-click → Quit), then press OK to update.",
@@ -76,6 +77,7 @@ func uninstall(l install.Layout) {
 			}
 		},
 		Remove: func(wipe bool) error {
+			defer winutil.HoldUpdate()() // no dms-host restarts the engine being removed
 			if !quitEngine() {
 				for _, pid := range winutil.ProcessesOf(l.Engine()) {
 					winutil.Dialog(title, "Quit DMS² from its tray icon (right-click → Quit), then press OK.", windows.MB_OK|windows.MB_ICONINFORMATION)
