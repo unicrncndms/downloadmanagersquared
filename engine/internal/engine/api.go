@@ -57,7 +57,6 @@ type pageParams struct {
 	PageURL string `json:"pageUrl"`
 }
 
-
 type resolvedParams struct {
 	ID      string `json:"id"`
 	Iface   string `json:"iface"`
