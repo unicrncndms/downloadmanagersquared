@@ -622,6 +622,7 @@ func (r *Resolver) captchaShown(j *job) {
 		return
 	}
 	j.captcha = true
+	log.Printf("resolver: %s via %s: captcha, asking for help", j.host, j.ifaceName)
 	r.markCaptcha(j)
 	r.clearTimer(j, "budget")
 	r.clearTimer(j, "effect")
@@ -644,6 +645,7 @@ func (r *Resolver) markCaptcha(j *job) {
 func (r *Resolver) captchaDone(j *job) {
 	r.clearTimer(j, "captchaGone")
 	j.captcha = false
+	log.Printf("resolver: %s via %s: captcha solved", j.host, j.ifaceName)
 	r.markCaptcha(j)
 	if j.mode != "replay" {
 		r.touch(j, "")

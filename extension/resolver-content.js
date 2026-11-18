@@ -22,9 +22,9 @@
   // Invisible reCAPTCHA's corner badge: it only gets an answer when you press the
   // site's own button, so it never needs (or gets) your attention.
   const BACKGROUND_CAPTCHA = ".grecaptcha-badge, iframe[src*='size=invisible']";
-  // Many captchas pass by themselves within a second or two; only ask for help
-  // when one is still there after this long.
-  const CAPTCHA_GRACE = 5000;
+  // Many captchas pass by themselves, some only after several seconds (a
+  // Turnstile in a slow VM); only ask for help when one is still there after this long.
+  const CAPTCHA_GRACE = 12000;
   let recording = false;
   let captcha = false;
   let pendingSince = 0;

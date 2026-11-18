@@ -415,7 +415,7 @@ func TestACaptchaThatReloadsIsLeftAlone(t *testing.T) {
 		t.Fatal("the captcha window was moved or minimized while the challenge reloaded")
 	}
 	g.load("tab1", "ctx1", "https://host.example/g")
-	g.advance(9 * time.Second)
+	g.advance(16 * time.Second)
 	if g.count("Browser.setWindowBounds") != bounds+1 {
 		t.Fatal("not minimized once a page came without a captcha")
 	}

@@ -47,8 +47,8 @@ const (
 	popupGrace = 4 * time.Second // a new tab on another site has to start a download
 	// After a page load during a captcha, how long the new page has to report
 	// the captcha again before it counts as solved: longer than the page
-	// script's CAPTCHA_GRACE (5 s) and the time to put the script in.
-	captchaSettle = 8 * time.Second
+	// script's CAPTCHA_GRACE (12 s) and the time to put the script in.
+	captchaSettle = 15 * time.Second
 )
 
 func ms(n int64) time.Duration { return time.Duration(n) * time.Millisecond }

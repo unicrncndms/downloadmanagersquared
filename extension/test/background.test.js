@@ -534,7 +534,7 @@ test("a captcha that reloads is left alone, recording or replaying", async () =>
   assert.deepEqual(cupdates(), ["normal", "normal"], "moved or minimized while the challenge reloaded");
   c.fire("tabs.onUpdated", job.tabId, { status: "complete" }, { id: job.tabId, url: PAGE });
   await c.settle();
-  c.advance(9000);
+  c.advance(16000);
   await c.settle();
   assert.deepEqual(cupdates(), ["normal", "normal", "minimized"], "not minimized once a page came without a captcha");
 });
