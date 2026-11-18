@@ -27,6 +27,7 @@ import (
 	"downloadmanagersquared/engine/internal/portmap"
 	"downloadmanagersquared/engine/internal/queue"
 	"downloadmanagersquared/engine/internal/rate"
+	"downloadmanagersquared/engine/internal/resolver"
 	"downloadmanagersquared/engine/internal/torrent"
 	"downloadmanagersquared/engine/internal/update"
 	"downloadmanagersquared/engine/internal/vpn"
@@ -62,11 +63,10 @@ type Engine struct {
 	resolves  map[string]resolveReq // waiting for an extension to pick them up
 	learning  map[string]*ipc.Conn  // download id -> the extension recording its recipe (Record recipe)
 	// The engine's own resolver for Chromium downloads (ownresolver.go): nil
-	// without a Chromium. ownLearning are the ids it records a recipe for,
-	// ownHosts the hosts it has a recipe for.
+	// without a Chromium. ownLearning are the ids it records a recipe for.
 	own         ownResolver
 	ownLearning map[string]bool
-	ownHosts    map[string]bool
+	recipes     *resolver.Recipes          // every browser's, see recipes.go
 	pageInfos   map[string][]chan pageInfo // download id -> the resolves waiting for its browser's pageInfo
 	started     map[string]time.Time       // browsers started for a resolve, by exe, so not twice at once
 	ipv6Only    []string                   // adapters with only IPv6, left out while IPv6 is off: Settings hints at them
@@ -214,6 +214,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		quitReq:     make(chan struct{}),
 		pushReq:     make(chan struct{}, 1),
 	}
+	e.recipes = openRecipes(dir)
 	e.keepingNow()
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
 	e.unclean = markRunning(dir)

@@ -35,14 +35,9 @@ func (e *Engine) startOwnResolver() {
 		log.Printf("no Chrome or Edge: only a Firefox-based browser can resolve")
 		return
 	}
-	recipes, err := resolver.OpenRecipes(filepath.Join(e.dir, "recipes.json"))
-	if err != nil {
-		log.Printf("the engine's recipes can't be read (%v): starting without them", err)
-		recipes, _ = resolver.OpenRecipes("")
-	}
 	profile := filepath.Join(e.dir, "resolver-profile")
 	r := &resolver.Resolver{
-		Recipes: recipes,
+		Recipes: e.recipes,
 		Hooks:   e.ownHooks(),
 		Start: func(ev resolver.Events) (*resolver.Driver, resolver.Browser, error) {
 			return resolver.Start(exe, profile, ev)
@@ -51,16 +46,7 @@ func (e *Engine) startOwnResolver() {
 	}
 	e.mu.Lock()
 	e.own = r
-	e.ownHosts = hostSet(recipes.Hosts())
 	e.mu.Unlock()
-}
-
-func hostSet(hosts []string) map[string]bool {
-	m := make(map[string]bool, len(hosts))
-	for _, h := range hosts {
-		m[h] = true
-	}
-	return m
 }
 
 func (e *Engine) ownHooks() resolver.Hooks {
@@ -91,11 +77,7 @@ func (e *Engine) ownHooks() resolver.Hooks {
 				d.SetPageURL(page)
 			}
 		},
-		RecipeHosts: func(hosts []string) {
-			e.mu.Lock()
-			e.ownHosts = hostSet(hosts)
-			e.mu.Unlock()
-		},
+		RecipeHosts: func([]string) { e.recipesChanged() },
 		// Where the first recorded click was is where that browser's next
 		// download from the host starts (its capture keeps the step-backs).
 		LearnStepBack: func(id, start string) {
@@ -146,6 +128,7 @@ func (e *Engine) startOwn(own ownResolver, req resolveReq) {
 		return
 	}
 	st := d.State()
+	r.From = browserName(st.Browser)
 	if info, ok := e.askPageInfo(st.Browser, req.ID, req.PageURL, st.CookieStore); ok {
 		r.Cookies, r.Pages = info.Cookies, info.Pages
 		if len(info.Tokens) > 0 && string(info.Tokens) != "null" {

@@ -105,7 +105,8 @@ const SPLIT_DOWNLOADS = [
 const STATE = { downloads: DOWNLOADS, interfaces: IFACES, pia: { state: "off" }, speed: 11.5e6, eta: 322, active: 1 };
 
 const RECIPES = {
-  "example.com": { steps: [{ tag: "button", text: "Free download" }, { tag: "a", text: "Start download" }], learned: Date.parse("2026-10-20") },
+  "example.com": { steps: [{ tag: "button", text: "Free download" }, { tag: "a", text: "Start download" }], learned: Date.parse("2026-10-20"), from: "Firefox" },
+  "files.example.net": { steps: [{ tag: "a", text: "Download" }], learned: Date.parse("2026-11-18"), from: "Google Chrome" },
 };
 
 // A torrent waiting for its files to be chosen: the state has only their count.
@@ -181,7 +182,7 @@ const STORE_STATE = { downloads: [...STORE_DOWNLOADS].reverse(), interfaces: STO
 const STORE_SETTINGS = { ...SETTINGS, theme: "dark", interfaces: { eth: { name: "Ethernet" }, wifi: { name: "Wi-Fi" }, phone: { name: "Phone hotspot" } }, maxParallel: 3 };
 
 const FIXTURES = {
-  store: { connected: true, state: STORE_STATE, settings: STORE_SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", host: { version: "0.3.0", userAgent: null, recipesHere: false, openDownloads: true } },
+  store: { connected: true, state: STORE_STATE, settings: STORE_SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", host: { version: "0.3.0", userAgent: null, openDownloads: true } },
   "big-queue": bigFixture([...running5, ...Array.from({ length: 300 }, (_, i) => bigItem(i, "queued"))]),
   "big-finished": bigFixture(Array.from({ length: 3000 }, (_, i) => bigItem(i, "completed"))),
   "big-mixed": bigFixture(Array.from({ length: 5000 }, (_, i) => bigItem(i, ["queued", "completed", "completed", "paused", "completed"][i % 5]))),
@@ -257,12 +258,12 @@ const FIXTURES = {
     ] } },
   // The Downloads window: no recipes or user agent here, and the versions always match.
   window: { connected: true, state: STATE, settings: { ...SETTINGS, vpnProvider: "pia" }, autostart: true, recipes: null, engineVersion: "0.3.0",
-    host: { version: "0.3.0", userAgent: null, recipesHere: false, openDownloads: true } },
+    host: { version: "0.3.0", userAgent: null, openDownloads: true } },
 };
 
 // The Downloads window with the SFTP states.
-FIXTURES["store-popup"] = { ...FIXTURES.store, host: { version: "0.3.0", userAgent: null, recipesHere: false } };
-FIXTURES.windowSftp = { ...FIXTURES.sftp, recipes: null, host: { version: "0.3.0", userAgent: null, recipesHere: false, openDownloads: true } };
+FIXTURES["store-popup"] = { ...FIXTURES.store, host: { version: "0.3.0", userAgent: null } };
+FIXTURES.windowSftp = { ...FIXTURES.sftp, recipes: null, host: { version: "0.3.0", userAgent: null, openDownloads: true } };
 
 // What the real engine adds to every download and to each group of them (Present
 // and Groups in engine/internal/download): the section, whether the label is plain, and the group summaries.

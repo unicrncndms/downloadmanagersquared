@@ -63,7 +63,7 @@ Each connection can get its own WireGuard tunnel, for downloads, torrents or bot
 
 ### Several browsers
 
-Settings and the download list live in DMS² itself, so every browser shares them. Learned sites are kept per browser, and a download is always clicked through in the browser it came from.
+Settings and the download list live in DMS² itself, so every browser shares them. Learned sites are kept by DMS² too, one list for every browser: a site learned in Firefox is used for Chrome downloads as well, and the other way round.
 
 ## Upgrade and uninstall
 

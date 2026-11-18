@@ -22,6 +22,7 @@ type Request struct {
 	Cookies                       []Cookie // the user's login for the landing page, from the download's browser
 	Pages                         []string // the download's page history, for the record bar's way back
 	Tokens                        any      // the record bar's accent (lib/accent.js accentTokens), nil for its own
+	From                          string   // the download's browser, e.g. "Google Chrome": a recipe recorded here says so
 }
 
 // Hooks tell the engine how resolves end. They run after the resolver's lock
@@ -73,6 +74,7 @@ type job struct {
 	cookies                                  []Cookie
 	pages                                    []string
 	tokens                                   any
+	from                                     string
 
 	learn, done, ended bool
 	mode               string // new, waiting, replay, record
@@ -203,7 +205,7 @@ func (r *Resolver) Request(req Request) {
 	}
 	j := &job{
 		key: key, id: req.ID, iface: req.Iface, ifaceName: name, pageURL: req.PageURL, host: hostOf(req.PageURL),
-		socksPort: req.SocksPort, cookies: req.Cookies, pages: req.Pages, tokens: req.Tokens,
+		socksPort: req.SocksPort, cookies: req.Cookies, pages: req.Pages, tokens: req.Tokens, from: req.From,
 		learn: req.Learn, mode: "new", timers: map[string]*timer{}, measured: map[int]int64{}, budgetFor: -1, retried: map[int]bool{},
 	}
 	r.jobs = append(r.jobs, j)
@@ -851,7 +853,9 @@ func (r *Resolver) saveRecipe(j *job) {
 	if !j.lastClick.IsZero() {
 		wait = r.clock().Sub(j.lastClick).Milliseconds()
 	}
-	r.Recipes.Set(j.host, recorded(r.Recipes.Get(j.host), j.recordFrom, j.recorded, wait, r.clock()))
+	rec := recorded(r.Recipes.Get(j.host), j.recordFrom, j.recorded, wait, r.clock())
+	rec.From = j.from
+	r.Recipes.Set(j.host, rec)
 	r.sendRecipeHosts()
 }
 

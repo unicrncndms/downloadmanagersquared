@@ -175,7 +175,7 @@ test("a learn job saves the recipe and reports no link", async () => {
   assert.deepEqual(engineCalls(b, "resolved"), []);
   assert.deepEqual(engineCalls(b, "learnEnded"), [{ id: "d1", iface: "eth" }]);
   assert.ok(b.shared.local.recipes["site.test"]);
-  assert.deepEqual(engineCalls(b, "recipeHosts").pop(), { hosts: ["site.test"] });
+  assert.equal(engineCalls(b, "setRecipe").pop().host, "site.test", "the engine wasn't sent the recipe");
 });
 
 test("a learn job that fails changes nothing for the download", async () => {
@@ -214,15 +214,26 @@ test("a learn job for a site that has a recipe by now does nothing", async () =>
   assert.equal(engineCalls(b, "learnEnded").length, 1);
 });
 
-test("the engine hears the recipe hosts on connect and when one is forgotten", async () => {
-  const shared = { local: { recipes: { "a.test": { steps: [] }, "b.test": { steps: [] } } }, session: {}, windows: new Map(), nextId: { v: 100 } };
+test("this browser's recipes move to the engine once, newest per site, and the engine's list is the one used", async () => {
+  const shared = { local: { recipes: { "a.test": { steps: [], learned: 5 }, "b.test": { steps: [], learned: 5 } } }, session: {}, windows: new Map(), nextId: { v: 100 },
+    engineRecipes: { "b.test": { steps: [{ tag: "a" }], learned: 9 }, "c.test": { steps: [], learned: 1 } } };
   const b = load({ shared });
   await b.settle();
   b.connect();
   await b.settle();
-  assert.deepEqual(engineCalls(b, "recipeHosts").pop(), { hosts: ["a.test", "b.test"] });
-  await b.Resolver.forgetRecipe("a.test");
-  assert.deepEqual(engineCalls(b, "recipeHosts").pop(), { hosts: ["b.test"] });
+  assert.deepEqual(Object.keys(engineCalls(b, "mergeRecipes")[0].recipes).sort(), ["a.test", "b.test"]);
+  assert.deepEqual(Object.keys(b.Resolver.recipes).sort(), ["a.test", "b.test", "c.test"]);
+  assert.equal(b.Resolver.recipes["b.test"].learned, 9, "an older recipe replaced the engine's newer one");
+  assert.equal(shared.local.recipesMoved, true);
+  // Again on the next connect: nothing to move.
+  b.connect();
+  await b.settle();
+  assert.equal(engineCalls(b, "mergeRecipes").length, 1);
+  // A change anywhere comes as an event; forgetting goes to the engine.
+  b.Engine.emit("recipes", { "c.test": { steps: [], learned: 1 } });
+  assert.deepEqual(Object.keys(b.Resolver.recipes), ["c.test"]);
+  await b.Resolver.forgetRecipe("c.test");
+  assert.deepEqual(engineCalls(b, "forgetRecipe").pop(), { host: "c.test" });
 });
 
 test("without storage.session the resolver still works, in memory", async () => {

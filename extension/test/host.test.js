@@ -46,7 +46,6 @@ test("browser.runtime means the extension", () => {
   const host = pickHost({ browser, navigator: { userAgent: "Firefox/152" } });
   assert.equal(host.version, "1.2.3");
   assert.equal(host.userAgent, "Firefox/152");
-  assert.equal(host.recipesHere, true);
 });
 
 test("with neither, there is no Host", () => {
@@ -124,7 +123,6 @@ test("chrome.webview means the Downloads window", () => {
   const { win } = fakeWindow();
   const host = pickHost(win);
   assert.equal(host.userAgent, null);
-  assert.equal(host.recipesHere, false);
 });
 
 test("the window's calls are correlated with their answers by id", async () => {
@@ -156,15 +154,16 @@ test("the window's subscribe sends the extension's message shape, connected once
   const got = [];
   host.subscribe((m) => got.push(m));
   assert.equal(got.length, 0); // nothing before the engine answers: no "Engine offline" for a moment
-  assert.deepEqual(f.sent.map((r) => r.method).sort(), ["getAutostart", "getSettings", "getState", "version"]);
+  assert.deepEqual(f.sent.map((r) => r.method).sort(), ["getAutostart", "getSettings", "getState", "recipes", "version"]);
   f.answer("getState", { downloads: [] });
   f.answer("getSettings", { maxParallel: 3 });
   f.answer("getAutostart", true);
   f.answer("version", "1.4.0");
+  f.answer("recipes", { "a.test": { steps: [] } });
   await tick();
   assert.deepEqual(got.at(-1), {
     connected: true, error: "", notInstalled: false, engineVersion: "1.4.0",
-    state: { downloads: [] }, settings: { maxParallel: 3 }, autostart: true, recipes: null,
+    state: { downloads: [] }, settings: { maxParallel: 3 }, autostart: true, recipes: { "a.test": { steps: [] } },
   });
   assert.equal(got.length, 1);
   const later = [];
@@ -174,24 +173,26 @@ test("the window's subscribe sends the extension's message shape, connected once
   assert.equal(host.version, "1.4.0");
 });
 
-test("the window's subscribers get each state and settings broadcast, and nothing else", async () => {
+test("the window's subscribers get each state, settings and recipes broadcast, and nothing else", async () => {
   const f = fakeWindow();
   const host = pickHost(f.win);
   const got = [];
   const stop = host.subscribe((m) => got.push(m));
-  for (const m of ["getState", "getSettings", "getAutostart", "version"]) f.answer(m, m === "version" ? "1.0.0" : {});
+  for (const m of ["getState", "getSettings", "getAutostart", "version", "recipes"]) f.answer(m, m === "version" ? "1.0.0" : {});
   await tick();
   const n = got.length;
   f.engine({ event: "state", data: { active: 2 } });
   f.engine({ event: "settings", data: { maxParallel: 5 } });
+  f.engine({ event: "recipes", data: { "a.test": { steps: [] } } });
   f.engine({ event: "resolve", data: {} }); // the extension's, never sent here; ignored
   f.engine("not json");
-  assert.equal(got.length, n + 2);
-  assert.deepEqual(got.at(-2).state, { active: 2 });
-  assert.deepEqual(got.at(-1).settings, { maxParallel: 5 });
+  assert.equal(got.length, n + 3);
+  assert.deepEqual(got.at(-3).state, { active: 2 });
+  assert.deepEqual(got.at(-2).settings, { maxParallel: 5 });
+  assert.deepEqual(got.at(-1).recipes, { "a.test": { steps: [] } });
   stop();
   f.engine({ event: "state", data: { active: 3 } });
-  assert.equal(got.length, n + 2);
+  assert.equal(got.length, n + 3);
 });
 
 test("the window keeps autostart after setAutostart, as the background does", async () => {
@@ -199,7 +200,7 @@ test("the window keeps autostart after setAutostart, as the background does", as
   const host = pickHost(f.win);
   const got = [];
   host.subscribe((m) => got.push(m));
-  for (const m of ["getState", "getSettings", "version"]) f.answer(m, {});
+  for (const m of ["getState", "getSettings", "version", "recipes"]) f.answer(m, {});
   f.answer("getAutostart", undefined); // false is left out of the answer
   await tick();
   assert.equal(got.at(-1).autostart, false);
@@ -219,7 +220,9 @@ test("the window switches views by navigating, and opens links in the default br
   assert.equal(f.win.location.href, "popup.html?window");
   host.openUrl("https://example.com/releases");
   assert.deepEqual(f.opened, ["https://example.com/releases"]);
-  assert.equal(host.forgetRecipe, undefined);
+  host.forgetRecipe("a.test"); // the recipes are the engine's: forgotten there
+  assert.deepEqual(f.sent.at(-1).method, "forgetRecipe");
+  assert.deepEqual(f.sent.at(-1).params, { host: "a.test" });
 });
 
 test("a subscriber that throws is reported to the engine's log, not lost in the closed DevTools", async () => {
@@ -232,6 +235,7 @@ test("a subscriber that throws is reported to the engine's log, not lost in the 
   f.answer("getSettings", {});
   f.answer("getAutostart", false);
   f.answer("version", "1");
+  f.answer("recipes", {});
   await tick();
   assert.match(logged[0], /accentCSS is not defined/);
 });

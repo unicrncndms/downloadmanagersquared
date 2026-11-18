@@ -52,7 +52,7 @@ func TestChromiumDownloadsResolveInTheEnginesBrowser(t *testing.T) {
 	}
 	defer e.Shutdown()
 	own := &fakeOwn{}
-	e.own, e.ownHosts = own, map[string]bool{}
+	e.own = own
 
 	no := false
 	chromeExe := fakeBrowserExe(t, "chrome.exe")

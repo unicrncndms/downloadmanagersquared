@@ -36,11 +36,6 @@ function canMoveFolder(d) {
   return d.kind !== "torrent" && !uiLib.finished(d) && !(d.folder && d.folder.on) && (d.status === "paused" || d.status === "queued");
 }
 
-// browserNames: "Firefox and Chrome" from the browsers' exe paths.
-function browserNames(exes) {
-  return [...new Set((exes || []).map((p) => p.split(/[\\/]/).pop().replace(/\.exe$/i, "")).filter(Boolean).map((n) => n[0].toUpperCase() + n.slice(1)))];
-}
-
 // partTiles reads a file map's d.mapPart: for each square, null when none of it
 // is written (or it is whole), else { n: tenths written, 1 to 9, who: the index
 // into mapBy of the connection that wrote it, -1 when not known }. A square
@@ -72,4 +67,4 @@ function rowFill(pct, n) {
   return Array.from({ length: n }, (_, i) => Math.max(0, Math.min(1, at - i)));
 }
 
-if (typeof module !== "undefined") module.exports = { rowFill, frontFill, partTiles, shortName, stripSpeed, unitField, sameFolder, canMoveFolder, browserNames };
+if (typeof module !== "undefined") module.exports = { rowFill, frontFill, partTiles, shortName, stripSpeed, unitField, sameFolder, canMoveFolder };

@@ -33,7 +33,8 @@ type Step struct {
 type Recipe struct {
 	Steps        []Step `json:"steps"`
 	DownloadWait int64  `json:"downloadWait"`
-	Learned      int64  `json:"learned"` // ms since 1970
+	Learned      int64  `json:"learned"`        // ms since 1970
+	From         string `json:"from,omitempty"` // the browser it was learned in, e.g. "Firefox"
 }
 
 const (
@@ -137,8 +138,10 @@ func siteOf(u string) string {
 
 func isHTTP(u string) bool { return strings.HasPrefix(u, "http:") || strings.HasPrefix(u, "https:") }
 
-// Recipes are the recipes recorded in the engine's browser, by landing-page
-// host, kept in one file. Safe for concurrent use.
+// Recipes are the recipes of every browser, by landing-page host, kept in one
+// file: the engine's browser and Firefox's resolver record into it and replay
+// from it (the page script is the same, so a recipe works in either). Safe
+// for concurrent use.
 type Recipes struct {
 	path string
 	mu   sync.Mutex
@@ -181,6 +184,17 @@ func (r *Recipes) Set(host string, rec *Recipe) error {
 		return nil
 	}
 	return atomicfile.WriteJSON(r.path, r.by)
+}
+
+// All is a copy of every recipe, by host.
+func (r *Recipes) All() map[string]*Recipe {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]*Recipe, len(r.by))
+	for h, rec := range r.by {
+		out[h] = rec
+	}
+	return out
 }
 
 // Hosts are the hosts with a recipe, sorted.

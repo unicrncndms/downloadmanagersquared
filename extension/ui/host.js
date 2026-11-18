@@ -14,7 +14,6 @@
 //   startEngine()                    start the engine again after the user quit it (extension only)
 //   version                          this UI's version, compared with the engine's
 //   userAgent                        sent with "Add download"; null leaves it to the engine
-//   recipesHere                      whether learned sites can be shown and forgotten here
 //   openDownloads()                  back to the downloads (only in the Downloads window)
 //   pickFolderKeeping(start, draft) → { dir }  Windows' folder picker for the toolbar popup,
 //                                    which closes behind it: the background keeps draft
@@ -44,7 +43,6 @@ function extensionHost(browser, navigator) {
     takeDraft: () => browser.runtime.sendMessage({ type: "takeDraft" }),
     version: browser.runtime.getManifest().version,
     userAgent: navigator.userAgent,
-    recipesHere: true,
   };
 }
 
@@ -96,7 +94,7 @@ function windowHost(win, bridge) {
     try { msg = JSON.parse(line); } catch { return; }
     if (!msg || typeof msg !== "object") return;
     if (msg.event) {
-      if (msg.event !== "state" && msg.event !== "settings") return;
+      if (msg.event !== "state" && msg.event !== "settings" && msg.event !== "recipes") return;
       latest[msg.event] = msg.data;
       if (latest.connected) emit();
       if (msg.event === "state") note(line, msg.data);
@@ -112,9 +110,9 @@ function windowHost(win, bridge) {
   }
 
   function connect() {
-    connecting = Promise.all(["getState", "getSettings", "getAutostart", "version"].map((m) => call(m)))
-      .then(([state, settings, autostart, version]) => {
-        Object.assign(latest, { state, settings, autostart: !!autostart, engineVersion: version || "", connected: true, error: "" });
+    connecting = Promise.all(["getState", "getSettings", "getAutostart", "version", "recipes"].map((m) => call(m)))
+      .then(([state, settings, autostart, version, recipes]) => {
+        Object.assign(latest, { state, settings, recipes, autostart: !!autostart, engineVersion: version || "", connected: true, error: "" });
       })
       .catch((e) => {
         Object.assign(latest, { connected: false, error: e.message });
@@ -136,9 +134,9 @@ function windowHost(win, bridge) {
     openSettings: (hash) => { win.location.href = "settings.html" + (hash || ""); },
     openDownloads: () => { win.location.href = "popup.html?window"; },
     openUrl: (url) => bridge.openUrl(url),
+    forgetRecipe: (host) => call("forgetRecipe", { host }),
     get version() { return latest.engineVersion; }, // the window is part of the engine
     userAgent: null,
-    recipesHere: false,
   };
 }
 

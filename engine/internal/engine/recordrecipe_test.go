@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"downloadmanagersquared/engine/internal/resolver"
 )
 
 // addPaused adds an HTTP download with a landing page from x's browser, paused
@@ -43,7 +45,7 @@ func call(t *testing.T, e *Engine, x *fakeExtension, method string, params any) 
 	}
 }
 
-func TestRecordRecipeIsOfferedOnlyWhenTheBrowserHasNoRecipeForTheSite(t *testing.T) {
+func TestRecordRecipeIsOfferedOnlyWhenTheSiteHasNoRecipe(t *testing.T) {
 	e, err := open(t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -53,21 +55,64 @@ func TestRecordRecipeIsOfferedOnlyWhenTheBrowserHasNoRecipeForTheSite(t *testing
 	ff := connectExtension(t, e, firefox, "Firefox UA")
 	id := addPaused(t, e, ff)
 
-	if recordOffered(t, e, id) {
-		t.Fatal("offered before the extension said which sites have recipes")
-	}
-	call(t, e, ff, "recipeHosts", recipeHostsParams{Hosts: []string{"other.test"}})
 	if !recordOffered(t, e, id) {
 		t.Fatal("not offered for a site without a recipe")
 	}
-	call(t, e, ff, "recipeHosts", recipeHostsParams{Hosts: []string{"other.test", "site.test"}})
+	call(t, e, ff, "setRecipe", recipeParams{Host: "site.test", Recipe: &resolver.Recipe{Learned: 1}})
 	if recordOffered(t, e, id) {
 		t.Fatal("still offered once the site has a recipe")
 	}
-	call(t, e, ff, "recipeHosts", recipeHostsParams{Hosts: nil})
+	call(t, e, ff, "forgetRecipe", recipeParams{Host: "site.test"})
+	if !recordOffered(t, e, id) {
+		t.Fatal("not offered again once the recipe is forgotten")
+	}
 	e.Disconnected(ff.conn)
 	if recordOffered(t, e, id) {
 		t.Fatal("offered with the browser's extension not connected")
+	}
+}
+
+// One store for every browser: a recipe a browser sends is kept with its name,
+// every client hears of the change, and a browser's old recipes merge in with
+// the newer one winning per host.
+func TestRecipesAreKeptByTheEngineForEveryBrowser(t *testing.T) {
+	dir := t.TempDir()
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ff := connectExtension(t, e, fakeBrowserExe(t, "firefox.exe"), "")
+	chrome := connectExtension(t, e, fakeBrowserExe(t, "chrome.exe"), "")
+
+	call(t, e, ff, "setRecipe", recipeParams{Host: "a.test", Recipe: &resolver.Recipe{Steps: []resolver.Step{{Tag: "a", Text: "Go"}}, Learned: 100}})
+	if !chrome.next("recipes", 2*time.Second) {
+		t.Fatal("another browser didn't hear of the new recipe")
+	}
+	if r := e.recipes.Get("a.test"); r == nil || r.From != "firefox" {
+		t.Fatalf("recipe %+v, want it marked as learned in firefox", r)
+	}
+	call(t, e, chrome, "mergeRecipes", mergeRecipesParams{Recipes: map[string]*resolver.Recipe{
+		"a.test": {Learned: 50},  // older: the one kept stays
+		"b.test": {Learned: 200}, // new
+	}})
+	if r := e.recipes.Get("a.test"); r.Learned != 100 {
+		t.Fatal("an older recipe replaced a newer one")
+	}
+	if r := e.recipes.Get("b.test"); r == nil || r.From != "chrome" {
+		t.Fatalf("merged recipe %+v", r)
+	}
+	got, err := e.Call(nil, "recipes", nil)
+	if err != nil || len(got.(map[string]*resolver.Recipe)) != 2 {
+		t.Fatalf("recipes = %v, %v", got, err)
+	}
+	e.Shutdown()
+	e2, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e2.Shutdown()
+	if e2.recipes.Get("b.test") == nil {
+		t.Fatal("recipes lost across a restart")
 	}
 }
 
@@ -80,7 +125,6 @@ func TestRecordRecipeIsNotOfferedWhileAResolveRuns(t *testing.T) {
 	firefox := fakeBrowserExe(t, "firefox.exe")
 	ff := connectExtension(t, e, firefox, "")
 	id := addPaused(t, e, ff)
-	call(t, e, ff, "recipeHosts", recipeHostsParams{})
 	e.RequestResolve(id, "eth", "https://site.test/get/a", firefox)
 	if recordOffered(t, e, id) {
 		t.Fatal("offered while a resolve runs")
@@ -100,7 +144,6 @@ func TestRecordRecipeSendsALearnResolveAndLeavesTheLinksAlone(t *testing.T) {
 	firefox := fakeBrowserExe(t, "firefox.exe")
 	ff := connectExtension(t, e, firefox, "")
 	id := addPaused(t, e, ff)
-	call(t, e, ff, "recipeHosts", recipeHostsParams{})
 	d, err := e.get(id)
 	if err != nil {
 		t.Fatal(err)

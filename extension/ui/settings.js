@@ -400,19 +400,10 @@ $("piaClear").onclick = () => act("clearPia", {}, "Signed out of PIA");
 
 // --- learned sites ---
 
-// Learned sites are kept by the browser that learned them, so only its pages list them.
-// The window says which browsers have an extension connected (the engine knows).
+// Learned sites are the engine's, one list for every browser: a site learned in
+// one is used for downloads from the others too. Each says where it was learned.
 function renderRecipes(recipes) {
   const box = $("recipes");
-  if (!Host.recipesHere) {
-    if (box.childElementCount) return;
-    box.replaceChildren(el("div", { class: "muted" }, "Learned sites are kept in your browser, where they are learned and used. Open DMS² settings in the browser to see or forget them."));
-    call("extensionBrowsers", {}).then((exes) => {
-      const names = browserNames(exes);
-      if (names.length) box.replaceChildren(el("div", { class: "muted" }, `Learned sites are kept in ${names.join(" and ")}, where they are learned and used. Open DMS² settings there to see or forget them.`));
-    }).catch(() => {});
-    return;
-  }
   latestRecipes = recipes;
   const shown = Object.fromEntries(Object.entries(recipes || {}).filter(([h]) => !forgetting.has(h)));
   const sig = JSON.stringify(shown);
@@ -428,6 +419,7 @@ function renderRecipes(recipes) {
     el("tbody", {}, hosts.map((h) => el("tr", {},
       el("td", {}, h),
       el("td", { class: "muted" }, recipes[h].steps.map((s) => s.text || s.tag).join(" → ") || "no clicks (the download starts by itself)"),
+      el("td", { class: "muted" }, recipes[h].from || ""),
       el("td", { class: "muted when" }, new Date(recipes[h].learned).toLocaleDateString()),
       el("td", {}, el("button", { class: "small", onclick: () => forgetSite(h) }, "Forget"))))))));
 }

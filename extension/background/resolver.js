@@ -13,7 +13,8 @@ const Resolver = {
   containers: {},   // ifaceId -> cookieStoreId
   removing: new Map(), // ifaceId -> the remove of its container in flight
   ifaceByStore: {}, // cookieStoreId -> ifaceId
-  recipes: {},      // landing-page host -> recipe (lib/recipe.js)
+  recipesSeen: 0,   // "recipes" events so far: an answer older than the last one is stale
+  recipes: {},      // landing-page host -> recipe (lib/recipe.js): the engine's, which keeps every browser's; a copy in storage.local
   jobs: new Map(),  // "downloadId|ifaceId" -> job
   tabJobs: new Map(), // tabId -> job: the job's own tabs and the ones they opened
   newTabs: new Map(),  // tabId -> its judge (watchNewTab), for a tab a replayed click opened
@@ -29,6 +30,9 @@ const Resolver = {
   // Registers every listener before anything is awaited (an MV3 worker only
   // gets the event that woke it if they are), then reads the state back.
   init() {
+    // The recipes are the engine's (it keeps every browser's): kept in step here for replays and the settings page.
+    Engine.on("recipes", (r) => { this.recipesSeen++; this.setRecipes(r); });
+    Engine.on("connection", ({ connected }) => { if (connected) this.syncRecipes().catch(() => {}); });
     // A resolve needs a proxy per request and containers: without them (Chromium) none is ever sent, so nothing is registered.
     if (!browser.proxy?.onRequest || !browser.contextualIdentities) {
       this.loaded = true;
@@ -38,10 +42,8 @@ const Resolver = {
     // a container is left. Once it is, fence() drops them if none is.
     this.fence();
     // Without the engine no resolve can finish: fail them and close their windows.
-    // With it, it learns which sites have a recipe (for its Record recipe button).
     Engine.on("connection", ({ connected }) => {
       if (!connected) for (const job of [...this.jobs.values()]) this.fail(job, "the engine went away");
-      else this.ready.then(() => this.sendRecipeHosts());
     });
     browser.proxy.onError.addListener((e) => console.warn("DMS² proxy:", e.message));
     browser.contextualIdentities.onRemoved.addListener(({ contextualIdentity }) => {
@@ -495,8 +497,7 @@ const Resolver = {
     if (job.mode === "replay" && this.recipes[job.host]) {
       // The site's waits this time are the ones to expect next time.
       job.measured.download = Date.now() - job.lastClick;
-      this.recipes[job.host] = withMeasuredWaits(this.recipes[job.host], job.measured);
-      browser.storage.local.set({ recipes: this.recipes });
+      this.putRecipe(job.host, withMeasuredWaits(this.recipes[job.host], job.measured));
     }
     // A learn job's link is thrown away: the download keeps its own.
     if (job.learn) return this.endLearn(job);
@@ -544,20 +545,38 @@ const Resolver = {
 
   saveRecipe(job) {
     const downloadWait = job.lastClick ? Date.now() - job.lastClick : 0;
-    this.recipes[job.host] = recorded(this.recipes[job.host], job.recordFrom, job.recorded, downloadWait, Date.now());
+    this.putRecipe(job.host, recorded(this.recipes[job.host], job.recordFrom, job.recorded, downloadWait, Date.now()));
+  },
+
+  // A recipe recorded or re-timed here: kept now, and sent to the engine, which keeps every browser's.
+  putRecipe(host, recipe) {
+    this.recipes[host] = recipe;
     browser.storage.local.set({ recipes: this.recipes });
-    this.sendRecipeHosts();
+    if (Engine.connected) Engine.call("setRecipe", { host, recipe }).catch(() => {});
   },
 
   forgetRecipe(host) {
     delete this.recipes[host];
-    this.sendRecipeHosts();
-    return browser.storage.local.set({ recipes: this.recipes });
+    browser.storage.local.set({ recipes: this.recipes });
+    return Engine.call("forgetRecipe", { host });
   },
 
-  // The landing-page hosts this browser has a recipe for, to the engine.
-  sendRecipeHosts() {
-    if (Engine.connected) Engine.call("recipeHosts", { hosts: Object.keys(this.recipes) }).catch(() => {});
+  // The engine's recipes, as it sends them on every change.
+  setRecipes(recipes) {
+    this.recipes = recipes && typeof recipes === "object" ? recipes : {};
+    browser.storage.local.set({ recipes: this.recipes });
+  },
+
+  // On connect: this browser's recipes from before the engine kept them go to
+  // it once (the newer per site stays), then the engine's list is the one used.
+  async syncRecipes() {
+    await this.ready;
+    const s = await browser.storage.local.get(["recipes", "recipesMoved"]);
+    if (!s.recipesMoved && s.recipes && Object.keys(s.recipes).length) await Engine.call("mergeRecipes", { recipes: s.recipes });
+    await browser.storage.local.set({ recipesMoved: true });
+    const seen = this.recipesSeen;
+    const recipes = await Engine.call("recipes");
+    if (seen === this.recipesSeen) this.setRecipes(recipes); // else an event since is newer
   },
 
   cleanup(job) {

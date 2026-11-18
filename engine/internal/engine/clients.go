@@ -22,9 +22,6 @@ type client struct {
 	seq       int64  // higher = connected later
 	browser   string // the exe of the browser the extension runs in, from its hello
 	userAgent string // that browser's, from its hello
-	// The landing-page hosts that browser has a recipe for, from recipeHosts;
-	// nil until the extension says.
-	recipeHosts map[string]bool
 }
 
 type resolveReq struct {
@@ -132,8 +129,8 @@ func (e *Engine) RecordRecipe(id string) error {
 }
 
 // canRecordLocked: the Record recipe button. An unfinished HTTP download with a
-// landing page whose browser's extension is connected, has said which hosts
-// it has recipes for, and has none for this one; with no resolve or
+// landing page, a browser to record in (its extension, or the engine's
+// browser) and no recipe for the page's host yet; with no resolve or
 // recording running for it. resolving is resolvingIDsLocked, built once per tick.
 func (e *Engine) canRecordLocked(s download.Summary, browser string, resolving map[string]bool) bool {
 	if s.Kind != "" || s.Status == download.StatusCompleted || s.PageURL == "" {
@@ -150,16 +147,11 @@ func (e *Engine) canRecordLocked(s download.Summary, browser string, resolving m
 			return false
 		}
 	}
-	var hosts map[string]bool
-	if e.ownsLocked(browser) {
-		hosts = e.ownHosts
-	} else if c := e.extensionForLocked(browser); c != nil {
-		hosts = e.clients[c].recipeHosts
-	} else {
-		return false
+	if !e.ownsLocked(browser) && e.extensionForLocked(browser) == nil {
+		return false // no browser to record in
 	}
 	u, err := url.Parse(s.PageURL)
-	return hosts != nil && err == nil && u.Hostname() != "" && !hosts[u.Hostname()]
+	return err == nil && u.Hostname() != "" && e.recipes.Get(u.Hostname()) == nil
 }
 
 // resolvingIDsLocked is the ids of the downloads with a resolve pending: the

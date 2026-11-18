@@ -38,7 +38,8 @@ function extensionCalls() {
 
 // Not called by the extension: the installer and tray (ipc.Call), the Downloads
 // window, and the engine's own tests.
-const NOT_FOR_THE_EXTENSION = new Set(["getState", "getSettings", "getAutostart", "version", "restartCost", "quit"]);
+// recipeHosts: what extensions before the engine kept the recipes said (ticket 37), still answered.
+const NOT_FOR_THE_EXTENSION = new Set(["getState", "getSettings", "getAutostart", "version", "restartCost", "quit", "recipeHosts", "extensionBrowsers"]);
 
 test("every method the extension calls exists in the engine", () => {
   const have = engineMethods();

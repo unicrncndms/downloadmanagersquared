@@ -29,7 +29,7 @@ browser.runtime.onConnect.addListener((port) => {
   const welcome = String(port.sender && port.sender.url || "").endsWith("/welcome.html");
   if (welcome) Engine.fast(true);
   send();
-  const offs = ["state", "settings", "connection"].map((ev) => Engine.on(ev, send));
+  const offs = ["state", "settings", "connection", "recipes"].map((ev) => Engine.on(ev, send));
   port.onDisconnect.addListener(() => {
     offs.forEach((off) => off());
     if (welcome) Engine.fast(false);

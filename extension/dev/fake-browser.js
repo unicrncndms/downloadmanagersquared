@@ -2,8 +2,8 @@
 
 // The harness's Host (see ui/host.js), set before host.js loads so it is kept:
 // the pages are fed the fixture from dev/fixtures.js, and what they ask for is
-// kept in window.calls. A fixture's `host` overrides version, userAgent and
-// recipesHere, and openDownloads (e.g. the Downloads window's).
+// kept in window.calls. A fixture's `host` overrides version, userAgent
+// and openDownloads (e.g. the Downloads window's).
 
 window.calls = [];
 window.errs = [];
@@ -12,7 +12,7 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
 (() => {
   const listeners = [];
   const record = (m) => { window.calls.push(m); return Promise.resolve(); };
-  const hostFixture = () => Object.assign({ version: "0.3.0", userAgent: navigator.userAgent, recipesHere: true }, window.fixture().host);
+  const hostFixture = () => Object.assign({ version: "0.3.0", userAgent: navigator.userAgent }, window.fixture().host);
 
   // setSettings changes the fixture's settings, as the engine would, and feeds them.
   const applySettings = (patch) => {
@@ -57,6 +57,5 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
     takeDraft: () => Promise.resolve(null),
     get version() { return hostFixture().version; },
     get userAgent() { return hostFixture().userAgent; },
-    get recipesHere() { return hostFixture().recipesHere; },
   };
 })();

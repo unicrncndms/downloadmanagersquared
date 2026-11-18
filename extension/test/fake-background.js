@@ -137,8 +137,22 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
   // The engine: connected, with one interface per entry of ifaces.
   const E = get("Engine");
   E.rpc.pending.clear(); // the real hello, never answered here
+  // The engine keeps every browser's recipes (shared.engineRecipes), as the real one does.
+  const recipes = (shared.engineRecipes = shared.engineRecipes || {});
   E.call = (method, params) => {
     engine.push({ method, params: clone(params) });
+    if (method === "recipes") return Promise.resolve(clone(recipes));
+    // Each change goes to every client as a "recipes" event, after the answer.
+    const changed = () => { Promise.resolve().then(() => E.emit("recipes", clone(recipes))); return Promise.resolve(null); };
+    if (method === "setRecipe" || method === "forgetRecipe") {
+      if (params.recipe) recipes[params.host] = clone(params.recipe);
+      else delete recipes[params.host];
+      return changed();
+    }
+    if (method === "mergeRecipes") {
+      for (const [h, r] of Object.entries(params.recipes)) if (!recipes[h] || recipes[h].learned < r.learned) recipes[h] = clone(r);
+      return changed();
+    }
     return Promise.resolve(method === "add" ? { id: "d" + engine.length } : {});
   };
   const connect = (ifaces = [{ id: "eth", present: true, socksPort: 5001 }], settings = { thresholdBytes: 100e6 }) => {

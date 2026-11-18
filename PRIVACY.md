@@ -55,7 +55,7 @@ The Firefox extension asks for these permissions. The Chrome build asks for the 
 | `contextualIdentities` | Creating the temporary containers that open a site through one connection |
 | `cookies` | Reading the cookies a download needs when the browser didn't send any with it, and copying your cookies for a landing page into the temporary container, so the page opens logged in |
 | `tabs` | Opening and closing the windows that click through landing pages, recording and replaying the clicks in them, and opening the settings page |
-| `storage` | Keeping the learned sites and containers in this browser |
+| `storage` | Keeping a copy of the learned sites, and the containers, in this browser |
 | `contextMenus`, `menus` | The *Download with DMS²* entries on links and pages, hidden where they don't apply |
 | `theme` | Reading your browser theme's accent colour, to colour the pages |
 | `notifications` | Telling you when a download is taken over or can't be, and when a site needs your clicks or a captcha |

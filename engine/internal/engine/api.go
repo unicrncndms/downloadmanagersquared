@@ -57,9 +57,6 @@ type pageParams struct {
 	PageURL string `json:"pageUrl"`
 }
 
-type recipeHostsParams struct {
-	Hosts []string `json:"hosts"` // landing-page hosts the extension's browser has a recipe for
-}
 
 type resolvedParams struct {
 	ID      string `json:"id"`
@@ -423,18 +420,12 @@ var methods = map[string]handler{
 		return nil
 	}),
 	"pageInfo": ack(func(e *Engine, p pageInfo) error { e.gotPageInfo(p); return nil }),
-	"recipeHosts": on(func(e *Engine, c *ipc.Conn, p recipeHostsParams) (any, error) {
-		hosts := make(map[string]bool, len(p.Hosts))
-		for _, h := range p.Hosts {
-			hosts[h] = true
-		}
-		e.mu.Lock()
-		if cl := e.clients[c]; cl != nil {
-			cl.recipeHosts = hosts
-		}
-		e.mu.Unlock()
-		return nil, nil
-	}),
+	// Extensions before the shared recipes said their hosts: nothing to do with it now.
+	"recipeHosts":  bare(func(e *Engine) (any, error) { return nil, nil }),
+	"recipes":      bare(func(e *Engine) (any, error) { return e.recipes.All(), nil }),
+	"setRecipe":    on(func(e *Engine, c *ipc.Conn, p recipeParams) (any, error) { return nil, e.setRecipe(c, p) }),
+	"mergeRecipes": on(func(e *Engine, c *ipc.Conn, p mergeRecipesParams) (any, error) { return nil, e.mergeRecipes(c, p) }),
+	"forgetRecipe": ack(func(e *Engine, p recipeParams) error { return e.setRecipe(nil, recipeParams{Host: p.Host}) }),
 	"resolved": ack(func(e *Engine, p resolvedParams) error {
 		d, err := e.takeResolve(p)
 		if err != nil {
