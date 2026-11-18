@@ -14,6 +14,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // TestARealBrowser drives the browser named by DMS_CDP_EXE (skipped without
@@ -433,6 +436,13 @@ func TestARealRecording(t *testing.T) {
 			t.Fatal("the record bar never showed")
 		}
 	}
+	// The window is in front of whatever was, and is the browser's only one.
+	if pid := foregroundPID(); pid != drv.pid {
+		t.Errorf("the window in front is process %d's, not the browser's (%d)", pid, drv.pid)
+	}
+	if n := visibleWindows(drv.pid); n != 1 {
+		t.Errorf("the browser shows %d windows, want only the record window", n)
+	}
 	var rect struct{ X, Y, Width, Height float64 }
 	json.Unmarshal([]byte(eval(`JSON.stringify(document.getElementById("go").getBoundingClientRect())`)), &rect)
 	x, y := rect.X+rect.Width/2, rect.Y+rect.Height/2
@@ -453,4 +463,41 @@ func TestARealRecording(t *testing.T) {
 	if rec == nil || len(rec.Steps) != 1 || rec.Steps[0].ID != "go" {
 		t.Fatalf("recipe %+v, want the one click on #go", rec)
 	}
+}
+
+var (
+	user32                   = windows.NewLazySystemDLL("user32.dll")
+	pGetForegroundWindow     = user32.NewProc("GetForegroundWindow")
+	pGetWindowThreadProcessI = user32.NewProc("GetWindowThreadProcessId")
+	pEnumWindows             = user32.NewProc("EnumWindows")
+	pIsWindowVisible         = user32.NewProc("IsWindowVisible")
+)
+
+func windowPID(h uintptr) uint32 {
+	var p uint32
+	pGetWindowThreadProcessI.Call(h, uintptr(unsafe.Pointer(&p)))
+	return p
+}
+
+func foregroundPID() uint32 {
+	h, _, _ := pGetForegroundWindow.Call()
+	return windowPID(h)
+}
+
+// visibleWindows counts pid's visible top-level windows that have a title.
+func visibleWindows(pid uint32) int {
+	n := 0
+	pGetWindowTextLength := user32.NewProc("GetWindowTextLengthW")
+	cb := windows.NewCallback(func(h, _ uintptr) uintptr {
+		if windowPID(h) == pid {
+			if v, _, _ := pIsWindowVisible.Call(h); v != 0 {
+				if l, _, _ := pGetWindowTextLength.Call(h); l > 0 {
+					n++
+				}
+			}
+		}
+		return 1
+	})
+	pEnumWindows.Call(cb, 0)
+	return n
 }

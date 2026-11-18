@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"downloadmanagersquared/engine/internal/cdp"
+	"downloadmanagersquared/engine/internal/winutil"
 )
 
 // caller is what the driver needs of a *cdp.Browser.
@@ -43,8 +44,9 @@ type Bounds struct{ Left, Top, Width, Height int }
 
 // Driver runs the pages of resolves in one browser.
 type Driver struct {
-	b  caller
-	ev Events
+	b   caller
+	ev  Events
+	pid uint32 // the browser's process, whose windows Show brings to the front; 0 in tests
 
 	mu       sync.Mutex
 	contexts map[string]ctxEntry // iface -> its context
@@ -76,7 +78,7 @@ func Start(exe, dir string, ev Events) (*Driver, *cdp.Browser, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	d.b = b // before init: no target event comes until init asks for them
+	d.b, d.pid = b, b.PID // before init: no target event comes until init asks for them
 	if err := d.init(); err != nil {
 		b.Close()
 		return nil, nil, err
@@ -207,6 +209,11 @@ func (d *Driver) Show(target string, b Bounds, focus bool) error {
 		return nil
 	}
 	_, err = d.call("", "Target.activateTarget", map[string]any{"targetId": target})
+	// The browser is a background process: Windows keeps its window behind the
+	// one in front unless it is given the foreground.
+	if d.pid != 0 {
+		winutil.FrontWindowAt(d.pid, b.Left, b.Top)
+	}
 	return err
 }
 

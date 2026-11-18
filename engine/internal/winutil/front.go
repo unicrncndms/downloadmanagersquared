@@ -107,3 +107,35 @@ func IsForeground(h uintptr) bool {
 	fg, _, _ := pGetForegroundWindow.Call()
 	return fg != 0 && fg == h
 }
+
+var pEnumWindows = user32.NewProc("EnumWindows")
+
+// FrontWindowAt brings the visible top-level window of process pid whose
+// top-left corner is at x,y to the front, as a dialog is brought (a window a
+// background process shows stays behind the one in front). False: no such
+// window.
+func FrontWindowAt(pid uint32, x, y int) bool {
+	var found uintptr
+	cb := windows.NewCallback(func(h, _ uintptr) uintptr {
+		var p uint32
+		pGetWindowThreadProcessId.Call(h, uintptr(unsafe.Pointer(&p)))
+		if p != pid {
+			return 1
+		}
+		if v, _, _ := pIsWindowVisible.Call(h); v == 0 {
+			return 1
+		}
+		var r struct{ Left, Top, Right, Bottom int32 }
+		if ok, _, _ := pGetWindowRect.Call(h, uintptr(unsafe.Pointer(&r))); ok != 0 && int(r.Left) == x && int(r.Top) == y {
+			found = h
+			return 0
+		}
+		return 1
+	})
+	pEnumWindows.Call(cb, 0)
+	if found == 0 {
+		return false
+	}
+	takeForeground(found)
+	return true
+}

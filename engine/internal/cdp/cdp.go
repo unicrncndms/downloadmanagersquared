@@ -26,6 +26,8 @@ type Event struct {
 
 // Browser is one connection to a browser. Safe for concurrent use.
 type Browser struct {
+	PID uint32 // the browser's main process, which owns its windows; 0 when not started by Start
+
 	w io.WriteCloser
 
 	mu      sync.Mutex

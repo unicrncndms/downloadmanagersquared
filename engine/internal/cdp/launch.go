@@ -27,6 +27,9 @@ var flags = []string{
 	// The replayed clicks are the page script's, not the user's: without this a
 	// click that opens a tab is blocked (18). Only this browser, never the user's.
 	"--disable-popup-blocking",
+	// Only the resolves' own windows: no empty one at start (as Playwright
+	// drives a headful Chromium).
+	"--no-startup-window",
 }
 
 // Exe picks the browser to drive: Chrome, else Edge (every Windows 10/11 has
@@ -79,7 +82,7 @@ func Start(exe, profileDir string, onEvent func(Event)) (*Browser, error) {
 		fmt.Sprintf("--remote-debugging-io-pipes=%d,%d", inherit[0], inherit[1]),
 		"--user-data-dir=" + profileDir,
 	}, flags...)
-	cmd := exec.Command(exe, append(args, "about:blank")...)
+	cmd := exec.Command(exe, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{AdditionalInheritedHandles: inherit}
 	err = cmd.Start()
 	toR.Close()
@@ -90,6 +93,7 @@ func Start(exe, profileDir string, onEvent func(Event)) (*Browser, error) {
 		return nil, err
 	}
 	b := newBrowser(fromR, toW, onEvent)
+	b.PID = uint32(cmd.Process.Pid)
 	exited := make(chan struct{})
 	go func() {
 		cmd.Wait()
