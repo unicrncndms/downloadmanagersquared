@@ -316,6 +316,9 @@ func TestACaptchaShowsTheWindowAndHoldsTheBudgetUntilSolved(t *testing.T) {
 	if g.count("Target.activateTarget") != 1 {
 		t.Fatal("the captcha window was not brought to front")
 	}
+	if !g.d.captcha["tab1"] {
+		t.Fatal("the captcha's page still blocks media and fonts")
+	}
 	g.advance(3 * time.Minute) // far past the step's budget
 	if m := g.sent(); m["cmd"] != "replay" {
 		t.Fatalf("the budget ran during the captcha: %v", m)
@@ -324,6 +327,9 @@ func TestACaptchaShowsTheWindowAndHoldsTheBudgetUntilSolved(t *testing.T) {
 	g.msg("tab1", map[string]any{"type": "captchaDone"})
 	if g.count("Browser.setWindowBounds") != minimizes+1 {
 		t.Fatal("not minimized after the captcha")
+	}
+	if g.d.captcha["tab1"] {
+		t.Fatal("media and fonts still fetched after the captcha")
 	}
 	if g.said() != "" {
 		t.Fatal("something ended during the captcha")

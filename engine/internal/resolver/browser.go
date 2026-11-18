@@ -53,6 +53,7 @@ type Driver struct {
 	pages    map[string]string   // page target -> its session
 	worlds   map[string]int      // page target -> the page script's execution context (script.go)
 	urls     map[string]string   // page target -> its main frame's address
+	captcha  map[string]bool     // page targets showing a captcha: they fetch everything (SetCaptcha)
 }
 
 type ctxEntry struct {
@@ -63,7 +64,7 @@ type ctxEntry struct {
 const callTimeout = 15 * time.Second
 
 func newDriver(ev Events) *Driver {
-	return &Driver{ev: ev, contexts: map[string]ctxEntry{}, ours: map[string]bool{}, sessions: map[string]string{}, pages: map[string]string{}, worlds: map[string]int{}, urls: map[string]string{}}
+	return &Driver{ev: ev, contexts: map[string]ctxEntry{}, ours: map[string]bool{}, sessions: map[string]string{}, pages: map[string]string{}, worlds: map[string]int{}, urls: map[string]string{}, captcha: map[string]bool{}}
 }
 
 // Start runs exe with its profile in dir and returns its driver. The browser
@@ -261,6 +262,18 @@ func (d *Driver) Close(target string) error {
 	return err
 }
 
+// SetCaptcha marks target as showing a captcha (it then fetches media and
+// fonts too, as a captcha may need them) or no longer.
+func (d *Driver) SetCaptcha(target string, on bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if on {
+		d.captcha[target] = true
+	} else {
+		delete(d.captcha, target)
+	}
+}
+
 // URLOf is target's main frame address, "" when not known.
 func (d *Driver) URLOf(target string) string {
 	d.mu.Lock()
@@ -309,6 +322,7 @@ func (d *Driver) event(e cdp.Event) {
 		delete(d.pages, p.TargetID)
 		delete(d.worlds, p.TargetID)
 		delete(d.urls, p.TargetID)
+		delete(d.captcha, p.TargetID)
 		for k, v := range d.sessions {
 			if v == p.TargetID || k == s {
 				delete(d.sessions, k)
@@ -391,6 +405,10 @@ func (d *Driver) attached(e cdp.Event) {
 	d.call(p.SessionID, "Fetch.enable", map[string]any{"patterns": []any{
 		map[string]any{"resourceType": "Document", "requestStage": "Response"},
 		map[string]any{"resourceType": "Other", "requestStage": "Response"},
+		// Nothing on a landing page needs sound, video or fonts to be clicked:
+		// not fetched over a line that may be slow, unless a captcha shows.
+		map[string]any{"resourceType": "Media", "requestStage": "Request"},
+		map[string]any{"resourceType": "Font", "requestStage": "Request"},
 	}})
 	// Out-of-process iframes are attached to this session, waiting like their page.
 	d.call(p.SessionID, "Target.setAutoAttach", map[string]any{"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true})
@@ -415,9 +433,21 @@ func (d *Driver) paused(e cdp.Event) {
 			Name  string `json:"name"`
 			Value string `json:"value"`
 		} `json:"responseHeaders"`
-		ErrorReason string `json:"responseErrorReason"`
+		ErrorReason  string `json:"responseErrorReason"`
+		ResourceType string `json:"resourceType"`
 	}
 	json.Unmarshal(e.Params, &p)
+	if p.ResourceType == "Media" || p.ResourceType == "Font" { // paused before it is sent
+		d.mu.Lock()
+		captcha := d.captcha[d.sessions[e.SessionID]]
+		d.mu.Unlock()
+		if captcha {
+			d.call(e.SessionID, "Fetch.continueRequest", map[string]any{"requestId": p.RequestID})
+		} else {
+			d.call(e.SessionID, "Fetch.failRequest", map[string]any{"requestId": p.RequestID, "errorReason": "BlockedByClient"})
+		}
+		return
+	}
 	h := map[string]string{}
 	for _, x := range p.Headers {
 		h[strings.ToLower(x.Name)] = x.Value

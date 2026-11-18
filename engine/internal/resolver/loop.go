@@ -587,6 +587,7 @@ func (r *Resolver) captchaShown(j *job) {
 		return
 	}
 	j.captcha = true
+	r.markCaptcha(j)
 	r.clearTimer(j, "budget")
 	r.clearTimer(j, "effect")
 	j.clicked = nil
@@ -595,8 +596,19 @@ func (r *Resolver) captchaShown(j *job) {
 	r.notify("DMS² needs you to solve a captcha", j.host+" asks for a captcha on "+j.ifaceName+". The window is open; DMS² continues once it's solved.")
 }
 
+// markCaptcha tells the driver which of j's pages show a captcha.
+func (r *Resolver) markCaptcha(j *job) {
+	if r.d == nil {
+		return
+	}
+	for _, t := range j.tabs {
+		r.d.SetCaptcha(t, j.captcha)
+	}
+}
+
 func (r *Resolver) captchaDone(j *job) {
 	j.captcha = false
+	r.markCaptcha(j)
 	if j.mode != "replay" {
 		r.touch(j, "")
 		return

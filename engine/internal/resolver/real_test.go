@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -287,10 +288,15 @@ func TestARealReplay(t *testing.T) {
 		content, err := os.ReadFile(filepath.Join(dir, "resolver-content.js"))
 		return prelude + string(ready) + "\n" + string(content), err
 	}
+	var heavy atomic.Int32 // fetches of the page's video and font: none may come
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/f":
-			fmt.Fprint(w, `<html><body><p>Your file</p><a id=go href="/wait">Free download</a></body></html>`)
+			fmt.Fprint(w, `<html><head><style>@font-face{font-family:F;src:url(/font.woff2)}p{font-family:F}</style></head>`+
+				`<body><p>Your file</p><video src="/ad.mp4" autoplay muted></video><a id=go href="/wait">Free download</a></body></html>`)
+		case "/ad.mp4", "/font.woff2":
+			heavy.Add(1)
+			w.WriteHeader(404)
 		case "/wait":
 			fmt.Fprint(w, `<html><body><a id=get href="/file">Get it now</a></body></html>`)
 		case "/file":
@@ -328,6 +334,9 @@ func TestARealReplay(t *testing.T) {
 			t.Fatal(s)
 		}
 		t.Logf("resolved in %v", time.Since(start))
+		if n := heavy.Load(); n != 0 {
+			t.Fatalf("the page fetched its video or font %d time(s)", n)
+		}
 	case <-time.After(60 * time.Second):
 		t.Fatal("no end in 60 s")
 	}

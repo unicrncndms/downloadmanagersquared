@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -168,6 +169,37 @@ func TestTheCatchDropsTheDownloadAndNamesItsPageEvenFromAnIframe(t *testing.T) {
 	}
 	if c.URL != "https://h/f.zip" || c.Cookie != "a=1" || c.Referer != "https://h/page" || c.Headers["content-disposition"] == "" {
 		t.Fatalf("catch %+v", c)
+	}
+}
+
+func TestMediaAndFontsAreNotFetchedUnlessACaptchaShows(t *testing.T) {
+	d, f := driver(t, Events{})
+	ctx, _ := d.Context("eth", 4001)
+	d.event(ev("Target.attachedToTarget", "", map[string]any{"sessionId": "s1", "targetInfo": map[string]any{"targetId": "p1", "type": "page", "browserContextId": ctx}}))
+	if en := f.last("Fetch.enable"); en == nil || !strings.Contains(fmt.Sprint(en.params["patterns"]), "Media") || !strings.Contains(fmt.Sprint(en.params["patterns"]), "Font") {
+		t.Fatal("media and fonts are not paused")
+	}
+	paused := func(id, kind string) {
+		d.event(ev("Fetch.requestPaused", "s1", map[string]any{"requestId": id, "resourceType": kind, "request": map[string]any{"url": "https://h/x"}}))
+	}
+
+	paused("m1", "Media")
+	if fail := f.last("Fetch.failRequest"); fail == nil || fail.params["requestId"] != "m1" || fail.params["errorReason"] != "BlockedByClient" {
+		t.Fatal("a video was fetched")
+	}
+	paused("f1", "Font")
+	if fail := f.last("Fetch.failRequest"); fail == nil || fail.params["requestId"] != "f1" {
+		t.Fatal("a font was fetched")
+	}
+	d.SetCaptcha("p1", true)
+	paused("m2", "Media")
+	if cont := f.last("Fetch.continueRequest"); cont == nil || cont.params["requestId"] != "m2" {
+		t.Fatal("a captcha's audio was blocked")
+	}
+	d.SetCaptcha("p1", false)
+	paused("m3", "Media")
+	if fail := f.last("Fetch.failRequest"); fail == nil || fail.params["requestId"] != "m3" {
+		t.Fatal("media fetched after the captcha")
 	}
 }
 
