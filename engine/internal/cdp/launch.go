@@ -30,6 +30,10 @@ var flags = []string{
 	// Only the resolves' own windows: no empty one at start (as Playwright
 	// drives a headful Chromium).
 	"--no-startup-window",
+	// Driven over the pipe, Chromium says navigator.webdriver = true, which
+	// captcha services take for a bot: a person solves the captcha here
+	// (ticket 35). Firefox's resolver windows say false.
+	"--disable-blink-features=AutomationControlled",
 }
 
 // Exe picks the browser to drive: Chrome, else Edge (every Windows 10/11 has
