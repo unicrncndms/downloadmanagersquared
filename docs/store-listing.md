@@ -49,6 +49,9 @@ How it works
 - The engine does the downloading. This extension shows its list, with a square map of each file that shows which connection fetched which part, and has the settings page.
 - If the engine can't take a download, your browser downloads it as usual.
 
+Sites that give each IP its own link
+Some sites tie a download link to the IP address that asked for it. For each connection, the engine opens the page in its own Chrome or Edge window, reaching the internet only through that connection, replays the clicks you showed it once, and takes that connection's link. With no recorded clicks yet, it asks you to click through once.
+
 What you get
 - Several connections per file, each with its own speed
 - Pause, resume, queue, reorder
@@ -59,8 +62,6 @@ What you get
 
 Privacy
 No account, no analytics, no telemetry. The extension sends data only to the engine on your own PC, through Chrome's native messaging. The engine contacts the sites you download from, and api.github.com once a day to see if a newer version exists. Details: PRIVACY.md in the project.
-
-Not in the Chrome version yet: sites that give each IP address its own download link. Only the Firefox version handles those for now.
 
 Source code and issues: https://github.com/unicrncndms/downloadmanagersquared
 ```

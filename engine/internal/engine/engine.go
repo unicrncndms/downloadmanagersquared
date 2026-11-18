@@ -61,10 +61,16 @@ type Engine struct {
 	clientSeq int64
 	resolves  map[string]resolveReq // waiting for an extension to pick them up
 	learning  map[string]*ipc.Conn  // download id -> the extension recording its recipe (Record recipe)
-	started   map[string]time.Time  // browsers started for a resolve, by exe, so not twice at once
-	ipv6Only  []string              // adapters with only IPv6, left out while IPv6 is off: Settings hints at them
-	userAgent string                // the browser's, from its latest hello; not saved
-	browser   string                // the browser's exe, from its latest hello; not saved
+	// The engine's own resolver for Chromium downloads (ownresolver.go): nil
+	// without a Chromium. ownLearning are the ids it records a recipe for,
+	// ownHosts the hosts it has a recipe for.
+	own         ownResolver
+	ownLearning map[string]bool
+	ownHosts    map[string]bool
+	started     map[string]time.Time // browsers started for a resolve, by exe, so not twice at once
+	ipv6Only    []string             // adapters with only IPv6, left out while IPv6 is off: Settings hints at them
+	userAgent   string               // the browser's, from its latest hello; not saved
+	browser     string               // the browser's exe, from its latest hello; not saved
 
 	// Also under mu.
 	window       Window // the Downloads window; nil until SetWindow
@@ -133,6 +139,7 @@ func New() (*Engine, error) {
 		ln.Close()
 		return nil, err
 	}
+	e.startOwnResolver()
 	e.refreshInterfaces()
 	e.updateSnapshot(0)
 	return e, nil
@@ -187,22 +194,23 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		pickFolder: func(owner uintptr, start, title string) (string, bool) {
 			return winutil.PickFolder(windows.Handle(owner), start, title)
 		},
-		ln:        ln,
-		settings:  settings,
-		ifaces:    map[string]*ifaceEntry{},
-		global:    rate.NewShaper(),
-		clients:   map[*ipc.Conn]*client{},
-		resolves:  map[string]resolveReq{},
-		groupSaid: map[string]bool{},
-		learning:  map[string]*ipc.Conn{},
-		started:   map[string]time.Time{},
-		mapPort:   portmap.Map,
-		quit:      make(chan struct{}),
-		ctx:       ctx,
-		stop:      stop,
-		ran:       make(chan struct{}),
-		quitReq:   make(chan struct{}),
-		pushReq:   make(chan struct{}, 1),
+		ln:          ln,
+		settings:    settings,
+		ifaces:      map[string]*ifaceEntry{},
+		global:      rate.NewShaper(),
+		clients:     map[*ipc.Conn]*client{},
+		resolves:    map[string]resolveReq{},
+		groupSaid:   map[string]bool{},
+		learning:    map[string]*ipc.Conn{},
+		ownLearning: map[string]bool{},
+		started:     map[string]time.Time{},
+		mapPort:     portmap.Map,
+		quit:        make(chan struct{}),
+		ctx:         ctx,
+		stop:        stop,
+		ran:         make(chan struct{}),
+		quitReq:     make(chan struct{}),
+		pushReq:     make(chan struct{}, 1),
 	}
 	e.keepingNow()
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
@@ -416,6 +424,12 @@ func (e *Engine) Shutdown() {
 			e.pieces.Close()
 		}
 		e.vpn.Close()
+		e.mu.Lock()
+		own := e.own
+		e.mu.Unlock()
+		if own != nil {
+			own.Close()
+		}
 		e.mu.Lock()
 		for _, ent := range e.ifaces {
 			ent.socks.Close()

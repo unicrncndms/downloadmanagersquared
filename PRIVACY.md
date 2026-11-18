@@ -16,6 +16,8 @@ The extension also keeps, in the browser's own storage, the clicks it learned pe
 
 In Firefox, pages DMS² opens to fetch a link run in a temporary container that only reaches the internet through the chosen connection, and is removed with its cookies when the link is fetched. It starts with a copy of the cookies your browser would send to that page, so you are logged in there too (never from a private window). That site then sees your session from that connection's IP address as well; a site that ties a login to one address may log you out. If the engine isn't running, those requests are blocked.
 
+For downloads from Chrome and other Chromium browsers (and from any browser while no Firefox extension is connected), the engine opens those pages itself, in Chrome or Edge, which it starts with a profile of its own (`resolver-profile` in the data folder), never your browser's. Each connection gets a private browsing context that reaches the internet only through that connection's proxy and keeps nothing on disk; it is closed, with its cookies, when the last page for that connection is done, and that browser closes a few minutes after the last one. It starts with the cookies your browser sent with the download, for that same site only. The landing-page hosts and the clicks DMS² learned there are kept in `recipes.json` in the data folder.
+
 ## What the engine keeps
 
 In `%APPDATA%\downloadmanagersquared\`: your settings, the download list (with the URLs, landing pages and, until each download completes, its cookies, encrypted with Windows so only your user can read them; cookies an older version saved readable are encrypted as soon as the engine starts, and a download file that can't be read is set aside as `….broken` without its cookies), torrents, the log (no URLs), imported WireGuard configs (encrypted with Windows, as their private keys are in them), the login of an `ftp://user:password@…` link (encrypted with Windows, only until that download completes; the link itself is saved without it), the SFTP logins you gave (a password, or a key file's path and passphrase; encrypted with Windows, kept per host and user until you remove them in Settings) and the SSH host keys you trusted (public keys), the password you typed for an encrypted archive (encrypted with Windows, and only until that archive is extracted), and a PIA login if you use one, encrypted with Windows so only your user can read it. Uninstalling can delete all of it; your downloaded files are always kept.
@@ -41,7 +43,7 @@ Questions about privacy: open an issue at https://github.com/unicrncndms/downloa
 
 ## Extension permissions
 
-The Firefox extension asks for these permissions. The Chrome build asks for the same, except `proxy`, `contextualIdentities`, `webRequestBlocking`, `menus` and `theme`, which the Chrome build leaves out; `<all_urls>` is a host permission there. It does not open temporary containers (so the *Pages DMS² opens* section is Firefox only).
+The Firefox extension asks for these permissions. The Chrome build asks for the same, except `proxy`, `contextualIdentities`, `webRequestBlocking`, `menus` and `theme`, which the Chrome build leaves out; `<all_urls>` is a host permission there. It does not open temporary containers: the engine opens those pages itself (see *Pages DMS² opens*).
 
 | Permission | What DMS² uses it for |
 |---|---|

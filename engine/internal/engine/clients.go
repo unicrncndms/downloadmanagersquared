@@ -38,12 +38,14 @@ type resolveReq struct {
 	// cookies for the landing page are copied into the resolve's container.
 	CookieStore string `json:"cookieStore,omitempty"`
 	Browser     string `json:"-"` // only the extension in this browser gets it ("" = any)
+	Own         bool   `json:"-"` // the engine's resolver runs it: no extension gets it
 }
 
 // RequestResolve has the extension in the browser the download came from open
 // its page through ifaceID: the page's clicks are learned in that browser, and
 // its cookies are there. If that browser isn't running, it is started and
-// gets the request once its extension connects.
+// gets the request once its extension connects. A Chromium download, or any
+// while no extension can resolve, goes to the engine's resolver (ownsLocked).
 func (e *Engine) RequestResolve(id, ifaceID, pageURL, browser string) {
 	if browser != "" {
 		if fi, err := os.Stat(browser); err != nil || fi.IsDir() {
@@ -57,15 +59,19 @@ func (e *Engine) RequestResolve(id, ifaceID, pageURL, browser string) {
 	e.mu.Lock()
 	req := e.resolveReqLocked(id, ifaceID, pageURL, browser)
 	req.CookieStore = store
-	e.resolves[id+"|"+ifaceID] = req
 	c := e.extensionForLocked(browser)
-	start := c == nil && browser != "" && time.Since(e.started[strings.ToLower(browser)]) > time.Minute
+	req.Own = e.ownsLocked(browser)
+	own := e.own
+	e.resolves[id+"|"+ifaceID] = req
+	start := c == nil && !req.Own && browser != "" && time.Since(e.started[strings.ToLower(browser)]) > time.Minute
 	if start {
 		e.started[strings.ToLower(browser)] = time.Now()
 	}
 	e.mu.Unlock()
 	log.Printf("resolve %s via %s", id, req.IfaceName)
 	switch {
+	case req.Own:
+		own.Request(e.ownRequest(req))
 	case c != nil:
 		c.Emit("resolve", req)
 	case start:
@@ -100,6 +106,16 @@ func (e *Engine) RecordRecipe(id string) error {
 		return fmt.Errorf("%s has no landing page", st.Filename)
 	}
 	e.mu.Lock()
+	if e.ownsLocked(st.Browser) {
+		req := e.resolveReqLocked(id, paths.MainInterface(e.pathSnapshotLocked()), st.PageURL, st.Browser)
+		req.Learn = true
+		e.ownLearning[id] = true
+		own := e.own
+		e.mu.Unlock()
+		log.Printf("recording a recipe for %s via %s in the engine's browser", id, req.IfaceName)
+		own.Request(e.ownRequest(req))
+		return nil
+	}
 	c := e.extensionForLocked(st.Browser)
 	if c == nil {
 		e.mu.Unlock()
@@ -123,7 +139,7 @@ func (e *Engine) canRecordLocked(s download.Summary, browser string, resolving m
 	if s.Kind != "" || s.Status == download.StatusCompleted || s.PageURL == "" {
 		return false
 	}
-	if c := e.learning[s.ID]; c != nil && e.clients[c] != nil {
+	if c := e.learning[s.ID]; (c != nil && e.clients[c] != nil) || e.ownLearning[s.ID] {
 		return false
 	}
 	if resolving[s.ID] {
@@ -134,11 +150,14 @@ func (e *Engine) canRecordLocked(s download.Summary, browser string, resolving m
 			return false
 		}
 	}
-	c := e.extensionForLocked(browser)
-	if c == nil {
+	var hosts map[string]bool
+	if e.ownsLocked(browser) {
+		hosts = e.ownHosts
+	} else if c := e.extensionForLocked(browser); c != nil {
+		hosts = e.clients[c].recipeHosts
+	} else {
 		return false
 	}
-	hosts := e.clients[c].recipeHosts
 	u, err := url.Parse(s.PageURL)
 	return hosts != nil && err == nil && u.Hostname() != "" && !hosts[u.Hostname()]
 }

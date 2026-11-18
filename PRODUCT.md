@@ -36,7 +36,7 @@ It is free and open source (MIT), with no account, no server and no telemetry. T
 
 ## Capabilities and Constraints
 
-- Platform: Windows 10/11 only. Browsers: Firefox, LibreWolf, Waterfox, Floorp (Chromium support is an open spec, not shipped).
+- Platform: Windows 10/11 only. Browsers: Firefox, LibreWolf, Waterfox, Floorp, Chrome, Edge, Brave and other Chromium browsers.
 - Pages run in two hosts: the Firefox extension popup and the engine's WebView2 Downloads window (`extension/ui/host.js`). One set of pages covers both.
 - Core features that the UI must show: parallel connections per interface, backoff ("Server busy"), mirrors, checksums, a drag-and-arrow queue, *Download as folder* for `.zip`, `.7z`, `.rar` and split archives, the password for archives, IPv4 and experimental IPv6, VPN tunnels per connection, port forwarding, torrents.
 - Shared vocabulary lives in `CONTEXT.md`: use its terms (interface, connection, chunk, link, probe, mirror, backoff, landing page, failed link) in UI wording. Avoid its listed alternatives in user-facing text.

@@ -113,7 +113,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	resolving := e.resolvingIDsLocked()
-	noResolver := len(resolving) > 0 && e.onlyNonResolvingLocked()
+	noResolver := len(resolving) > 0 && e.own == nil && e.onlyNonResolvingLocked() // without a Chromium to drive
 	for i := range sums {
 		if noResolver && resolving[sums[i].ID] {
 			for id, l := range sums[i].Links {

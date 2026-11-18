@@ -97,6 +97,9 @@ func isFirefoxFamily(exe string) bool {
 	return exe != "" && slices.Contains(firefoxFamily, strings.ToLower(filepath.Base(exe)))
 }
 
+// IsChromium: exe is a Chrome-family browser's.
+func IsChromium(exe string) bool { return isChromiumFamily(exe) }
+
 func isChromiumFamily(exe string) bool {
 	return exe != "" && slices.Contains(chromiumFamily, strings.ToLower(filepath.Base(exe)))
 }

@@ -591,7 +591,7 @@ func (e *Engine) hello(c *ipc.Conn, p helloParams) hello {
 	}
 	pending := make([]resolveReq, 0, len(e.resolves))
 	for _, r := range e.resolves {
-		if r.Browser == "" || strings.EqualFold(r.Browser, p.Browser) {
+		if !r.Own && (r.Browser == "" || strings.EqualFold(r.Browser, p.Browser)) {
 			pending = append(pending, r)
 		}
 	}
