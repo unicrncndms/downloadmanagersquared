@@ -254,6 +254,11 @@ func TestAFirstVisitRecordsTheRecipeAndReportsTheLink(t *testing.T) {
 func TestRecordingWithoutAnAccentAndWithABrokenPageScript(t *testing.T) {
 	g := newRig(t)
 	g.r.Request(req("d1", "wifi", "https://host.example/f"))
+	before := g.count("Runtime.evaluate")
+	g.load("tab1", "ctx1", "about:blank") // the window's first page: nothing to drive
+	if g.count("Runtime.evaluate") != before {
+		t.Fatal("the page script was put into about:blank")
+	}
 	g.load("tab1", "ctx1", "https://host.example/f")
 	tok, _ := g.sent()["tokens"].(map[string]any)
 	if light, _ := tok["light"].(map[string]any); light["accent"] != "#1d4ed8" {

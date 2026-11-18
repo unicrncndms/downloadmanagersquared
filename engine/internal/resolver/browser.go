@@ -53,6 +53,7 @@ type Driver struct {
 	pages    map[string]string   // page target -> its session
 	worlds   map[string]int      // page target -> the page script's execution context (script.go)
 	urls     map[string]string   // page target -> its main frame's address
+	ready    map[string]bool     // page target -> its document said Loaded (once per document)
 	captcha  map[string]bool     // page targets showing a captcha: they fetch everything (SetCaptcha)
 }
 
@@ -64,7 +65,7 @@ type ctxEntry struct {
 const callTimeout = 15 * time.Second
 
 func newDriver(ev Events) *Driver {
-	return &Driver{ev: ev, contexts: map[string]ctxEntry{}, ours: map[string]bool{}, sessions: map[string]string{}, pages: map[string]string{}, worlds: map[string]int{}, urls: map[string]string{}, captcha: map[string]bool{}}
+	return &Driver{ev: ev, contexts: map[string]ctxEntry{}, ours: map[string]bool{}, sessions: map[string]string{}, pages: map[string]string{}, worlds: map[string]int{}, urls: map[string]string{}, ready: map[string]bool{}, captcha: map[string]bool{}}
 }
 
 // Start runs exe with its profile in dir and returns its driver. The browser
@@ -323,6 +324,7 @@ func (d *Driver) event(e cdp.Event) {
 		delete(d.pages, p.TargetID)
 		delete(d.worlds, p.TargetID)
 		delete(d.urls, p.TargetID)
+		delete(d.ready, p.TargetID)
 		delete(d.captcha, p.TargetID)
 		for k, v := range d.sessions {
 			if v == p.TargetID || k == s {
@@ -339,7 +341,7 @@ func (d *Driver) event(e cdp.Event) {
 		d.paused(e)
 	case "Runtime.bindingCalled":
 		d.bindingCalled(e)
-	case "Page.frameNavigated", "Page.loadEventFired":
+	case "Page.frameNavigated", "Page.domContentEventFired", "Page.loadEventFired":
 		d.pageEvent(e)
 	}
 }
@@ -353,11 +355,15 @@ func (d *Driver) pageEvent(e cdp.Event) {
 	if !own {
 		return
 	}
-	if e.Method == "Page.loadEventFired" {
+	if e.Method != "Page.frameNavigated" {
+		// Loaded at DOMContentLoaded, as the extension's scripts run at
+		// document_idle: a page with ads may not fire load for a long time.
+		// The load event after it is the same document's: not again.
 		d.mu.Lock()
-		url := d.urls[page]
+		url, again := d.urls[page], d.ready[page]
+		d.ready[page] = true
 		d.mu.Unlock()
-		if d.ev.Loaded != nil {
+		if !again && d.ev.Loaded != nil {
 			d.ev.Loaded(page, url)
 		}
 		return
@@ -374,6 +380,7 @@ func (d *Driver) pageEvent(e cdp.Event) {
 	}
 	d.mu.Lock()
 	d.urls[page] = p.Frame.URL
+	d.ready[page] = false
 	d.mu.Unlock()
 	if d.ev.Loading != nil {
 		d.ev.Loading(page, p.Frame.URL)

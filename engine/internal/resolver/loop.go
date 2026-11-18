@@ -388,6 +388,7 @@ func (r *Resolver) launch(j *job, mode string) {
 	}
 	j.tab, j.minimized = tab, !visible
 	r.addTab(j, tab)
+	log.Printf("resolver: %s via %s: %s in %s", j.host, j.ifaceName, mode, tab)
 	if visible {
 		d.Show(tab, r.screen(), true)
 		r.notify("Show DMS² how to get the link", "Click through "+j.host+" for "+j.ifaceName+" as you normally would. Your clicks are remembered for next time.")
@@ -523,8 +524,8 @@ func (r *Resolver) onLoading(tab, url string) {
 
 func (r *Resolver) onLoaded(tab, url string) {
 	j := r.byTab[tab]
-	if j == nil || j.done || tab != j.tab {
-		return
+	if j == nil || j.done || tab != j.tab || !isHTTP(url) {
+		return // about:blank, which a window opens on, is no page to drive
 	}
 	j.loading = false
 	j.lastURL = url
@@ -547,6 +548,7 @@ func (r *Resolver) drive(j *job) {
 		log.Printf("resolver: no page script in %s's page: %v", j.host, err) // e.g. an error page; the overall timer catches a stuck job
 		return
 	}
+	log.Printf("resolver: %s via %s: page script in %s (%s)", j.host, j.ifaceName, j.tab, j.mode)
 	switch j.mode {
 	case "record":
 		r.sendRecord(j)

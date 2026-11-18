@@ -217,9 +217,12 @@ func TestPageEventsOfOurContextsOnly(t *testing.T) {
 	d.event(ev("Target.attachedToTarget", "", map[string]any{"sessionId": "s2", "targetInfo": map[string]any{"targetId": "p2", "type": "page", "browserContextId": ctx}}))
 	d.event(ev("Page.frameNavigated", "s2", map[string]any{"frame": map[string]any{"id": "F", "url": "https://ad/2"}}))
 	d.event(ev("Page.frameNavigated", "s2", map[string]any{"frame": map[string]any{"id": "G", "parentId": "F", "url": "https://iframe"}}))
-	d.event(ev("Page.loadEventFired", "s2", map[string]any{}))
+	d.event(ev("Page.domContentEventFired", "s2", map[string]any{}))
+	d.event(ev("Page.loadEventFired", "s2", map[string]any{})) // the same document: not loaded twice
+	d.event(ev("Page.frameNavigated", "s2", map[string]any{"frame": map[string]any{"id": "F", "url": "https://ad/3"}}))
+	d.event(ev("Page.loadEventFired", "s2", map[string]any{})) // no DOMContentLoaded seen: load does
 	d.event(ev("Target.targetDestroyed", "", map[string]any{"targetId": "p2"}))
-	want := "open p2 by p1 https://ad|loading p2 https://ad/2|loaded p2 https://ad/2|closed p2"
+	want := "open p2 by p1 https://ad|loading p2 https://ad/2|loaded p2 https://ad/2|loading p2 https://ad/3|loaded p2 https://ad/3|closed p2"
 	if got := strings.Join(log, "|"); got != want {
 		t.Fatalf("events %s\nwant   %s", got, want)
 	}
