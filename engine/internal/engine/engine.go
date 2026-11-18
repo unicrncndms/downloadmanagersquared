@@ -906,7 +906,19 @@ func (e *Engine) RemoveMany(ids []string, deleteFile bool) {
 
 func (e *Engine) forgetResolves(ids []string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	own := e.own
+	for _, id := range ids {
+		delete(e.ownLearning, id)
+	}
+	defer func() {
+		e.mu.Unlock()
+		// After the lock: the resolver's hooks take it.
+		if own != nil {
+			for _, id := range ids {
+				own.Cancel(id)
+			}
+		}
+	}()
 	for k := range e.resolves {
 		for _, id := range ids {
 			if strings.HasPrefix(k, id+"|") {

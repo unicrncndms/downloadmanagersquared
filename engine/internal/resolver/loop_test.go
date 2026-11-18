@@ -443,6 +443,32 @@ func TestAtMostTwoWindowsPerHostTheRestWait(t *testing.T) {
 	}
 }
 
+// A cancelled download's jobs close their windows without a word, and a job
+// waiting on the same host takes the place.
+func TestCancelEndsADownloadsJobsQuietly(t *testing.T) {
+	g := newRig(t)
+	recipeFor(g, "host.example", 1000)
+	g.r.Request(req("d1", "a", "https://host.example/f"))
+	g.r.Request(req("d1", "b", "https://host.example/f"))
+	g.r.Request(req("d2", "a", "https://host.example/g")) // waits: two windows for the host
+	if n := g.count("Target.createTarget"); n != 2 {
+		t.Fatalf("%d windows, want 2", n)
+	}
+	g.said()
+	g.r.Cancel("d1")
+	g.sync()
+	if n := g.count("Target.closeTarget"); n != 2 {
+		t.Fatalf("%d windows closed, want d1's two", n)
+	}
+	if n := g.count("Target.createTarget"); n != 3 {
+		t.Fatal("the waiting job did not start")
+	}
+	g.advance(10 * time.Minute)
+	if s := g.said(); strings.Contains(s, "d1") {
+		t.Fatalf("a hook fired for the cancelled download: %s", s)
+	}
+}
+
 func TestADeadBrowserFailsItsJobsAndTheNextResolveStartsANewOne(t *testing.T) {
 	g := newRig(t)
 	g.r.Request(req("d1", "wifi", "https://host.example/f"))

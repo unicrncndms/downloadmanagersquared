@@ -10,8 +10,15 @@ import (
 )
 
 type fakeOwn struct {
-	mu   sync.Mutex
-	reqs []resolver.Request
+	mu        sync.Mutex
+	reqs      []resolver.Request
+	cancelled []string
+}
+
+func (f *fakeOwn) Cancel(id string) {
+	f.mu.Lock()
+	f.cancelled = append(f.cancelled, id)
+	f.mu.Unlock()
 }
 
 func (f *fakeOwn) Request(r resolver.Request) { f.mu.Lock(); f.reqs = append(f.reqs, r); f.mu.Unlock() }
@@ -70,13 +77,24 @@ func TestChromiumDownloadsResolveInTheEnginesBrowser(t *testing.T) {
 		t.Fatalf("the engine's resolver got %d resolves, want only Chrome's", n)
 	}
 
-	// The engine answers through the hooks.
+	// Removing the download stops its resolve in the engine's browser.
+	if err := e.Remove(id, false); err != nil {
+		t.Fatal(err)
+	}
+	own.mu.Lock()
+	cancelled := own.cancelled
+	own.mu.Unlock()
+	if len(cancelled) != 1 || cancelled[0] != id {
+		t.Fatalf("cancelled %v, want the removed download", cancelled)
+	}
+
+	// The engine answers through the hooks, and one for a removed download is dropped.
 	e.ownHooks().Failed(id, "eth", "no link")
 	e.mu.Lock()
 	_, pending := e.resolves[id+"|eth"]
 	e.mu.Unlock()
 	if pending {
-		t.Fatal("a failed resolve stays pending")
+		t.Fatal("a removed download's resolve stays pending")
 	}
 }
 

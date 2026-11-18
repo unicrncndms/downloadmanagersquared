@@ -951,6 +951,26 @@ func (r *Resolver) onMessage(tab, payload string) {
 	}
 }
 
+// Cancel ends every job of download id (its links and a recording alike) and
+// closes its pages, with no hook: the download is gone, or needs no link now.
+func (r *Resolver) Cancel(id string) {
+	r.lock()
+	defer r.unlock()
+	for _, j := range slices.Clone(r.jobs) {
+		if j.id != id || !slices.Contains(r.jobs, j) {
+			continue
+		}
+		j.done, j.ended = true, true
+		r.clearTimers(j)
+		for _, p := range r.popups {
+			if p.job == j && p.stop != nil {
+				p.stop()
+			}
+		}
+		r.cleanup(j)
+	}
+}
+
 // Close ends every resolve and the browser (the engine is quitting).
 func (r *Resolver) Close() {
 	r.lock()

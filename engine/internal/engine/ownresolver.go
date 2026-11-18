@@ -19,6 +19,7 @@ import (
 // ownResolver is what the engine needs of a *resolver.Resolver; tests fake it.
 type ownResolver interface {
 	Request(resolver.Request)
+	Cancel(id string) // the download is gone: its pages close, nothing is reported
 	Close()
 }
 
