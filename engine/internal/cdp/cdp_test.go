@@ -182,52 +182,6 @@ func TestACallGivesUpWithItsContext(t *testing.T) {
 	}
 }
 
-func TestKeeperStartsOnceClosesWhenIdleAndRestartsADeadOne(t *testing.T) {
-	var started []*Browser
-	k := &Keeper{Idle: 30 * time.Millisecond, Start: func() (*Browser, error) {
-		b, _ := newFake(t, nil)
-		started = append(started, b)
-		return b, nil
-	}}
-	b1, rel1, _ := k.Acquire()
-	b2, rel2, _ := k.Acquire()
-	if b1 != b2 || len(started) != 1 {
-		t.Fatal("a second job started a second browser")
-	}
-	rel1()
-	rel1() // twice is once
-	time.Sleep(60 * time.Millisecond)
-	if b1.Err() != nil {
-		t.Fatal("closed while a job still held it")
-	}
-	rel2()
-	select {
-	case <-b1.Done():
-	case <-time.After(time.Second):
-		t.Fatal("not closed when idle")
-	}
-	b3, rel3, _ := k.Acquire()
-	if b3 == b1 || len(started) != 2 {
-		t.Fatal("a closed browser was handed out")
-	}
-	b3.Close() // dies while held
-	b4, rel4, _ := k.Acquire()
-	if b4 == b3 || len(started) != 3 {
-		t.Fatal("a dead browser was handed out")
-	}
-	rel3() // the dead one's release must not count against b4
-	time.Sleep(60 * time.Millisecond)
-	if b4.Err() != nil {
-		t.Fatal("the dead one's release closed its successor")
-	}
-	rel4()
-	select {
-	case <-b4.Done():
-	case <-time.After(time.Second):
-		t.Fatal("successor never idles out")
-	}
-}
-
 func TestExePrefersChromeThenEdge(t *testing.T) {
 	ff := winutil.Browser{Name: "Firefox", Exe: `C:\ff\firefox.exe`}
 	edge := winutil.Browser{Name: "Edge", Exe: `C:\e\msedge.exe`, Chromium: true}

@@ -31,7 +31,8 @@ type Catch struct {
 // goroutine, in order; none may block for long.
 type Events struct {
 	Opened  func(target, opener, url string) // a page in one of the driver's contexts; opener "" for one Open made
-	URL     func(target, url string)         // a page's address changed
+	Loading func(target, url string)         // its main frame navigated (committed) to url
+	Loaded  func(target, url string)         // its load event fired: the page is complete
 	Closed  func(target string)
 	Caught  func(target string, c Catch)
 	Message func(target, payload string) // from the page script (script.go)
@@ -51,6 +52,7 @@ type Driver struct {
 	sessions map[string]string   // session id -> the page target it belongs to (an iframe's: its page's)
 	pages    map[string]string   // page target -> its session
 	worlds   map[string]int      // page target -> the page script's execution context (script.go)
+	urls     map[string]string   // page target -> its main frame's address
 }
 
 type ctxEntry struct {
@@ -61,11 +63,11 @@ type ctxEntry struct {
 const callTimeout = 15 * time.Second
 
 func newDriver(ev Events) *Driver {
-	return &Driver{ev: ev, contexts: map[string]ctxEntry{}, ours: map[string]bool{}, sessions: map[string]string{}, pages: map[string]string{}, worlds: map[string]int{}}
+	return &Driver{ev: ev, contexts: map[string]ctxEntry{}, ours: map[string]bool{}, sessions: map[string]string{}, pages: map[string]string{}, worlds: map[string]int{}, urls: map[string]string{}}
 }
 
 // Start runs exe with its profile in dir and returns its driver. The browser
-// ends with b.Close (see cdp.Keeper).
+// ends with b.Close.
 func Start(exe, dir string, ev Events) (*Driver, *cdp.Browser, error) {
 	d := newDriver(ev)
 	b, err := cdp.Start(exe, dir, d.event)
@@ -150,14 +152,31 @@ func (d *Driver) Open(contextID, url string, shown bool) (string, error) {
 	if shown {
 		state = "normal"
 	}
-	r, err := d.call("", "Target.createTarget", map[string]any{"url": url, "browserContextId": contextID, "newWindow": true, "windowState": state})
+	// Blank first: a page given its address here can load before it is attached,
+	// and its load events and its catch would be missed (seen on Edge and Chrome 157).
+	r, err := d.call("", "Target.createTarget", map[string]any{"url": "about:blank", "browserContextId": contextID, "newWindow": true, "windowState": state})
 	if err != nil {
 		return "", err
 	}
 	var t struct{ TargetID string }
 	json.Unmarshal(r, &t)
+	s := ""
+	for end := time.Now().Add(attachWait); s == "" && time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		s = d.session(t.TargetID)
+	}
+	if s == "" {
+		d.Close(t.TargetID)
+		return "", fmt.Errorf("the page did not attach")
+	}
+	if _, err := d.call(s, "Page.navigate", map[string]any{"url": url}); err != nil {
+		d.Close(t.TargetID)
+		return "", err
+	}
 	return t.TargetID, nil
 }
+
+// attachWait is how long Open waits for its page to attach; a var for tests.
+var attachWait = 10 * time.Second
 
 func (d *Driver) window(target string) (int, error) {
 	r, err := d.call("", "Browser.getWindowForTarget", map[string]any{"targetId": target})
@@ -169,8 +188,8 @@ func (d *Driver) window(target string) (int, error) {
 	return w.WindowID, nil
 }
 
-// Show puts target's window at b and in front.
-func (d *Driver) Show(target string, b Bounds) error {
+// Show puts target's window at b, and in front if focus.
+func (d *Driver) Show(target string, b Bounds, focus bool) error {
 	w, err := d.window(target)
 	if err != nil {
 		return err
@@ -182,8 +201,48 @@ func (d *Driver) Show(target string, b Bounds) error {
 	if _, err := d.call("", "Browser.setWindowBounds", map[string]any{"windowId": w, "bounds": map[string]any{"left": b.Left, "top": b.Top, "width": b.Width, "height": b.Height}}); err != nil {
 		return err
 	}
+	if !focus {
+		return nil
+	}
 	_, err = d.call("", "Target.activateTarget", map[string]any{"targetId": target})
 	return err
+}
+
+// Cookie is a cookie to set (CDP's CookieParam).
+type Cookie struct {
+	Name     string  `json:"name"`
+	Value    string  `json:"value"`
+	Domain   string  `json:"domain,omitempty"`
+	Path     string  `json:"path,omitempty"`
+	Secure   bool    `json:"secure,omitempty"`
+	HTTPOnly bool    `json:"httpOnly,omitempty"`
+	Expires  float64 `json:"expires,omitempty"` // seconds since 1970; 0: a session cookie
+}
+
+// SetCookies puts cookies into a context, e.g. the user's login for the landing page.
+func (d *Driver) SetCookies(contextID string, cookies []Cookie) error {
+	if len(cookies) == 0 {
+		return nil
+	}
+	_, err := d.call("", "Storage.setCookies", map[string]any{"cookies": cookies, "browserContextId": contextID})
+	return err
+}
+
+// CookieHeader is the Cookie header target's context would send to url.
+func (d *Driver) CookieHeader(target, url string) string {
+	r, err := d.call(d.session(target), "Network.getCookies", map[string]any{"urls": []string{url}})
+	if err != nil {
+		return ""
+	}
+	var c struct {
+		Cookies []struct{ Name, Value string }
+	}
+	json.Unmarshal(r, &c)
+	parts := make([]string, 0, len(c.Cookies))
+	for _, k := range c.Cookies {
+		parts = append(parts, k.Name+"="+k.Value)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // Minimize hides target's window.
@@ -200,6 +259,13 @@ func (d *Driver) Minimize(target string) error {
 func (d *Driver) Close(target string) error {
 	_, err := d.call("", "Target.closeTarget", map[string]any{"targetId": target})
 	return err
+}
+
+// URLOf is target's main frame address, "" when not known.
+func (d *Driver) URLOf(target string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.urls[target]
 }
 
 // session is target's attached session, "" if it has none (yet).
@@ -229,15 +295,11 @@ func (d *Driver) event(e cdp.Event) {
 		var p struct{ TargetInfo targetInfo }
 		json.Unmarshal(e.Params, &p)
 		t := p.TargetInfo
-		if t.Type != "page" || !d.mine(t) {
+		if t.Type != "page" || !d.mine(t) || e.Method != "Target.targetCreated" {
 			return
 		}
-		if e.Method == "Target.targetCreated" {
-			if d.ev.Opened != nil {
-				d.ev.Opened(t.TargetID, t.OpenerID, t.URL)
-			}
-		} else if d.ev.URL != nil {
-			d.ev.URL(t.TargetID, t.URL)
+		if d.ev.Opened != nil {
+			d.ev.Opened(t.TargetID, t.OpenerID, t.URL)
 		}
 	case "Target.targetDestroyed":
 		var p struct{ TargetID string }
@@ -246,6 +308,7 @@ func (d *Driver) event(e cdp.Event) {
 		s, ok := d.pages[p.TargetID]
 		delete(d.pages, p.TargetID)
 		delete(d.worlds, p.TargetID)
+		delete(d.urls, p.TargetID)
 		for k, v := range d.sessions {
 			if v == p.TargetID || k == s {
 				delete(d.sessions, k)
@@ -261,6 +324,44 @@ func (d *Driver) event(e cdp.Event) {
 		d.paused(e)
 	case "Runtime.bindingCalled":
 		d.bindingCalled(e)
+	case "Page.frameNavigated", "Page.loadEventFired":
+		d.pageEvent(e)
+	}
+}
+
+// pageEvent turns a page's own Page events (not an iframe's) into Loading and Loaded.
+func (d *Driver) pageEvent(e cdp.Event) {
+	d.mu.Lock()
+	page := d.sessions[e.SessionID]
+	own := page != "" && d.pages[page] == e.SessionID
+	d.mu.Unlock()
+	if !own {
+		return
+	}
+	if e.Method == "Page.loadEventFired" {
+		d.mu.Lock()
+		url := d.urls[page]
+		d.mu.Unlock()
+		if d.ev.Loaded != nil {
+			d.ev.Loaded(page, url)
+		}
+		return
+	}
+	var p struct {
+		Frame struct {
+			ParentID string `json:"parentId"`
+			URL      string `json:"url"`
+		} `json:"frame"`
+	}
+	json.Unmarshal(e.Params, &p)
+	if p.Frame.ParentID != "" {
+		return
+	}
+	d.mu.Lock()
+	d.urls[page] = p.Frame.URL
+	d.mu.Unlock()
+	if d.ev.Loading != nil {
+		d.ev.Loading(page, p.Frame.URL)
 	}
 }
 
@@ -294,6 +395,7 @@ func (d *Driver) attached(e cdp.Event) {
 	// Out-of-process iframes are attached to this session, waiting like their page.
 	d.call(p.SessionID, "Target.setAutoAttach", map[string]any{"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true})
 	if t.Type == "page" {
+		d.call(p.SessionID, "Page.enable", nil) // its load events
 		d.mu.Lock()
 		d.pages[page] = p.SessionID
 		d.mu.Unlock()

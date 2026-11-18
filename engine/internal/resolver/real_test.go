@@ -151,7 +151,7 @@ func TestARealBrowser(t *testing.T) {
 		t.Fatal("the replayed click's tab was blocked")
 	}
 
-	if err := d.Show(page, Bounds{100, 100, 900, 700}); err != nil {
+	if err := d.Show(page, Bounds{100, 100, 900, 700}, true); err != nil {
 		t.Fatal(err)
 	}
 	if st := windowState(t, d, page); st != "normal" {
@@ -268,4 +268,81 @@ func testSocks(t *testing.T, target string) (int, chan string) {
 		}
 	}()
 	return ln.Addr().(*net.TCPAddr).Port, hosts
+}
+
+// TestARealReplay runs a whole resolve in the browser named by DMS_CDP_EXE: a
+// stored recipe, the real page script clicking it, the catch and the hook.
+func TestARealReplay(t *testing.T) {
+	exe, dir := os.Getenv("DMS_CDP_EXE"), os.Getenv("DMS_PAGE_SCRIPT_DIR")
+	if exe == "" || dir == "" {
+		t.Skip("set DMS_CDP_EXE and DMS_PAGE_SCRIPT_DIR")
+	}
+	was := pageScript
+	t.Cleanup(func() { pageScript = was })
+	pageScript = func() (string, error) {
+		ready, err := os.ReadFile(filepath.Join(dir, "lib", "ready.js"))
+		if err != nil {
+			return "", err
+		}
+		content, err := os.ReadFile(filepath.Join(dir, "resolver-content.js"))
+		return prelude + string(ready) + "\n" + string(content), err
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/f":
+			fmt.Fprint(w, `<html><body><p>Your file</p><a id=go href="/wait">Free download</a></body></html>`)
+		case "/wait":
+			fmt.Fprint(w, `<html><body><a id=get href="/file">Get it now</a></body></html>`)
+		case "/file":
+			w.Header().Set("Content-Type", "application/zip")
+			w.Header().Set("Content-Disposition", `attachment; filename="f.zip"`)
+			w.Header().Set("Content-Length", fmt.Sprint(20<<20))
+			w.Write(make([]byte, 1<<20))
+		}
+	}))
+	defer srv.Close()
+	port, _ := testSocks(t, srv.Listener.Addr().String())
+	base := "http://dms.test:" + strings.Split(srv.Listener.Addr().String(), ":")[1]
+
+	recipes, _ := OpenRecipes(filepath.Join(t.TempDir(), "recipes.json"))
+	recipes.Set("dms.test", &Recipe{Steps: []Step{
+		{Tag: "a", ID: "go", Text: "Free download", Selector: "#go", Wait: 500},
+		{Tag: "a", ID: "get", Text: "Get it now", Selector: "#get", Wait: 500},
+	}, DownloadWait: 500})
+	done := make(chan string, 2)
+	profile := t.TempDir()
+	r := &Resolver{
+		Recipes: recipes, Idle: time.Second,
+		Start: func(ev Events) (*Driver, Browser, error) { return Start(exe, profile, traced(t, ev)) },
+		Hooks: Hooks{
+			Resolved: func(id, iface, url, cookie, referer string) { done <- "resolved " + url + " referer=" + referer },
+			Failed:   func(id, iface, why string) { done <- "failed " + why },
+		},
+	}
+	defer r.Close()
+	start := time.Now()
+	r.Request(Request{ID: "d1", Iface: "eth", IfaceName: "Ethernet", PageURL: base + "/f", SocksPort: port})
+	select {
+	case s := <-done:
+		if s != "resolved "+base+"/file referer="+base+"/wait" {
+			t.Fatal(s)
+		}
+		t.Logf("resolved in %v", time.Since(start))
+	case <-time.After(60 * time.Second):
+		t.Fatal("no end in 60 s")
+	}
+	rec := recipes.Get("dms.test")
+	t.Logf("measured waits: %d %d, download %d", rec.Steps[0].Wait, rec.Steps[1].Wait, rec.DownloadWait)
+}
+
+// traced logs each event before passing it on.
+func traced(t *testing.T, ev Events) Events {
+	return Events{
+		Opened:  func(a, b, c string) { t.Logf("opened %s by %q %s", a, b, c); ev.Opened(a, b, c) },
+		Loading: func(a, b string) { t.Logf("loading %s %s", a, b); ev.Loading(a, b) },
+		Loaded:  func(a, b string) { t.Logf("loaded %s %s", a, b); ev.Loaded(a, b) },
+		Closed:  func(a string) { t.Logf("closed %s", a); ev.Closed(a) },
+		Caught:  func(a string, c Catch) { t.Logf("caught %s %s", a, c.URL); ev.Caught(a, c) },
+		Message: func(a, b string) { t.Logf("message %s %s", a, b); ev.Message(a, b) },
+	}
 }

@@ -127,7 +127,7 @@ func TestOurPagesAreWatchedOthersRunUnwatched(t *testing.T) {
 	ctx, _ := d.Context("eth", 4001)
 	d.event(ev("Target.attachedToTarget", "", map[string]any{"sessionId": "s1", "targetInfo": map[string]any{"targetId": "p1", "type": "page", "browserContextId": ctx}}))
 	got := strings.Join(f.methods("s1"), ",")
-	if got != "Fetch.enable,Target.setAutoAttach,Runtime.runIfWaitingForDebugger" {
+	if got != "Fetch.enable,Target.setAutoAttach,Page.enable,Runtime.runIfWaitingForDebugger" {
 		t.Fatalf("our page got %s", got)
 	}
 	d.event(ev("Target.attachedToTarget", "", map[string]any{"sessionId": "s2", "targetInfo": map[string]any{"targetId": "x", "type": "page", "browserContextId": "the-users"}}))
@@ -174,17 +174,20 @@ func TestTheCatchDropsTheDownloadAndNamesItsPageEvenFromAnIframe(t *testing.T) {
 func TestPageEventsOfOurContextsOnly(t *testing.T) {
 	var log []string
 	d, _ := driver(t, Events{
-		Opened: func(t, o, u string) { log = append(log, "open "+t+" by "+o+" "+u) },
-		URL:    func(t, u string) { log = append(log, "url "+t+" "+u) },
-		Closed: func(t string) { log = append(log, "closed "+t) },
+		Opened:  func(t, o, u string) { log = append(log, "open "+t+" by "+o+" "+u) },
+		Loading: func(t, u string) { log = append(log, "loading "+t+" "+u) },
+		Loaded:  func(t, u string) { log = append(log, "loaded "+t+" "+u) },
+		Closed:  func(t string) { log = append(log, "closed "+t) },
 	})
 	ctx, _ := d.Context("eth", 4001)
 	d.event(ev("Target.targetCreated", "", map[string]any{"targetInfo": map[string]any{"targetId": "p2", "type": "page", "openerId": "p1", "url": "https://ad", "browserContextId": ctx}}))
 	d.event(ev("Target.targetCreated", "", map[string]any{"targetInfo": map[string]any{"targetId": "u", "type": "page", "browserContextId": "other"}}))
 	d.event(ev("Target.attachedToTarget", "", map[string]any{"sessionId": "s2", "targetInfo": map[string]any{"targetId": "p2", "type": "page", "browserContextId": ctx}}))
-	d.event(ev("Target.targetInfoChanged", "", map[string]any{"targetInfo": map[string]any{"targetId": "p2", "type": "page", "url": "https://ad/2", "browserContextId": ctx}}))
+	d.event(ev("Page.frameNavigated", "s2", map[string]any{"frame": map[string]any{"id": "F", "url": "https://ad/2"}}))
+	d.event(ev("Page.frameNavigated", "s2", map[string]any{"frame": map[string]any{"id": "G", "parentId": "F", "url": "https://iframe"}}))
+	d.event(ev("Page.loadEventFired", "s2", map[string]any{}))
 	d.event(ev("Target.targetDestroyed", "", map[string]any{"targetId": "p2"}))
-	want := "open p2 by p1 https://ad|url p2 https://ad/2|closed p2"
+	want := "open p2 by p1 https://ad|loading p2 https://ad/2|loaded p2 https://ad/2|closed p2"
 	if got := strings.Join(log, "|"); got != want {
 		t.Fatalf("events %s\nwant   %s", got, want)
 	}
