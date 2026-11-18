@@ -184,8 +184,14 @@ func (l Layout) PutFiles(src string) error {
 		return err
 	}
 	inPlace := strings.EqualFold(filepath.Clean(src), filepath.Clean(l.Dir)) // installing where it was extracted
+	// What an earlier update moved aside, now that nothing runs it.
+	if old, _ := filepath.Glob(filepath.Join(l.Dir, "*.old-*")); len(old) > 0 {
+		for _, f := range old {
+			os.Remove(f)
+		}
+	}
 	if !inPlace {
-		if err := retrying(func() error { return copyFile(filepath.Join(src, "dms-engine.exe"), l.Engine()) }); err != nil {
+		if err := retrying(l.Engine(), func(dst string) error { return copyFile(filepath.Join(src, "dms-engine.exe"), dst) }); err != nil {
 			return err
 		}
 	}
@@ -270,27 +276,55 @@ func (l Layout) place(src, name string, inPlace bool) error {
 	dst := filepath.Join(l.Dir, name)
 	if l.Bundled != nil {
 		if b, err := fs.ReadFile(l.Bundled, name); err == nil {
-			return retrying(func() error { return os.WriteFile(dst, b, 0o755) })
+			return retrying(dst, func(p string) error { return os.WriteFile(p, b, 0o755) })
 		}
 	}
 	if inPlace {
 		_, err := os.Stat(dst)
 		return err
 	}
-	return retrying(func() error { return copyFile(filepath.Join(src, name), dst) })
+	return retrying(dst, func(p string) error { return copyFile(filepath.Join(src, name), p) })
 }
 
-// retrying retries write for a few seconds: a host that is still exiting
-// holds its exe open. A file that isn't there fails at once.
-func retrying(write func() error) error {
+// retrying writes dst through write (which writes the path it is given),
+// retrying for a few seconds. A file that isn't there fails at once.
+func retrying(dst string, write func(string) error) error {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		err := write()
+		err := replace(dst, write)
 		if err == nil || errors.Is(err, fs.ErrNotExist) || time.Now().After(deadline) {
 			return err
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+}
+
+// replace writes dst, or, while a running program holds it (an engine or a
+// host that a browser's older dms-host started again during the update: no
+// guard holds those back), writes a new file beside it and swaps it in after
+// moving the running one aside. Windows lets a running exe be renamed, not
+// overwritten; the next start runs the new one, and the next install removes
+// the one set aside.
+func replace(dst string, write func(string) error) error {
+	err := write(dst)
+	if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+		return err
+	}
+	tmp := dst + ".new"
+	if err := write(tmp); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	aside := fmt.Sprintf("%s.old-%d", dst, time.Now().UnixNano())
+	if err := os.Rename(dst, aside); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		os.Rename(aside, dst)
+		return err
+	}
+	return nil
 }
 
 func copyFile(src, dst string) error {

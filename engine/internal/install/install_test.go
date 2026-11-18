@@ -12,6 +12,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -391,5 +392,58 @@ func TestRemoveLaterWaitsForTheEngineToExit(t *testing.T) {
 	cmd.Wait()
 	if _, err := os.Stat(l.Dir); err == nil {
 		t.Fatal("the folder is still there once the exe was let go")
+	}
+}
+
+// A running exe is open for reading and deleting only: it can't be written,
+// but it can be renamed. An update writes the new one beside it and swaps it
+// in; the next install removes the one set aside.
+func TestAnUpdateReplacesAnExeThatIsRunning(t *testing.T) {
+	src := t.TempDir()
+	for _, f := range []string{"dms-engine.exe", "dms-host.exe"} {
+		if err := os.WriteFile(filepath.Join(src, f), []byte("new "+f), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l := testLayout(t)
+	if err := os.MkdirAll(l.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var held []windows.Handle
+	for _, f := range []string{"dms-engine.exe", "dms-host.exe"} {
+		p := filepath.Join(l.Dir, f)
+		if err := os.WriteFile(p, []byte("old"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		name, _ := windows.UTF16PtrFromString(p)
+		h, err := windows.CreateFile(name, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, h)
+	}
+	if err := os.WriteFile(filepath.Join(l.Dir, "dms-engine.exe"), nil, 0o755); err == nil {
+		t.Fatal("the held file could be written: the test doesn't hold it as a running exe is held")
+	}
+	if err := l.PutFiles(src); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"dms-engine.exe", "dms-host.exe"} {
+		if b, _ := os.ReadFile(filepath.Join(l.Dir, f)); string(b) != "new "+f {
+			t.Fatalf("%s is %q after the update", f, b)
+		}
+	}
+	aside, _ := filepath.Glob(filepath.Join(l.Dir, "*.old-*"))
+	if len(aside) != 2 {
+		t.Fatalf("set aside: %v, want the two running exes", aside)
+	}
+	for _, h := range held {
+		windows.CloseHandle(h)
+	}
+	if err := l.PutFiles(src); err != nil {
+		t.Fatal(err)
+	}
+	if aside, _ := filepath.Glob(filepath.Join(l.Dir, "*.old-*")); len(aside) != 0 {
+		t.Fatalf("still set aside after the next install: %v", aside)
 	}
 }

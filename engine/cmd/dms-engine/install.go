@@ -54,6 +54,9 @@ func installFrom(l install.Layout, src string, first *install.Options) error {
 	if err := l.Install(src, engine.Version, first); err != nil {
 		return err
 	}
+	// A browser's older dms-host may have started the old engine meanwhile,
+	// from the exe the copy moved aside: it makes way for the new one.
+	quitEngine()
 	if first != nil {
 		return winutil.StartDetached(l.Engine(), flagInstalled) // setup's window says the rest
 	}
