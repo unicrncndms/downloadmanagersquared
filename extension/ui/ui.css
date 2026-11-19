@@ -236,3 +236,4 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .info:hover::after, .info:focus::after { display: block; animation: pop .14s var(--ease); transform-origin: 12px 0; }
 .info.terms::after { white-space: pre-line; }
 .info.left::after { left: auto; right: -8px; }
+.info.up::after { top: auto; bottom: calc(100% + 6px); transform-origin: 12px 100%; }

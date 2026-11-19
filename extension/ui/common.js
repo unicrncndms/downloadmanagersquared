@@ -52,7 +52,12 @@ function sideInfo(e) {
   const i = e.target.closest && e.target.closest(".info");
   // By the body's width, not the window's: Chrome sizes a popup to its content, so a tip that
   // stuck out would widen the window, flip the side and shrink it again, many times a second.
-  if (i) { const r = i.getBoundingClientRect(); i.classList.toggle("left", document.body.clientWidth - r.left < r.right); }
+  // Up when there is less room below than a few lines of note need.
+  if (i) {
+    const r = i.getBoundingClientRect();
+    i.classList.toggle("left", document.body.clientWidth - r.left < r.right);
+    i.classList.toggle("up", document.body.clientHeight - r.bottom < 140 && r.top > document.body.clientHeight - r.bottom);
+  }
 }
 addEventListener("pointerover", sideInfo);
 addEventListener("focusin", sideInfo);

@@ -1,5 +1,7 @@
 html, body { height: 100%; }
 body { width: 480px; max-height: 600px; display: flex; flex-direction: column; }
+/* Chrome sizes the popup to its content: a note sticking out would resize it, move the (i) and flicker. */
+body:not(.windowed) { overflow: clip; }
 body.windowed { width: auto; max-height: none; }
 /* The popup is as tall as its list; with the Details sheet over it, as tall as it gets. */
 body.detailing:not(.windowed) { height: 600px; }
