@@ -126,7 +126,6 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 .ctile.busy { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
 .ctile.busy > span { color: currentColor; }
 .toast.undo { pointer-events: auto; display: flex; align-items: center; gap: var(--s3); bottom: 96px; }
-.toast.undo button { background: transparent; color: inherit; border: 1px solid currentColor; }
 .card [hidden] { display: none !important; }
 .card > .n { grid-area: 1 / 1; }
 .card > .title { grid-area: 1 / 2 / 2 / 4; display: flex; align-items: center; gap: var(--s3); min-width: 0; }

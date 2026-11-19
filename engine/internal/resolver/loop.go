@@ -595,6 +595,7 @@ func (r *Resolver) sendRecord(j *job) {
 	if i >= 0 && i+1 < len(j.pages) {
 		next = j.pages[i+1]
 	}
+	log.Printf("resolver: %s: record bar on page %d of %d the download came through", j.host, i+1, len(j.pages))
 	n, of := r.learningPlace(j)
 	tokens := j.tokens
 	if tokens == nil {

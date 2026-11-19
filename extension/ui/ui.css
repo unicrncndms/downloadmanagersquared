@@ -204,10 +204,9 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .toast.show { opacity: 1; translate: 0 0; }
 .toast.error { background: var(--bad); color: #fff; pointer-events: auto; display: flex; align-items: flex-start; gap: var(--s2); }
 .toast.error button { color: inherit; flex: none; }
-/* A button in a toast (Undo) is in the toast's colours, readable in both themes, and clickable. */
+/* A button in a toast (Undo) looks like every other button, not in the toast's inverted text colour. */
 .toast:has(button) { pointer-events: auto; }
-.toast button { background: transparent; color: inherit; border: 1px solid currentColor; }
-.toast button:hover { background: color-mix(in srgb, currentColor 15%, transparent); border-color: currentColor; }
+.toast button:not(.icon) { color: var(--text); }
 .badge[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
