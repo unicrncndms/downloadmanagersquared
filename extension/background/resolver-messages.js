@@ -17,6 +17,10 @@ Object.assign(Resolver, {
         this.setTimer(job, "effect", EFFECT_WAIT, "judgeClick");
         break;
       }
+      case "notReady": // found, not clickable yet: the step's time becomes READY_WAIT
+        if (job.mode !== "replay" || job.captcha || msg.index !== job.step) return;
+        this.setTimer(job, "budget", READY_WAIT, "budgetOut", msg.index, READY_WAIT, "The button didn't become clickable");
+        break;
       case "effect":
         if (job.clicked && job.clicked.index === msg.index) this.clickEffect(job, msg.kind);
         break;

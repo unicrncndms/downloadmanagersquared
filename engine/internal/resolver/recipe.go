@@ -39,6 +39,7 @@ type Recipe struct {
 
 const (
 	budgetSlack = 15 * time.Second
+	readyWait   = 2 * time.Minute // a found button has to become clickable (ready.js READY_WAIT)
 	replaySlack = time.Minute
 	recordIdle  = 5 * time.Minute // without a click, page load or captcha change
 	maxWindows  = 2               // per page host (ADR 0010)

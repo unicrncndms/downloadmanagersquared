@@ -648,3 +648,17 @@ func TestTheRecordBarGetsTheDownloadsPagesOnTheSite(t *testing.T) {
 		t.Fatalf("record message %v", m)
 	}
 }
+
+// A step whose button is found but not clickable yet (disabled until the page
+// is ready) gets readyWait, not its recorded wait's budget (ankergames in Chrome).
+func TestAFoundButtonGetsTimeToBecomeClickable(t *testing.T) {
+	g := newRig(t)
+	recipeFor(g, "host.example", 20)
+	g.r.Request(req("d1", "wifi", "https://host.example/f"))
+	g.load("tab1", "ctx1", "https://host.example/f")
+	g.msg("tab1", map[string]any{"type": "notReady", "index": 0, "kind": "disabled"})
+	g.advance(time.Minute) // far past budget(20 ms)
+	if m := g.sent(); m["cmd"] != "replay" {
+		t.Fatalf("gave up on a button the page was still readying: %v", m)
+	}
+}

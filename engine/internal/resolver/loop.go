@@ -967,6 +967,13 @@ func (r *Resolver) onMessage(tab, payload string) {
 		}
 		j.clicked, j.lastClick = c, now
 		r.setTimer(j, "effect", effectWait, func() { r.judgeClick(j) })
+	case "notReady": // found, not clickable yet: the step's time becomes readyWait
+		if j.mode != "replay" || j.captcha || m.Index != j.step {
+			return
+		}
+		log.Printf("resolver: %s via %s: step %d found, not clickable yet (%s)", j.host, j.ifaceName, m.Index+1, m.Kind)
+		index := m.Index
+		r.setTimer(j, "budget", readyWait, func() { r.budgetOut(j, index, readyWait, "The button didn't become clickable") })
 	case "effect":
 		if j.clicked != nil && j.clicked.index == m.Index {
 			r.clickEffect(j, m.Kind)

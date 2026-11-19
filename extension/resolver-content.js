@@ -142,7 +142,15 @@
       return;
     }
     el.scrollIntoView({ block: "center" });
+    let said = false;
     while (!isReady(factsOf(el)) || captchaPending()) {
+      // Found but not clickable yet: the page is getting there, which a recorded wait can't foresee.
+      if (!said) {
+        said = true;
+        const f = factsOf(el);
+        const why = ["covered", "disabled", "ariaDisabled"].filter((k) => f[k]).concat(f.visible ? [] : ["hidden"], f.pointerEvents === "none" ? ["pointer-events none"] : []).join(", ") || "a captcha";
+        browser.runtime.sendMessage({ resolver: true, type: "notReady", index, kind: why }).catch(() => {}); // background not listening
+      }
       await sleep(250);
       if (run !== replaying) return;
       if (!el.isConnected && !(el = find(step))) return replay(step, index, next, budget - (Date.now() - start));

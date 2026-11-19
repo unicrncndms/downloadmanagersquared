@@ -5,6 +5,7 @@
 // background read the facts, and the Node tests require this file.
 
 const EFFECT_WAIT = 2000; // ms a click has to show an effect
+const READY_WAIT = 120000; // ms a found button has to become clickable
 const MAX_CLICKS = 5;     // per step, before asking for help
 const POPUP_GRACE = 4000; // ms a new tab on another site has to start a download
 // ms the page after a load has to report a captcha again before the captcha
@@ -38,4 +39,4 @@ function popupVerdict({ openerSite, site, age, download }) {
   return age >= POPUP_GRACE ? "close" : "wait";
 }
 
-if (typeof module !== "undefined") module.exports = { isReady, afterClick, popupVerdict, EFFECT_WAIT, MAX_CLICKS, POPUP_GRACE };
+if (typeof module !== "undefined") module.exports = { isReady, afterClick, popupVerdict, EFFECT_WAIT, READY_WAIT, MAX_CLICKS, POPUP_GRACE };
