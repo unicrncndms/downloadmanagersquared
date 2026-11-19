@@ -225,8 +225,10 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .info::before { content: "i"; }
 .info:hover, .info:focus { color: var(--accent); border-color: var(--accent); }
 .info:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Fixed, placed by common.js from where the (i) is: an absolute note counted in the
+   width Chrome gives its popup, which then moved the (i) away from the mouse, many times a second. */
 .info::after {
-  content: attr(data-tip); position: absolute; z-index: 20; left: -8px; top: calc(100% + 6px);
+  content: attr(data-tip); position: fixed; z-index: 20; left: var(--tip-l); top: var(--tip-t);
   width: max-content; max-width: min(300px, 100vw - 32px); padding: 8px 10px; border-radius: var(--r);
   background: var(--text); color: var(--bg); box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
   font: normal 400 12px/1.45 Rubik, system-ui, "Segoe UI", sans-serif; text-align: left; white-space: normal;
@@ -235,5 +237,5 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 /* Hidden it takes no room, so a narrow page never scrolls sideways; common.js picks the side with room. */
 .info:hover::after, .info:focus::after { display: block; animation: pop .14s var(--ease); transform-origin: 12px 0; }
 .info.terms::after { white-space: pre-line; }
-.info.left::after { left: auto; right: -8px; }
-.info.up::after { top: auto; bottom: calc(100% + 6px); transform-origin: 12px 100%; }
+.info.left::after { left: auto; right: var(--tip-r); }
+.info.up::after { top: auto; bottom: var(--tip-b); transform-origin: 12px 100%; }

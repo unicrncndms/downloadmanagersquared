@@ -47,17 +47,20 @@ function applyTheme(settings) {
   document.documentElement.toggleAttribute("data-tint", !!settings.tintBackground);
 }
 
-// An (i)'s note opens to the right, or to the left when the right has less room.
+// An (i)'s note (fixed, ui.css) is placed by the (i): to the right, or to the left
+// when the right has less room; below, or above when there is less room below than
+// a few lines of note need.
 function sideInfo(e) {
   const i = e.target.closest && e.target.closest(".info");
-  // By the body's width, not the window's: Chrome sizes a popup to its content, so a tip that
-  // stuck out would widen the window, flip the side and shrink it again, many times a second.
-  // Up when there is less room below than a few lines of note need.
-  if (i) {
-    const r = i.getBoundingClientRect();
-    i.classList.toggle("left", document.body.clientWidth - r.left < r.right);
-    i.classList.toggle("up", document.body.clientHeight - r.bottom < 140 && r.top > document.body.clientHeight - r.bottom);
-  }
+  if (!i) return;
+  const r = i.getBoundingClientRect();
+  const w = document.documentElement.clientWidth, h = document.documentElement.clientHeight;
+  i.classList.toggle("left", w - r.left < r.right);
+  i.classList.toggle("up", h - r.bottom < 140 && r.top > h - r.bottom);
+  i.style.setProperty("--tip-l", `${r.left - 8}px`);
+  i.style.setProperty("--tip-r", `${w - r.right - 8}px`);
+  i.style.setProperty("--tip-t", `${r.bottom + 6}px`);
+  i.style.setProperty("--tip-b", `${h - r.top + 6}px`);
 }
 addEventListener("pointerover", sideInfo);
 addEventListener("focusin", sideInfo);
