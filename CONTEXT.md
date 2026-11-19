@@ -68,12 +68,15 @@ Getting a link for one interface by loading the landing page through that interf
 _Avoid_: Job (an internal word for one resolving attempt)
 
 **Recipe**:
-The clicks recorded on a landing-page host that lead to the download, each with how long the site made you wait before it, plus the wait for the download after the last click. Saved so later visits can be automated.
+The clicks recorded on a landing-page host that lead to the download, each with how long the site made you wait before it, plus the wait for the download after the last click. Saved so later visits can be automated. The engine keeps them, one list for every browser, each marked with the browser it was learned in.
 _Avoid_: Script, macro
 
 **Wait**:
 The time a landing page makes you wait before a step can be clicked, or before the download starts.
 _Avoid_: Timer, countdown
+
+**Step-back**:
+How many pages before the one that started a download its landing page is, per host, learned from where a recording's first click was. Unknown hosts start one page back. Kept by the engine like the recipes.
 
 **Recording**:
 The first visit to a landing-page host, where the user clicks through by hand and the clicks become its recipe.

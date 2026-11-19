@@ -67,7 +67,7 @@ Open source (MIT) and built by GitHub Actions: every release is [attested](#priv
 
 DMS² then runs in the tray. In Firefox the extension asks to enable containers, which it uses to open sites through one connection at a time; in Chrome and Edge, DMS² opens those sites in its own browser window.
 
-Then download a file of 100 MB or more as usual, or use *Download with DMS²* on a link's menu. Everything else is in the **[guide](docs/guide.md)**: sites with a link per IP, Download as folder, checksums, settings, VPN, upgrade and uninstall.
+Then download a file of 100 MB or more as usual, or use *Download with DMS²* on a link's menu. Everything else is in the **[guide](docs/guide.md)**: adding downloads, connections, sites with a link per IP, Download as folder, torrents, FTP and SFTP, checksums, settings, VPN, several browsers, upgrade and uninstall, and what to do when something goes wrong.
 
 <p align="center"><img src="docs/img/store/hd/02-toolbar.png" width="800" alt="The DMS² toolbar button opens a panel with every download, its square map and the speed of each connection"></p>
 
