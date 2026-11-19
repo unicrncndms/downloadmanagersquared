@@ -177,7 +177,7 @@
   function startRecording(msg) {
     if (recording) return;
     recording = true;
-    const { ifaceName, prev, n, of, learn, tokens } = msg;
+    const { ifaceName, prev, next, n, of, learn, tokens } = msg;
     const host = document.createElement("div");
     host.id = "dms-resolver-bar";
     const root = host.attachShadow({ mode: "closed" });
@@ -187,7 +187,8 @@
     const count = of > 1 ? `${n} of ${of}, ` : "";
     const title = el("span", "");
     title.append(el("b", `DMS² is watching (${count}${ifaceName}): `), document.createTextNode("click to the download as you normally do."));
-    const more = el("p", `Wrong page? ${prev ? "Go back with the button here, or paste" : "Paste"} the page you started from into the address bar. ` +
+    const more = el("p", `Wrong page? ${prev || next ? "Go to the page you started from with the buttons here, or paste it" : "Paste the page you started from"} into the address bar. ` +
+      "Start on the page of the file you want, not a list of files: DMS² repeats your clicks for every download from this site. " +
       (learn ? "Skip closes this window; nothing changes for the download." : "Skip closes this window and this connection's download fails."), "more");
     more.hidden = true;
     const q = el("button", "?", "q");
@@ -198,6 +199,11 @@
       const back = el("button", "◀ Previous page");
       back.addEventListener("click", () => { location.href = prev; });
       bar.append(back);
+    }
+    if (next) {
+      const fwd = el("button", "Next page ▶");
+      fwd.addEventListener("click", () => { location.href = next; });
+      bar.append(fwd);
     }
     const skip = el("button", "Skip this connection");
     skip.addEventListener("click", () => browser.runtime.sendMessage({ resolver: true, type: "skip" }).catch(() => {}));

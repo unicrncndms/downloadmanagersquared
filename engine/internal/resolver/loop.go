@@ -580,22 +580,27 @@ func (r *Resolver) learningPlace(j *job) (n, of int) {
 }
 
 // sendRecord: recording, with a way back to the page before this one in case
-// DMS² opened a page that only worked for the first connection.
+// DMS² opened a page that only worked for the first connection, and on to the
+// next one in case it started too early (a recipe that starts on a listing
+// only fits one item).
 func (r *Resolver) sendRecord(j *job) {
 	i := slices.Index(j.pages, j.lastURL)
 	if i < 0 {
 		i = slices.Index(j.pages, j.pageURL)
 	}
-	var prev any
+	var prev, next any
 	if i > 0 {
 		prev = j.pages[i-1]
+	}
+	if i >= 0 && i+1 < len(j.pages) {
+		next = j.pages[i+1]
 	}
 	n, of := r.learningPlace(j)
 	tokens := j.tokens
 	if tokens == nil {
 		tokens = defaultTokens // the record bar needs colours (resolver-content.js BAR_CSS)
 	}
-	if err := r.send(j, map[string]any{"cmd": "record", "ifaceName": j.ifaceName, "prev": prev, "n": n, "of": of, "learn": j.learn, "tokens": tokens}); err != nil {
+	if err := r.send(j, map[string]any{"cmd": "record", "ifaceName": j.ifaceName, "prev": prev, "next": next, "n": n, "of": of, "learn": j.learn, "tokens": tokens}); err != nil {
 		log.Printf("resolver: recording on %s didn't start: %v", j.host, err)
 		j.noRecorder = true
 	} else {

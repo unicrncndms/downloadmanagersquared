@@ -224,7 +224,7 @@ func TestAFirstVisitRecordsTheRecipeAndReportsTheLink(t *testing.T) {
 	}
 	g.want(t, "notify Show DMS² how to get the link")
 	g.load("tab1", "ctx1", "https://host.example/file/1")
-	if m := g.sent(); m["cmd"] != "record" || m["prev"] != "https://host.example/" || m["n"] != float64(1) {
+	if m := g.sent(); m["cmd"] != "record" || m["prev"] != "https://host.example/" || m["next"] != nil || m["n"] != float64(1) {
 		t.Fatalf("record message %v", m)
 	}
 	g.advance(3 * time.Second)
@@ -633,4 +633,14 @@ func (g *rig) sync() {
 	done := make(chan struct{})
 	q.post(func() { close(done) })
 	<-done
+}
+
+func TestARecordingThatStartedEarlyOffersTheNextPage(t *testing.T) {
+	g := newRig(t)
+	g.r.Request(Request{ID: "d1", Iface: "wifi", IfaceName: "Wi-Fi", PageURL: "https://host.example/list", SocksPort: 4001,
+		Pages: []string{"https://host.example/list", "https://host.example/item", "https://host.example/get"}})
+	g.load("tab1", "ctx1", "https://host.example/list")
+	if m := g.sent(); m["cmd"] != "record" || m["prev"] != nil || m["next"] != "https://host.example/item" {
+		t.Fatalf("record message %v", m)
+	}
 }
