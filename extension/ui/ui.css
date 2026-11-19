@@ -76,7 +76,8 @@
 }
 * { box-sizing: border-box; }
 /* What the browser draws follows the palette too. */
-html { scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
+/* The page's own background too: unpainted, Firefox shows black around the body of its popup and in its rounded corners. */
+html { background: var(--bg); scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
 ::selection { background: var(--accent); color: var(--on-accent); }
 [hidden] { display: none !important; }
 body {
