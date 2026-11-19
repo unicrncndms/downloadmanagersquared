@@ -740,6 +740,7 @@ func (r *Resolver) switchToRecord(j *job, from int, why string) {
 	if j.done {
 		return
 	}
+	log.Printf("resolver: %s via %s: replay gave up at step %d of %d (%s), recording from there", j.host, j.ifaceName, from+1, len(r.steps(j)), why)
 	j.mode, j.recordFrom, j.recorded = "record", from, nil
 	r.clearTimers(j)
 	r.show(j, true)
