@@ -17,7 +17,7 @@
 
 Plug a phone hotspot or a second line in next to your home connection. DMS² splits every download across them: a 300 Mbit/s line plus a 100 Mbit/s hotspot downloads at close to 400 Mbit/s.
 
-For Windows 10/11 with Firefox, LibreWolf, Waterfox or Floorp. Free and open source (MIT). No account, no server, no telemetry.
+For Windows 10/11 with Firefox, LibreWolf, Waterfox, Floorp, Chrome or Edge. Free and open source (MIT). No account, no server, no telemetry.
 
 ## What makes it different
 
@@ -65,7 +65,7 @@ Open source (MIT) and built by GitHub Actions: every release is [attested](#priv
 3. Pick the install folder (Program Files by default) and shortcuts, then **Install**. Windows asks for administrator rights only if the folder needs them.
 4. Click **Add to …** for your browser and confirm.
 
-DMS² then runs in the tray. The extension asks to enable containers, which it uses to open sites through one connection at a time.
+DMS² then runs in the tray. In Firefox the extension asks to enable containers, which it uses to open sites through one connection at a time; in Chrome and Edge, DMS² opens those sites in its own browser window.
 
 Then download a file of 100 MB or more as usual, or use *Download with DMS²* on a link's menu. Everything else is in the **[guide](docs/guide.md)**: sites with a link per IP, Download as folder, checksums, settings, VPN, upgrade and uninstall.
 
@@ -86,7 +86,7 @@ Then download a file of 100 MB or more as usual, or use *Download with DMS²* on
 
 ## Limitations
 
-- Windows only, and only Firefox-based browsers.
+- Windows only. Browsers: Firefox-based ones, Chrome and Edge.
 - IPv6 is experimental and off by default. Inside VPN tunnels it's IPv4 only, torrents get no port forwarding over IPv6, and on an IPv6-only connection a link with a bare IPv4 address fails (there is no NAT64 prefix discovery).
 - Replayed clicks are synthetic: sites that only accept real clicks ask every time.
 - Links a site creates through a form POST can't be fetched again.
