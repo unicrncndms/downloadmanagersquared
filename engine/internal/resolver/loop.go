@@ -506,6 +506,7 @@ func (r *Resolver) judgePopup(tab string, p *popup) {
 		j.tab = tab // the next page opened in a tab of its own: follow it there
 		r.clickEffect(j, "newTab")
 	default:
+		log.Printf("resolver: %s via %s: closed a tab a click opened on %s, taken for an ad", j.host, j.ifaceName, site)
 		delete(r.popups, tab)
 		if r.d != nil {
 			r.d.Close(tab)
@@ -680,6 +681,7 @@ func (r *Resolver) sendStep(j *job) {
 		r.armBudget(j, len(steps), budget(wait), "The download didn't start")
 		return
 	}
+	log.Printf("resolver: %s via %s: replay step %d of %d (%s %q) in %s", j.host, j.ifaceName, j.step+1, len(steps), steps[j.step].Tag, steps[j.step].Text, j.tab)
 	b := budget(steps[j.step].Wait)
 	r.armBudget(j, j.step, b+time.Second, "The page didn't let DMS² click in time") // the page reports first
 	var next any
