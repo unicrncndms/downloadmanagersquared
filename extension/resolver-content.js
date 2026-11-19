@@ -171,13 +171,14 @@
     .more { flex-basis: 100%; margin: 0; color: var(--muted); }
     button { font: inherit; cursor: pointer; padding: 3px 10px; border-radius: 4px; color: var(--text);
       background: transparent; border: 1px solid var(--line); }
+    button:disabled { opacity: .45; cursor: default; }
     button.q { padding: 3px 8px; font-weight: 600; color: var(--accent); background: var(--soft); border-color: transparent; }
     .sp { flex: 1; }`;
 
   function startRecording(msg) {
     if (recording) return;
     recording = true;
-    const { ifaceName, prev, next, n, of, learn, tokens } = msg;
+    const { ifaceName, pages = [], n, of, learn, tokens } = msg;
     const host = document.createElement("div");
     host.id = "dms-resolver-bar";
     const root = host.attachShadow({ mode: "closed" });
@@ -187,7 +188,7 @@
     const count = of > 1 ? `${n} of ${of}, ` : "";
     const title = el("span", "");
     title.append(el("b", `DMS² is watching (${count}${ifaceName}): `), document.createTextNode("click to the download as you normally do."));
-    const more = el("p", `Wrong page? ${prev || next ? "Go to the page you started from with the buttons here, or paste it" : "Paste the page you started from"} into the address bar. ` +
+    const more = el("p", "Wrong page? Go to it with Back and Forward (they follow the pages you went through to this download), or paste it into the address bar. " +
       "Start on the page of the file you want, not a list of files: DMS² repeats your clicks for every download from this site. " +
       (learn ? "Skip closes this window; nothing changes for the download." : "Skip closes this window and this connection's download fails."), "more");
     more.hidden = true;
@@ -195,16 +196,20 @@
     q.title = "More";
     q.addEventListener("click", () => { more.hidden = !more.hidden; });
     bar.append(title, q, el("span", "", "sp"));
-    if (prev) {
-      const back = el("button", "◀ Previous page");
-      back.addEventListener("click", () => { location.href = prev; });
-      bar.append(back);
-    }
-    if (next) {
-      const fwd = el("button", "Next page ▶");
-      fwd.addEventListener("click", () => { location.href = next; });
-      bar.append(fwd);
-    }
+    // Back and Forward follow the download's pages when this one is among them,
+    // else this window's own history (after a click to a page not in the list).
+    // Where this page is, is looked up at each click: a site may change its address in place.
+    const bare = (u) => u.split("#")[0];
+    const target = (step) => { const i = pages.map(bare).indexOf(bare(location.href)); return i < 0 ? null : pages[i + step]; };
+    const nav = window.navigation; // Chromium's Navigation API knows whether the window can go back or forward
+    const way = (label, step, can, go) => {
+      const b = el("button", label);
+      b.disabled = !target(step) && !can;
+      b.addEventListener("click", () => { const page = target(step); if (page) location.href = page; else go(); });
+      bar.append(b);
+    };
+    way("◀ Back", -1, nav ? nav.canGoBack : history.length > 1, () => history.back());
+    way("Forward ▶", 1, nav ? nav.canGoForward : false, () => history.forward());
     const skip = el("button", "Skip this connection");
     skip.addEventListener("click", () => browser.runtime.sendMessage({ resolver: true, type: "skip" }).catch(() => {}));
     bar.append(skip, more);

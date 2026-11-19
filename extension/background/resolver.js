@@ -360,20 +360,13 @@ const Resolver = {
     }
   },
 
-  // Recording, with a way back to the page before this one in case DMS² opened
-  // a page that only worked for the first connection, and on to the next one in
-  // case it started too early (a recipe that starts on a listing only fits one item).
+  // Recording, with the download's pages on this site for the record bar's Back
+  // and Forward (sendRecord in the engine's loop.go says why).
   async sendRecord(job) {
-    const pages = Capture.pagesById[job.id] || [];
-    const tab = await browser.tabs.get(job.tabId).catch(() => null);
-    let i = tab ? pages.indexOf(tab.url) : -1;
-    if (i < 0) i = pages.indexOf(job.pageUrl);
-    // Back only within the site: the page before it is often a search engine.
-    const prev = i > 0 && siteOf(pages[i - 1]) === siteOf(pages[i]) ? pages[i - 1] : null;
-    const next = i >= 0 && i + 1 < pages.length ? pages[i + 1] : null;
+    const pages = (Capture.pagesById[job.id] || []).filter((u) => siteOf(u) === siteOf(job.pageUrl)); // not the search engine before them
     const { n, of } = learningPlace([...this.jobs.values()], job);
     const tokens = accentTokens(pageAccent(Engine.settings)) || accentTokens("#1d4ed8");
-    browser.tabs.sendMessage(job.tabId, { cmd: "record", ifaceName: job.ifaceName, prev, next, n, of, learn: job.learn, tokens }).catch(() => {});
+    browser.tabs.sendMessage(job.tabId, { cmd: "record", ifaceName: job.ifaceName, pages, n, of, learn: job.learn, tokens }).catch(() => {});
   },
 
   // A captcha needs a person: show the window and hold all timeouts until it's solved.

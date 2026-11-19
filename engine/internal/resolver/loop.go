@@ -579,29 +579,25 @@ func (r *Resolver) learningPlace(j *job) (n, of int) {
 	return max(1, slices.Index(mine, j)+1), max(1, len(mine))
 }
 
-// sendRecord: recording, with a way back to the page before this one in case
-// DMS² opened a page that only worked for the first connection, and on to the
-// next one in case it started too early (a recipe that starts on a listing
-// only fits one item).
+// sendRecord: recording, with the download's pages on this site for the record
+// bar's Back and Forward: back in case DMS² opened a page that only worked for
+// the first connection, forward in case it started too early (a recipe that
+// starts on a list of files only fits one of them). The bar finds itself in
+// the list by its own address.
 func (r *Resolver) sendRecord(j *job) {
-	i := slices.Index(j.pages, j.lastURL)
-	if i < 0 {
-		i = slices.Index(j.pages, j.pageURL)
+	pages := []string{}
+	for _, p := range j.pages {
+		if siteOf(p) == siteOf(j.pageURL) { // the page before them is often a search engine
+			pages = append(pages, p)
+		}
 	}
-	var prev, next any
-	if i > 0 && siteOf(j.pages[i-1]) == siteOf(j.pages[i]) { // the page before it is often a search engine
-		prev = j.pages[i-1]
-	}
-	if i >= 0 && i+1 < len(j.pages) {
-		next = j.pages[i+1]
-	}
-	log.Printf("resolver: %s: record bar on page %d of %d the download came through", j.host, i+1, len(j.pages))
+	log.Printf("resolver: %s: record bar, page %d of the %d on this site the download came through", j.host, slices.Index(pages, j.pageURL)+1, len(pages))
 	n, of := r.learningPlace(j)
 	tokens := j.tokens
 	if tokens == nil {
 		tokens = defaultTokens // the record bar needs colours (resolver-content.js BAR_CSS)
 	}
-	if err := r.send(j, map[string]any{"cmd": "record", "ifaceName": j.ifaceName, "prev": prev, "next": next, "n": n, "of": of, "learn": j.learn, "tokens": tokens}); err != nil {
+	if err := r.send(j, map[string]any{"cmd": "record", "ifaceName": j.ifaceName, "pages": pages, "n": n, "of": of, "learn": j.learn, "tokens": tokens}); err != nil {
 		log.Printf("resolver: recording on %s didn't start: %v", j.host, err)
 		j.noRecorder = true
 	} else {
