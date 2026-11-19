@@ -424,6 +424,7 @@ var methods = map[string]handler{
 	"recipes":      bare(func(e *Engine) (any, error) { return e.recipes.All(), nil }),
 	"setRecipe":    on(func(e *Engine, c *ipc.Conn, p recipeParams) (any, error) { return nil, e.setRecipe(c, p) }),
 	"mergeRecipes": on(func(e *Engine, c *ipc.Conn, p mergeRecipesParams) (any, error) { return nil, e.mergeRecipes(c, p) }),
+	"stepBacks":    with(func(e *Engine, p stepBacksParams) (any, error) { return e.addStepBacks(p) }),
 	"forgetRecipe": ack(func(e *Engine, p recipeParams) error { return e.setRecipe(nil, recipeParams{Host: p.Host}) }),
 	"resolved": ack(func(e *Engine, p resolvedParams) error {
 		d, err := e.takeResolve(p)

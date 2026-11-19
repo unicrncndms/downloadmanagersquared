@@ -67,6 +67,7 @@ type Engine struct {
 	own         ownResolver
 	ownLearning map[string]bool
 	recipes     *resolver.Recipes          // every browser's, see recipes.go
+	stepBacks   *stepBacks                 // every browser's too
 	pageInfos   map[string][]chan pageInfo // download id -> the resolves waiting for its browser's pageInfo
 	started     map[string]time.Time       // browsers started for a resolve, by exe, so not twice at once
 	ipv6Only    []string                   // adapters with only IPv6, left out while IPv6 is off: Settings hints at them
@@ -215,6 +216,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 		pushReq:     make(chan struct{}, 1),
 	}
 	e.recipes = openRecipes(dir)
+	e.stepBacks = openStepBacks(dir)
 	e.keepingNow()
 	e.saveSettingsLocked() // keeps the torrent port picked on the first start
 	e.unclean = markRunning(dir)

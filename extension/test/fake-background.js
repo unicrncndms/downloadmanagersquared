@@ -139,6 +139,7 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
   E.rpc.pending.clear(); // the real hello, never answered here
   // The engine keeps every browser's recipes (shared.engineRecipes), as the real one does.
   const recipes = (shared.engineRecipes = shared.engineRecipes || {});
+  const stepBacks = (shared.engineStepBacks = shared.engineStepBacks || {});
   E.call = (method, params) => {
     engine.push({ method, params: clone(params) });
     if (method === "recipes") return Promise.resolve(clone(recipes));
@@ -152,6 +153,12 @@ function load({ shared = { local: {}, session: {}, windows: new Map(), nextId: {
     if (method === "mergeRecipes") {
       for (const [h, r] of Object.entries(params.recipes)) if (!recipes[h] || recipes[h].learned < r.learned) recipes[h] = clone(r);
       return changed();
+    }
+    if (method === "stepBacks") {
+      let changedAny = false;
+      for (const [h, n] of Object.entries(params.stepBacks)) if (params.set || !(h in stepBacks)) { changedAny = changedAny || stepBacks[h] !== n; stepBacks[h] = n; }
+      if (changedAny) Promise.resolve().then(() => E.emit("stepBacks", clone(stepBacks)));
+      return Promise.resolve(clone(stepBacks));
     }
     return Promise.resolve(method === "add" ? { id: "d" + engine.length } : {});
   };

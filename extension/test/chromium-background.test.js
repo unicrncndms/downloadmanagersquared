@@ -117,3 +117,26 @@ test("Chromium: a stepBack from the engine is learned as a recording in this bro
   assert.deepEqual(want, c.Capture.stepBacks);
   assert.ok(Object.keys(want).length === 1, "nothing learned");
 });
+
+test("A step-back learned in one browser is used by another through the engine (ticket 36)", async () => {
+  const engineStepBacks = {};
+  const own = () => ({ local: {}, session: {}, windows: new Map(), nextId: { v: 100 }, engineStepBacks });
+  const ff = load({ shared: own() });
+  ff.connect();
+  await ff.settle();
+  ff.Capture.pagesById.d1 = ["https://site.test/list", "https://site.test/item", "https://site.test/get"];
+  ff.Capture.learnStepBack("d1", "https://site.test/get");
+  await ff.settle();
+  const chrome = load({ shared: own(), chromium: true });
+  await chrome.settle();
+  chrome.connect();
+  await chrome.settle();
+  assert.equal(chrome.Capture.landingPage(["https://site.test/list", "https://site.test/item", "https://site.test/get"]), "https://site.test/get");
+  // A new recording replaces what the engine knew; the event carries it to the others.
+  ff.Capture.learnStepBack("d1", "https://site.test/item");
+  await ff.settle();
+  assert.equal(engineStepBacks["site.test"], 1);
+  chrome.Engine.emit("stepBacks", { ...engineStepBacks });
+  await chrome.settle();
+  assert.equal(chrome.Capture.stepBacks["site.test"], 1);
+});

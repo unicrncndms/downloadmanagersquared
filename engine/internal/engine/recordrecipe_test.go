@@ -190,3 +190,34 @@ func TestRecordRecipeNeedsTheBrowserRunning(t *testing.T) {
 		t.Fatal("recordRecipe worked without the browser's extension")
 	}
 }
+
+func TestStepBacksAreSharedByEveryBrowser(t *testing.T) {
+	dir := t.TempDir()
+	e, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ff := connectExtension(t, e, fakeBrowserExe(t, "firefox.exe"), "")
+	chrome := connectExtension(t, e, fakeBrowserExe(t, "chrome.exe"), "")
+
+	call(t, e, ff, "stepBacks", stepBacksParams{StepBacks: map[string]int{"a.test": 0}, Set: true})
+	if !chrome.next("stepBacks", 2*time.Second) {
+		t.Fatal("another browser didn't hear of the step-back")
+	}
+	// A browser's own from before only adds hosts the engine doesn't know.
+	raw, _ := json.Marshal(stepBacksParams{StepBacks: map[string]int{"a.test": 1, "b.test": 2}})
+	got, err := e.Call(chrome.conn, "stepBacks", raw)
+	all, _ := got.(map[string]int)
+	if err != nil || all["a.test"] != 0 || all["b.test"] != 2 {
+		t.Fatalf("stepBacks = %v", all)
+	}
+	e.Shutdown()
+	e2, err := open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e2.Shutdown()
+	if n, ok := e2.stepBacks.m["b.test"]; !ok || n != 2 {
+		t.Fatal("step-backs lost across a restart")
+	}
+}

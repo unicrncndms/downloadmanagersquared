@@ -46,6 +46,12 @@ const Capture = {
       this.stepBacks = s.stepBacks || {};
       this.pagesById = s.pagesById || {};
     }).catch(() => {});
+    // Step-backs are shared through the engine (ticket 36): this browser's own go to it
+    // on connect (it keeps those it knows), and every change comes back as an event.
+    Engine.on("stepBacks", (m) => this.stored.then(() => this.setStepBacks(m)));
+    Engine.on("connection", ({ connected }) => {
+      if (connected) this.stored.then(() => Engine.call("stepBacks", { stepBacks: this.stepBacks })).then((m) => this.setStepBacks(m), () => {});
+    });
 
     // Firefox menus do not persist: made at every start. Chromium's do, and creating an id twice fails: made once, on install.
     if (browser.runtime.getManifest().manifest_version === 3) browser.runtime.onInstalled.addListener(() => this.createMenus());
@@ -197,8 +203,17 @@ const Capture = {
     const pages = this.pagesById[id] || [];
     const n = learnedStepBack(pages, firstClickUrl);
     if (n === null) return;
-    this.stepBacks[hostOf(pages[pages.length - 1])] = n;
+    const host = hostOf(pages[pages.length - 1]);
+    this.stepBacks[host] = n;
     browser.storage.local.set({ stepBacks: this.stepBacks });
+    Engine.call("stepBacks", { stepBacks: { [host]: n }, set: true }).catch(() => {});
+  },
+
+  // The engine's step-backs; an engine older than them answers nothing to keep.
+  setStepBacks(m) {
+    if (!m || typeof m !== "object") return;
+    this.stepBacks = m;
+    browser.storage.local.set({ stepBacks: m });
   },
 
   // pageInfo answers the engine: this browser's cookies for the landing page

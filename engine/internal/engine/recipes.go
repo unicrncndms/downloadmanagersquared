@@ -1,11 +1,15 @@
 package engine
 
 import (
+	"encoding/json"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
+	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/ipc"
 	"downloadmanagersquared/engine/internal/resolver"
 	"downloadmanagersquared/engine/internal/winutil"
@@ -103,4 +107,53 @@ func browserName(exe string) string {
 		}
 	}
 	return strings.TrimSuffix(filepath.Base(exe), filepath.Ext(exe))
+}
+
+// Step-backs (host -> how many pages before a download its landing page is)
+// are learned by any browser's recording and shared like the recipes (ticket
+// 36): a site learned in Firefox starts on the right page in Chrome too.
+type stepBacks struct {
+	mu   sync.Mutex
+	path string
+	m    map[string]int
+}
+
+type stepBacksParams struct {
+	StepBacks map[string]int `json:"stepBacks"`
+	Set       bool           `json:"set"` // overwrite; else only hosts not known yet are added
+}
+
+func openStepBacks(dir string) *stepBacks {
+	s := &stepBacks{path: filepath.Join(dir, "stepbacks.json"), m: map[string]int{}}
+	if b, err := os.ReadFile(s.path); err == nil && json.Unmarshal(b, &s.m) != nil {
+		log.Printf("stepbacks.json can't be read: starting without it")
+		s.m = map[string]int{}
+	}
+	return s
+}
+
+// add merges p in, saves, and answers all of them; a change goes to every client.
+func (e *Engine) addStepBacks(p stepBacksParams) (map[string]int, error) {
+	s := e.stepBacks
+	s.mu.Lock()
+	changed := false
+	for host, n := range p.StepBacks {
+		if host == "" || n < 0 {
+			continue
+		}
+		if have, ok := s.m[host]; ok && (have == n || !p.Set) {
+			continue
+		}
+		s.m[host], changed = n, true
+	}
+	all := maps.Clone(s.m)
+	var err error
+	if changed {
+		err = atomicfile.WriteJSON(s.path, all)
+	}
+	s.mu.Unlock()
+	if changed {
+		e.broadcast("stepBacks", all)
+	}
+	return all, err
 }
