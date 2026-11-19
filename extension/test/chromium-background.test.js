@@ -153,3 +153,15 @@ test("Chromium: an open settings page gets the engine's recipes as soon as they 
   await c2.settle();
   assert.ok(sent.length && sent[sent.length - 1].recipes["a.test"], "the page never heard of the recipe");
 });
+
+test("Chromium: a tab's page history outlives the background going to sleep", async () => {
+  const c = load({ chromium: true });
+  await c.settle();
+  for (const url of ["https://www.google.com/", "https://site.test/list", "https://site.test/item"]) c.fire("webNavigation.onCommitted", { frameId: 0, tabId: 7, url });
+  await c.settle();
+  const woken = load({ chromium: true, shared: c.shared }); // the worker woke with nothing in memory
+  await woken.settle();
+  woken.fire("webNavigation.onCommitted", { frameId: 0, tabId: 7, url: "https://site.test/get" });
+  await woken.settle();
+  assert.deepEqual(woken.Capture.history.get(7), ["https://www.google.com/", "https://site.test/list", "https://site.test/item", "https://site.test/get"]);
+});

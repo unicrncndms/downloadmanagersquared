@@ -29,11 +29,20 @@ const Capture = {
     browser.tabs.query({}).then((tabs) => {
       for (const t of tabs) if (isHttp(t.url) && !this.history.has(t.id)) this.recordPage(t.id, t.url);
     });
-    browser.tabs.onRemoved.addListener((id) => this.history.delete(id));
+    browser.tabs.onRemoved.addListener((id) => { this.history.delete(id); this.saveHistory(); });
+    // Chromium's background sleeps after 30 s idle and wakes with no history: it
+    // outlives that in storage.session. What was seen since waking goes after it.
+    this.historyRead = Promise.resolve(browser.storage.session && browser.storage.session.get("tabHistory")).then((s) => {
+      for (const [id, old] of Object.entries((s && s.tabHistory) || {})) {
+        const h = old.slice();
+        for (const u of this.history.get(+id) || []) if (h[h.length - 1] !== u) h.push(u);
+        this.history.set(+id, h.slice(-15));
+      }
+    }).catch(() => {});
     // A tab opened from another one (downloads often open in a new tab) inherits its history.
     browser.tabs.onCreated.addListener((tab) => {
       const h = tab.openerTabId !== undefined && this.history.get(tab.openerTabId);
-      if (h) this.history.set(tab.id, h.slice());
+      if (h) { this.history.set(tab.id, h.slice()); this.saveHistory(); }
     });
     // The engine resolves this browser's downloads in a browser of its own
     // (Chromium): it asks for the landing page's login and the record bar's
@@ -128,7 +137,7 @@ const Capture = {
   // where there is no blocking headers hook (Chromium), every download: the
   // same thresholds and the same hand-off, after the browser started it.
   async onDownload(item) {
-    await Resolver.ready;
+    await Promise.all([Resolver.ready, this.historyRead]);
     const owner = Resolver.ownerOf(item);
     if (owner) return Resolver.onDownload(item, owner);
     if (!Engine.connected || !Engine.settings || item.byExtensionId === browser.runtime.id) return;
@@ -184,6 +193,13 @@ const Capture = {
     if (h[h.length - 1] !== url) h.push(url);
     if (h.length > 15) h.shift();
     this.history.set(tabId, h);
+    this.saveHistory();
+  },
+
+  // After the stored histories are read back: written earlier, it would replace them.
+  saveHistory() {
+    if (!browser.storage.session) return;
+    this.historyRead.then(() => browser.storage.session.set({ tabHistory: Object.fromEntries(this.history) })).catch(() => {});
   },
 
   // Pages leading up to the download in a tab (-1: none known), oldest first.

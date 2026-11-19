@@ -589,7 +589,7 @@ func (r *Resolver) sendRecord(j *job) {
 		i = slices.Index(j.pages, j.pageURL)
 	}
 	var prev, next any
-	if i > 0 {
+	if i > 0 && siteOf(j.pages[i-1]) == siteOf(j.pages[i]) { // the page before it is often a search engine
 		prev = j.pages[i-1]
 	}
 	if i >= 0 && i+1 < len(j.pages) {

@@ -368,7 +368,8 @@ const Resolver = {
     const tab = await browser.tabs.get(job.tabId).catch(() => null);
     let i = tab ? pages.indexOf(tab.url) : -1;
     if (i < 0) i = pages.indexOf(job.pageUrl);
-    const prev = i > 0 ? pages[i - 1] : null;
+    // Back only within the site: the page before it is often a search engine.
+    const prev = i > 0 && siteOf(pages[i - 1]) === siteOf(pages[i]) ? pages[i - 1] : null;
     const next = i >= 0 && i + 1 < pages.length ? pages[i + 1] : null;
     const { n, of } = learningPlace([...this.jobs.values()], job);
     const tokens = accentTokens(pageAccent(Engine.settings)) || accentTokens("#1d4ed8");
