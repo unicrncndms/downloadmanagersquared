@@ -150,15 +150,22 @@ func (d *Driver) DropContext(iface string) {
 	}
 }
 
-// Open loads url in a new window of the context, minimized unless shown.
+// hidden is where a resolver window waits out of sight. Not minimized: Chrome
+// stops drawing a minimized window, so a page whose overlay or menu animates
+// away stalls there (a site's mirror list opened only once the window was
+// clicked), while one off the screen is drawn like any other (cdp's flags keep
+// a hidden window from being slowed).
+var hidden = Bounds{Left: -10000, Top: 0, Width: 1280, Height: 900}
+
+// Open loads url in a new window of the context, hidden unless shown.
 func (d *Driver) Open(contextID, url string, shown bool) (string, error) {
-	state := "minimized"
-	if shown {
-		state = "normal"
-	}
 	// Blank first: a page given its address here can load before it is attached,
 	// and its load events and its catch would be missed (seen on Edge and Chrome 157).
-	r, err := d.call("", "Target.createTarget", map[string]any{"url": "about:blank", "browserContextId": contextID, "newWindow": true, "windowState": state})
+	p := map[string]any{"url": "about:blank", "browserContextId": contextID, "newWindow": true, "windowState": "normal"}
+	if !shown {
+		p["left"], p["top"], p["width"], p["height"] = hidden.Left, hidden.Top, hidden.Width, hidden.Height
+	}
+	r, err := d.call("", "Target.createTarget", p)
 	if err != nil {
 		return "", err
 	}
@@ -255,13 +262,14 @@ func (d *Driver) CookieHeader(target, url string) string {
 	return strings.Join(parts, "; ")
 }
 
-// Minimize hides target's window.
+// Minimize hides target's window: off the screen (see hidden), not minimized.
 func (d *Driver) Minimize(target string) error {
 	w, err := d.window(target)
 	if err != nil {
 		return err
 	}
-	_, err = d.call("", "Browser.setWindowBounds", map[string]any{"windowId": w, "bounds": map[string]any{"windowState": "minimized"}})
+	_, err = d.call("", "Browser.setWindowBounds", map[string]any{"windowId": w, "bounds": map[string]any{
+		"windowState": "normal", "left": hidden.Left, "top": hidden.Top, "width": hidden.Width, "height": hidden.Height}})
 	return err
 }
 

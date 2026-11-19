@@ -297,8 +297,8 @@ func TestAReplayClicksStepByStepMinimizedAndKeepsTheWaitsItSaw(t *testing.T) {
 	g := newRig(t)
 	recipeFor(g, "host.example", 1000, 2000)
 	g.r.Request(req("d1", "wifi", "https://host.example/f"))
-	if c := g.f.last("Target.createTarget"); c.params["windowState"] != "minimized" {
-		t.Fatalf("replay opens minimized: %v", c.params)
+	if c := g.f.last("Target.createTarget"); c.params["left"] != float64(hidden.Left) && c.params["left"] != hidden.Left {
+		t.Fatalf("replay opens off the screen: %v", c.params)
 	}
 	g.load("tab1", "ctx1", "https://host.example/f")
 	if m := g.sent(); m["cmd"] != "replay" || m["index"] != float64(0) || m["budget"] != float64(17000) {

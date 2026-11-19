@@ -85,8 +85,8 @@ func TestARealBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st := windowState(t, d, page); st != "minimized" {
-		t.Errorf("opened %s, want minimized", st)
+	if st := windowState(t, d, page); st != "offscreen" {
+		t.Errorf("opened %s, want offscreen", st)
 	}
 	select {
 	case o := <-opened:
@@ -164,8 +164,8 @@ func TestARealBrowser(t *testing.T) {
 	if err := d.Minimize(page); err != nil {
 		t.Fatal(err)
 	}
-	if st := windowState(t, d, page); st != "minimized" {
-		t.Errorf("minimized %s", st)
+	if st := windowState(t, d, page); st != "offscreen" {
+		t.Errorf("hidden %s, want offscreen", st)
 	}
 	d.DropContext("eth")
 }
@@ -181,9 +181,15 @@ func windowState(t *testing.T, d *Driver, target string) string {
 		t.Fatal(err)
 	}
 	var b struct {
-		Bounds struct{ WindowState string }
+		Bounds struct {
+			WindowState string
+			Left        int
+		}
 	}
 	json.Unmarshal(r, &b)
+	if b.Bounds.WindowState == "normal" && b.Bounds.Left <= hidden.Left/2 {
+		return "offscreen" // where Minimize puts it; Chrome didn't pull it back on screen
+	}
 	return b.Bounds.WindowState
 }
 
