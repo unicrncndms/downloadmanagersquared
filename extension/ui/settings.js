@@ -416,6 +416,7 @@ function renderRecipes(recipes) {
     return;
   }
   box.replaceChildren(el("div", { class: "conn-scroll" }, el("table", { class: "recipes" },
+    el("thead", {}, el("tr", {}, ["Site", "Clicks", "Learned in", "Learned"].map((t) => el("th", {}, t)), el("th", {}, el("span", { class: "sr-only" }, "Forget")))),
     el("tbody", {}, hosts.map((h) => el("tr", {},
       el("td", {}, h),
       el("td", { class: "muted" }, recipes[h].steps.map((s) => s.text || s.tag).join(" → ") || "no clicks (the download starts by itself)"),
@@ -424,20 +425,19 @@ function renderRecipes(recipes) {
       el("td", {}, el("button", { class: "small", onclick: () => forgetSite(h) }, "Forget"))))))));
 }
 
-// Forgetting waits for the Undo toast to end: the row goes now, the browser forgets the site after.
+// Forgetting is at once, so a page closed right after has still forgotten; Undo gives
+// the engine the recipe back. The row stays hidden until the engine's list says so.
 const forgetting = new Set();
 let latestRecipes = null;
 function forgetSite(h) {
+  const recipe = latestRecipes && latestRecipes[h];
   forgetting.add(h);
   renderRecipes(latestRecipes);
+  Host.forgetRecipe(h).catch((e) => toast(e.message, true)).finally(() => { forgetting.delete(h); renderRecipes(latestRecipes); });
   const t = $("toast");
   toast(`Forgot ${h}`);
   const end = () => t.classList.remove("show");
-  const timer = setTimeout(() => {
-    end();
-    Host.forgetRecipe(h).catch((e) => toast(e.message, true)).finally(() => { forgetting.delete(h); renderRecipes(latestRecipes); });
-  }, 8000);
-  t.append(" ", el("button", { class: "small", onclick: () => { clearTimeout(timer); forgetting.delete(h); end(); renderRecipes(latestRecipes); } }, "Undo"));
+  t.append(" ", el("button", { class: "small", onclick: () => { end(); if (recipe) act("setRecipe", { host: h, recipe }); } }, "Undo"));
   clearTimeout(toast.timer); // toast() would close it sooner
   toast.timer = setTimeout(end, 8000);
 }

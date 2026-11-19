@@ -140,3 +140,16 @@ test("A step-back learned in one browser is used by another through the engine (
   await chrome.settle();
   assert.equal(chrome.Capture.stepBacks["site.test"], 1);
 });
+
+test("Chromium: an open settings page gets the engine's recipes as soon as they are synced (ticket 37)", async () => {
+  const c = load({ chromium: true });
+  c.shared.engineRecipes = { "a.test": { steps: [], learned: 1 } };
+  const c2 = load({ chromium: true, shared: c.shared });
+  await c2.settle();
+  const sent = [];
+  const ev = () => ({ addListener() {} });
+  c2.fire("runtime.onConnect", { name: "ui", sender: { url: "chrome-extension://x/ui/settings.html" }, postMessage: (m) => sent.push(m), onMessage: ev(), onDisconnect: ev() });
+  c2.connect();
+  await c2.settle();
+  assert.ok(sent.length && sent[sent.length - 1].recipes["a.test"], "the page never heard of the recipe");
+});

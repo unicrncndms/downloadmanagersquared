@@ -576,7 +576,8 @@ const Resolver = {
     await browser.storage.local.set({ recipesMoved: true });
     const seen = this.recipesSeen;
     const recipes = await Engine.call("recipes");
-    if (seen === this.recipesSeen) this.setRecipes(recipes); // else an event since is newer
+    // As an event, so the open settings pages get them now (Chromium has no copy of its own to show before).
+    if (seen === this.recipesSeen) Engine.emit("recipes", recipes); // else an event since is newer
   },
 
   cleanup(job) {
