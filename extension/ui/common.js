@@ -45,6 +45,7 @@ function applyTheme(settings) {
   if (t) document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
   document.documentElement.toggleAttribute("data-tint", !!settings.tintBackground);
+  try { localStorage.setItem("dms-theme", JSON.stringify({ theme: t, tint: !!settings.tintBackground })); } catch (e) { /* early.js then follows the system */ }
 }
 
 // An (i)'s note (fixed, ui.css) is placed by the (i): to the right, or to the left
