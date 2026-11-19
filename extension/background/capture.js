@@ -151,7 +151,7 @@ const Capture = {
       torrent: kind === "torrent",
       metalink: kind === "metalink",
       url,
-      pages: this.pagesFor(this.tabShowing(item.referrer), url, [item.referrer]),
+      pages: this.downloadPages(item.referrer, url),
       filename: (item.filename || "").split(/[\\/]/).pop(),
       cookieStoreId: item.cookieStoreId,
     });
@@ -188,10 +188,24 @@ const Capture = {
     return -1;
   },
 
+  // The pages before a download the browser started. Chrome names only the site
+  // (https://host/) as the referrer of a download from another site: then the
+  // tab that was last on that site is the one, and the bare address isn't a page
+  // of it (taken as one, the resolve started on a stale page of an earlier download).
+  downloadPages(referrer, url) {
+    let tab = this.tabShowing(referrer);
+    if (tab < 0 && /^https?:\/\/[^/]+\/$/.test(referrer || "")) {
+      for (const [id, h] of this.history) if (h.length && h[h.length - 1].startsWith(referrer)) tab = id; // the Map is in order of use: the last is the latest
+      if (tab >= 0) return this.pagesFor(tab, url, []);
+    }
+    return this.pagesFor(tab, url, [referrer]);
+  },
+
   recordPage(tabId, url) {
     const h = this.history.get(tabId) || [];
     if (h[h.length - 1] !== url) h.push(url);
     if (h.length > 15) h.shift();
+    this.history.delete(tabId); // to the end: tabs in order of use
     this.history.set(tabId, h);
     this.saveHistory();
   },

@@ -165,3 +165,18 @@ test("Chromium: a tab's page history outlives the background going to sleep", as
   await woken.settle();
   assert.deepEqual(woken.Capture.history.get(7), ["https://www.google.com/", "https://site.test/list", "https://site.test/item", "https://site.test/get"]);
 });
+
+test("Chromium: a download whose referrer is only the site's address uses the tab last on that site (ticket 36)", async () => {
+  const c = load({ chromium: true });
+  await c.settle();
+  c.connect();
+  await c.settle();
+  for (const url of ["https://site.test/", "https://site.test/top", "https://site.test/game/a", "https://site.test/download/new-token"]) c.fire("webNavigation.onCommitted", { frameId: 0, tabId: 7, url });
+  c.fire("webNavigation.onCommitted", { frameId: 0, tabId: 8, url: "https://other.test/" });
+  await c.settle();
+  await Promise.all(c.fire("downloads.onCreated", { id: 5, url: "https://cdn.test/big.zip", finalUrl: "https://cdn.test/big.zip", referrer: "https://site.test/", totalBytes: 5e9, state: "in_progress" }));
+  await c.settle();
+  const add = c.engine.find((x) => x.method === "add").params;
+  assert.equal(add.pageUrl, "https://site.test/game/a");
+  assert.deepEqual(Object.values(c.Capture.pagesById)[0].slice(-4), ["https://site.test/", "https://site.test/top", "https://site.test/game/a", "https://site.test/download/new-token"]);
+});
