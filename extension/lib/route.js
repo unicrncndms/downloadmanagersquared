@@ -39,10 +39,11 @@ function ownerOf({ tabJobs, jobs, ifaceByStore }, { tabId, windowId, cookieStore
 const MAX_WINDOWS = 2;
 function startChoice(job, hasRecipe, jobs) {
   if (hasRecipe && job.learn) return "endLearn";
-  const open = [...jobs].filter((j) => j !== job && !j.done && j.host === job.host && (j.mode === "replay" || j.mode === "record")).length;
+  jobs = [...jobs]; // once: the resolver passes a Map's values(), which a second spread finds empty
+  const open = jobs.filter((j) => j !== job && !j.done && j.host === job.host && (j.mode === "replay" || j.mode === "record")).length;
   if (open >= MAX_WINDOWS) return "waiting";
   if (hasRecipe) return "replay";
-  const recording = [...jobs].some((j) => j !== job && j.host === job.host && j.mode === "record");
+  const recording = jobs.some((j) => j !== job && j.host === job.host && j.mode === "record");
   return recording ? "waiting" : "record";
 }
 

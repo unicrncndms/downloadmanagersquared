@@ -549,3 +549,21 @@ test("a captcha that reloads is left alone, recording or replaying", async () =>
   await c.settle();
   assert.deepEqual(cupdates(), ["normal", "normal", "minimized"], "not minimized once a page came without a captcha");
 });
+
+test("two connections of one site: one records, the other waits and then replays it (ticket 33)", async () => {
+  const b = load();
+  await b.settle();
+  b.connect([{ id: "eth", present: true, socksPort: 5001 }, { id: "vpn", present: true, socksPort: 5002 }]);
+  b.Engine.emit("resolve", { id: "d1", iface: "eth", ifaceName: "Ethernet", pageUrl: PAGE });
+  b.Engine.emit("resolve", { id: "d1", iface: "vpn", ifaceName: "VPN", pageUrl: PAGE });
+  await b.settle();
+  const eth = b.Resolver.jobs.get("d1|eth");
+  const vpn = b.Resolver.jobs.get("d1|vpn");
+  assert.equal(eth.mode, "record");
+  assert.equal(vpn.mode, "waiting");
+  message(b, eth, { type: "recorded", step: { tag: "a", text: "Download" } });
+  await b.settle();
+  await Promise.all(b.fire("downloads.onCreated", { id: 2, url: "https://cdn.test/f", totalBytes: 5, cookieStoreId: b.Resolver.containers.eth }));
+  await b.settle();
+  assert.equal(vpn.mode, "replay");
+});
