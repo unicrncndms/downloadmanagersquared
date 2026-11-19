@@ -972,7 +972,7 @@ func (r *Resolver) onMessage(tab, payload string) {
 			r.clickEffect(j, m.Kind)
 		}
 	case "notFound":
-		if j.mode != "replay" {
+		if j.mode != "replay" || j.captcha { // behind a captcha: the step is sent again once it's solved
 			return
 		}
 		steps := r.steps(j)

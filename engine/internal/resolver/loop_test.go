@@ -360,6 +360,10 @@ func TestACaptchaShowsTheWindowAndHoldsTheBudgetUntilSolved(t *testing.T) {
 	if m := g.sent(); m["cmd"] != "replay" {
 		t.Fatalf("the budget ran during the captcha: %v", m)
 	}
+	g.msg("tab1", map[string]any{"type": "notFound", "index": 0}) // the step's element is behind the captcha
+	if m := g.sent(); m["cmd"] != "replay" {
+		t.Fatalf("a step not found behind the captcha ended the replay: %v", m)
+	}
 	minimizes := g.count("Browser.setWindowBounds")
 	g.msg("tab1", map[string]any{"type": "captchaDone"})
 	if g.count("Browser.setWindowBounds") != minimizes+1 {

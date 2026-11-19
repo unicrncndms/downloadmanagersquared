@@ -127,10 +127,14 @@
   async function replay(step, index, next, budget) {
     const run = ++replaying;
     await untilNoCaptcha();
-    const start = Date.now();
+    let start = Date.now();
     let el = null;
     while (!(el = find(step)) && Date.now() - start < budget) {
-      await sleep(300);
+      // A captcha that comes up meanwhile holds the page: its time isn't the step's.
+      if (captchaPending()) {
+        await untilNoCaptcha();
+        start = Date.now();
+      } else await sleep(300);
       if (run !== replaying) return;
     }
     if (!el) {

@@ -21,7 +21,7 @@ Object.assign(Resolver, {
         if (job.clicked && job.clicked.index === msg.index) this.clickEffect(job, msg.kind);
         break;
       case "notFound":
-        if (job.mode !== "replay") return;
+        if (job.mode !== "replay" || job.captcha) return; // behind a captcha: the step is sent again once it's solved
         // A remembered click may have been optional (e.g. a banner): try skipping it once.
         if (!job.skipped && msg.index + 1 < steps.length) {
           job.skipped = true;
