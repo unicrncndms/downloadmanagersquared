@@ -42,6 +42,12 @@ func shortErr(err error) string {
 	if errors.As(err, &ue) {
 		err = ue.Err
 	}
+	if s := diskText(err); s != "" {
+		return s
+	}
+	if s := netText(err); s != "" {
+		return s
+	}
 	s := err.Error()
 	if i := strings.LastIndex(s, ": "); i >= 0 && len(s) > 120 {
 		s = s[i+2:]

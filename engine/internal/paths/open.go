@@ -71,8 +71,8 @@ type Path struct {
 }
 
 var (
-	errTunnelDown = errors.New("the VPN tunnel is not up")
-	errNoIface    = errors.New("interface is not connected")
+	errTunnelDown = errors.New("the VPN is not connected, so nothing is sent")
+	errNoIface    = errors.New("this connection is not connected")
 )
 
 // Build is the paths a download in mode m may use, the main first. A tunnel

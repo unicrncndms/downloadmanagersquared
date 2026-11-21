@@ -88,6 +88,14 @@ func (d *Download) nextLocked(w *worker) *segment {
 	return d.claimLocked(w.iface)
 }
 
+// diskMsg is a write error as the card says it.
+func diskMsg(err error) string {
+	if s := diskText(err); s != "" {
+		return s
+	}
+	return "Writing to disk failed: " + err.Error()
+}
+
 func (d *Download) workerFailedLocked(w *worker, err error) {
 	now := time.Now()
 	ir := w.ir
@@ -99,7 +107,7 @@ func (d *Download) workerFailedLocked(w *worker, err error) {
 	if !errors.As(err, &fe) {
 		fe = &fetchError{kind: kindNet, msg: shortErr(err)}
 	}
-	log.Printf("download %s via %s: %s", d.st.ID, w.iface, fe.msg)
+	log.Printf("download %s via %s: %v", d.st.ID, w.iface, err) // the raw error: the card has fe.msg
 	// A rejection while sibling connections on the same link still work is a
 	// per-IP connection limit, not an expired link: back off instead.
 	if fe.kind == kindExpired && ir.active > 1 {
@@ -126,7 +134,7 @@ func (d *Download) workerFailedLocked(w *worker, err error) {
 		}
 	case kindDisk:
 		select {
-		case d.fatal <- errors.New("writing to disk failed: " + fe.msg):
+		case d.fatal <- errors.New(fe.msg):
 		default:
 		}
 	default:
@@ -209,7 +217,7 @@ func (w *worker) fetch(ctx context.Context, segp **segment, buf []byte) error {
 	if !ranged {
 		// Without ranges every attempt fetches the whole file again.
 		if err := d.file.Truncate(0); err != nil {
-			return &fetchError{kind: kindDisk, msg: err.Error()}
+			return &fetchError{kind: kindDisk, msg: diskMsg(err)}
 		}
 	}
 
@@ -269,7 +277,7 @@ func (w *worker) fetch(ctx context.Context, segp **segment, buf []byte) error {
 			d.mu.Unlock()
 			if allowed > 0 {
 				if _, err := d.file.WriteAt(buf[:allowed], off); err != nil {
-					return &fetchError{kind: kindDisk, msg: err.Error()}
+					return &fetchError{kind: kindDisk, msg: diskMsg(err)}
 				}
 				d.mu.Lock()
 				d.plan.wrote(seg, off, allowed)

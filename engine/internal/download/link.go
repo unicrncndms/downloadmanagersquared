@@ -75,7 +75,7 @@ func (l *Link) mismatch(msg string) { l.Status, l.Error = LinkMismatch, msg }
 
 // unreachable: the interface couldn't get through. Networks come back, so keep trying.
 func (l *Link) unreachable(now time.Time, msg string) {
-	l.Status, l.Error, l.retryAt = LinkRetrying, "unreachable: "+msg, now.Add(30*time.Second)
+	l.Status, l.Error, l.retryAt = LinkRetrying, msg, now.Add(30*time.Second)
 }
 
 // httpError: the server answered with an error. Try again in a minute, a few times.
@@ -160,7 +160,7 @@ func (l *Link) resolved(url, cookie, referer string) {
 
 func (l *Link) resolveFailed(msg string) {
 	if l.Status == LinkResolving {
-		l.fail("browser: " + msg)
+		l.fail("Getting the link in the browser failed: " + msg)
 	}
 }
 

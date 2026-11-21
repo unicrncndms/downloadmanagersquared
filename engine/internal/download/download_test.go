@@ -373,7 +373,7 @@ func TestFailedWriteFailsTheDownload(t *testing.T) {
 	d.mu.Unlock()
 	waitSummary(t, d, func(s Summary) bool { return s.Status == StatusFailed }, "the download to fail")
 	s := d.Summary()
-	if !strings.Contains(s.Error, "writing to disk failed") || s.Done >= int64(len(data)) {
+	if !strings.Contains(s.Error, "Writing to disk failed") || s.Done >= int64(len(data)) {
 		t.Fatalf("error %q, done %d of %d", s.Error, s.Done, len(data))
 	}
 }

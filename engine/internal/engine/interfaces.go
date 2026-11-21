@@ -289,7 +289,7 @@ func (e *Engine) bindingOf(id string) (*netif.Binding, error) {
 	if ent := e.ifaces[id]; ent != nil && ent.present {
 		return ent.binding, nil
 	}
-	return nil, errors.New("interface is not connected")
+	return nil, errors.New("this connection is not connected")
 }
 
 // syncTorrentIfaces hands each torrent session the paths its VPN mode allows.

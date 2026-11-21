@@ -155,7 +155,7 @@ func (s *Set) loop(ctx context.Context) {
 				logged = err.Error()
 				log.Printf("set %s: %v", s.set, err)
 			}
-			run.note = err.Error()
+			run.note = UserText(err)
 			failing := !errors.As(err, new(*pauseError))
 			if failing {
 				// The parts are downloaded: it is the extraction that failed, and it tries again by itself.

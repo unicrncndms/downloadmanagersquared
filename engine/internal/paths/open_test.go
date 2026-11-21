@@ -75,7 +75,7 @@ func TestTunnelThatWentDownIsSkipped(t *testing.T) {
 	if ps := Build(VPNOnly, snap(true), src); len(ps) != 0 {
 		t.Errorf("got %d paths, want none", len(ps))
 	}
-	if _, err := Open(src, Tunnel("a")); err == nil || err.Error() != "the VPN tunnel is not up" {
+	if _, err := Open(src, Tunnel("a")); err == nil || err.Error() != "the VPN is not connected, so nothing is sent" {
 		t.Errorf("Open error %v", err)
 	}
 	if ps := Build(Alongside, snap(true), src); len(ps) != 1 || ps[0].ID != "a" {
@@ -90,7 +90,7 @@ func TestBareLooksUpItsBindingOnEachCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	src.gone = true
-	if _, err := p.Listen(0); err == nil || err.Error() != "interface is not connected" {
+	if _, err := p.Listen(0); err == nil || err.Error() != "this connection is not connected" {
 		t.Errorf("Listen error %v", err)
 	}
 	if p.IPv6() {

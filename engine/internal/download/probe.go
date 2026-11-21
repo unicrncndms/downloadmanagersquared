@@ -274,7 +274,7 @@ func (d *Download) applyProbeLocked(ifaceID string, l *Link, r probeResult, err 
 	defer d.leaveMirrorLocked(ifaceID, l)
 	mirror := d.mirrorLocked(l.URL) != nil
 	if err != nil {
-		log.Printf("download %s probe via %s: %s", d.st.ID, ifaceID, shortErr(err))
+		log.Printf("download %s probe via %s: %v", d.st.ID, ifaceID, err)
 		l.unreachable(time.Now(), shortErr(err))
 		return
 	}

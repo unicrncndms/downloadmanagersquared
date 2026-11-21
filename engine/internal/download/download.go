@@ -468,7 +468,8 @@ func (d *Download) run(ctx context.Context) {
 	case errors.As(err, &pe):
 		d.st.Status, d.st.Error, d.st.Stuck = StatusPaused, pe.msg, pe.stuck
 	case err != nil:
-		d.st.Status, d.st.Error, finished = StatusFailed, err.Error(), true
+		d.st.Status, d.st.Error, finished = StatusFailed, UserText(err), true
+		log.Printf("download %s failed: %v", d.st.ID, err)
 		if xe := new(extractError); errors.As(err, &xe) && d.st.Folder != nil {
 			d.st.Folder.ExtractFailed = true
 		}

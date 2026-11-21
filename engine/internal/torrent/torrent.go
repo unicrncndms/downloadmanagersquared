@@ -261,7 +261,7 @@ func (t *Torrent) run(ctx context.Context) {
 		t.mu.Lock()
 		if ctx.Err() == nil {
 			t.dropLocked()
-			t.st.Status, t.st.Error = download.StatusFailed, err.Error()
+			t.st.Status, t.st.Error = download.StatusFailed, download.UserText(err)
 		}
 		t.mu.Unlock()
 		t.changed()
