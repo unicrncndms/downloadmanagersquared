@@ -554,7 +554,8 @@ const Resolver = {
   forgetRecipe(host) {
     delete this.recipes[host];
     browser.storage.local.set({ recipes: this.recipes });
-    return Engine.call("forgetRecipe", { host });
+    // An engine one minor older (0.12) keeps no recipes: forgotten here is all there is.
+    return Engine.call("forgetRecipe", { host }).catch((e) => { if (!/^unknown method/.test(e && e.message)) throw e; });
   },
 
   // The engine's recipes, as it sends them on every change.
