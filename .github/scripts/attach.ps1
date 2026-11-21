@@ -25,6 +25,10 @@ $notes = Join-Path $dir 'notes.md'
 $zips = @(Get-ChildItem (Join-Path $dir '*.zip') | ForEach-Object FullName)
 $text = & (Join-Path $PSScriptRoot 'release-notes.ps1') -Tag $Tag -Files ($zips + $asset)
 [IO.File]::WriteAllText($notes, $text, (New-Object Text.UTF8Encoding $false))
-gh release edit $Tag --notes-file $notes --draft=false --latest --repo $repo
+# Two calls: GitHub refuses --latest on a release that is still a draft (HTTP 422),
+# and v0.12.1 came out of the draft as a pre-release unless that is cleared too.
+gh release edit $Tag --notes-file $notes --draft=false --prerelease=false --repo $repo
 if ($LASTEXITCODE) { throw 'publishing the release failed' }
+gh release edit $Tag --latest --repo $repo
+if ($LASTEXITCODE) { throw 'marking the release latest failed' }
 Write-Host "Attached the AMO-signed extension to $Tag and published it"
