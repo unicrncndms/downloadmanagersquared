@@ -314,7 +314,7 @@ func (w *worker) fetch(ctx context.Context, segp **segment, buf []byte) error {
 				return ctx.Err()
 			}
 			if rctx.Err() != nil {
-				return &fetchError{kind: kindNet, msg: "no data for 30s"}
+				return &fetchError{kind: kindNet, msg: "The server sent nothing for 30 s"}
 			}
 			if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
 				if end == unknownEnd {
@@ -336,7 +336,7 @@ func (w *worker) fetch(ctx context.Context, segp **segment, buf []byte) error {
 						return nil // not the line's fault: let go, so run hands out the sweep
 					}
 				}
-				return &fetchError{kind: kindNet, msg: "connection closed early"}
+				return &fetchError{kind: kindNet, msg: "The server closed the connection early"}
 			}
 			return rerr
 		}
