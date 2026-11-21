@@ -51,7 +51,11 @@ type Engine struct {
 	setsMu    sync.Mutex
 	sets      map[string]*download.Set // split archives, by key
 	groupSaid map[string]bool          // groups whose end has been notified (Finished); under mu
-	tails     map[string]string        // the id of the part each set had start first last tick, for its end (syncSets)
+
+	// The VPN notice (noticeVPN), under mu: a tunnel has been up since the
+	// engine started, and downloads stopped for the VPN after that.
+	tunnelSeenUp, vpnDown bool
+	tails                 map[string]string // the id of the part each set had start first last tick, for its end (syncSets)
 
 	refreshMu sync.Mutex // one interface refresh at a time (listInterfaces)
 	mu        sync.Mutex
@@ -489,6 +493,35 @@ func (e *Engine) schedule() {
 	e.mu.Unlock()
 	e.queue.SetWindow(week.Open(time.Now()))
 	e.queue.Schedule(limit, snap)
+	e.noticeVPN(!paths.For(paths.VPNOnly, snap).Wait)
+}
+
+// noticeVPN tells the user once when downloads stop because the VPN dropped,
+// and once when they go on: a balloon each time, and VPNDown in the state for
+// the pages' banner. up: a tunnel is up now. Not at engine start, while the
+// tunnels are still connecting: the cards say that.
+func (e *Engine) noticeVPN(up bool) {
+	waiting := false
+	for _, j := range e.queue.List() {
+		if j.WaitingForVPN() {
+			waiting = true
+			break
+		}
+	}
+	e.mu.Lock()
+	seen, was := e.tunnelSeenUp, e.vpnDown
+	e.tunnelSeenUp = seen || up
+	e.vpnDown = waiting && (was || seen)
+	down := e.vpnDown
+	e.mu.Unlock()
+	switch {
+	case down && !was:
+		log.Printf("VPN disconnected: downloads under VPN only stopped")
+		notify("VPN disconnected", "All downloads stopped: nothing is sent outside the VPN.", nil)
+	case was && !down:
+		log.Printf("VPN connected again: downloads continue")
+		notify("VPN connected again", "Downloads continue.", nil)
+	}
 }
 
 func (e *Engine) saveSettingsLocked() {

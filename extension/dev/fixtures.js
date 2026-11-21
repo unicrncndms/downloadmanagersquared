@@ -198,6 +198,11 @@ const FIXTURES = {
     ] } },
   folder: { connected: true, state: { ...STATE, downloads: FOLDER_DOWNLOADS, active: 3 }, settings: { ...SETTINGS, folderDir: "E:\\Data", folderDirs: ["E:\\Data", "D:\\Games\\Mods", "F:\\Archive"] },
     autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
+  // The VPN dropped under VPN only: the banner, and a card waiting for it.
+  vpnDown: { connected: true, settings: { ...SETTINGS, vpnHttp: "vpn" }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
+    state: { ...STATE, active: 0, speed: 0, vpnDown: true, downloads: [{ ...DOWNLOADS[0], status: "paused", label: "Waiting for VPN", tone: "dim", speed: 0, eta: -1,
+      error: "Waiting for the VPN: nothing is sent outside it. It resumes by itself once the VPN is connected.", waitVpn: true,
+      actions: { resume: true, showInFolder: true, remove: true }, links: {} }] } },
   // Extraction failed: a whole archive that arrived, and a split archive whose parts all arrived.
   extractFailed: { connected: true, settings: { ...SETTINGS, folderDir: "E:\Data" }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
     state: { ...STATE, active: 0, speed: 0, downloads: [

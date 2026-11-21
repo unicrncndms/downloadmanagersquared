@@ -78,6 +78,10 @@ func Present(s Summary) Summary {
 		s.Label, s.Tone = statusText[StatusVerifying], toneNone
 	case s.Status == StatusCompleted && mismatch:
 		s.Label, s.Tone, s.Error = "Checksum mismatch", toneBad, s.hashResult
+	case s.Status == StatusPaused && s.WaitVPN:
+		s.Label = "Waiting for VPN" // not a pause the user made: it goes on by itself
+	case s.Status == StatusPaused && s.WaitDrive:
+		s.Label = "Waiting for drive"
 	case s.Status == StatusFailed && s.Folder != nil && s.Folder.ExtractFailed:
 		s.Label = "Extraction failed" // the download itself went on until then
 	}

@@ -788,7 +788,7 @@ func (t *Torrent) PauseForVPN() {
 		t.dropLocked()
 	}
 	t.st.Status, t.st.WaitVPN = download.StatusPaused, true
-	t.st.Error = "Paused: no VPN tunnel is up. It resumes by itself once one is."
+	t.st.Error = "Waiting for the VPN: nothing is sent outside it. It resumes by itself once the VPN is connected."
 	t.mu.Unlock()
 	t.changed()
 }

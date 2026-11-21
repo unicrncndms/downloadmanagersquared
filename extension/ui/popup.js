@@ -670,6 +670,16 @@ function renderVersion(m) {
     : [`The extension (v${ext}) is older than the engine (v${m.engineVersion}), so they may not work together. Update it in Firefox: about:addons, then Check for Updates.`]));
 }
 
+// A line under the header while downloads under VPN only stopped because the
+// VPN dropped (the engine's vpnDown), and a toast once they go on.
+let vpnWasDown = false;
+function renderVPN(m) {
+  const down = !!(m.connected && m.state && m.state.vpnDown);
+  $("vpnWarn").hidden = !down;
+  if (vpnWasDown && !down && m.connected) toast("VPN connected again. Downloads continue.");
+  vpnWasDown = down;
+}
+
 // The note under the header: once after an upgrade "Updated to vX: what's new"
 // (seenVersion), else a newer release as the engine found it on GitHub (at most
 // once a day). Closing either is kept in the engine's settings (seenVersion,
@@ -742,6 +752,7 @@ function render(m) {
   latest = m;
   renderConn(m);
   renderVersion(m);
+  renderVPN(m);
   syncFolded(m.settings);
   renderUpdate(m);
   // Connected, yet with an error: what is shown is out of date (see TOO_LONG in background/engine.js).
