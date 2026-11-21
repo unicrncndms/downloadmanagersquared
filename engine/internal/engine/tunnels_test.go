@@ -347,3 +347,41 @@ func TestVPNForTorrentsMovesEveryTorrentToThatSession(t *testing.T) {
 		t.Fatal("a single download's VPN mode can still be set on its own")
 	}
 }
+
+// A tunnel that goes away mid-download (here: its config removed) stops the
+// VPN-only download at once: it waits for the VPN, and no byte of it goes any
+// other way meanwhile.
+func TestVPNOnlyDownloadStopsWhenItsTunnelGoes(t *testing.T) {
+	e := loopbackEngine(t)
+	clientPriv, clientPub, _ := tunnel.GenerateKey()
+	srv := newVPNServer(t, clientPub)
+	importConf(t, e, srv, clientPriv)
+	id, err := e.Add(AddRequest{URL: "http://203.0.113.1/vpn.bin", VPN: "vpn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ := e.get(id)
+	d.SetLimit(128 << 10) // slow enough to still be running when the tunnel goes
+	waitFor(t, "bytes over the tunnel", 60*time.Second, func() bool {
+		e.tickVPN(time.Now())
+		e.schedule()
+		return d.Summary().Done > 0
+	})
+	if err := e.removeTunnel("lo"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the download to wait for the VPN", 5*time.Second, func() bool {
+		e.tickVPN(time.Now())
+		e.schedule()
+		return d.WaitingForVPN() && !d.Running()
+	})
+	done := d.Summary().Done
+	for range 10 {
+		e.tickVPN(time.Now())
+		e.schedule()
+		time.Sleep(50 * time.Millisecond)
+	}
+	if s := d.Summary(); s.Done != done || s.Status != download.StatusPaused {
+		t.Fatalf("after the tunnel went: %s, %d bytes then %d", s.Status, done, s.Done)
+	}
+}
