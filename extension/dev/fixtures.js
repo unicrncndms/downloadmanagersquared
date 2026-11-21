@@ -243,6 +243,8 @@ const FIXTURES = {
   quit: { connected: false, quit: true, error: "", state: null, settings: null, recipes: RECIPES },
   notInstalled: { connected: false, notInstalled: true, error: "No such native application downloadmanagersquared", state: null, settings: null, recipes: {} },
   otherVersion: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.4.1" },
+  // The stores went before GitHub: extension one minor ahead, a soft note only.
+  engineBehind: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.2.0" },
   stress: STRESS,
   // SFTP: a server key waiting for Trust, a changed key, the saved logins and trusted keys in Settings.
   sftp: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",

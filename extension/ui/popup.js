@@ -654,12 +654,17 @@ function place(parent, node, index) {
 }
 
 // A line under the header when engine and extension may not work together:
-// it says which is older and what to do for that one.
+// it says which is older and what to do for that one. An extension one minor
+// ahead works with its engine (the stores go before GitHub): a soft note only.
 function renderVersion(m) {
   const ext = Host.version;
   const clash = m.connected && versionsClash(m.engineVersion, ext);
-  $("versionWarn").hidden = !clash;
-  if (!clash) return;
+  const behind = m.connected && engineBehind(m.engineVersion, ext);
+  $("versionWarn").hidden = !clash && !behind;
+  if (!clash) {
+    if (behind) $("versionWarn").textContent = "A newer engine is on its way. This one keeps working.";
+    return;
+  }
   $("versionWarn").replaceChildren(...(olderSide(m.engineVersion, ext) === "engine"
     ? [`The engine (v${m.engineVersion}) is older than the extension (v${ext}), so they may not work together. Download the new engine: `, link(ENGINE_ZIP_URL, "downloadmanagersquared-windows.zip"), ", extract it and run dms-engine.exe."]
     : [`The extension (v${ext}) is older than the engine (v${m.engineVersion}), so they may not work together. Update it in Firefox: about:addons, then Check for Updates.`]));
