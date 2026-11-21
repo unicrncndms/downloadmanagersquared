@@ -121,11 +121,33 @@ func (d *Download) SetVPN(m paths.Mode) error {
 	}
 	same := d.st.VPN == m
 	d.st.VPN = m
+	running := d.running
 	d.mu.Unlock()
-	if !same {
-		d.changed()
+	if same {
+		return nil
 	}
+	if running {
+		d.dropUnusable(d.env.Paths(m))
+	}
+	d.changed()
 	return nil
+}
+
+// dropUnusable stops at once every request on a path not in usable, as when
+// the download was just switched to VPN only: waiting for the next tick would
+// let them go on outside the tunnel a moment longer.
+func (d *Download) dropUnusable(usable []Iface) {
+	ok := make(map[string]bool, len(usable))
+	for _, ifc := range usable {
+		ok[ifc.ID] = true
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for w := range d.workers {
+		if !ok[w.iface] {
+			w.cancel()
+		}
+	}
 }
 
 // PauseForVPN pauses a running or queued download because, under VPN only, no
@@ -140,7 +162,7 @@ func (d *Download) PauseForVPN() {
 	}
 	d.Stop(StatusPaused)
 	d.mu.Lock()
-	d.st.Error, d.st.WaitVPN = "Paused: no VPN tunnel is up. It resumes by itself once one is.", true
+	d.st.Error, d.st.WaitVPN = "Waiting for the VPN: nothing is sent outside it. It resumes by itself once the VPN is connected.", true
 	d.mu.Unlock()
 	d.changed()
 }
