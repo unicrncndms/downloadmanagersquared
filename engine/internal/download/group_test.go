@@ -72,6 +72,7 @@ func TestGroupsSummarizeAndOrder(t *testing.T) {
 		}{
 			{SetSummary{}, "Extracting", "", false},
 			{SetSummary{Note: "Part 3 missing", Files: 1, Of: 4}, "Waiting", "warn", false},
+			{SetSummary{Note: "Extraction failed, trying again: disk full", Failing: true, Files: 1, Of: 4}, "Extraction failed", "bad", false},
 			{SetSummary{Finished: true}, "Completed", "ok", true},
 		} {
 			set := c.set

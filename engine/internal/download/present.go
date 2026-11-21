@@ -78,6 +78,8 @@ func Present(s Summary) Summary {
 		s.Label, s.Tone = statusText[StatusVerifying], toneNone
 	case s.Status == StatusCompleted && mismatch:
 		s.Label, s.Tone, s.Error = "Checksum mismatch", toneBad, s.hashResult
+	case s.Status == StatusFailed && s.Folder != nil && s.Folder.ExtractFailed:
+		s.Label = "Extraction failed" // the download itself went on until then
 	}
 
 	switch s.Status {
@@ -132,6 +134,8 @@ func Present(s Summary) Summary {
 		case s.Status == StatusCompleted && f.Out != "":
 			s.Note = "Extracted to " + filepath.Base(f.Out)
 		case s.Status == StatusCompleted:
+		case f.ExtractFailed && s.Status == StatusFailed && s.Size > 0 && s.Done >= s.Size:
+			s.Note = "downloaded, not extracted"
 		case f.Ask != "":
 			s.Note = joinNote(s.Note, "needs the archive's password")
 		case f.Into == "":
@@ -194,7 +198,7 @@ func sectionOf(s Summary) string {
 	done := s.Status == StatusCompleted && extractedWith(s)
 	if f := s.Folder; s.Kind != KindTorrent && f != nil && f.On {
 		asking := f.Into == "" && s.Status != StatusCompleted
-		stuck := !done && (f.Ask != "" || (f.Set != nil && len(f.Set.Missing) > 0))
+		stuck := !done && (f.Ask != "" || (f.Set != nil && (len(f.Set.Missing) > 0 || f.Set.Failing)))
 		if asking || stuck {
 			return SectionNeeds
 		}

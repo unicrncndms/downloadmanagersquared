@@ -143,6 +143,8 @@ func summarizeGroup(id string, items []Summary) GroupSummary {
 	switch {
 	case g.Finished:
 		g.Label, g.Tone = "Completed", toneOK
+	case fetched && set.Failing:
+		g.Label, g.Tone = "Extraction failed", toneBad
 	case fetched && set.Note != "":
 		g.Label, g.Tone = "Waiting", toneWarn
 	case fetched:

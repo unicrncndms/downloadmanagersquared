@@ -150,6 +150,13 @@ type pauseError struct {
 
 func (e *pauseError) Error() string { return e.msg }
 
+// extractError ends a run of a Download as folder whose extraction failed,
+// as opposed to the download itself.
+type extractError struct{ err error }
+
+func (e *extractError) Error() string { return e.err.Error() }
+func (e *extractError) Unwrap() error { return e.err }
+
 type Download struct {
 	env Env
 	mu  sync.Mutex
@@ -296,6 +303,9 @@ func (d *Download) startLocked() {
 	d.running, d.cancel, d.done, d.stopAs = true, cancel, make(chan struct{}), ""
 	d.fatal = make(chan error, 1)
 	d.st.Status, d.st.Error = StatusRunning, ""
+	if d.st.Folder != nil {
+		d.st.Folder.ExtractFailed = false
+	}
 	d.workers, d.ifs, d.probing = map[*worker]struct{}{}, map[string]*ifaceRun{}, map[string]bool{}
 	d.meter = rate.Meter{Window: d.env.ETAWindow()}
 	d.total, d.speed, d.eta = rate.EWMA{}, 0, rate.ETA{}
@@ -459,6 +469,9 @@ func (d *Download) run(ctx context.Context) {
 		d.st.Status, d.st.Error, d.st.Stuck = StatusPaused, pe.msg, pe.stuck
 	case err != nil:
 		d.st.Status, d.st.Error, finished = StatusFailed, err.Error(), true
+		if xe := new(extractError); errors.As(err, &xe) && d.st.Folder != nil {
+			d.st.Folder.ExtractFailed = true
+		}
 	default:
 		d.st.Status, d.st.Finished, d.st.Remaining, finished = StatusCompleted, time.Now(), nil, true
 		// Nothing left to resume: the site's cookies needn't stay on disk.

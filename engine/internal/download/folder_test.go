@@ -486,3 +486,42 @@ func TestGoneInsideTellsAPartlyDeletedFolder(t *testing.T) {
 		}
 	}
 }
+
+// An extraction error ends the run as an extraction that failed, not as a
+// failed download: the card says "Extraction failed", Resume tries again, and
+// the next run clears it. (An unreadable archive falls back to a file instead,
+// and a damaged Entry pauses, so the error is put in as the extraction would.)
+func TestAnExtractionErrorFailsTheExtraction(t *testing.T) {
+	data := buildZip(t, manyFiles("", 40, 512<<10))
+	srv := newZipServer(data)
+	defer srv.Close()
+	env := &testEnv{ifaces: []Iface{iface("eth", 1, 4*time.Millisecond)}, main: "eth", finished: make(chan struct{})}
+	d := New(env, State{ID: "fx", URL: srv.URL + "/dl", Dir: t.TempDir(), Size: -1, Folder: &Folder{On: true, Into: t.TempDir()}})
+	d.Start()
+	deadline := time.Now().Add(30 * time.Second)
+	for len(d.State().Folder.Done) < 1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("nothing extracted: %+v", d.Summary())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	d.mu.Lock()
+	fatal := d.fatal
+	d.mu.Unlock()
+	fatal <- &extractError{errors.New("writing big/file001.bin: There is not enough space on the disk.")}
+	<-env.finished
+	s := Present(d.Summary())
+	if s.Status != StatusFailed || s.Label != "Extraction failed" || !s.Actions.Resume {
+		t.Fatalf("status %s label %q error %q resume %v", s.Status, s.Label, s.Error, s.Actions.Resume)
+	}
+	d.Start()
+	failed := d.State().Folder.ExtractFailed
+	d.Stop(StatusPaused)
+	for d.Running() {
+		time.Sleep(20 * time.Millisecond)
+	}
+	d.dropParked() // its open .part would outlive the test's folder
+	if failed {
+		t.Error("a new run still says the extraction failed")
+	}
+}

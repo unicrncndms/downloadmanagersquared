@@ -20,7 +20,8 @@ type SetSummary struct {
 	Of       int    `json:"of"`
 	Out      string `json:"out,omitempty"`
 	Finished bool   `json:"finished,omitempty"`
-	Locked   bool   `json:"locked,omitempty"` // a part's bytes are freed: archive keeping can't change any more
+	Locked   bool   `json:"locked,omitempty"`  // a part's bytes are freed: archive keeping can't change any more
+	Failing  bool   `json:"failing,omitempty"` // the extraction failed and tries again by itself; Note says why
 
 	// The extraction's progress: bytes of the archive extracted (freed or kept), of
 	// how many (a part not started yet counts as long as part 1), what it is
@@ -74,7 +75,7 @@ func (s *Set) publish(run *setRun) {
 	// than a part: read front to back only. Not known before its list is read.
 	arc := run.arc()
 	s.inOrder.Store(arc == nil || s.rar || run.parts != nil && arc.LargestCompressed > run.parts.Span(0).End)
-	v := &SetSummary{Note: run.note, Out: run.out, Finished: run.finished, Locked: run.locked, Phase: run.phase, Extracted: run.extracted, Total: run.sizes}
+	v := &SetSummary{Note: run.note, Failing: run.failing, Out: run.out, Finished: run.finished, Locked: run.locked, Phase: run.phase, Extracted: run.extracted, Total: run.sizes}
 	if run.tail != nil && v.Phase == "" {
 		v.Phase = "Waiting for the archive's list of files"
 	}

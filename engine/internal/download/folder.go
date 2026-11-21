@@ -49,6 +49,10 @@ type Folder struct {
 	MoveError string `json:"moveError,omitempty"` // why the last move didn't happen
 	MoveOut   string `json:"moveOut,omitempty"`   // where a move between drives copies the folder to, for a retry after a crash
 	MovePart  string `json:"movePart,omitempty"`  // and the .part
+
+	// The last run ended because the extraction failed, not the download:
+	// the card says "Extraction failed", and Resume tries it again.
+	ExtractFailed bool `json:"extractFailed,omitempty"`
 }
 
 func (f *Folder) locked() bool { return f != nil && len(f.Freed) > 0 }
@@ -127,6 +131,8 @@ type FolderSummary struct {
 	Extracted  int64   `json:"extracted,omitempty"`
 	Phase      string  `json:"phase,omitempty"`
 	ExtractETA float64 `json:"extractEta,omitempty"`
+
+	ExtractFailed bool `json:"extractFailed,omitempty"` // the last run ended on an extraction error
 }
 
 func (f *Folder) summary() *FolderSummary {
@@ -134,7 +140,7 @@ func (f *Folder) summary() *FolderSummary {
 		return nil
 	}
 	return &FolderSummary{On: f.On, Into: f.Into, Out: f.Out, Locked: f.locked(), Files: f.Files, Of: f.Of,
-		Renamed: slices.Clone(f.Renamed), Note: f.Note, Ask: f.Ask, Moving: f.Moving, MoveError: f.MoveError}
+		Renamed: slices.Clone(f.Renamed), Note: f.Note, Ask: f.Ask, Moving: f.Moving, MoveError: f.MoveError, ExtractFailed: f.ExtractFailed}
 }
 
 // What Folder.Ask can be.

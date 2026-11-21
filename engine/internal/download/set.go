@@ -96,6 +96,7 @@ func (s *Set) Stop() {
 // setRun is a Set's extraction while it runs: rebuilt from the parts' record
 // after a restart.
 type setRun struct {
+	failing  bool // the last step failed (not a pause): the parts are fetched, the extraction is not
 	parts    *archive.Parts
 	files    []*os.File  // the Set's own handles, by part index
 	released []bool      // the part's .part is deleted: all of it is freed
@@ -155,11 +156,16 @@ func (s *Set) loop(ctx context.Context) {
 				log.Printf("set %s: %v", s.set, err)
 			}
 			run.note = err.Error()
+			failing := !errors.As(err, new(*pauseError))
+			if failing {
+				// The parts are downloaded: it is the extraction that failed, and it tries again by itself.
+				run.note = "Extraction failed, trying again: " + run.note
+			}
 			if run.parts != nil {
 				run.close()
 			}
 			s.stepMu.Lock()
-			*run = setRun{note: run.note}
+			*run = setRun{note: run.note, failing: failing}
 			s.stepMu.Unlock()
 		}
 		s.stepMu.Lock()
@@ -247,7 +253,7 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 		members[n] = d.partInfo()
 	}
 	s.mu.Unlock()
-	run.note, run.tail, run.phase = "", nil, ""
+	run.note, run.tail, run.phase, run.failing = "", nil, "", false
 	if m, ok := members[archive.LastPart]; ok && run.disks > 0 {
 		delete(members, archive.LastPart) // a split ZIP's .zip: its last part
 		members[run.disks] = m

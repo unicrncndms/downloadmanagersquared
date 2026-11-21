@@ -198,6 +198,18 @@ const FIXTURES = {
     ] } },
   folder: { connected: true, state: { ...STATE, downloads: FOLDER_DOWNLOADS, active: 3 }, settings: { ...SETTINGS, folderDir: "E:\\Data", folderDirs: ["E:\\Data", "D:\\Games\\Mods", "F:\\Archive"] },
     autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
+  // Extraction failed: a whole archive that arrived, and a split archive whose parts all arrived.
+  extractFailed: { connected: true, settings: { ...SETTINGS, folderDir: "E:\Data" }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
+    state: { ...STATE, active: 0, speed: 0, downloads: [
+      zipDownload("x1", "photos.zip", { on: true, into: "E:\Data", out: "E:\Data\photos", files: 212, of: 480, extractFailed: true },
+        { status: "failed", section: "needs", label: "Extraction failed", tone: "bad", done: 4.2e10, speed: 0, eta: -1, map: undefined,
+          error: "writing photos/2024/IMG_0412.jpg: There is not enough space on the disk.", note: "downloaded, not extracted",
+          actions: { resume: true, showInFolder: true, remove: true }, links: { eth: { status: "ready", conns: 0, label: "Ready", tone: "ok" } } }),
+      ...[1, 2].map((n) => metaFile("x" + (n + 1), `holiday-video.7z.00${n}`, { status: "completed", label: "Completed", tone: "ok", size: 2.3e9, done: 2.3e9, speed: 0, eta: -1,
+        group: "parts:holiday-video.7z", groupName: "holiday-video.7z", partialFile: false, actions: { remove: true, showInFolder: true },
+        note: "Extraction failed, trying again: writing clip-03.mp4: There is not enough space on the disk.",
+        folder: { on: true, into: "E:\Data", files: 3, of: 12, set: { parts: 2, failing: true, note: "Extraction failed, trying again: writing clip-03.mp4: There is not enough space on the disk.", files: 3, of: 12, extracted: 6e8, total: 4.6e9 } } })),
+    ] } },
   // Ethernet and Wi-Fi behind one router; Check lines finds them on one public IP.
   uplink: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
     state: { ...STATE, interfaces: IFACES.map((i) => (i.id === "eth" ? { ...i, sameRouter: ["Wi-Fi"] } : i.id === "wifi" ? { ...i, sameRouter: ["Ethernet"] } : i)) },
@@ -277,7 +289,7 @@ function sectionOf(d) {
   const set = d.folder && d.folder.set;
   const fetched = d.status === "completed" && !(set && !set.finished);
   const asking = f && !f.into && d.status !== "completed";
-  const stuck = f && !fetched && (f.ask || (set && set.missing && set.missing.length));
+  const stuck = f && !fetched && (f.ask || (set && ((set.missing && set.missing.length) || set.failing)));
   if (d.status === "failed" || d.status === "choosing" || asking || stuck || Object.values(d.links || {}).some((l) => l.canRetry) || (d.status === "paused" && d.error && !d.waitVpn)) return "needs";
   return d.status === "completed" && !fetched ? "active" : SECTION_OF[d.status] || "active";
 }
@@ -297,7 +309,7 @@ function groupsOf(downloads) {
     const waiting = set && !set.finished;
     const finished = done === items.length && !waiting;
     const size = items.every((d) => d.size > 0) ? items.reduce((a, d) => a + d.size, 0) : set && set.total > 0 ? set.total : -1;
-    const [label, tone] = finished ? ["Completed", "ok"] : done === items.length ? (set.note ? ["Waiting", "warn"] : ["Extracting", ""]) : [items[0].label, items[0].tone || ""];
+    const [label, tone] = finished ? ["Completed", "ok"] : done === items.length ? (set.failing ? ["Extraction failed", "bad"] : set.note ? ["Waiting", "warn"] : ["Extracting", ""]) : [items[0].label, items[0].tone || ""];
     const can = (k) => items.some((d) => d.actions && d.actions[k]);
     return { id, name: items[0].groupName || "Metalink", parts: id.startsWith("parts:"), count: set && set.parts ? set.parts : items.length, items: items.length, done, size,
       got: items.reduce((a, d) => a + (d.done || 0), 0), speed: items.reduce((a, d) => a + (d.status === "running" ? d.speed || 0 : 0), 0), finished, label, tone,

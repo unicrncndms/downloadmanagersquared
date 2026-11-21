@@ -146,6 +146,9 @@ func (d *Download) folderLoop(ctx context.Context, fr *folderRun) {
 	for {
 		more, err := d.folderStep(ctx, fr)
 		if err != nil && ctx.Err() == nil {
+			if !errors.As(err, new(*pauseError)) {
+				err = &extractError{err}
+			}
 			select {
 			case d.fatal <- err:
 			default:

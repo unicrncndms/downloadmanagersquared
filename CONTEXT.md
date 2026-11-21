@@ -125,7 +125,7 @@ One file or folder stored inside a ZIP archive. In a 7z, an Entry is a block: pa
 _Avoid_: File (that is the download), member, item
 
 **Extraction**:
-One archive being extracted while its bytes download, whether it is one download or a Set's parts. An Entry that comes out wrong is fetched again once; wrong a second time, the downloads holding it pause.
+One archive being extracted while its bytes download, whether it is one download or a Set's parts. An Entry that comes out wrong is fetched again once; wrong a second time, the downloads holding it pause. Any other error ends it as *Extraction failed*, apart from the download: a single download stops (Resume tries again), a Set tries again by itself while its fetched parts wait in "Needs you" (or *Retry extraction*).
 _Avoid_: Unpacking, unzip
 
 **Set**:

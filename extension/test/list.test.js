@@ -135,6 +135,8 @@ test("a split archive's card counts its parts, and its extraction has a line of 
   const x = extractView([part({ phase: "Extracting", extracted: 50, total: 200, eta: 0, files: 1, of: 4 })]);
   assert.equal(x.text, "Extraction · 25% · 1 of 4 files");
   assert.equal(extractView([part({ phase: "Waiting for part 3", extracted: 50, total: 200, eta: 0 })]).text, "Extraction · Waiting for part 3");
+  assert.equal(extractView([part({ note: "Extraction failed, trying again: disk full", failing: true, extracted: 50, total: 200, files: 1, of: 4 })]).text,
+    "Extraction failed, trying again: disk full · 1 of 4 files");
   assert.ok(!v.finished && v.label === "Waiting" && v.tone === "warn");
   // The size isn't known before every part has started: only what is fetched.
   assert.equal(groupView(summary({ parts: true, count: 3, size: -1, got: 60 })).percent, 0);
@@ -194,6 +196,9 @@ test("a screen reader hears a download finish or fail once, and nothing about do
   r = announcements(r.seen, [dl("t", "running", { kind: "torrent", filename: "t" })]);
   r = announcements(r.seen, [dl("t", "seeding", { kind: "torrent", filename: "t" })]);
   assert.deepEqual(r.texts, ["t finished"]);
+  r = announcements(r.seen, [dl("z", "running", { filename: "z.zip" })]);
+  r = announcements(r.seen, [dl("z", "failed", { filename: "z.zip", error: "disk full", folder: { on: true, extractFailed: true } })]);
+  assert.deepEqual(r.texts, ["z.zip: extraction failed: disk full"]);
 });
 
 test("a torrent that finishes seeding isn't announced a second time", () => {

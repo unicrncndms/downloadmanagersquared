@@ -118,7 +118,8 @@ function extractView(items, eta) {
   const line = (bytes, total, what, eta, files) => {
     const percent = total > 0 ? Math.min(100, ((bytes || 0) / total) * 100) : 0;
     const where = what === "Extracting" ? `${Math.round(percent)}%` : what;
-    return { percent, text: ["Extraction", where, files, eta > 0 ? `${fmtETA(eta)} left` : ""].filter(Boolean).join(" · ") };
+    // A note that names the extraction already ("Extraction failed, …") needs no label.
+    return { percent, text: [/^Extraction /.test(where) ? "" : "Extraction", where, files, eta > 0 ? `${fmtETA(eta)} left` : ""].filter(Boolean).join(" · ") };
   };
   if (!items.some((d) => d.kind !== "torrent" && d.folder && d.folder.on && d.folder.into)) return null;
   const set = items.map((d) => d.folder.set).find(Boolean);
@@ -327,7 +328,7 @@ function announcements(prev, downloads) {
     if (!was || was === d.status) continue;
     const name = d.filename || d.url;
     if ((d.status === "completed" && was !== "seeding") || (d.status === "seeding" && was !== "completed")) texts.push(`${name} finished`);
-    else if (d.status === "failed") texts.push(`${name} failed${d.error ? ": " + d.error : ""}`);
+    else if (d.status === "failed") texts.push(`${name}${d.folder && d.folder.extractFailed ? ": extraction failed" : " failed"}${d.error ? ": " + d.error : ""}`);
   }
   return { texts, seen: next };
 }
