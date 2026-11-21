@@ -40,7 +40,8 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
       .then(() => method === "setSettings" ? applySettings(params) : method === "setInterface" ? applyInterface(params) : method === "torrentFiles" ? (window.fixture().files || {})[params.id] || []
         : method === "sftpHostKeys" || method === "sftpLogins" ? (window.fixture()[method] || [])
         : method === "checkLines" ? window.fixture().lines || []
-        : method === "downloadLog" ? (window.fixture().logs || {})[params.id] || [] : undefined),
+        : method === "diagnostics" ? `DMS² 0.3.0 diagnostics (harness)
+Download ${params.id}` : method === "downloadLog" ? (window.fixture().logs || {})[params.id] || [] : undefined),
     subscribe(fn) {
       listeners.push(fn);
       setTimeout(() => fn(window.fixture()), 0);

@@ -375,6 +375,7 @@ var methods = map[string]handler{
 		return d.SetHashes(p.SHA256, p.MD5)
 	}),
 	"retryExtraction": ack(func(e *Engine, p idParams) error { return e.RetryExtraction(p.ID) }),
+	"diagnostics":     with(func(e *Engine, p idParams) (any, error) { return e.Diagnostics(p.ID) }),
 	"setFolder":       ack(func(e *Engine, p folderParams) error { return e.SetFolder(p.ID, p.On, p.Into, p.Keep) }),
 	"trustHostKey": ack(func(e *Engine, p idParams) error {
 		d, err := e.get(p.ID)

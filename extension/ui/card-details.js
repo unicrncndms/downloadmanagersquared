@@ -58,7 +58,18 @@ function activityPart(id) {
       toast("Couldn't copy the activity", true);
     }
   } }, "Copy");
-  const section = detailSection("Activity", activityList, copy);
+  // A plain-text report for a bug report or a forum post: the engine leaves out
+  // cookies, passwords and query strings (engine Diagnostics).
+  const diag = el("button", { class: "small", onclick: async () => {
+    try {
+      await navigator.clipboard.writeText(await call("diagnostics", { id }));
+      toast("Diagnostics copied: paste them where you ask for help");
+    } catch (e) {
+      // An engine one minor older has no such method (CONTRIBUTING: compatibility).
+      toast(/unknown method/.test(e && e.message) ? "Copy diagnostics needs the newer engine" : "Couldn't copy the diagnostics", true);
+    }
+  } }, "Copy diagnostics");
+  const section = detailSection("Activity", activityList, copy, " ", diag);
   section.hidden = true; // until the log comes
   async function load() {
     if (Date.now() - activityAt < 2000) return;
