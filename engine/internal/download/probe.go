@@ -210,6 +210,7 @@ type fetchError struct {
 	kind       errKind
 	msg        string
 	retryAfter time.Duration
+	err        error // kindDisk: the write error, for drivePause
 }
 
 func (e *fetchError) Error() string { return e.msg }

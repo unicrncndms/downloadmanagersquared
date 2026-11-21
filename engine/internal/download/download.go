@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -77,7 +78,8 @@ type State struct {
 	Probed      bool             `json:"probed"`
 	Stuck       bool             `json:"stuck,omitempty"` // paused because no connection could reach the file
 	VPN         paths.Mode       `json:"vpn,omitempty"`
-	WaitVPN     bool             `json:"waitVpn,omitempty"` // paused because no tunnel is up under VPN only
+	WaitVPN     bool             `json:"waitVpn,omitempty"`   // paused because no tunnel is up under VPN only
+	WaitDrive   string           `json:"waitDrive,omitempty"` // paused because this drive (its root) is gone; resumes once it is back
 	Allocated   bool             `json:"allocated"`
 	SHA256      string           `json:"sha256,omitempty"`
 	MD5         string           `json:"md5,omitempty"`
@@ -145,7 +147,8 @@ type ifaceRun struct {
 
 type pauseError struct {
 	msg   string
-	stuck bool // no connection can reach the file
+	stuck bool   // no connection can reach the file
+	drive string // the drive it waits for (State.WaitDrive)
 }
 
 func (e *pauseError) Error() string { return e.msg }
@@ -162,17 +165,19 @@ type Download struct {
 	mu  sync.Mutex
 	st  State
 
-	renameFails int       // keepPart failures in a row
-	renameNext  time.Time // no new try before this
-	runStart    time.Time // when the run under way began, for State.Active
-	running     bool
-	retrying    bool // every link waited to retry, and none is ready since (Retrying)
-	checking    bool // a finished file is being checked against new checksums
-	cancel      context.CancelFunc
-	done        chan struct{}
-	stopAs      Status
-	fatal       chan error
-	wg          sync.WaitGroup
+	renameFails  int       // keepPart failures in a row
+	driveChecked time.Time // DriveBack's last look for the drive
+	durable      []Range   // the plan's Remaining at the last flush: what State saves while running
+	renameNext   time.Time // no new try before this
+	runStart     time.Time // when the run under way began, for State.Active
+	running      bool
+	retrying     bool // every link waited to retry, and none is ready since (Retrying)
+	checking     bool // a finished file is being checked against new checksums
+	cancel       context.CancelFunc
+	done         chan struct{}
+	stopAs       Status
+	fatal        chan error
+	wg           sync.WaitGroup
 
 	file    *os.File
 	plan    *plan      // nil unless running with the file open
@@ -268,7 +273,7 @@ func (d *Download) SourceURL() string {
 func (d *Download) State() State {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.syncRemainingLocked()
+	d.durableRemainingLocked()
 	st := d.st
 	st.Links = make(map[string]*Link, len(d.st.Links))
 	for k, l := range d.st.Links {
@@ -280,6 +285,36 @@ func (d *Download) State() State {
 	st.Mirrors = slices.Clone(d.st.Mirrors)
 	st.Log = slices.Clone(d.st.Log)
 	return st
+}
+
+// flush writes what the .part has in Windows' cache to the disk, then lets the
+// saved state count those bytes as done (durable). Saved progress never runs
+// ahead of the disk, so after a power loss the file and the state agree: what
+// was only cached is fetched again.
+func (d *Download) flush() {
+	d.mu.Lock()
+	f, plan := d.file, d.plan
+	var snap []Range
+	if plan != nil && plan.splittable {
+		snap = plan.ranges()
+	}
+	d.mu.Unlock()
+	if f == nil || snap == nil || f.Sync() != nil {
+		return
+	}
+	d.mu.Lock()
+	if d.plan == plan {
+		d.durable = snap
+	}
+	d.mu.Unlock()
+}
+
+// durableRemainingLocked is what State saves of a running download's
+// Remaining: as of the last flush, never bytes only in the cache.
+func (d *Download) durableRemainingLocked() {
+	if d.plan != nil && d.plan.splittable && d.durable != nil {
+		d.st.Remaining = d.durable
+	}
 }
 
 func (d *Download) syncRemainingLocked() {
@@ -301,6 +336,7 @@ func (d *Download) Start() {
 func (d *Download) startLocked() {
 	ctx, cancel := context.WithCancel(context.Background())
 	d.running, d.cancel, d.done, d.stopAs = true, cancel, make(chan struct{}), ""
+	d.durable = nil
 	d.fatal = make(chan error, 1)
 	d.st.Status, d.st.Error = StatusRunning, ""
 	if d.st.Folder != nil {
@@ -314,7 +350,7 @@ func (d *Download) startLocked() {
 	for _, l := range d.st.Links {
 		l.resume(d.st.Stuck)
 	}
-	d.st.Stuck, d.st.WaitVPN = false, false
+	d.st.Stuck, d.st.WaitVPN, d.st.WaitDrive = false, false, ""
 	go func() {
 		defer cancel() // whichever way the run ends, nothing of it lingers
 		d.run(ctx)
@@ -436,6 +472,7 @@ func (d *Download) run(ctx context.Context) {
 	d.mu.Lock()
 	d.st.Active += time.Since(d.runStart).Seconds()
 	d.syncRemainingLocked()
+	d.durable = nil // the workers have stopped: the plan's Remaining is what the file holds once synced below
 	if d.file != nil {
 		d.file.Sync() // a clean stop: what the saved state records is on disk
 		if d.parked != nil {
@@ -466,7 +503,7 @@ func (d *Download) run(ctx context.Context) {
 	case d.stopAs != "":
 		d.st.Status = d.stopAs
 	case errors.As(err, &pe):
-		d.st.Status, d.st.Error, d.st.Stuck = StatusPaused, pe.msg, pe.stuck
+		d.st.Status, d.st.Error, d.st.Stuck, d.st.WaitDrive = StatusPaused, pe.msg, pe.stuck, pe.drive
 	case err != nil:
 		d.st.Status, d.st.Error, finished = StatusFailed, UserText(err), true
 		log.Printf("download %s failed: %v", d.st.ID, err)
@@ -515,11 +552,14 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 	usable := d.env.Paths(d.VPN())
 	mainID := mainOf(usable)
 	now := time.Now()
-	changed := false
+	changed, flush := false, false
 
 	d.mu.Lock()
 	defer func() {
 		d.mu.Unlock()
+		if flush {
+			d.flush()
+		}
 		if changed {
 			d.changed()
 		}
@@ -612,13 +652,13 @@ func (d *Download) tick(ctx context.Context) (bool, error) {
 
 	if now.Sub(d.lastSave) >= 5*time.Second {
 		d.lastSave = now
-		changed = true
+		changed, flush = true, true
 	}
 	if now.Sub(d.lastDisk) >= 30*time.Second {
 		d.lastDisk = now
 		// Automatic keeping the archive frees it instead (Extraction.mayFree).
 		if free, err := freeSpace(d.st.Dir); err == nil && free < diskReserve && d.remainingLocked() > 0 && !d.keptByAutoLocked() {
-			return false, &pauseError{msg: fmt.Sprintf("Paused: disk almost full (%s free)", human(free))}
+			return false, &pauseError{msg: fmt.Sprintf("Paused: %s is almost full (%s free)", driveName(d.st.Dir), human(free))}
 		}
 	}
 
@@ -685,7 +725,18 @@ func (d *Download) openFileLocked() error {
 		return nil
 	}
 	if err := os.MkdirAll(d.st.Dir, 0o755); err != nil {
+		if pe := drivePause(err, d.st.Dir, 0); pe != nil {
+			return pe
+		}
 		return err
+	}
+	if d.st.Allocated && !d.folderOnLocked() {
+		// Its .part was deleted (the drive is there: MkdirAll worked). Nothing
+		// of it is left to keep, so it starts over instead of failing.
+		if _, err := os.Stat(d.partPath()); errors.Is(err, fs.ErrNotExist) {
+			log.Printf("download %s: its partial file %s is gone: starting over", d.st.ID, d.partPath())
+			d.st.Allocated, d.st.Remaining = false, nil
+		}
 	}
 	if !d.st.Allocated {
 		d.st.Filename = uniqueName(d.st.Dir, d.st.Filename, "", partSuffix)
@@ -695,6 +746,9 @@ func (d *Download) openFileLocked() error {
 	if !d.st.RangeOK {
 		// No resume without ranges: every attempt starts from byte 0.
 		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+		if pe := drivePause(err, d.st.Dir, d.st.Size); pe != nil {
+			return pe
+		}
 		if err != nil {
 			return err
 		}
@@ -714,6 +768,9 @@ func (d *Download) openFileLocked() error {
 			return err
 		}
 		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+		if pe := drivePause(err, d.st.Dir, d.st.Size); pe != nil {
+			return pe
+		}
 		if err != nil {
 			return err
 		}
@@ -730,6 +787,9 @@ func (d *Download) openFileLocked() error {
 		d.st.Remaining = []Range{{0, d.st.Size}}
 	} else {
 		f, err := os.OpenFile(path, os.O_RDWR, 0)
+		if pe := drivePause(err, d.st.Dir, 0); pe != nil {
+			return pe
+		}
 		if err != nil {
 			return fmt.Errorf("partial file is gone: %w", err)
 		}
@@ -762,7 +822,7 @@ func checkSpace(dir string, need int64) error {
 		return nil
 	}
 	if free < need+diskReserve {
-		return &pauseError{msg: fmt.Sprintf("Paused: not enough disk space (need %s, %s free)", human(need), human(free))}
+		return &pauseError{msg: fmt.Sprintf("Paused: not enough space on %s (needs %s, %s free)", driveName(dir), human(need), human(free))}
 	}
 	return nil
 }

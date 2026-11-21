@@ -395,7 +395,7 @@ func TestDiskAlmostFullPauses(t *testing.T) {
 	d := New(env, State{ID: "df", URL: srv.URL + "/file/any", Dir: t.TempDir(), Size: -1})
 	d.Start()
 	waitSummary(t, d, func(s Summary) bool { return s.Status == StatusPaused }, "a pause")
-	if s := d.Summary(); !strings.Contains(s.Error, "disk almost full") {
+	if s := d.Summary(); !strings.Contains(s.Error, "is almost full") {
 		t.Fatalf("paused with %q", s.Error)
 	}
 }

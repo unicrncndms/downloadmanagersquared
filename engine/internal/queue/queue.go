@@ -374,6 +374,9 @@ func (q *Queue) Schedule(limit int, snap paths.Snapshot) {
 		} else if e.WaitingForVPN() {
 			e.Resume() // a tunnel came up
 		}
+		if w, ok := e.(interface{ DriveBack() bool }); ok && w.DriveBack() {
+			e.Resume() // its drive is back
+		}
 		if now[e.ID()] { // started by hand: it runs outside the count
 			if e.Running() {
 				continue

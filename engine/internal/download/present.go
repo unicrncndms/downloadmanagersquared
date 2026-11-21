@@ -207,8 +207,8 @@ func sectionOf(s Summary) string {
 	for _, l := range s.Links {
 		retry = retry || l.CanRetry
 	}
-	// A pause only for the VPN ends by itself, so it needs nobody.
-	pausedWithError := s.Status == StatusPaused && s.Error != "" && !s.WaitVPN
+	// A pause only for the VPN or a drive ends by itself, so it needs nobody.
+	pausedWithError := s.Status == StatusPaused && s.Error != "" && !s.WaitVPN && !s.WaitDrive
 	if s.Status == StatusFailed || s.Status == StatusChoosing || retry || pausedWithError {
 		return SectionNeeds
 	}

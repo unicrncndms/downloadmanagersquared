@@ -641,7 +641,10 @@ func (d *Download) editFolder(edit func(f *Folder) bool) {
 }
 
 // save is archivePart's: it writes the download's state to disk at once.
-func (d *Download) save() error { return d.env.Save(d) }
+func (d *Download) save() error {
+	d.flush()
+	return d.env.Save(d)
+}
 
 // pause is archivePart's: it stops the download with msg as why. A
 // download's own extraction ends its step with the error instead, as its run

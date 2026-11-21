@@ -88,6 +88,8 @@ type Summary struct {
 	InSwarm   bool          `json:"inSwarm,omitempty"` // exchanging pieces with peers right now
 
 	WaitVPN bool `json:"-"` // paused only because no tunnel is up: it resumes by itself, so for the section it needs nobody
+	// WaitDrive: paused only because its drive is gone; it resumes by itself too.
+	WaitDrive bool `json:"-"`
 
 	hashResult string // State.HashResult, for the label and note
 	serverSHA  bool   // no checksum pasted: the server's SHA-256 is the one checked
@@ -169,7 +171,7 @@ func (d *Download) summaryLocked() Summary {
 		serverSHA: d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.SHA256 != "",
 		serverMD:  d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.MD5 != "",
 		Added:     d.st.Added, Finished: d.st.Finished, Active: d.st.Active, VPN: d.st.VPN,
-		HostKey: d.st.HostAsk, Folder: d.folderSummaryLocked(), Limit: d.st.Limit, WaitVPN: d.st.WaitVPN,
+		HostKey: d.st.HostAsk, Folder: d.folderSummaryLocked(), Limit: d.st.Limit, WaitVPN: d.st.WaitVPN, WaitDrive: d.st.WaitDrive != "",
 		Mirrors: slices.Clone(d.st.Mirrors), Group: d.st.Group, GroupName: d.st.GroupName,
 	}
 	if s.Group == "" && s.Filename != "" {

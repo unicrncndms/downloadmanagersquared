@@ -133,8 +133,12 @@ func (d *Download) workerFailedLocked(w *worker, err error) {
 			l.mismatch(fe.msg)
 		}
 	case kindDisk:
+		var end error = errors.New(fe.msg)
+		if pe := drivePause(fe.err, d.st.Dir, d.remainingLocked()); pe != nil {
+			end = pe // a full or missing drive pauses: nothing is lost, and space or the drive comes back
+		}
 		select {
-		case d.fatal <- errors.New(fe.msg):
+		case d.fatal <- end:
 		default:
 		}
 	default:
@@ -217,7 +221,7 @@ func (w *worker) fetch(ctx context.Context, segp **segment, buf []byte) error {
 	if !ranged {
 		// Without ranges every attempt fetches the whole file again.
 		if err := d.file.Truncate(0); err != nil {
-			return &fetchError{kind: kindDisk, msg: diskMsg(err)}
+			return &fetchError{kind: kindDisk, msg: diskMsg(err), err: err}
 		}
 	}
 
@@ -277,7 +281,7 @@ func (w *worker) fetch(ctx context.Context, segp **segment, buf []byte) error {
 			d.mu.Unlock()
 			if allowed > 0 {
 				if _, err := d.file.WriteAt(buf[:allowed], off); err != nil {
-					return &fetchError{kind: kindDisk, msg: diskMsg(err)}
+					return &fetchError{kind: kindDisk, msg: diskMsg(err), err: err}
 				}
 				d.mu.Lock()
 				d.plan.wrote(seg, off, allowed)
