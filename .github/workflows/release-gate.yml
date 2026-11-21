@@ -1,0 +1,35 @@
+name: Release gate
+
+# Every 15 minutes: does a draft release wait whose extension both stores have
+# approved (AMO listed, Chrome Web Store staged)? Then start release-signed.yml
+# on its tag, which publishes the release and makes the Chrome version live.
+# Exits at once when no draft waits. See .github/scripts/release-gate.ps1.
+# The release environment's secrets are for v* tags only, so this reads the
+# stores without them: AMO's public API, and a read-only Chrome Web Store token
+# in repo secrets (.github/scripts/cws-check.ps1 -ReadOnly).
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write # drafts are listed only to writers
+  actions: write # start release-signed.yml
+
+concurrency: release-gate
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the stores for each draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+          CWS_READ_REFRESH_TOKEN: ${{ secrets.CWS_READ_REFRESH_TOKEN }}
+        run: ./.github/scripts/release-gate.ps1

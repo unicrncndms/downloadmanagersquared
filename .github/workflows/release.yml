@@ -1,11 +1,14 @@
 name: Release
 
 # A tag vX.Y.Z drafts the release with the engine zip and the Chromium zip
-# (both attested, as are the exes: gh attestation verify) and submits the
-# extension to addons.mozilla.org as a listed version. Mozilla reviews it, which
-# takes hours to days, so the workflow doesn't wait: once AMO has approved it,
-# run release-signed.yml on the tag, which attaches the AMO-signed .xpi and
-# publishes the draft. A release is never public without its .xpi.
+# (both attested, as are the exes: gh attestation verify), submits the
+# extension to addons.mozilla.org as a listed version and uploads it to the
+# Chrome Web Store staged (approved, it waits for us). Both stores review it,
+# which takes hours to days, so the workflow doesn't wait: release-gate.yml
+# checks both every 15 minutes and, once both have approved, starts
+# release-signed.yml on the tag, which attaches the AMO-signed .xpi, publishes
+# the draft and then makes the Chrome version live. The release is never public
+# before both stores have approved, nor without its .xpi.
 
 on:
   push:
@@ -74,6 +77,18 @@ jobs:
           # --approval-timeout 0: submit and return, the review takes far longer than a job should wait.
           npx --yes web-ext@10.8.0 sign --channel=listed --source-dir dist/extension --artifacts-dir dist/signed --api-key $env:AMO_JWT_ISSUER --api-secret $env:AMO_JWT_SECRET --amo-metadata .github/amo-metadata.json --approval-timeout 0
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          echo "::notice::$env:TAG is submitted to AMO for review. The release stays a draft. Once approved, run 'Publish with the AMO-signed extension' on this tag: gh workflow run release-signed.yml --ref $env:TAG -f tag=$env:TAG"
+          echo "::notice::$env:TAG is submitted to AMO for review. The release stays a draft until both stores have approved: release-gate.yml then starts release-signed.yml on this tag."
 
-      # The Chrome Web Store gets the Chromium zip from release-signed.yml, once the release is public.
+      # Staged: approved, it waits until release-signed.yml has published the release (cws-live.ps1).
+      - name: Upload the Chromium zip to the Chrome Web Store (staged)
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+        run: |
+          if (-not ($env:CWS_CLIENT_ID -and $env:CWS_CLIENT_SECRET -and $env:CWS_REFRESH_TOKEN -and $env:CWS_PUBLISHER_ID)) {
+            echo "::warning::No Chrome Web Store secrets: upload dist/downloadmanagersquared-chromium.zip from the $env:TAG draft in the dashboard by hand, with 'Defer publish' on."
+            exit 0
+          }
+          ./.github/scripts/cws-upload.ps1 -Zip (Resolve-Path dist/downloadmanagersquared-chromium.zip).Path -Staged

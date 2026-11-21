@@ -6,7 +6,14 @@
 # (gh secret set). A value already in the environment (CWS_CLIENT_ID,
 # CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN, CWS_PUBLISHER_ID) isn't asked for.
 #   powershell -ExecutionPolicy Bypass -File .github\scripts\cws-check.ps1
-param([switch]$NoStore) # only check, don't set the secrets
+# With -ReadOnly it gets a token that can only read the store
+# (chromewebstore.readonly) and stores it, with the client and publisher ID, as
+# repo secrets (CWS_READ_REFRESH_TOKEN for the token): release-gate.yml runs on
+# main, which can't use the release environment's secrets.
+param(
+    [switch]$NoStore, # only check, don't set the secrets
+    [switch]$ReadOnly
+)
 $ErrorActionPreference = 'Stop'
 
 function Ask([string]$name, [string]$label, [bool]$hidden) {
@@ -47,7 +54,7 @@ function RefreshToken($id, $secret) {
         $challenge = B64Url ([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::ASCII.GetBytes($verifier)))
         $q = @{
             client_id = $id; redirect_uri = $redirect; response_type = 'code'
-            scope = 'https://www.googleapis.com/auth/chromewebstore'
+            scope = $scope
             access_type = 'offline'; prompt = 'consent'
             code_challenge = $challenge; code_challenge_method = 'S256'; state = $state
         }
@@ -85,14 +92,16 @@ function RefreshToken($id, $secret) {
     $t.refresh_token
 }
 
+$scope = 'https://www.googleapis.com/auth/chromewebstore' + $(if ($ReadOnly) { '.readonly' } else { '' })
+$tokenName = if ($ReadOnly) { 'CWS_READ_REFRESH_TOKEN' } else { 'CWS_REFRESH_TOKEN' }
 $vals = [ordered]@{
     CWS_CLIENT_ID     = Ask 'CWS_CLIENT_ID' 'OAuth client ID (...apps.googleusercontent.com)' $false
     CWS_CLIENT_SECRET = Ask 'CWS_CLIENT_SECRET' 'OAuth client secret' $true
-    CWS_REFRESH_TOKEN = $env:CWS_REFRESH_TOKEN
+    $tokenName        = [Environment]::GetEnvironmentVariable($tokenName)
     CWS_PUBLISHER_ID  = Ask 'CWS_PUBLISHER_ID' 'Publisher ID (dashboard, Publisher > Settings)' $false
 }
-if (-not $vals.CWS_REFRESH_TOKEN) {
-    try { $vals.CWS_REFRESH_TOKEN = RefreshToken $vals.CWS_CLIENT_ID $vals.CWS_CLIENT_SECRET }
+if (-not $vals[$tokenName]) {
+    try { $vals[$tokenName] = RefreshToken $vals.CWS_CLIENT_ID $vals.CWS_CLIENT_SECRET }
     catch { Write-Host "FAILED: no refresh token. $(Why $_)" -ForegroundColor Red; exit 1 }
     Write-Host "OK: got a refresh token." -ForegroundColor Green
 }
@@ -104,12 +113,12 @@ $item = $Matches[1]
 try {
     $token = (Invoke-RestMethod -Method Post -Uri 'https://oauth2.googleapis.com/token' -Body @{
             client_id = $vals.CWS_CLIENT_ID; client_secret = $vals.CWS_CLIENT_SECRET
-            refresh_token = $vals.CWS_REFRESH_TOKEN; grant_type = 'refresh_token'
+            refresh_token = $vals[$tokenName]; grant_type = 'refresh_token'
         }).access_token
 } catch {
     Write-Host "FAILED: Google refused the client ID, secret or refresh token." -ForegroundColor Red
     Write-Host "  invalid_client: ID or secret wrong. invalid_grant: refresh token wrong, revoked, or from an app still in Testing that expired."
-    Write-Host "  unauthorized_client: the refresh token was made for another client: unset CWS_REFRESH_TOKEN and run this again to get a new one."
+    Write-Host "  unauthorized_client: the refresh token was made for another client: unset $tokenName and run this again to get a new one."
     Write-Host "  $(Why $_)"
     exit 1
 }
@@ -131,10 +140,12 @@ Write-Host "OK: item $item. Published: $(if ($pub) { $pub } else { 'none' }). In
 if ($sub -eq 'PENDING_REVIEW') { Write-Host "  A review is pending: a release run now would fail at the upload. Wait until it is through." -ForegroundColor Yellow }
 
 if ($NoStore) { exit 0 }
-if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { Write-Host "gh not found: set the four secrets of the 'release' environment by hand."; exit 0 }
-if ((Read-Host "Store the four values as secrets of the 'release' environment? (y/n)") -ne 'y') { exit 0 }
+$where = if ($ReadOnly) { 'the repo' } else { "the 'release' environment" }
+$envArgs = if ($ReadOnly) { @() } else { @('--env', 'release') }
+if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { Write-Host "gh not found: set the four secrets of $where by hand."; exit 0 }
+if ((Read-Host "Store the four values as secrets of $where? (y/n)") -ne 'y') { exit 0 }
 foreach ($k in $vals.Keys) {
-    $vals[$k] | gh secret set $k --env release # from stdin: the value is never on a command line
+    $vals[$k] | gh secret set $k @envArgs # from stdin: the value is never on a command line
     if ($LASTEXITCODE) { throw "gh secret set $k failed" }
 }
-Write-Host "Stored. gh secret list --env release shows them." -ForegroundColor Green
+Write-Host "Stored. gh secret list $envArgs shows them." -ForegroundColor Green

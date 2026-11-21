@@ -1,13 +1,14 @@
 name: Publish with the AMO-signed extension
 
-# Run by hand on a release's tag once AMO has approved that version's listed
-# submission (release.yml submits it and leaves the release a draft): fetches
-# the approved .xpi from AMO, attaches it to the draft with its hash in the
-# notes, and publishes the release. For v0.12.0 only it also attaches the one
-# updates.json that sends self-distributed builds to that file (see
-# .github/scripts/updates-json.ps1). Then it submits the release's Chromium zip
-# to the Chrome Web Store, so both stores get the version once it is public.
-# Run it on the tag (only v* tags may use the release environment).
+# Started by release-gate.yml on a release's tag once both stores have approved
+# its extension (AMO listed, Chrome Web Store staged), or by hand:
+# gh workflow run release-signed.yml --ref vX.Y.Z -f tag=vX.Y.Z. Checks Chrome
+# has the version staged, fetches the approved .xpi from AMO, attaches it to
+# the draft with its hash in the notes, publishes the release, then makes the
+# staged Chrome version live: GitHub and Chrome go live together. For v0.12.0
+# only it also attaches the one updates.json that sends self-distributed builds
+# to that file (see .github/scripts/updates-json.ps1). Run it on the tag (only
+# v* tags may use the release environment).
 
 on:
   workflow_dispatch:
@@ -38,6 +39,20 @@ jobs:
           $draft = gh release view $env:TAG --json isDraft --jq .isDraft
           if ($draft -ne 'true') { throw "$env:TAG is not a draft release" }
 
+      # Never publish the engine while Chrome users can't get the extension that goes with it.
+      - name: Check the Chrome Web Store has approved it
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+        run: |
+          if (-not ($env:CWS_CLIENT_ID -and $env:CWS_CLIENT_SECRET -and $env:CWS_REFRESH_TOKEN -and $env:CWS_PUBLISHER_ID)) { throw 'No Chrome Web Store secrets in the release environment' }
+          . ./.github/scripts/cws-lib.ps1
+          $state = CwsState $env:TAG.TrimStart('v') (CwsAuth)
+          if ($state -notin 'staged', 'published') { throw "$env:TAG is $state in the Chrome Web Store, not approved: the release stays a draft" }
+          Write-Host "Chrome Web Store: $env:TAG is $state"
+
       - name: Fetch the approved extension from AMO
         env:
           AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
@@ -47,17 +62,11 @@ jobs:
       - name: Attach it and publish
         run: ./.github/scripts/attach.ps1 -Tag $env:TAG -Xpi (Resolve-Path signed.xpi).Path
 
-      # The same attested zip the release carries. Skipped until the store's API secrets are set.
-      - name: Submit the Chromium zip to the Chrome Web Store
+      # After the release: a Chrome user who updates finds the engine already out.
+      - name: Make the staged Chrome Web Store version live
         env:
           CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
           CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
           CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
           CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
-        run: |
-          if (-not ($env:CWS_CLIENT_ID -and $env:CWS_CLIENT_SECRET -and $env:CWS_REFRESH_TOKEN -and $env:CWS_PUBLISHER_ID)) {
-            echo "::warning::No Chrome Web Store secrets: upload dist/downloadmanagersquared-chromium.zip from the $env:TAG release to the dashboard by hand."
-            exit 0
-          }
-          gh release download $env:TAG -p downloadmanagersquared-chromium.zip -D cws
-          ./.github/scripts/cws-upload.ps1 -Zip (Resolve-Path cws/downloadmanagersquared-chromium.zip).Path
+        run: ./.github/scripts/cws-live.ps1 -Version $env:TAG.TrimStart('v')
