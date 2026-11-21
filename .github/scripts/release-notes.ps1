@@ -1,47 +1,34 @@
-# Writes the release notes for -Tag: the install sentence, the changes since the
-# previous v* tag (commit subjects are written as user-facing changes), and,
-# once the files are final, the SHA-256 of each attached file.
+# Writes the release notes for -Tag: the install sentence, docs/releases/<tag>.md
+# (written for users before tagging, see CONTRIBUTING), and, once the files are
+# final, the SHA-256 of each attached file in a collapsed block at the end.
+# Throws when the notes file is missing: no release goes out as commit subjects.
 param(
     [Parameter(Mandatory)][string]$Tag,
     [string[]]$Files = @()
 )
 $ErrorActionPreference = 'Stop'
 
+$curated = Join-Path $PSScriptRoot "..\..\docs\releases\$Tag.md"
+if (-not (Test-Path $curated)) {
+    throw "docs/releases/$Tag.md is missing. Write the release notes (format in CONTRIBUTING.md, Releasing), commit them, then tag again with the next version."
+}
+
 $lines = @(
     'Download downloadmanagersquared-windows.zip, extract it and run dms-engine.exe. Setup then adds the extension to your browser.'
     ''
+    (Get-Content -Raw -Encoding utf8 $curated).TrimEnd()
 )
-
-# The previous release: the newest earlier v* tag that has one. A tag whose
-# release never went out (CI failed; release tags can't be moved) is skipped.
-$tags = @(git tag --merged "$Tag^" --list 'v*' --sort=-v:refname)
-if ($LASTEXITCODE) { throw "reading the tags before $Tag failed" }
-$previous = $null
-foreach ($t in $tags) {
-    # "release not found" on stderr is an answer here, not an error.
-    $released = & { $ErrorActionPreference = 'Continue'; gh release view $t --json tagName 2>$null | Out-Null; $LASTEXITCODE -eq 0 }
-    if ($released) { $previous = $t; break }
-}
-$global:LASTEXITCODE = 0
-$range = if ($previous) { "$previous..$Tag" } else { $Tag }
-$subjects = @(git log --no-merges --format=%s $range)
-if ($LASTEXITCODE) { throw "reading the commits for $range failed" }
-
-$lines += if ($previous) { "## Changes since $previous" } else { '## Changes' }
-$lines += ''
-# docs/releases/<tag>.md, when present, replaces the commit subjects with notes written for the release.
-$curated = Join-Path $PSScriptRoot "..\..\docs\releases\$Tag.md"
-$lines += if (Test-Path $curated) { (Get-Content -Raw -Encoding utf8 $curated).TrimEnd() }
-    elseif ($subjects.Count) { $subjects | ForEach-Object { "- $_" } } else { '- No changes.' }
 
 if ($Files.Count) {
     $lines += ''
-    $lines += '## SHA-256'
+    $lines += '<details><summary>SHA-256</summary>'
     $lines += ''
     foreach ($f in $Files) {
         $hash = (Get-FileHash -Algorithm SHA256 $f).Hash.ToLower()
         $lines += "- ``$(Split-Path -Leaf $f)``: ``$hash``"
     }
+    $lines += ''
+    $lines += '</details>'
 }
 
 $lines -join "`n"
