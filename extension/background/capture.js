@@ -273,11 +273,17 @@ const Capture = {
     const referer = pages[pages.length - 1] || pageUrl;
     if (cookie === undefined) cookie = await cookieHeader(url, cookieStoreId);
     try {
-      const { id } = await Engine.call("add", { url, pageUrl, filename, cookie, referer, userAgent: navigator.userAgent, torrent: !!torrent, metalink: !!metalink, cookieStore: cookieStoreId || "" });
-      if (torrent) {
+      const r = await Engine.call("add", { url, pageUrl, filename, cookie, referer, userAgent: navigator.userAgent, torrent: !!torrent, metalink: !!metalink, cookieStore: cookieStoreId || "", ask: true });
+      if (r.skipped) {
+        notify("DMS² didn't add this download", r.skipped);
+      } else if (r.ask) {
+        // Held by the engine until the user answers above the downloads list.
+        notify("DMS² has a question", "A file with this name is already there. Answer in the DMS² downloads list.");
+        Engine.call("openManager", {}).catch(() => {});
+      } else if (torrent) {
         this.torrentAdded();
       } else {
-        this.rememberPages(id, pages); // no notice: the toolbar button shows it running, and the engine speaks when it ends
+        this.rememberPages(r.id, pages); // no notice: the toolbar button shows it running, and the engine speaks when it ends
       }
     } catch (e) {
       // Don't lose the download: give it back to Firefox.

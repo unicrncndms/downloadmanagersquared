@@ -36,6 +36,16 @@ func uniqueName(dir, name string, suffixes ...string) string {
 	return cand
 }
 
+// finalName is the name a finished file gets in dir: name itself over a file
+// already there only when replace is that very path, which the user was
+// warned about and chose to replace; else the first name that is free.
+func finalName(replace, dir, name string) string {
+	if replace != "" && strings.EqualFold(replace, filepath.Join(dir, name)) {
+		return name
+	}
+	return uniqueName(dir, name, "")
+}
+
 // shortErr keeps error messages short and free of the link itself, which is private.
 func shortErr(err error) string {
 	var ue *url.Error

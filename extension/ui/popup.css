@@ -292,6 +292,9 @@ button.icon[aria-expanded] svg { transition: transform var(--t) var(--ease); }
 .form .actions { grid-column: 1 / -1; margin-top: 4px; }
 .version-warn { margin-top: 6px; padding: 5px 8px; border-radius: var(--r); background: var(--accent-soft); font-size: 12px; }
 .version-warn[hidden] { display: none; }
+.asks .ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.asks .ask + .ask { margin-top: 6px; }
+.asks .ask span { flex: 1 1 200px; overflow-wrap: anywhere; }
 #updateNote { display: flex; align-items: center; gap: 6px; }
 #updateNote > span { flex: 1; }
 #addBox .check { display: flex; gap: 6px; align-items: center; font-size: 12px; }

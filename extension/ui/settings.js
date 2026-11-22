@@ -219,6 +219,7 @@ for (const id of ["sVpnHttp", "sVpnTorrent"]) {
   $(id).replaceChildren(...VPN_MODES.map(([v, text]) => el("option", { value: v }, text)));
 }
 $("sSpeedUnit").replaceChildren(el("option", { value: "MBps" }, "MB/s"), el("option", { value: "Mbps" }, "Mbit/s"));
+$("sOnExists").replaceChildren(...[["rename", "Keep both (number the new one)"], ["overwrite", "Replace it, after asking"], ["skip", "Don't add the new one"], ["ask", "Ask me"]].map(([v, text]) => el("option", { value: v }, text)));
 $("sKeep").replaceChildren(...KEEP_CHOICES.map(([v, text]) => el("option", { value: v }, text)));
 
 const FIELDS = {
@@ -231,6 +232,7 @@ const FIELDS = {
   sConns: ["defaultConnections", (s) => s.defaultConnections, Number],
   sEta: ["etaWindowSec", (s) => s.etaWindowSec, Number],
   sNever: ["neverCapture", (s) => (s.neverCapture || []).join(", "), (v) => v.split(/[\s,;]+/).filter(Boolean)],
+  sOnExists: ["onExists", (s) => s.onExists || "rename", String],
   sAlways: ["alwaysCapture", (s) => (s.alwaysCapture || []).join(", "), (v) => v.split(/[\s,;]+/).filter(Boolean)],
   sTorrentPort: ["torrentPort", (s) => s.torrentPort, Number],
   sTheme: ["theme", (s) => s.theme || "", String],

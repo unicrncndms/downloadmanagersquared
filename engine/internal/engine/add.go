@@ -50,6 +50,7 @@ type AddRequest struct {
 	KeyFile   string `json:"keyFile"`  // SFTP: a private key file to log in with, in place of a password in the link
 	KeyPass   string `json:"keyPass"`  // its passphrase: never logged
 	CheckDup  bool   `json:"checkDup"` // asks before adding a link already in the list (the Add box); the list's id comes back instead
+	Answered  string `json:"answered"` // set by the engine when a held question is answered: "rename" or "replace" (the file is already there), "again"
 	// CookieStore is the browser's cookie store (container) the download came from.
 	CookieStore string `json:"cookieStore"`
 }
@@ -146,6 +147,10 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		Cookie: download.Secret(r.Cookie), Login: login, Referer: r.Referer, UserAgent: r.UserAgent, Browser: r.Browser,
 		CookieStore: r.CookieStore, Dir: cmp.Or(r.Dir, e.settings.ruleDir(r.URL, r.PageURL, nameOf(r)), e.settings.SaveDir), Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(), SHA256: sha, MD5: md,
+	}
+	if name := nameOf(r); r.Answered == "replace" && name != "" && plainLink(r) {
+		// The file the user was warned about, by that name: the server's own name for it may differ.
+		st.Filename, st.Replace = name, filepath.Join(st.Dir, name)
 	}
 	if st.Filename == "" {
 		// A link that names a part of a split archive: known as one before it

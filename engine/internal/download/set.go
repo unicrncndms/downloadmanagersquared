@@ -837,13 +837,13 @@ func (s *Set) giveUp(run *setRun, members map[int]partInfo, err error) error {
 // keepPart gives a completed part kept for its Set its own name after all.
 func (d *Download) keepPart(part string) {
 	d.mu.Lock()
-	dir, name := d.st.Dir, d.st.Filename
+	dir, name, replace := d.st.Dir, d.st.Filename, d.st.Replace
 	holdOff := time.Now().Before(d.renameNext)
 	d.mu.Unlock()
 	if holdOff || !exists(part) {
 		return
 	}
-	final := filepath.Join(dir, uniqueName(dir, name, ""))
+	final := filepath.Join(dir, finalName(replace, dir, name))
 	if err := os.Rename(part, final); err != nil {
 		log.Printf("download %s: naming the part: %v", d.ID(), err)
 		d.mu.Lock()

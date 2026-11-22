@@ -90,6 +90,7 @@ type Settings struct {
 	IPv6               bool                      `json:"ipv6"`          // Enable IPv6 (experimental); off: IPv4 only, no AAAA lookups, no IPv6 sockets
 	NeverCapture       []string                  `json:"neverCapture"`  // sites (host names) whose downloads the browser keeps; the extension checks it
 	FolderRules        []FolderRule              `json:"folderRules"`   // where downloads of an extension or a site are saved, unless added with a folder; the first rule that fits wins
+	OnExists           string                    `json:"onExists"`      // a download whose file is already there: OnExistsRename (default), OnExistsOverwrite, OnExistsSkip or OnExistsAsk
 	AlwaysCapture      []string                  `json:"alwaysCapture"` // sites (host names) whose downloads come to DMS² whatever thresholdBytes says; the extension checks it
 	Theme              string                    `json:"theme"`         // "" = follow the system, "light" or "dark"
 	QueueWindow        queue.Week                `json:"queueWindow"`   // per weekday when the queue runs; none set = always
@@ -256,6 +257,11 @@ func (s *Settings) normalize() {
 	s.NeverCapture = cleanHosts(s.NeverCapture)
 	s.AlwaysCapture = cleanHosts(s.AlwaysCapture)
 	s.FolderRules = cleanFolderRules(s.FolderRules)
+	switch s.OnExists {
+	case OnExistsOverwrite, OnExistsSkip, OnExistsAsk:
+	default:
+		s.OnExists = OnExistsRename
+	}
 	for i, sp := range s.QueueWindow {
 		if _, _, ok := sp.Valid(); !ok {
 			s.QueueWindow[i] = queue.Span{}

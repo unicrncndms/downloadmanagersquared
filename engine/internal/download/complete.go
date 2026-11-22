@@ -162,8 +162,11 @@ func (d *Download) complete(ctx context.Context) error {
 		d.mu.Unlock()
 	}
 	d.markFunc()(part)
-	final := filepath.Join(dir, uniqueName(dir, name, ""))
-	if err := os.Rename(part, final); err != nil {
+	d.mu.Lock()
+	replace := d.st.Replace
+	d.mu.Unlock()
+	final := filepath.Join(dir, finalName(replace, dir, name))
+	if err := os.Rename(part, final); err != nil { // replaces a file there when it is the one chosen
 		return fmt.Errorf("could not rename finished file: %w", err)
 	}
 	d.mu.Lock()

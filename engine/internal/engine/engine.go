@@ -66,6 +66,7 @@ type Engine struct {
 	clientSeq int64
 	resolves  map[string]resolveReq // waiting for an extension to pick them up
 	learning  map[string]*ipc.Conn  // download id -> the extension recording its recipe (Record recipe)
+	held      []*heldAdd            // downloads waiting for the user's answer (asks.go), oldest first
 	// The engine's own resolver for Chromium downloads (ownresolver.go): nil
 	// without a Chromium. ownLearning are the ids it records a recipe for.
 	own         ownResolver

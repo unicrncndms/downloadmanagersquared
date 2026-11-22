@@ -248,15 +248,19 @@ var methods = map[string]handler{
 			}
 		}
 		e.mu.Unlock()
-		if p.CheckDup {
-			id, known, err := e.AddUnlessKnown(p)
-			if known {
+		if p.CheckDup && p.File == "" {
+			if id := e.findURL(p.URL); id != "" {
 				return map[string]any{"id": id, "duplicate": true}, nil
 			}
-			return map[string]string{"id": id}, err
 		}
-		id, err := e.Add(p)
-		return map[string]string{"id": id}, err
+		return e.addAsking(p)
+	}),
+	// The user's answer to a question a download was held back for (asks.go).
+	"answerAsk": with(func(e *Engine, p struct {
+		ID     string `json:"id"`
+		Choice string `json:"choice"`
+	}) (any, error) {
+		return e.answerAsk(p.ID, p.Choice)
 	}),
 	"startNow": ack(func(e *Engine, p idParams) error { return e.queue.StartNow(p.ID) }),
 	"pause":    jobCall(func(e *Engine, _ queue.Entry, p idParams) (any, error) { return nil, e.queue.Pause(p.ID) }),
@@ -564,7 +568,7 @@ var changesList = map[string]bool{
 	"retryLink": true, "deleteFile": true, "again": true, "setLimit": true, "move": true,
 	"chooseFiles": true, "setTorrentFiles": true, "pauseAll": true, "resumeAll": true,
 	"setHashes": true, "retryExtraction": true, "setFolder": true, "setDir": true,
-	"setPageUrl": true, "setArchivePassword": true,
+	"setPageUrl": true, "setArchivePassword": true, "answerAsk": true,
 }
 
 // hello registers the caller as the browser extension and hands it anything it

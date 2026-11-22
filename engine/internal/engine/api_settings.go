@@ -76,6 +76,9 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		if p.NeverCapture != nil {
 			s.NeverCapture = *p.NeverCapture
 		}
+		if p.OnExists != nil {
+			s.OnExists = *p.OnExists // normalize puts back one that isn't a choice
+		}
 		if p.FolderRules != nil {
 			s.FolderRules = *p.FolderRules // normalize drops the ones that are no rule
 		}
@@ -196,6 +199,7 @@ type settingsPatch struct {
 	SpeedUnit          *string       `json:"speedUnit"`
 	TorrentPort        *int          `json:"torrentPort"`
 	NeverCapture       *[]string     `json:"neverCapture"`
+	OnExists           *string       `json:"onExists"`
 	FolderRules        *[]FolderRule `json:"folderRules"`
 	AlwaysCapture      *[]string     `json:"alwaysCapture"`
 	Theme              *string       `json:"theme"`

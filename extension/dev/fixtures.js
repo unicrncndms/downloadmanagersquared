@@ -189,6 +189,11 @@ const FIXTURES = {
   "big-mixed": bigFixture(Array.from({ length: 5000 }, (_, i) => bigItem(i, ["queued", "completed", "completed", "paused", "completed"][i % 5]))),
   choosing: { connected: true, state: { ...STATE, downloads: [CHOOSING], active: 0 }, settings: SETTINGS, autostart: true, recipes: RECIPES,
     engineVersion: "0.3.0", files: { t: [{ path: "datasets/a.csv", size: 1e9, selected: true }, { path: "datasets/b.csv", size: 2e9, selected: false }] } },
+  // Downloads held back for a question (state.asks).
+  asks: { connected: true, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", settings: SETTINGS, state: { ...STATE, asks: [
+    { id: "q1", text: "\"Debian-13.iso\" is already in D:\\ISOs.", choices: [{ key: "rename", label: "Keep both" }, { key: "replace", label: "Replace it" }, { key: "cancel", label: "Skip" }] },
+    { id: "q2", text: "\"Debian-13.iso\" is already in the list (Completed).", existing: "a", choices: [{ key: "again", label: "Add anyway" }, { key: "show", label: "Open it" }, { key: "cancel", label: "Cancel" }] },
+  ] } },
   downloads: { connected: true, state: STATE, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
     logs: { a: [
       { time: "2026-11-03T20:00:01Z", text: "Queued" },

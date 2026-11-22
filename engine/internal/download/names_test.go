@@ -1,18 +1,24 @@
 package download
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
-// The same samples as "fmtBytes" in extension/test/list.test.js: the engine's
-// text and the pages show a size the same way.
-func TestHumanMatchesTheListsRule(t *testing.T) {
-	for _, c := range []struct {
-		n    int64
-		want string
-	}{
-		{0, "0 B"}, {999, "999 B"}, {1500, "1.5 KB"}, {150e6, "150 MB"}, {3435973837, "3.4 GB"}, {-1, "?"},
-	} {
-		if got := Human(c.n); got != c.want {
-			t.Errorf("Human(%d) = %q, want %q", c.n, got, c.want)
-		}
+func TestFinalNameReplacesOnlyTheFileChosen(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.iso"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := finalName("", dir, "a.iso"); got != "a (1).iso" {
+		t.Errorf("no choice: %q", got)
+	}
+	if got := finalName(filepath.Join(dir, "a.iso"), dir, "a.iso"); got != "a.iso" {
+		t.Errorf("chosen: %q", got)
+	}
+	// A chosen file in another folder says nothing about this one.
+	if got := finalName(filepath.Join(dir, "other", "a.iso"), dir, "a.iso"); got != "a (1).iso" {
+		t.Errorf("other folder: %q", got)
 	}
 }

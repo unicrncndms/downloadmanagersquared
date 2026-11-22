@@ -71,6 +71,7 @@ type State struct {
 	CookieStore string           `json:"cookieStore,omitempty"` // that browser's cookie store (container) it came from; resolving starts with its cookies
 	Dir         string           `json:"dir"`
 	Filename    string           `json:"filename"`
+	Replace     string           `json:"replace,omitempty"`    // the existing file (full path) the user chose to replace when adding: the finished file takes its name; any other name that is taken is numbered
 	RemoteName  string           `json:"remoteName,omitempty"` // name the server reports; must match across links
 	Size        int64            `json:"size"`
 	RangeOK     bool             `json:"rangeOk"`
@@ -746,7 +747,11 @@ func (d *Download) openFileLocked() error {
 		}
 	}
 	if !d.st.Allocated {
-		d.st.Filename = uniqueName(d.st.Dir, d.st.Filename, "", partSuffix)
+		if d.st.Replace != "" && strings.EqualFold(d.st.Replace, filepath.Join(d.st.Dir, d.st.Filename)) {
+			d.st.Filename = uniqueName(d.st.Dir, d.st.Filename, partSuffix) // the file is to be replaced: only the .part must be free
+		} else {
+			d.st.Filename = uniqueName(d.st.Dir, d.st.Filename, "", partSuffix)
+		}
 	}
 	path := d.partPath()
 

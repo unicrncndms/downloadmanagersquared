@@ -90,6 +90,22 @@ test("with no headers hook, every capture case hands off through downloads.onCre
   assert.equal(b.engine.length, before);
 });
 
+test("a download the engine holds for a question or skips is not given back to the browser", async () => {
+  const b = load();
+  await b.settle();
+  b.connect();
+  const call = b.Engine.call;
+  for (const reply of [{ ask: "q1" }, { skipped: "Not added: x is already in D:\\" }]) {
+    b.Engine.call = (method, params) => (method === "add" ? Promise.resolve(reply) : call(method, params));
+    const before = b.calls.length;
+    await b.Capture.handOff({ url: "https://cdn.test/x.iso", pages: [], cookie: "" });
+    await b.settle();
+    assert.ok(b.calls.slice(before).some((c) => c[0] === "notifications.create"), JSON.stringify(reply));
+    assert.ok(!b.calls.slice(before).some((c) => c[0] === "downloads.download"), "handed back to the browser");
+  }
+  assert.equal(engineCalls(b, "openManager").length, 1); // only the question opens the window
+});
+
 test("a download in a resolver job's container is its link, not a new download", async () => {
   const b = load();
   await b.settle();

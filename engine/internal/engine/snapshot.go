@@ -60,6 +60,7 @@ type StateEvent struct {
 	Update     *UpdateView             `json:"update,omitempty"`   // a newer release exists
 	IPv6Only   []string                `json:"ipv6Only,omitempty"` // adapters left out because they have only IPv6 and IPv6 is off
 	VPNDown    bool                    `json:"vpnDown,omitempty"`  // downloads under VPN only stopped because the VPN dropped (noticeVPN)
+	Asks       []AskView               `json:"asks,omitempty"`     // downloads held back until the user answers (asks.go)
 }
 
 // BadgeEvent is all the toolbar badge needs of the state: how many downloads
@@ -180,7 +181,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 	tviews := e.tunnelViewsLocked(tunnels, speeds)
 	sort.Slice(tviews, func(i, j int) bool { return tviews[i].Name < tviews[j].Name })
 	views = append(views, tviews...)
-	e.snapshot = StateEvent{Downloads: sums, Groups: download.Groups(sums), Interfaces: views, PIA: e.vpn.PIA(), Speed: total, ETA: e.eta.Seconds(), Active: active, Update: e.updateViewLocked(), IPv6Only: e.ipv6Only, VPNDown: e.vpnDown}
+	e.snapshot = StateEvent{Downloads: sums, Groups: download.Groups(sums), Interfaces: views, PIA: e.vpn.PIA(), Speed: total, ETA: e.eta.Seconds(), Active: active, Update: e.updateViewLocked(), IPv6Only: e.ipv6Only, VPNDown: e.vpnDown, Asks: e.asksLocked()}
 }
 
 // markLimitLocked names the limit holding the running download s back: its own,

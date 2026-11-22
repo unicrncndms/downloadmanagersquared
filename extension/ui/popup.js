@@ -369,6 +369,7 @@ $("addBox").addEventListener("submit", async (e) => {
   const many = urls.length + bad.length > 1;
   const failed = bad.map((b) => ({ ...b, error: "not a link" }));
   const dups = [];
+  let asked = 0;
   for (const { line, url } of urls) {
     const add = { url: many ? url : withLogin(url, $("addUser").value.trim(), $("addPass").value), pageUrl: $("addPage").value, vpn: $("addVpn").value, checkDup: !again };
     if (!many && $("addName").value.trim()) add.filename = $("addName").value.trim();
@@ -381,6 +382,8 @@ $("addBox").addEventListener("submit", async (e) => {
     try {
       const r = await call("add", add);
       if (r && r.duplicate) dups.push({ line, url, id: r.id });
+      else if (r && r.skipped) failed.push({ line, url, error: r.skipped }); // stays in the box, with why
+      else if (r && r.ask) asked++; // held until answered above the list (asks.js)
     } catch (err) {
       failed.push({ line, url, error: err.message });
     }
@@ -395,7 +398,7 @@ $("addBox").addEventListener("submit", async (e) => {
     if (dups.length) showDup(dups);
     return;
   }
-  toast(added === 1 ? "Added" : `${added} downloads added`);
+  toast(asked ? `${plural(asked, "download")} waiting for your answer` : added === 1 ? "Added" : `${added} downloads added`);
   $("addUrl").value = "";
   $("addPage").value = $("addName").value = $("addSum").value = $("addKey").value = $("addKeyPass").value = $("addUser").value = $("addPass").value = "";
   addDir.reset();
@@ -755,6 +758,7 @@ function render(m) {
   renderVPN(m);
   syncFolded(m.settings);
   renderUpdate(m);
+  renderAsks(m, (id) => { showDetail(id); const c = cards.get(id); if (c) c.root.scrollIntoView({ block: "nearest" }); });
   // Connected, yet with an error: what is shown is out of date (see TOO_LONG in background/engine.js).
   $("staleWarn").hidden = !(m.connected && m.error);
   $("staleWarn").textContent = (m.connected && m.error) || "";

@@ -130,6 +130,10 @@
             <span class="note">For example .iso to D:\ISOs, or a site such as files.example (with its sub-domains).</span></label>
             <span><span id="ruleList"></span>
             <span class="pathrow"><input type="text" id="ruleMatch" placeholder=".iso or files.example" autocomplete="off" spellcheck="false"><button type="button" id="ruleAdd">Choose folder…</button></span></span></div>
+          <div class="setting"><label for="sOnExists">When the file already exists
+            <span class="info" tabindex="0" data-tip="What happens to a new download whose file name is already in the folder. Replace always asks before it replaces a file."></span>
+            <span class="note">Checked when a download is added, by the name the link or the server gives.</span></label>
+            <select id="sOnExists" data-setting></select></div>
           <div class="setting"><label for="sFolder">Download archives as folders
             <span class="info" tabindex="0" data-tip="Applies to downloads added from now on."></span>
             <span class="note">A .zip, .7z or .rar is extracted as it downloads: you get the folder, not the archive. <a href="#" data-guide="download-as-folder">More</a></span></label>
