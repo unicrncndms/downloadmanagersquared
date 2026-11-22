@@ -89,6 +89,7 @@ type Settings struct {
 	SpeedUnit          string                    `json:"speedUnit"`     // how speeds and limits are shown: SpeedBytes (MB/s) or SpeedBits (Mbit/s); stored limits are bytes per second either way
 	IPv6               bool                      `json:"ipv6"`          // Enable IPv6 (experimental); off: IPv4 only, no AAAA lookups, no IPv6 sockets
 	NeverCapture       []string                  `json:"neverCapture"`  // sites (host names) whose downloads the browser keeps; the extension checks it
+	FolderRules        []FolderRule              `json:"folderRules"`   // where downloads of an extension or a site are saved, unless added with a folder; the first rule that fits wins
 	AlwaysCapture      []string                  `json:"alwaysCapture"` // sites (host names) whose downloads come to DMS² whatever thresholdBytes says; the extension checks it
 	Theme              string                    `json:"theme"`         // "" = follow the system, "light" or "dark"
 	QueueWindow        queue.Week                `json:"queueWindow"`   // per weekday when the queue runs; none set = always
@@ -126,6 +127,7 @@ func (s Settings) clone() Settings {
 	s.FolderDirs = slices.Clone(s.FolderDirs)
 	s.NeverCapture = slices.Clone(s.NeverCapture)
 	s.AlwaysCapture = slices.Clone(s.AlwaysCapture)
+	s.FolderRules = slices.Clone(s.FolderRules)
 	s.FoldedSections = slices.Clone(s.FoldedSections)
 	return s
 }
@@ -253,6 +255,7 @@ func (s *Settings) normalize() {
 	}
 	s.NeverCapture = cleanHosts(s.NeverCapture)
 	s.AlwaysCapture = cleanHosts(s.AlwaysCapture)
+	s.FolderRules = cleanFolderRules(s.FolderRules)
 	for i, sp := range s.QueueWindow {
 		if _, _, ok := sp.Valid(); !ok {
 			s.QueueWindow[i] = queue.Span{}

@@ -39,6 +39,7 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
     call: (method, params) => record({ call: method, params })
       .then(() => method === "setSettings" ? applySettings(params) : method === "setInterface" ? applyInterface(params) : method === "torrentFiles" ? (window.fixture().files || {})[params.id] || []
         : method === "sftpHostKeys" || method === "sftpLogins" ? (window.fixture()[method] || [])
+        : method === "browseFolder" ? { dir: "D:\\Picked" }
         : method === "checkLines" ? window.fixture().lines || []
         : method === "diagnostics" ? `DMS² 0.3.0 diagnostics (harness)
 Download ${params.id}` : method === "downloadLog" ? (window.fixture().logs || {})[params.id] || [] : undefined),

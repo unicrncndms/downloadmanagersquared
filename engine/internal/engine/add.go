@@ -144,7 +144,7 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		VPN: paths.ParseMode(r.VPN, e.settings.VPNHTTP),
 		ID:  newID(), URL: r.URL, PageURL: strings.TrimSpace(r.PageURL),
 		Cookie: download.Secret(r.Cookie), Login: login, Referer: r.Referer, UserAgent: r.UserAgent, Browser: r.Browser,
-		CookieStore: r.CookieStore, Dir: cmp.Or(r.Dir, e.settings.SaveDir), Filename: download.SanitizeFilename(r.Filename),
+		CookieStore: r.CookieStore, Dir: cmp.Or(r.Dir, e.settings.ruleDir(r.URL, r.PageURL, nameOf(r)), e.settings.SaveDir), Filename: download.SanitizeFilename(r.Filename),
 		Size: -1, Status: download.StatusQueued, Added: time.Now(), SHA256: sha, MD5: md,
 	}
 	if st.Filename == "" {
@@ -171,6 +171,18 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 	e.queue.Add(download.New(e, st))
 	log.Printf("added %s", st.ID) // no URL: links are private
 	return st.ID, nil
+}
+
+// nameOf is the file name a link most likely gets: the one sent, else the
+// last part of the link's path ("" when it has none).
+func nameOf(r AddRequest) string {
+	if n := download.SanitizeFilename(r.Filename); n != "" {
+		return n
+	}
+	if u, err := url.Parse(r.URL); err == nil {
+		return download.SanitizeFilename(path.Base(u.Path))
+	}
+	return ""
 }
 
 // addLocalFile adds a .torrent or Metalink file the user picked or dropped,

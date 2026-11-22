@@ -316,8 +316,34 @@ function renderAccents(s) {
     el("label", { title: "Custom colour" }, picker, custom ? "Custom" : "Other…"));
 }
 
+// Folder rules: each one listed with Remove; a new one is a match and a folder
+// from Windows' picker (the engine drops what is no rule and cleans the match).
+let folderRules = [];
+function renderRules(s) {
+  folderRules = s.folderRules || [];
+  $("ruleList").replaceChildren(...folderRules.map((r, i) => el("span", { class: "pathrow" },
+    el("span", { class: "num", style: "flex:1;min-width:0;overflow-wrap:anywhere" }, `${r.match} → ${r.dir}`),
+    el("button", { type: "button", class: "small", onclick: () => act("setSettings", { folderRules: folderRules.filter((_, j) => j !== i) }, "Saved") }, "Remove"))));
+}
+$("ruleAdd").addEventListener("click", async () => {
+  const match = $("ruleMatch").value.trim();
+  if (!match) return toast("Type a file extension (.iso) or a site first", true);
+  try {
+    const { dir } = await call("browseFolder", { start: "" });
+    if (!dir) return;
+    const before = folderRules.length;
+    const saved = await call("setSettings", { folderRules: [...folderRules, { match, dir }] });
+    if (!saved || (saved.folderRules || []).length <= before) return toast("Not a file extension (.iso) or a site", true);
+    $("ruleMatch").value = "";
+    toast("Saved");
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
 // fillSettings shows what the engine has, except in the field being edited.
 function fillSettings(s) {
+  renderRules(s);
   dirError(""); // the field below shows what is saved
   for (const [id, [, show]] of Object.entries(FIELDS)) {
     if (document.activeElement !== $(id)) $(id).value = show(s);

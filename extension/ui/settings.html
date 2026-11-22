@@ -125,6 +125,11 @@
             <span class="info" tabindex="0" data-tip="Applies to downloads added from now on."></span></label>
             <span><span class="pathrow"><input type="text" id="sDir" data-setting aria-describedby="sDirErr"><button type="button" id="sBrowse">Browse…</button></span>
             <span class="field-error" id="sDirErr" role="alert" hidden></span></span></div>
+          <div class="setting"><label for="ruleMatch">Folder for a kind of file or a site
+            <span class="info" tabindex="0" data-tip="A download goes to the first rule that fits, unless it was added with a folder of its own. Applies to downloads added from now on."></span>
+            <span class="note">For example .iso to D:\ISOs, or a site such as files.example (with its sub-domains).</span></label>
+            <span><span id="ruleList"></span>
+            <span class="pathrow"><input type="text" id="ruleMatch" placeholder=".iso or files.example" autocomplete="off" spellcheck="false"><button type="button" id="ruleAdd">Choose folder…</button></span></span></div>
           <div class="setting"><label for="sFolder">Download archives as folders
             <span class="info" tabindex="0" data-tip="Applies to downloads added from now on."></span>
             <span class="note">A .zip, .7z or .rar is extracted as it downloads: you get the folder, not the archive. <a href="#" data-guide="download-as-folder">More</a></span></label>

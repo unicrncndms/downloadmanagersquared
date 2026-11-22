@@ -19,6 +19,7 @@ const SETTINGS = {
   interfaces: { eth: { name: "Ethernet" }, wifi: { name: "Wi-Fi" }, corp: { name: "Corporate VPN" } },
   mainInterface: "", thresholdBytes: 100e6, saveDir: "C:\\Users\\you\\Downloads", maxParallel: 1,
   etaWindowSec: 60, defaultConnections: 4, seedRatio: 1, torrentPort: 41234, vpnHttp: "off", vpnTorrent: "off", piaRegion: "", vpnProvider: "",
+  folderRules: [{ match: ".iso", dir: "D:\\ISOs" }, { match: "files.example", dir: "E:\\Files" }], alwaysCapture: ["files.example"],
 };
 
 // A file's map as the engine sends it: runs of [on disk, being fetched by, missing].
