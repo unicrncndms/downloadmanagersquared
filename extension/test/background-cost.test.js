@@ -55,6 +55,30 @@ test("the magnet content script waits for the page to be idle but stays in every
   assert.equal(m.all_frames, true);
 });
 
+test("the magnet content script takes only the user's own clicks, never a page's a.click()", () => {
+  const vm = require("node:vm");
+  const src = require("node:fs").readFileSync(require.resolve("../content/magnet.js"), "utf8");
+  let onClick, sent = [];
+  class Element {}
+  const ctx = {
+    Element,
+    document: { addEventListener: (type, f) => { if (type === "click") onClick = f; } },
+    browser: { runtime: { sendMessage: (m) => { sent.push(m); return Promise.resolve(); } } },
+  };
+  vm.runInNewContext(src, ctx);
+  const link = Object.assign(new Element(), { href: "magnet:?xt=urn:btih:abc", closest: () => link });
+  const click = (isTrusted) => {
+    const e = { isTrusted, button: 0, defaultPrevented: false, target: link, preventDefault() { this.prevented = true; }, stopPropagation() {} };
+    onClick(e);
+    return e;
+  };
+  const fake = click(false);
+  assert.equal(sent.length, 0, "a page's own click reached DMS²");
+  assert.ok(!fake.prevented, "the page's click is left to Firefox");
+  click(true);
+  assert.deepEqual(sent, [{ type: "magnet", url: "magnet:?xt=urn:btih:abc" }]);
+});
+
 test("a resolve copies its cookies in parallel", async () => {
   const login = (n) => ({ name: "c" + n, value: "v", domain: "site.test", hostOnly: true, path: "/", secure: true, httpOnly: false, session: true });
   const b = load({ cookieJar: { "firefox-default": Array.from({ length: 40 }, (_, i) => login(i)) } });
