@@ -834,7 +834,7 @@ func checkSpace(dir string, need int64) error {
 		return nil
 	}
 	if free < need+diskReserve {
-		return &pauseError{msg: fmt.Sprintf("Paused: not enough space on %s (needs %s, %s free)", driveName(dir), human(need), human(free))}
+		return &pauseError{msg: fmt.Sprintf("Paused: not enough space on %s (needs %s, plus %s kept free; %s free)", driveName(dir), human(need), human(diskReserve), human(free))}
 	}
 	return nil
 }
