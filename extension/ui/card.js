@@ -29,7 +29,7 @@ function doneActions(id) {
 function makeLine(id) {
   const name = el("span", { class: "name" });
   const size = el("b", { class: "num" });
-  const more = iconButton("chevron", "Details", () => showDetail(id));
+  const more = iconButton("details", "Details", () => showDetail(id));
   const show = iconButton("folder", "Show in folder", () => act("showInFolder", { id }));
   const drop = iconButton("close", "Remove from list (files stay)", () => removeWithUndo([id]));
   // The ⋯ menu is built when first used: thousands of lines stay cheap.
@@ -335,7 +335,7 @@ function makeCard(id) {
   const fin = doneActions(id);
   const menu = el("div", { class: "menu", hidden: true }, menuNow, menuNext, menuLast, fin.open, menuFolder, menuCopy, fin.again, menuRecord, menuAsFile, menuRemove, fin.del);
   const more = menuButton(() => menu);
-  const openDetails = iconButton("chevron", "Details", () => (detail.id === id ? closeDetail() : showDetail(id)));
+  const openDetails = iconButton("details", "Details", () => (detail.id === id ? closeDetail() : showDetail(id)));
   const tools = el("span", { class: "end" }, openDetails, moveUp, moveDown, pause, resume, showDone, dropDone, el("span", { class: "more" }, more, menu));
   const sub = el("span", { class: "muted num" });
   const via = el("span", { class: "via muted num" }); // which interfaces, how many connections each
@@ -834,7 +834,7 @@ function makeGroupCard(gid) {
 let lightEnd = null;
 function makeLight(id, promote) {
   if (!lightEnd) {
-    lightEnd = el("span", { class: "end" }, ...["chevron:Details", "up:Move up", "down:Move down", "pause:Pause", "play:Resume", "more:More"]
+    lightEnd = el("span", { class: "end" }, ...["details:Details", "up:Move up", "down:Move down", "pause:Pause", "play:Resume", "more:More"]
       .map((s) => iconButton(...s.split(":"))));
     for (const b of lightEnd.children) b.tabIndex = -1;
   }
