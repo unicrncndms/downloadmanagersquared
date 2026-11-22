@@ -31,23 +31,11 @@ func renameBlock(folderOn, inSet bool) string {
 	return ""
 }
 
-// CleanFileName is a name the user typed made fit for a Windows file: the
-// characters Windows refuses become "_", then SanitizeFilename's rules. "" when nothing is left.
-func CleanFileName(name string) string {
-	name = strings.Map(func(r rune) rune {
-		if strings.ContainsRune(`<>:"|?*`, r) {
-			return '_'
-		}
-		return r
-	}, strings.TrimSpace(name))
-	name = SanitizeFilename(name)
-	switch strings.ToUpper(strings.TrimSuffix(name, filepath.Ext(name))) {
-	case "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
-		return "_" + name
-	}
-	return name
-}
+// CleanFileName is a name the user typed made fit for a Windows file, by
+// SanitizeFilename's rules (characters Windows refuses, reserved names). The
+// spaces around it go first, so a pasted name's tab isn't kept as "_". "" when
+// nothing is left.
+func CleanFileName(name string) string { return SanitizeFilename(strings.TrimSpace(name)) }
 
 // Rename gives the download's file a new name: the .part is renamed and the
 // finished file will take the name. A name another file or .part in the

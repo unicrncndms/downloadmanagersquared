@@ -12,6 +12,7 @@ func TestCleanFileName(t *testing.T) {
 		`  my:file?.zip `: "my_file_.zip",
 		`a/b\c.txt`:       "a_b_c.txt",
 		"CON.txt":         "_CON.txt",
+		"con.tar.gz":      "_con.tar.gz",
 		"report. ":        "report",
 		"  ":              "",
 	} {
