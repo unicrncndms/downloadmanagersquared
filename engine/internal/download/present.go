@@ -19,6 +19,7 @@ type Actions struct {
 	DeleteFile   bool `json:"deleteFile"` // the finished file goes to the Recycle Bin
 	Again        bool `json:"again"`      // a new download from the same link
 	Cancel       bool `json:"cancel"`     // a torrent waiting for its files to be chosen: Remove under another name
+	Rename       bool `json:"rename"`     // the unfinished file's name can be changed (Summary.RenameNote says why not)
 	// Record the landing page's recipe now, while someone is there. Set by the
 	// engine, which knows the browsers' recipes, not by Present.
 	RecordRecipe bool `json:"recordRecipe"`
@@ -99,6 +100,12 @@ func Present(s Summary) Summary {
 	s.Actions.Open = known && (s.Status == StatusCompleted || s.Status == StatusSeeding)
 	s.Actions.DeleteFile = known && s.Status == StatusCompleted
 	s.Actions.Again = !torrent && s.Status == StatusCompleted && s.URL != ""
+	if !torrent && s.Status != StatusCompleted {
+		_, _, inSet := Splittable(s.Filename)
+		if s.RenameNote = renameBlock(s.Folder != nil && s.Folder.On, inSet); s.RenameNote == "" {
+			s.Actions.Rename = true
+		}
+	}
 
 	switch {
 	case choosing && len(s.Files) == 0:

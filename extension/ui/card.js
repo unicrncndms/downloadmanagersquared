@@ -410,9 +410,27 @@ function makeCard(id) {
   const dirMove = el("div", { hidden: true },
     el("div", { class: "row" }, el("span", { class: "muted" }, "Save folder"), dirPath, dirChange.button),
     dirChange.box);
+  // File name of an unfinished HTTP download: Rename… changes it, the partial file following. The
+  // engine says when it can't (a download as folder, a split archive's part): then only its note shows.
+  const nameText = el("span", { class: "path grow" });
+  const nameInput = el("input", { type: "text", class: "grow", spellcheck: "false", autocomplete: "off", "aria-label": "File name" });
+  const nameSave = () => { nameBox.hidden = false; act("renameFile", { id, name: nameInput.value }, "Renamed").then(() => { nameBox.hidden = true; }); };
+  nameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); nameSave(); } else if (e.key === "Escape") { e.stopPropagation(); nameBox.hidden = true; nameBtn.focus(); }
+  });
+  const nameBtn = el("button", { type: "button", class: "small", onclick: () => {
+    nameBox.hidden = !nameBox.hidden;
+    if (nameBox.hidden) return;
+    nameInput.value = (d && d.filename) || "";
+    nameInput.focus();
+    nameInput.setSelectionRange(0, nameInput.value.lastIndexOf(".") > 0 ? nameInput.value.lastIndexOf(".") : nameInput.value.length);
+  } }, "Rename…");
+  const nameBox = el("div", { class: "row", hidden: true }, nameInput, el("button", { type: "button", class: "small primary", onclick: nameSave }, "Save"));
+  const nameNote = el("div", { class: "muted", hidden: true });
+  const nameRow = el("div", { hidden: true }, el("div", { class: "row" }, el("span", { class: "muted" }, "File name"), nameText, nameBtn), nameBox, nameNote);
   const tfiles = torrentFilesPart(id, () => d);
   const summaryLine = el("p", { class: "muted num", style: "margin: 0 0 var(--s2)" });
-  const fileSection = section("File", summaryLine, dirMove, fileFacts);
+  const fileSection = section("File", summaryLine, nameRow, dirMove, fileFacts);
   // Mirrors: each source of the file, who uses it, and why one was dropped.
   const mirrorList = el("div", { class: "conns mirrors num" });
   const mirrorSection = section("Mirrors", mirrorList);
@@ -667,7 +685,14 @@ function makeCard(id) {
     const nameOfIfc = (ifc) => ifaceName(ifc, latest.state, latest.settings);
     summaryLine.textContent = done ? [finishedSummary(d, nameOfIfc), finishedVerdict(d, latest.state && latest.state.interfaces, nameOfIfc)].filter(Boolean).join(" · ") : "";
     summaryLine.hidden = !summaryLine.textContent;
-    fileSection.hidden = !fileFacts.children.length && summaryLine.hidden && dirMove.hidden;
+    const canRename = !!(d.actions || {}).rename;
+    nameRow.hidden = !canRename && !d.renameNote;
+    nameBtn.hidden = !canRename;
+    if (!canRename) nameBox.hidden = true;
+    nameText.textContent = nameText.title = d.filename || "";
+    nameNote.textContent = d.renameNote || "";
+    nameNote.hidden = !d.renameNote;
+    fileSection.hidden = !fileFacts.children.length && summaryLine.hidden && dirMove.hidden && nameRow.hidden;
 
     const mirrors = mirrorRows(d, (ifc) => ifaceName(ifc, latest.state, latest.settings));
     mirrorSection.hidden = !mirrors.length;

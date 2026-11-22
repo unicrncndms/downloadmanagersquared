@@ -822,6 +822,23 @@ func (e *Engine) SetDir(id, dir string) error {
 	return d.SetDir(dir)
 }
 
+// RenameFile changes the file name of an unfinished HTTP download (see
+// download.Rename). A running download is paused for it and resumed after, so
+// the partial file isn't open.
+func (e *Engine) RenameFile(id, name string) error {
+	d, err := e.get(id)
+	if err != nil {
+		return err
+	}
+	if d.Running() {
+		if err := e.queue.Pause(id); err != nil {
+			return err
+		}
+		defer e.queue.Resume(id)
+	}
+	return d.Rename(name)
+}
+
 // pickFrom shows the folder picker over the Downloads window, starting at
 // start; ok is false when it was cancelled.
 func (e *Engine) pickFrom(start, title string) (dir string, ok bool) {

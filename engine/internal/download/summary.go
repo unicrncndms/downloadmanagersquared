@@ -108,9 +108,10 @@ type Summary struct {
 	Tone        string  `json:"tone,omitempty"`
 	Note        string  `json:"note,omitempty"` // after the progress numbers, or alone when there are none
 	Actions     Actions `json:"actions"`
-	PartialFile bool    `json:"partialFile"`     // Remove asks whether to delete it
-	Section     string  `json:"section"`         // which section of the list it is in: needs, active, seeding, queued, paused, done
-	Plain       bool    `json:"plain,omitempty"` // the label says only what the status does, so a UI may leave it off
+	RenameNote  string  `json:"renameNote,omitempty"` // why an unfinished HTTP download's file name can't be changed
+	PartialFile bool    `json:"partialFile"`          // Remove asks whether to delete it
+	Section     string  `json:"section"`              // which section of the list it is in: needs, active, seeding, queued, paused, done
+	Plain       bool    `json:"plain,omitempty"`      // the label says only what the status does, so a UI may leave it off
 }
 
 // FileSummary is one file of a torrent.

@@ -29,14 +29,14 @@ const chunkMap = (...runs) => runs.map(([on, by, off, who = "#"]) => who.repeat(
 const DOWNLOADS = [
   { map: chunkMap([9, 0, 6, "a"], [7, 0, 8, "a"], [8, 1, 7, "b"], [5, 0, 10, "a"], [6, 1, 9, "b"], [2, 0, 13, "a"]), mapBy: ["eth", "wifi"], kind: "http", id: "a", url: "https://files.example.com/dl/abc", pageUrl: "https://example.com/file/abc", filename: "ubuntu-24.04.iso",
     dir: "C:\\Users\\you\\Downloads", size: 6.1e9, done: 2.4e9, status: "running", speed: 11.5e6, eta: 322, probed: true, rangeOk: true,
-    label: "Downloading", actions: { pause: true, showInFolder: true, remove: true }, partialFile: true,
+    label: "Downloading", actions: { pause: true, showInFolder: true, remove: true, rename: true }, partialFile: true,
     links: { eth: { status: "ready", conns: 4, speed: 7.1e6, resolved: false, label: "Downloading", tone: "ok" },
       wifi: { status: "ready", conns: 2, speed: 4.4e6, resolved: true, label: "Server busy · 2 of 4 connections", tone: "warn" } },
     added: "2026-11-03T20:00:00Z" },
   // One interface, a site with no recipe yet: the Record recipe button.
   { map: chunkMap([4, "", 0, "#"], [7, "0000", 81, "a"]), mapBy: ["eth"], kind: "http", id: "r", url: "https://dl.filehost.example/k/77", pageUrl: "https://filehost.example/f/77", filename: "dataset-2026.tar",
     dir: "C:\\Users\\you\\Downloads", size: 1.8e10, done: 2.1e9, status: "running", slowWhy: "Slower than usual: the server or this connection is slow", speed: 5.3e6, eta: 3000, probed: true, rangeOk: true,
-    label: "Downloading", actions: { pause: true, showInFolder: true, remove: true, recordRecipe: true }, partialFile: true,
+    label: "Downloading", actions: { pause: true, showInFolder: true, remove: true, recordRecipe: true, rename: true }, partialFile: true,
     links: { eth: { status: "ready", conns: 4, speed: 5.3e6, resolved: false, label: "Downloading", tone: "ok" } },
     added: "2026-11-03T20:30:00Z" },
   { kind: "http", id: "b", url: "https://cdn.example.org/big.zip", filename: "big.zip", dir: "C:\\Users\\you\\Downloads",

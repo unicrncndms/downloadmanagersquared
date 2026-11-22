@@ -401,9 +401,15 @@ var methods = map[string]handler{
 	}),
 	"pickFolder":     ack(func(e *Engine, p idParams) error { return e.PickFolder(p.ID) }),
 	"pickSaveFolder": bare(func(e *Engine) (any, error) { e.PickSaveFolder(); return nil, nil }),
-	"setDir":         ack(func(e *Engine, p dirParams) error { return e.SetDir(p.ID, p.Dir) }),
-	"pickDir":        ack(func(e *Engine, p idParams) error { return e.PickDir(p.ID) }),
-	"addFromFiles":   ack(func(e *Engine, p addFilesParams) error { e.AddFromFiles(p.VPN, p.Dir); return nil }),
+	"renameFile": ack(func(e *Engine, p struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}) error {
+		return e.RenameFile(p.ID, p.Name)
+	}),
+	"setDir":       ack(func(e *Engine, p dirParams) error { return e.SetDir(p.ID, p.Dir) }),
+	"pickDir":      ack(func(e *Engine, p idParams) error { return e.PickDir(p.ID) }),
+	"addFromFiles": ack(func(e *Engine, p addFilesParams) error { e.AddFromFiles(p.VPN, p.Dir); return nil }),
 	"browseFolder": with(func(e *Engine, p startParams) (any, error) {
 		return map[string]string{"dir": e.BrowseFolder(p.Start)}, nil
 	}),
@@ -567,7 +573,7 @@ var changesList = map[string]bool{
 	"add": true, "startNow": true, "pause": true, "resume": true, "remove": true, "removeMany": true,
 	"retryLink": true, "deleteFile": true, "again": true, "setLimit": true, "move": true,
 	"chooseFiles": true, "setTorrentFiles": true, "pauseAll": true, "resumeAll": true,
-	"setHashes": true, "retryExtraction": true, "setFolder": true, "setDir": true,
+	"setHashes": true, "retryExtraction": true, "setFolder": true, "setDir": true, "renameFile": true,
 	"setPageUrl": true, "setArchivePassword": true, "answerAsk": true,
 }
 
