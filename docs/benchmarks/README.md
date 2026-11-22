@@ -7,7 +7,7 @@ Results are in [results.csv](results.csv), one row per download. [bench.ps1](ben
 **Speed.** The same file from the same server, one after the other:
 
 - each connection alone, one request (`curl --interface`);
-- aria2 with 16 requests over the Windows default connection, if `aria2c` is installed;
+- a conventional download manager over the Windows default connection: aria2 with 16 requests, IDM and JDownloader, each one that is installed, with its own settings;
 - DMS² over every connection it is set to use. Its time runs from adding the link to the finished file, so it includes finding out what the server allows.
 
 Speed is the file's size over that time. The default file is the Arch Linux ISO (1.3 GB) from kernel.org's mirror, a distribution server built for large downloads; the speed-test servers we tried first (OVH, Hetzner) cut off our lines; a server slower than your lines together measures the server, not DMS².
@@ -16,17 +16,41 @@ Speed is the file's size over that time. The default file is the Arch Linux ISO 
 
 ## Measuring speed
 
-Nothing else should use the lines. Run each test three times; every run adds its rows.
+Nothing else should use the lines. Run each test three times; every run adds its rows. `-Unattended -Personal` runs everything with nobody watching.
 
 ```
 cd docs\benchmarks
 powershell -ExecutionPolicy Bypass -File bench.ps1
 ```
 
-It measures each connection alone, then asks you to add the link in DMS² and press Enter when it has finished. Delete the downloaded file afterwards.
+It measures each connection alone, then the other download managers, then asks you to add the link in DMS² and press Enter when it has finished (`-Unattended` does that step too). Delete DMS²'s downloaded file afterwards; the other tools' files are deleted by the script.
 
-- A tool you timed by hand (IDM, Free Download Manager, JDownloader): `-Tool IDM -Seconds 84`
+- A tool you timed by hand: `-Tool "Free Download Manager" -Seconds 84`
+- Skip the other download managers: `-NoOthers`
 - What the lines are: `-Note "250 Mbit cable + 5G hotspot"`
+
+## The other download managers
+
+Each runs without anyone watching, into its own folder under `%TEMP%`, and its time runs from handing it the link to the whole file on disk. A tool that is not installed is skipped with a line saying why.
+
+- **aria2**: `aria2c` on the PATH. `-x16 -s16 -k1M`.
+- **IDM**: found through its registry entry, or `-IDM <path to IDMan.exe>`. Started as `IDMan.exe /d <link> /p <folder> /f <name> /n`; IDM moves the file into the folder only once it is whole. Turn off IDM's "download complete" window (Options, Downloads) so runs don't wait on it. IDM must not be catching the browser's downloads while DMS² runs.
+- **JDownloader**: needs JDownloader running with *Folder Watch* on (Settings, Extensions, Folder Watch). The script drops a `.crawljob` into JDownloader's `folderwatch` folder (found in its install folder, or `-JDownloader <folder>`); JDownloader adds and starts it, writes `name.part` and renames it when done. Its *max. chunks per download* setting is what it uses: set it to 8 or more, as JDownloader's default of 1 measures a single request. The run stays in JDownloader's list; remove it there.
+
+The rows keep each tool's name. What the README and any summary show is *a conventional download manager*: the average of the tools' own averages (ADR 0012), so a tool run more often doesn't count more:
+
+```
+powershell -ExecutionPolicy Bypass -File bench.ps1 -Summary
+```
+
+It prints, per set of lines (`note`) and link, each line alone, a conventional download manager (and how many tools went into it), and DMS².
+
+## Your own comparison
+
+`-Personal` adds tools that also use every connection, for your own comparison only. Their rows go to `results-personal.csv`, which git ignores, and `-Summary` shows them by name from that file.
+
+- **aria2 over every line**: `--multiple-interface` with each line's IPv4 address, needs two lines up.
+- A tool with no command line, such as Plexo: time it by hand with `-Tool Plexo -Seconds 84 -Personal`.
 
 ## Without anyone watching
 

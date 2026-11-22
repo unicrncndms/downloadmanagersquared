@@ -16,3 +16,6 @@ engine/internal/ui/files/*
 .windsurf/
 .github/copilot-instructions.md
 AGENTS.md
+
+# a personal benchmark comparison (bench.ps1 -Personal), not shared
+docs/benchmarks/results-personal.csv
