@@ -1,6 +1,7 @@
 package tray
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -77,23 +78,30 @@ func TestTheMenuShowsOnlyTheInterfacesCarryingDownloads(t *testing.T) {
 	}
 }
 
-func TestSpeedInBytesOrBits(t *testing.T) {
-	for _, c := range []struct {
-		bps  float64
-		unit string
-		want string
-	}{
-		{0, engine.SpeedBytes, "0 B/s"},
-		{1.5e6, engine.SpeedBytes, "1.5 MB/s"},
-		{0, engine.SpeedBits, "0 bit/s"},
-		{1.5e6, engine.SpeedBits, "12.0 Mbit/s"},
-		{125e6, engine.SpeedBits, "1.0 Gbit/s"},
-		{150e6, engine.SpeedBytes, "150 MB/s"}, // no decimal from 100, like fmtSpeed
-		{12, engine.SpeedBytes, "12 B/s"},
-		{1e6, "", "1.0 MB/s"}, // an unknown unit is bytes
-	} {
-		if got := Speed(c.bps, c.unit); got != c.want {
-			t.Errorf("Speed(%v, %q) = %q, want %q", c.bps, c.unit, got, c.want)
+// testdata/format.json is shared with extension/test/list.test.js (fmtSpeed,
+// fmtETA), so the tray and the pages can't show a speed or a time differently.
+func TestSpeedAndDurationAsThePagesShowThem(t *testing.T) {
+	b, err := os.ReadFile("testdata/format.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases struct {
+		Speed [][3]any
+		ETA   [][2]any
+	}
+	if err := json.Unmarshal(b, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases.Speed {
+		bps, unit, want := c[0].(float64), c[1].(string), c[2].(string)
+		if got := Speed(bps, unit); got != want {
+			t.Errorf("Speed(%v, %q) = %q, want %q", bps, unit, got, want)
+		}
+	}
+	for _, c := range cases.ETA {
+		sec, want := c[0].(float64), c[1].(string)
+		if got := Duration(sec); got != want {
+			t.Errorf("Duration(%v) = %q, want %q", sec, got, want)
 		}
 	}
 }

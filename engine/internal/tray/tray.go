@@ -275,10 +275,12 @@ func Speed(bps float64, unit string) string {
 	units := []string{"B/s", "KB/s", "MB/s", "GB/s"}
 	if unit == engine.SpeedBits {
 		units = []string{"bit/s", "kbit/s", "Mbit/s", "Gbit/s"}
-		bps *= 8
 	}
-	if bps < 1 {
+	if !(bps >= 1) { // under a byte a second is nothing, in bits too
 		return "0 " + units[0]
+	}
+	if unit == engine.SpeedBits {
+		bps *= 8
 	}
 	return download.Scaled(bps, units)
 }
@@ -290,6 +292,8 @@ func Duration(sec float64) string {
 	d := time.Duration(sec) * time.Second
 	h, m := int(d.Hours()), int(d.Minutes())%60
 	switch {
+	case h >= 48:
+		return fmt.Sprintf("%dd %dh", h/24, h%24)
 	case h > 0:
 		return fmt.Sprintf("%dh %02dm", h, m)
 	case m > 0:

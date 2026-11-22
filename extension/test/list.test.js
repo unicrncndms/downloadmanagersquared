@@ -395,6 +395,13 @@ test("badgeOf: a failure the list has shown no longer keeps the !, a new one doe
   assert.equal(badgeOf([failed], seen).text, "!");
 });
 
+test("the same speeds and times as the engine's tray.Speed and tray.Duration", () => {
+  const { fmtSpeed, fmtETA } = require("../lib/list.js");
+  const { speed, eta } = require("../../engine/internal/tray/testdata/format.json");
+  for (const [bps, unit, want] of speed) assert.equal(fmtSpeed(bps, unit), want, `fmtSpeed(${bps}, ${unit})`);
+  for (const [sec, want] of eta) assert.equal(fmtETA(sec), want, `fmtETA(${sec})`);
+});
+
 test("fmtSpeed, in bytes or bits, and the limit conversions", () => {
   const { fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit } = require("../lib/list.js");
   assert.equal(fmtSpeed(1.5e6, "MBps"), "1.5 MB/s");
