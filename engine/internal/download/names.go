@@ -16,6 +16,9 @@ func exists(p string) bool {
 
 func numbered(name string, i int) string {
 	ext := filepath.Ext(name)
+	if base := strings.TrimSuffix(name, ext); strings.EqualFold(filepath.Ext(base), ".tar") {
+		ext = name[len(base)-len(".tar"):] // x.tar.gz: x (1).tar.gz, not x.tar (1).gz
+	}
 	return fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(name, ext), i, ext)
 }
 

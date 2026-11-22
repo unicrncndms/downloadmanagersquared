@@ -22,3 +22,17 @@ func TestFinalNameReplacesOnlyTheFileChosen(t *testing.T) {
 		t.Errorf("other folder: %q", got)
 	}
 }
+
+func TestNumberedKeepsTarExtensionsTogether(t *testing.T) {
+	for in, want := range map[string]string{
+		"linux.tar.xz": "linux (1).tar.xz",
+		"a.TAR.GZ":     "a (1).TAR.GZ",
+		"movie.mkv":    "movie (1).mkv",
+		"noext":        "noext (1)",
+		".tar.gz":      " (1).tar.gz",
+	} {
+		if got := numbered(in, 1); got != want {
+			t.Errorf("numbered(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
