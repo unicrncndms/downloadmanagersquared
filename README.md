@@ -86,7 +86,7 @@ Then download a file of 100 MB or more as usual, or use *Download with DMS²* on
 
 ## Limitations
 
-- Windows only. Browsers: Firefox-based ones, Chrome and Edge.
+- Windows only. Browsers: Firefox-based ones, Chrome and Edge. What DMS² does and doesn't aim to do is in [docs/adr/0012-project-scope.md](docs/adr/0012-project-scope.md).
 - IPv6 is experimental and off by default. Inside VPN tunnels it's IPv4 only, torrents get no port forwarding over IPv6, and on an IPv6-only connection a link with a bare IPv4 address fails (there is no NAT64 prefix discovery).
 - Replayed clicks are synthetic: sites that only accept real clicks ask every time.
 - Links a site creates through a form POST can't be fetched again.

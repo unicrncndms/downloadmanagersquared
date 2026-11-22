@@ -41,6 +41,7 @@ It is free and open source (MIT), with no account, no server and no telemetry. T
 - Core features that the UI must show: parallel connections per interface, backoff ("Server busy"), mirrors, checksums, a drag-and-arrow queue, *Download as folder* for `.zip`, `.7z`, `.rar` and split archives, the password for archives, IPv4 and experimental IPv6, VPN tunnels per connection, port forwarding, torrents.
 - Shared vocabulary lives in `CONTEXT.md`: use its terms (interface, connection, chunk, link, probe, mirror, backoff, landing page, failed link) in UI wording. Avoid its listed alternatives in user-facing text.
 - A download cannot go faster than the server sends, and Wi-Fi and Ethernet to one router share one line. The UI must not promise speed the product cannot deliver.
+- Scope, and what is out of it: `docs/adr/0012-project-scope.md`.
 - UI language: English only for now. Layout should still tolerate longer strings if translation is added later.
 
 ## Brand Commitments
