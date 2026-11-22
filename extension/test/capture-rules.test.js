@@ -117,6 +117,15 @@ test("fileLikeUrl: a page address that names a file", () => {
   assert.equal(fileLikeUrl("nonsense"), false);
 });
 
+test("a site on the always-take-over list ignores the size limit, with its sub-domains", () => {
+  const s = { thresholdBytes: 100e6, alwaysCapture: ["files.example"] };
+  assert.equal(r.thresholdFor(s, "https://cdn.files.example/a.zip"), 0);
+  assert.equal(r.thresholdFor(s, "https://other/a.zip", "https://files.example/page"), 0);
+  assert.equal(r.thresholdFor(s, "https://other/a.zip"), 100e6);
+  assert.equal(r.thresholdFor({ thresholdBytes: 5 }, "https://files.example/a.zip"), 5);
+  assert.equal(r.captureResponse({ "content-type": "application/zip", "content-length": "1000" }, "https://files.example/a.zip", 200, 0), "download");
+});
+
 test("a site on the never-capture list stays with the browser, with its sub-domains", () => {
   const sites = ["bank.example"];
   assert.ok(r.neverCaptured(sites, "https://bank.example/a.pdf"));

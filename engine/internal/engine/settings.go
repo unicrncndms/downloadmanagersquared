@@ -78,19 +78,20 @@ type Settings struct {
 	DownloadLimit      int64                     `json:"downloadLimit,omitempty"` // the same
 	ETAWindowSec       int                       `json:"etaWindowSec"`
 	DefaultConnections int                       `json:"defaultConnections"`
-	SeedRatio          float64                   `json:"seedRatio"`    // seed a torrent until uploaded/size reaches this; 0 = don't seed
-	TorrentPort        int                       `json:"torrentPort"`  // where peers connect in, on every interface; picked once
-	VPNHTTP            paths.Mode                `json:"vpnHttp"`      // VPN mode an HTTP download gets unless chosen when added
-	VPNTorrent         paths.Mode                `json:"vpnTorrent"`   // the same for a torrent
-	PIARegion          string                    `json:"piaRegion"`    // "" = the lowest latency
-	VPNProvider        string                    `json:"vpnProvider"`  // the settings page's provider choice: "", "conf" or "pia"
-	NotifyDone         bool                      `json:"notifyDone"`   // a balloon when a download finishes or fails
-	KeepAwake          bool                      `json:"keepAwake"`    // Windows stays awake while a download runs
-	SpeedUnit          string                    `json:"speedUnit"`    // how speeds and limits are shown: SpeedBytes (MB/s) or SpeedBits (Mbit/s); stored limits are bytes per second either way
-	IPv6               bool                      `json:"ipv6"`         // Enable IPv6 (experimental); off: IPv4 only, no AAAA lookups, no IPv6 sockets
-	NeverCapture       []string                  `json:"neverCapture"` // sites (host names) whose downloads the browser keeps; the extension checks it
-	Theme              string                    `json:"theme"`        // "" = follow the system, "light" or "dark"
-	QueueWindow        queue.Week                `json:"queueWindow"`  // per weekday when the queue runs; none set = always
+	SeedRatio          float64                   `json:"seedRatio"`     // seed a torrent until uploaded/size reaches this; 0 = don't seed
+	TorrentPort        int                       `json:"torrentPort"`   // where peers connect in, on every interface; picked once
+	VPNHTTP            paths.Mode                `json:"vpnHttp"`       // VPN mode an HTTP download gets unless chosen when added
+	VPNTorrent         paths.Mode                `json:"vpnTorrent"`    // the same for a torrent
+	PIARegion          string                    `json:"piaRegion"`     // "" = the lowest latency
+	VPNProvider        string                    `json:"vpnProvider"`   // the settings page's provider choice: "", "conf" or "pia"
+	NotifyDone         bool                      `json:"notifyDone"`    // a balloon when a download finishes or fails
+	KeepAwake          bool                      `json:"keepAwake"`     // Windows stays awake while a download runs
+	SpeedUnit          string                    `json:"speedUnit"`     // how speeds and limits are shown: SpeedBytes (MB/s) or SpeedBits (Mbit/s); stored limits are bytes per second either way
+	IPv6               bool                      `json:"ipv6"`          // Enable IPv6 (experimental); off: IPv4 only, no AAAA lookups, no IPv6 sockets
+	NeverCapture       []string                  `json:"neverCapture"`  // sites (host names) whose downloads the browser keeps; the extension checks it
+	AlwaysCapture      []string                  `json:"alwaysCapture"` // sites (host names) whose downloads come to DMS² whatever thresholdBytes says; the extension checks it
+	Theme              string                    `json:"theme"`         // "" = follow the system, "light" or "dark"
+	QueueWindow        queue.Week                `json:"queueWindow"`   // per weekday when the queue runs; none set = always
 
 	// Download as folder
 	FolderDefault  bool     `json:"folderDefault"`        // new .zip, .7z and .rar downloads are one
@@ -124,6 +125,7 @@ func (s Settings) clone() Settings {
 	s.Interfaces = ifs
 	s.FolderDirs = slices.Clone(s.FolderDirs)
 	s.NeverCapture = slices.Clone(s.NeverCapture)
+	s.AlwaysCapture = slices.Clone(s.AlwaysCapture)
 	s.FoldedSections = slices.Clone(s.FoldedSections)
 	return s
 }
@@ -250,6 +252,7 @@ func (s *Settings) normalize() {
 		s.Theme = ""
 	}
 	s.NeverCapture = cleanHosts(s.NeverCapture)
+	s.AlwaysCapture = cleanHosts(s.AlwaysCapture)
 	for i, sp := range s.QueueWindow {
 		if _, _, ok := sp.Valid(); !ok {
 			s.QueueWindow[i] = queue.Span{}

@@ -76,6 +76,9 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		if p.NeverCapture != nil {
 			s.NeverCapture = *p.NeverCapture
 		}
+		if p.AlwaysCapture != nil {
+			s.AlwaysCapture = *p.AlwaysCapture
+		}
 		if p.Theme != nil {
 			s.Theme = *p.Theme
 		}
@@ -190,6 +193,7 @@ type settingsPatch struct {
 	SpeedUnit          *string     `json:"speedUnit"`
 	TorrentPort        *int        `json:"torrentPort"`
 	NeverCapture       *[]string   `json:"neverCapture"`
+	AlwaysCapture      *[]string   `json:"alwaysCapture"`
 	Theme              *string     `json:"theme"`
 	QueueWindow        *queue.Week `json:"queueWindow"`
 	Accent             *string     `json:"accent"`

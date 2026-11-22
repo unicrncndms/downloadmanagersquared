@@ -179,7 +179,14 @@ function neverCaptured(sites, ...urls) {
   });
 }
 
-if (typeof module !== "undefined") Object.assign(module.exports, { neverCaptured });
+// thresholdFor: the size from which a download is DMS²'s: 0 on a site the user
+// always has taken over (settings.alwaysCapture, matched like neverCapture),
+// else settings.thresholdBytes. The caller checks neverCapture first.
+function thresholdFor(settings, ...urls) {
+  return neverCaptured(settings.alwaysCapture, ...urls) ? 0 : settings.thresholdBytes;
+}
+
+if (typeof module !== "undefined") Object.assign(module.exports, { neverCaptured, thresholdFor });
 
 // Whether "Download this page's file" can mean something on this page: its
 // address looks like a file's, or its host is one with a learned recipe.

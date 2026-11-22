@@ -231,6 +231,7 @@ const FIELDS = {
   sConns: ["defaultConnections", (s) => s.defaultConnections, Number],
   sEta: ["etaWindowSec", (s) => s.etaWindowSec, Number],
   sNever: ["neverCapture", (s) => (s.neverCapture || []).join(", "), (v) => v.split(/[\s,;]+/).filter(Boolean)],
+  sAlways: ["alwaysCapture", (s) => (s.alwaysCapture || []).join(", "), (v) => v.split(/[\s,;]+/).filter(Boolean)],
   sTorrentPort: ["torrentPort", (s) => s.torrentPort, Number],
   sTheme: ["theme", (s) => s.theme || "", String],
   sRatio: ["seedRatio", (s) => s.seedRatio, dec],

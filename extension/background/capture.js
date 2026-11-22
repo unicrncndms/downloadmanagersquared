@@ -116,7 +116,7 @@ const Capture = {
     const type = (d.responseHeaders || []).find((x) => x.name.toLowerCase() === "content-type");
     if (type && isPage({ "content-type": type.value })) return {};
     const h = headerMap(d.responseHeaders);
-    const kind = captureResponse(h, d.url, d.statusCode, Engine.settings.thresholdBytes);
+    const kind = captureResponse(h, d.url, d.statusCode, thresholdFor(Engine.settings, d.url, d.originUrl, d.documentUrl));
     if (!kind || neverCaptured(Engine.settings.neverCapture, d.url, d.originUrl, d.documentUrl)) return {};
     if (this.bypass.delete(d.url)) return {};
     this.handOff({
@@ -143,7 +143,7 @@ const Capture = {
     if (!Engine.connected || !Engine.settings || item.byExtensionId === browser.runtime.id) return;
     const url = item.finalUrl || item.url;
     if (this.bypass.delete(item.url) || this.bypass.delete(url)) return;
-    const kind = captureDownload(item, Engine.settings.thresholdBytes);
+    const kind = captureDownload(item, thresholdFor(Engine.settings, url, item.referrer));
     if (!kind || neverCaptured(Engine.settings.neverCapture, url, item.referrer)) return;
     if (!isHttp(url)) return kind === "download" ? undefined : this.takeSaved(item, kind === "torrent");
     await discardDownload(item.id);

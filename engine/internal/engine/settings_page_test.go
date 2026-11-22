@@ -32,6 +32,15 @@ func TestCheckSaveDir(t *testing.T) {
 	}
 }
 
+func TestAlwaysCaptureCleaned(t *testing.T) {
+	s := defaultSettings()
+	s.AlwaysCapture = []string{" HTTPS://www.Files.Example/x ", "files.example", ""}
+	s.normalize()
+	if len(s.AlwaysCapture) != 1 || s.AlwaysCapture[0] != "files.example" {
+		t.Fatalf("got %v", s.AlwaysCapture)
+	}
+}
+
 func TestRestoredKeepsConnections(t *testing.T) {
 	s := defaultSettings()
 	s.Interfaces["a"] = &IfaceSettings{Connections: 8}
