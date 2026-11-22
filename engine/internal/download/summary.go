@@ -30,6 +30,11 @@ type LinkSummary struct {
 	busy     bool // holding back because the server pushed back
 }
 
+// Throttled is for the engine: the link holds back because the server pushed back.
+func (l LinkSummary) Throttled() bool {
+	return l.busy
+}
+
 // Summary is what the UI shows for a download.
 type Summary struct {
 	Kind     string  `json:"kind,omitempty"` // KindTorrent; empty for HTTP

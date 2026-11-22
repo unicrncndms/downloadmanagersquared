@@ -148,7 +148,8 @@ function ifaceRow(i, tun, settings) {
   return el("div", { class: "conn-row" + (i.present ? "" : " absent") }, tile,
     el("div", { class: "who" },
       el("b", {}, i.name, tun ? badge("VPN", TUNNEL_CLASS[tun.tunnelState]) : null),
-      el("div", { class: "sub" }, i.present ? el("span", { class: "mono" }, i.ip) : "not connected", " · ", i.windowsName && i.windowsName !== i.name ? i.windowsName + " · " : "", i.description),
+      el("div", { class: "sub" }, i.present ? el("span", { class: "mono" }, i.ip) : "not connected", " · ", i.windowsName && i.windowsName !== i.name ? i.windowsName + " · " : "", i.description,
+        i.avgSpeed ? el("span", { title: "Averaged over the time it fetched a download alone and nothing held it back" }, " · usually ", fmtSpeed(i.avgSpeed)) : null),
       badges.length ? el("div", { class: "badges" }, badges) : null,
       i.vpn && !i.enabled && i.present ? el("div", { class: "sub" }, "Off because this is a VPN running in Windows. Turn it on to download through it as an extra connection.") : null,
       colours),
@@ -171,7 +172,7 @@ function renderIfaces(state, settings) {
   const all = state.interfaces || [];
   const ifaces = all.filter((i) => !i.tunnel);
   const tunnels = new Map(all.filter((i) => i.tunnel).map((t) => [t.of, t]));
-  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.color, i.windowsName, i.isMain, i.isDefault, i.name, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort, i.ip6, i.families]), settings.mainInterface, speedUnitLabel()]);
+  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.color, i.windowsName, i.isMain, i.isDefault, i.name, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort, i.ip6, i.families, i.avgSpeed ? fmtSpeed(i.avgSpeed) : ""]), settings.mainInterface, speedUnitLabel()]);
   const warnings = routerWarnings(all);
   const hints = ipv6Hints(state);
   $("ipv6Hint").hidden = !hints.length;

@@ -29,6 +29,7 @@ type IfaceView struct {
 	Connections int      `json:"connections"`
 	SocksPort   int      `json:"socksPort"`
 	Speed       float64  `json:"speed"`
+	AvgSpeed    float64  `json:"avgSpeed,omitempty"` // bytes per second it manages alone, averaged over time nothing held it back; 0 until known
 
 	Upload        bool   `json:"upload"`
 	UploadLimit   int64  `json:"uploadLimit"`   // bytes per second, 0 = none
@@ -151,6 +152,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		}
 	}
 	sameRouter := netif.SameRouter(used)
+	e.learnSpeedsLocked(sums, speeds, sameRouter, dt)
 	views := []IfaceView{}
 	for id, ent := range e.ifaces {
 		var same []string
@@ -164,7 +166,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 			Families: ent.info.Families(),
 			Present:  ent.present, Color: e.colorLocked(id), Enabled: e.enabledLocked(ent), VPN: ent.info.VPN,
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
-			SocksPort: ent.socks.Port(), Speed: speeds[id],
+			SocksPort: ent.socks.Port(), Speed: speeds[id], AvgSpeed: e.bases.avg(id),
 			Upload: e.uploadLocked(id), UploadLimit: up, DownloadLimit: down,
 			Incoming: incomingText(ent.incoming), HasTunnel: hasTunnel[id], SameRouter: same,
 		})

@@ -5,7 +5,7 @@
 
 const IFACES = [
   { id: "eth", color: 0, name: "Ethernet", description: "Intel I225-V", ip: "192.168.1.20", present: true, enabled: true, isDefault: true, isMain: true,
-    connections: 4, socksPort: 50001, speed: 7.1e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "reachable" },
+    connections: 4, socksPort: 50001, speed: 7.1e6, avgSpeed: 8.4e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "reachable" },
   { id: "wifi", color: 1, name: "Wi-Fi", description: "Intel AX211", ip: "192.168.2.33", present: true, enabled: true,
     connections: 4, socksPort: 50002, speed: 4.4e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" },
   { id: "corp", color: 2, name: "Corporate VPN", description: "WireGuard Tunnel", ip: "10.8.0.2", present: true, enabled: false, vpn: true,
