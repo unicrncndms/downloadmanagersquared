@@ -70,21 +70,7 @@ function rowIds(row) {
 const picked = () => ((latest.state && latest.state.downloads) || []).filter((d) => selected.has(d.id));
 
 function select(ids, e) {
-  if (e.shiftKey && anchor) {
-    const flat = shown.flat();
-    const [a, b] = [flat.indexOf(anchor), flat.indexOf(ids[0])].sort((x, y) => x - y);
-    if (a >= 0) for (const id of flat.slice(a, b + 1)) selected.add(id);
-    for (const id of ids) selected.add(id);
-  } else if (e.ctrlKey || e.metaKey) {
-    const on = ids.every((id) => selected.has(id));
-    for (const id of ids) on ? selected.delete(id) : selected.add(id);
-    anchor = ids[0];
-  } else {
-    const only = selected.size === ids.length && ids.every((id) => selected.has(id));
-    selected.clear();
-    if (!only) for (const id of ids) selected.add(id);
-    anchor = ids[0];
-  }
+  anchor = clickRows(selected, anchor, ids, e, shown);
   removing = false;
   // Details follows the row selected, once it is open.
   if (detail.id && selected.size === 1 && !selected.has(detail.id)) return showDetail([...selected][0]);
@@ -162,36 +148,20 @@ function removeSelected() {
 // Undo; the engine is asked to remove them (files kept) when the note ends.
 // Closing the popup first counts as keeping the removal. Undo only brings the
 // rows back: until then the engine still has them.
-const hiding = new Set();
-let undoing = null; // { ids, timer, node }
+const removal = undoRemoval((ids) => removeMany(ids, false));
+const hiding = removal.hiding;
 function removeWithUndo(ids) {
-  if (undoing) flushUndo();
   const text = ids.length === 1 ? "Removed from the list (file kept)" : `${plural(ids.length, "download")} removed from the list (files kept)`;
-  for (const id of ids) hiding.add(id);
   const node = el("div", { class: "toast show undo", role: "status" }, text,
     el("button", { class: "small", onclick: () => {
-      for (const id of ids) hiding.delete(id);
-      endUndo();
+      removal.undo();
       if (latest.state) renderDownloads(latest.state);
     } }, "Undo"));
+  removal.start(ids, 8000, () => node.remove());
   document.body.append(node);
-  undoing = { ids, node, timer: setTimeout(flushUndo, 8000) };
   if (latest.state) renderDownloads(latest.state);
 }
-function endUndo() {
-  if (!undoing) return;
-  clearTimeout(undoing.timer);
-  undoing.node.remove();
-  undoing = null;
-}
-function flushUndo() {
-  if (!undoing) return;
-  const { ids } = undoing;
-  endUndo();
-  removeMany(ids, false)
-    .finally(() => { for (const id of ids) hiding.delete(id); });
-}
-addEventListener("pagehide", flushUndo);
+addEventListener("pagehide", () => removal.flush());
 // The selected queued downloads start next, in the order they are listed.
 function startNext() {
   for (const d of picked().filter((x) => x.status === "queued").reverse()) moveDownload(d.id, "first");
