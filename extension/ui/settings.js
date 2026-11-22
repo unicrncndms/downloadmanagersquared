@@ -524,11 +524,25 @@ function found(section, q) {
   return any;
 }
 
+// The section shown and how far down, kept for the next opening of the page
+// without a #section; the scroll comes back once the engine's first update has
+// filled the page.
+let pageAt = "connections";
+const leftAt = recall("settings") || {};
+let scrollBack = location.hash ? 0 : leftAt.y || 0;
+if (!location.hash && leftAt.at) history.replaceState(null, "", "#" + leftAt.at);
+history.scrollRestoration = "manual"; // the browser's own would undo ours
+const savePlace = () => { if (!$("find").value && !scrollBack) remember("settings", { at: pageAt, y: Math.round(scrollY) }); };
+let placeFrame = 0;
+addEventListener("pagehide", savePlace);
+addEventListener("scroll", () => { if (!placeFrame) placeFrame = requestAnimationFrame(() => { placeFrame = 0; savePlace(); }); }, { passive: true });
+
 function showPage() {
   const q = $("find").value.trim().toLowerCase();
   let at = location.hash.slice(1);
   if (at === "pia") at = "vpn"; // the VPN's sign-in, from a torrent's card
   if (!sections.some((s) => s.id === at)) at = "connections";
+  if (!q) pageAt = at;
   let shown = 0;
   for (const s of sections) {
     const on = q ? found(s, q) : s.id === at;
@@ -543,6 +557,7 @@ function showPage() {
   $("notFound").hidden = shown > 0;
   $("notFound").textContent = `No setting matches “${$("find").value.trim()}”.`;
   scrollTo(0, 0);
+  savePlace();
 }
 addEventListener("hashchange", showPage);
 $("find").addEventListener("input", showPage);
@@ -644,4 +659,5 @@ connectUI((m) => {
     if (!piaSignedIn && document.activeElement !== $("vpnProvider")) showProvider(m.settings.vpnProvider || "");
   }
   if (document.activeElement !== $("sAuto")) $("sAuto").checked = m.autostart;
+  if (scrollBack) { const y = scrollBack; setTimeout(() => { scrollTo(0, y); scrollBack = 0; }); }
 });

@@ -142,6 +142,15 @@ function ifaceName(id, state, settings) {
 
 const $ = (id) => document.getElementById(id);
 
+// Where a page was left, kept in this browser (or this window) only, for its next
+// opening. Storage can be missing or refuse (a private window): then nothing is kept.
+function recall(key) {
+  try { return JSON.parse(localStorage.getItem("dms." + key)); } catch { return null; }
+}
+function remember(key, value) {
+  try { localStorage.setItem("dms." + key, JSON.stringify(value)); } catch { /* nothing kept */ }
+}
+
 // Short message at the bottom of the page (needs an element with id "toast").
 // It stays long enough to read: longer for longer text, up to 15 seconds.
 // An error (toast(text, true)) looks different and stays until closed.

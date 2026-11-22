@@ -15,6 +15,7 @@ const detail = { id: "", body: $("detailBody"), title: $("detailTitle") };
 // quiet: from inside a draw, which goes on to show it itself.
 function showDetail(id, quiet) {
   detail.id = id;
+  saveSpot();
   $("detail").hidden = false;
   document.body.classList.add("detailing");
   if (quiet) return;
@@ -26,12 +27,32 @@ function showDetail(id, quiet) {
 function closeDetail() {
   const row = $("list").querySelector(".card.detailed");
   detail.id = "";
+  saveSpot();
   $("detail").hidden = true;
   document.body.classList.remove("detailing");
   if (latest.state) renderDownloads(latest.state);
   if (row) row.focus();
 }
 $("detailClose").append(icon("close"));
+
+// The list's scroll and the open Details come back when the page opens again.
+// Restored once, at the first list drawn; a download gone since opens nothing.
+let spotRestored = false;
+function saveSpot() {
+  if (spotRestored) remember("list", { top: $("list").scrollTop, detail: detail.id });
+}
+let spotFrame = 0;
+$("list").addEventListener("scroll", () => {
+  if (!spotFrame) spotFrame = requestAnimationFrame(() => { spotFrame = 0; saveSpot(); });
+}, { passive: true });
+addEventListener("pagehide", saveSpot);
+function restoreSpot(state) {
+  if (spotRestored) return;
+  const r = recall("list") || {};
+  if (r.detail && (state.downloads || []).some((d) => d.id === r.detail)) showDetail(r.detail);
+  $("list").scrollTop = r.top || 0;
+  spotRestored = true;
+}
 $("detailClose").onclick = closeDetail;
 
 // The downloads selected, by id: a click selects a row, Ctrl and Shift add to
@@ -777,4 +798,5 @@ function render(m) {
   $("resumeAll").disabled = !bulk.resumeAll;
   renderStrip(s);
   renderDownloads(s);
+  restoreSpot(s);
 }
