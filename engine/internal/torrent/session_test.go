@@ -944,14 +944,70 @@ func TestFilesCanBeTickedAfterTheChoice(t *testing.T) {
 	}
 }
 
-func TestDiskPathsRefusePathsOutsideTheSaveFolder(t *testing.T) {
+func TestDiskPathsStayInTheSaveFolderAndFitWindows(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "save")
-	info := &metainfo.Info{Name: "pack", Files: []metainfo.FileInfo{
+	info := &metainfo.Info{Name: "Show: Part 1", Files: []metainfo.FileInfo{
 		{Path: []string{"ok.bin"}},
 		{Path: []string{"..", "..", "x.docx"}},
+		{Path: []string{"a?b", "CON.txt"}},
 	}}
 	got := diskPaths(dir, info)
-	if got[0] != filepath.Join(dir, "pack", "ok.bin") || got[1] != "" {
-		t.Fatalf("diskPaths = %q", got)
+	want := []string{
+		filepath.Join(dir, "Show_ Part 1", "ok.bin"),
+		filepath.Join(dir, "Show_ Part 1", "_", "_", "x.docx"),
+		filepath.Join(dir, "Show_ Part 1", "a_b", "_CON.txt"),
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("diskPaths = %q, want %q", got, want)
+	}
+	if one := (&metainfo.Info{Name: "film: cut.mkv", Length: 1}); diskPaths(dir, one)[0] != filepath.Join(dir, "film_ cut.mkv") {
+		t.Fatalf("one file: %q", diskPaths(dir, one))
+	}
+}
+
+// A name the peers chose that Windows can't take as it is lands where Path
+// says: here one longer than SanitizeFilename keeps (200 bytes).
+func TestATorrentsFileIsWhereItsPathSays(t *testing.T) {
+	src := t.TempDir()
+	name := strings.Repeat("x", 220) + ".bin"
+	if err := os.WriteFile(filepath.Join(src, name), make([]byte, 300<<10), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sw := newSwarmOf(t, 1, src, name, false)
+	var peers atomic.Int32
+	s, err := NewSession(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetIfaces([]Iface{sw.iface("eth", &peers)})
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	waitFor(t, "the torrent to complete", 30*time.Second, func() bool { return tor.Status() == download.StatusCompleted })
+	if fi, err := os.Stat(tor.Path()); err != nil || fi.Size() != 300<<10 {
+		t.Fatalf("Path %q: %v", tor.Path(), err)
+	}
+}
+
+func TestFilesKeptUnderTheRawNameMoveToTheCleanedOne(t *testing.T) {
+	dir := t.TempDir()
+	raw := strings.Repeat("y", 220) + ".bin"
+	if err := os.WriteFile(filepath.Join(dir, raw+".part"), []byte("half"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info := &metainfo.Info{Name: raw, Length: 8}
+	keepRawName(dir, info)
+	if b, err := os.ReadFile(filepath.Join(dir, diskName(info)+".part")); err != nil || string(b) != "half" {
+		t.Fatalf("the .part didn't move to %q: %v", diskName(info), err)
+	}
+	// A name leaving dir is never moved.
+	outside := filepath.Join(dir, "sub")
+	os.Mkdir(outside, 0o755)
+	keepRawName(outside, &metainfo.Info{Name: "..", Length: 1})
+	if _, err := os.Stat(filepath.Join(dir, "sub")); err != nil {
+		t.Fatal("keepRawName moved the save folder's parent")
 	}
 }

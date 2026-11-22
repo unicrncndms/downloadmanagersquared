@@ -1,9 +1,11 @@
 package torrent
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -238,9 +240,13 @@ func (t *Torrent) join(ctx context.Context) (*atorrent.Torrent, error) {
 	}
 	t.held = true
 	spec.InfoBytes = t.st.Info
+	if info, err := t.infoLocked(); err == nil {
+		keepRawName(t.st.Dir, info)
+	}
 	t.stor = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: t.st.Dir, PieceCompletion: t.s.completion(),
-		Logger: slog.New(slog.DiscardHandler),
+		FilePathMaker: func(o storage.FilePathMakerOpts) string { return filepath.Join(diskParts(o.Info, o.File)...) },
+		Logger:        slog.New(slog.DiscardHandler),
 	})
 	spec.Storage = t.stor
 	at, _, err := cl.AddTorrentSpec(spec)
@@ -276,7 +282,7 @@ func (t *Torrent) run(ctx context.Context) {
 	}
 	if !t.update(at, func() {
 		// Peers choose the name; never let it be a path.
-		t.st.Name, t.st.Size = download.SanitizeFilename(at.Name()), at.Length()
+		t.st.Name, t.st.Size = diskName(at.Info()), at.Length()
 		t.st.Info = at.Metainfo().InfoBytes
 		t.st.Status = StatusChecking
 		if t.st.Choose {
@@ -637,8 +643,10 @@ func (t *Torrent) hasData(at *atorrent.Torrent) bool {
 	t.mu.Lock()
 	dir := t.st.Dir
 	t.mu.Unlock()
-	for _, f := range at.Files() {
-		p := filepath.Join(dir, filepath.FromSlash(f.Path()))
+	for _, p := range diskPaths(dir, at.Info()) {
+		if p == "" {
+			continue
+		}
 		for _, q := range []string{p, p + ".part"} {
 			if _, err := os.Stat(q); err == nil {
 				return true
@@ -731,17 +739,58 @@ func (t *Torrent) Discard(deleteFiles bool) {
 func diskPaths(dir string, info *metainfo.Info) []string {
 	var out []string
 	for _, f := range info.UpvertedFiles() {
-		parts := []string{dir}
-		if n := info.BestName(); n != metainfo.NoName {
-			parts = append(parts, n)
-		}
-		p := filepath.Join(append(parts, f.BestPath()...)...)
+		p := filepath.Join(append([]string{dir}, diskParts(info, &f)...)...)
 		if rel, err := filepath.Rel(dir, p); err != nil || !filepath.IsLocal(rel) {
 			p = ""
 		}
 		out = append(out, p)
 	}
 	return out
+}
+
+// diskParts is file f's path under the save folder, the storage's
+// FilePathMaker: the torrent's name, then f's path, each part cleaned for
+// Windows as Path's name is. Peers choose them, and a ':' left in would write
+// the data to an alternate data stream of another file.
+func diskParts(info *metainfo.Info, f *metainfo.FileInfo) []string {
+	var parts []string
+	if n := diskName(info); n != "" {
+		parts = append(parts, n)
+	}
+	for _, p := range f.BestPath() {
+		parts = append(parts, cmp.Or(download.SanitizeFilename(p), "_"))
+	}
+	return parts
+}
+
+// diskName is the torrent's name on disk (st.Name): "" when it has none.
+func diskName(info *metainfo.Info) string {
+	if n := info.BestName(); n != metainfo.NoName {
+		return cmp.Or(download.SanitizeFilename(n), "_")
+	}
+	return ""
+}
+
+// keepRawName moves a torrent's file or folder stored under the peers' raw
+// name (up to 0.13.0 the storage used it as it was) to its cleaned name, so
+// its data isn't fetched again. Only a name that stays in dir is moved, and
+// never over something already there.
+func keepRawName(dir string, info *metainfo.Info) {
+	raw, name := info.BestName(), diskName(info)
+	if raw == name || name == "" || !filepath.IsLocal(raw) || strings.ContainsAny(raw, `/\:`) {
+		return
+	}
+	for _, sfx := range []string{"", ".part"} {
+		from, to := filepath.Join(dir, raw+sfx), filepath.Join(dir, name+sfx)
+		if _, err := os.Lstat(to); err == nil {
+			continue
+		}
+		if _, err := os.Lstat(from); err == nil {
+			if err := os.Rename(from, to); err != nil {
+				log.Printf("torrent %s: keeping its files under %q: %v", name, raw, err)
+			}
+		}
+	}
 }
 
 // Yields is true: torrents queue behind HTTP downloads and give their slot to one.
