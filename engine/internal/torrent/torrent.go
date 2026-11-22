@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -20,6 +19,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 
+	"downloadmanagersquared/engine/internal/archive"
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/rate"
@@ -240,9 +240,6 @@ func (t *Torrent) join(ctx context.Context) (*atorrent.Torrent, error) {
 	}
 	t.held = true
 	spec.InfoBytes = t.st.Info
-	if info, err := t.infoLocked(); err == nil {
-		keepRawName(t.st.Dir, info)
-	}
 	t.stor = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: t.st.Dir, PieceCompletion: t.s.completion(),
 		FilePathMaker: func(o storage.FilePathMakerOpts) string { return filepath.Join(diskParts(o.Info, o.File)...) },
@@ -285,14 +282,18 @@ func (t *Torrent) run(ctx context.Context) {
 		t.st.Name, t.st.Size = diskName(at.Info()), at.Length()
 		t.st.Info = at.Metainfo().InfoBytes
 		t.st.Status = StatusChecking
-		if t.st.Choose {
+		if p := samePath(diskPaths(t.st.Dir, at.Info())); p != "" {
+			t.dropLocked()
+			t.st.Status = download.StatusFailed
+			t.st.Error = "Two of its files would have the same name on Windows (" + filepath.Base(p) + ")"
+		} else if t.st.Choose {
 			t.dropLocked()
 			t.st.Status = StatusChoosing
 		}
 	}) {
 		return
 	}
-	if t.State().Status == StatusChoosing {
+	if s := t.State().Status; s == StatusChoosing || s == download.StatusFailed {
 		return
 	}
 	// The file storage trusts a full-size file and distrusts a .part one without
@@ -750,15 +751,18 @@ func diskPaths(dir string, info *metainfo.Info) []string {
 
 // diskParts is file f's path under the save folder, the storage's
 // FilePathMaker: the torrent's name, then f's path, each part cleaned for
-// Windows as Path's name is. Peers choose them, and a ':' left in would write
-// the data to an alternate data stream of another file.
+// Windows. Peers choose them, and a ':' left in would write the data to an
+// alternate data stream of another file. Nothing is cut short (as
+// SanitizeFilename cuts at 200 bytes): two long names that differ only at
+// their end would become one file. So a name that worked before is unchanged,
+// and a torrent fetched under it keeps its data.
 func diskParts(info *metainfo.Info, f *metainfo.FileInfo) []string {
 	var parts []string
 	if n := diskName(info); n != "" {
 		parts = append(parts, n)
 	}
 	for _, p := range f.BestPath() {
-		parts = append(parts, cmp.Or(download.SanitizeFilename(p), "_"))
+		parts = append(parts, diskPart(p))
 	}
 	return parts
 }
@@ -766,31 +770,27 @@ func diskParts(info *metainfo.Info, f *metainfo.FileInfo) []string {
 // diskName is the torrent's name on disk (st.Name): "" when it has none.
 func diskName(info *metainfo.Info) string {
 	if n := info.BestName(); n != metainfo.NoName {
-		return cmp.Or(download.SanitizeFilename(n), "_")
+		return diskPart(n)
 	}
 	return ""
 }
 
-// keepRawName moves a torrent's file or folder stored under the peers' raw
-// name (up to 0.13.0 the storage used it as it was) to its cleaned name, so
-// its data isn't fetched again. Only a name that stays in dir is moved, and
-// never over something already there.
-func keepRawName(dir string, info *metainfo.Info) {
-	raw, name := info.BestName(), diskName(info)
-	if raw == name || name == "" || !filepath.IsLocal(raw) || strings.ContainsAny(raw, `/\:`) {
-		return
-	}
-	for _, sfx := range []string{"", ".part"} {
-		from, to := filepath.Join(dir, raw+sfx), filepath.Join(dir, name+sfx)
-		if _, err := os.Lstat(to); err == nil {
-			continue
+func diskPart(p string) string {
+	return cmp.Or(archive.CleanPart(strings.NewReplacer(`/`, "_", `\`, "_").Replace(p)), "_")
+}
+
+// samePath is a path two of the torrent's files would share once cleaned
+// ("a?b" and "a*b" are both "a_b"; Windows ignores case), "" when none do.
+func samePath(paths []string) string {
+	seen := map[string]bool{}
+	for _, p := range paths {
+		k := strings.ToLower(p)
+		if p != "" && seen[k] {
+			return p
 		}
-		if _, err := os.Lstat(from); err == nil {
-			if err := os.Rename(from, to); err != nil {
-				log.Printf("torrent %s: keeping its files under %q: %v", name, raw, err)
-			}
-		}
+		seen[k] = true
 	}
+	return ""
 }
 
 // Yields is true: torrents queue behind HTTP downloads and give their slot to one.

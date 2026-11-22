@@ -966,15 +966,19 @@ func TestDiskPathsStayInTheSaveFolderAndFitWindows(t *testing.T) {
 	}
 }
 
-// A name the peers chose that Windows can't take as it is lands where Path
-// says: here one longer than SanitizeFilename keeps (200 bytes).
-func TestATorrentsFileIsWhereItsPathSays(t *testing.T) {
+// Long names land where Path says, and are never cut short: two that
+// differ only past SanitizeFilename's 200 bytes stay two files. 70 CJK
+// characters are 210 bytes.
+func TestLongNamesStayWholeAndApart(t *testing.T) {
 	src := t.TempDir()
-	name := strings.Repeat("x", 220) + ".bin"
-	if err := os.WriteFile(filepath.Join(src, name), make([]byte, 300<<10), 0o644); err != nil {
-		t.Fatal(err)
+	long := strings.Repeat("曲", 70)
+	os.Mkdir(filepath.Join(src, long), 0o755)
+	for i, n := range []int{300 << 10, 200 << 10} {
+		if err := os.WriteFile(filepath.Join(src, long, fmt.Sprintf("%s %02d.bin", long, i+1)), make([]byte, n), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	sw := newSwarmOf(t, 1, src, name, false)
+	sw := newSwarmOf(t, 1, src, long, false)
 	var peers atomic.Int32
 	s, err := NewSession(Config{})
 	if err != nil {
@@ -988,8 +992,11 @@ func TestATorrentsFileIsWhereItsPathSays(t *testing.T) {
 	}
 	tor.Start()
 	waitFor(t, "the torrent to complete", 30*time.Second, func() bool { return tor.Status() == download.StatusCompleted })
-	if fi, err := os.Stat(tor.Path()); err != nil || fi.Size() != 300<<10 {
-		t.Fatalf("Path %q: %v", tor.Path(), err)
+	for i, n := range []int64{300 << 10, 200 << 10} {
+		p := filepath.Join(tor.Path(), fmt.Sprintf("%s %02d.bin", long, i+1))
+		if fi, err := os.Stat(p); err != nil || fi.Size() != n {
+			t.Fatalf("file %d under Path %q: %v", i+1, tor.Path(), err)
+		}
 	}
 }
 
@@ -1023,22 +1030,16 @@ func TestASeedingTorrentsFileCanBeDeleted(t *testing.T) {
 	}
 }
 
-func TestFilesKeptUnderTheRawNameMoveToTheCleanedOne(t *testing.T) {
+func TestFilesThatCleanToOnePathAreFound(t *testing.T) {
 	dir := t.TempDir()
-	raw := strings.Repeat("y", 220) + ".bin"
-	if err := os.WriteFile(filepath.Join(dir, raw+".part"), []byte("half"), 0o644); err != nil {
-		t.Fatal(err)
+	info := &metainfo.Info{Name: "pack", Files: []metainfo.FileInfo{
+		{Path: []string{"a?b.txt"}}, {Path: []string{"ok.txt"}}, {Path: []string{"A*B.txt"}},
+	}}
+	if got := samePath(diskPaths(dir, info)); got != filepath.Join(dir, "pack", "A_B.txt") {
+		t.Fatalf("samePath = %q", got)
 	}
-	info := &metainfo.Info{Name: raw, Length: 8}
-	keepRawName(dir, info)
-	if b, err := os.ReadFile(filepath.Join(dir, diskName(info)+".part")); err != nil || string(b) != "half" {
-		t.Fatalf("the .part didn't move to %q: %v", diskName(info), err)
-	}
-	// A name leaving dir is never moved.
-	outside := filepath.Join(dir, "sub")
-	os.Mkdir(outside, 0o755)
-	keepRawName(outside, &metainfo.Info{Name: "..", Length: 1})
-	if _, err := os.Stat(filepath.Join(dir, "sub")); err != nil {
-		t.Fatal("keepRawName moved the save folder's parent")
+	info.Files = info.Files[:2]
+	if got := samePath(diskPaths(dir, info)); got != "" {
+		t.Fatalf("samePath = %q, want none", got)
 	}
 }
