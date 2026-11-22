@@ -34,7 +34,7 @@ const DOWNLOADS = [
     added: "2026-11-03T20:00:00Z" },
   // One interface, a site with no recipe yet: the Record recipe button.
   { map: chunkMap([4, "", 0, "#"], [7, "0000", 81, "a"]), mapBy: ["eth"], kind: "http", id: "r", url: "https://dl.filehost.example/k/77", pageUrl: "https://filehost.example/f/77", filename: "dataset-2026.tar",
-    dir: "C:\\Users\\you\\Downloads", size: 1.8e10, done: 2.1e9, status: "running", speed: 5.3e6, eta: 3000, probed: true, rangeOk: true,
+    dir: "C:\\Users\\you\\Downloads", size: 1.8e10, done: 2.1e9, status: "running", slowWhy: "Slower than usual: the server or this connection is slow", speed: 5.3e6, eta: 3000, probed: true, rangeOk: true,
     label: "Downloading", actions: { pause: true, showInFolder: true, remove: true, recordRecipe: true }, partialFile: true,
     links: { eth: { status: "ready", conns: 4, speed: 5.3e6, resolved: false, label: "Downloading", tone: "ok" } },
     added: "2026-11-03T20:30:00Z" },

@@ -476,6 +476,7 @@ test("addFileCheck takes small torrent and Metalink files only", () => {
 test("a running download held by a limit says so; Start now runs a queued one", () => {
   const { statusLine, predict } = require("../lib/list.js");
   assert.match(statusLine({ status: "running", speed: 5e6, eta: 10, size: 10, done: 1, limitedBy: "Wi-Fi's limit", limitedTo: 5e6 }).sub, /^limited to .* by Wi-Fi's limit$/);
+  assert.equal(statusLine({ status: "running", speed: 1e6, eta: 10, size: 10, done: 1, slowWhy: "Slower than usual: the server sends no faster" }).sub, "Slower than usual: the server sends no faster");
   const s = { downloads: [{ id: "a", status: "queued" }] };
   assert.equal(predict(s, "startNow", { id: "a" }).downloads[0].status, "running");
 });

@@ -201,6 +201,11 @@ type Download struct {
 	lastSave time.Time
 	lastDisk time.Time
 
+	writeNs   atomic.Int64 // time the workers spent in WriteAt
+	lastWrite int64
+	diskLoad  float64 // smoothed share of the connections' time spent writing
+	diskBound bool
+
 	limit *rate.Shaper // st.Limit, over all its connections
 
 	seen map[string]string // what the last summary showed, for the activity log; nil until the first
@@ -345,6 +350,8 @@ func (d *Download) startLocked() {
 	d.workers, d.ifs, d.probing = map[*worker]struct{}{}, map[string]*ifaceRun{}, map[string]bool{}
 	d.meter = rate.Meter{Window: d.env.ETAWindow()}
 	d.total, d.speed, d.eta = rate.EWMA{}, 0, rate.ETA{}
+	d.writeNs.Store(0)
+	d.lastWrite, d.diskLoad, d.diskBound = 0, 0, false
 	d.lastTick = time.Now()
 	d.runStart = d.lastTick
 	for _, l := range d.st.Links {
@@ -865,6 +872,10 @@ func (d *Download) statsLocked(now time.Time) {
 		ir.ewma.Update(ir.bytes.Load(), dt)
 	}
 	d.plan.prune()
+	// Writing for more than half the connections' time: the disk is the limit, not the network.
+	w := d.writeNs.Load()
+	d.diskLoad += 0.3 * (float64(w-d.lastWrite)/float64(dt)/float64(max(1, len(d.workers))) - d.diskLoad)
+	d.lastWrite, d.diskBound = w, d.diskLoad > 0.5
 
 	done := d.doneLocked()
 	d.meter.Add(now, done)

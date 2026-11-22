@@ -222,7 +222,8 @@ function statusLine(d) {
   const sub = f && f.on && f.into && f.of > 0 ? `${f.files.toLocaleString("en-US")} / ${f.of.toLocaleString("en-US")} files`
     : f && f.on && f.into && f.files > 0 ? `${f.files.toLocaleString("en-US")} files extracted`
     : d.note && d.note !== "complete" ? d.note
-    : d.status === "running" && d.limitedBy ? `limited to ${fmtSpeed(d.limitedTo)} by ${d.limitedBy}` : "";
+    : d.status === "running" && d.limitedBy ? `limited to ${fmtSpeed(d.limitedTo)} by ${d.limitedBy}`
+    : d.status === "running" && d.slowWhy ? d.slowWhy : "";
   return { left, right, sub, error: d.error || "" };
 }
 

@@ -53,6 +53,8 @@ type Summary struct {
 	// LimitedBy names the speed limit holding a running download back ("Wi-Fi's limit"), LimitedTo its size in bytes per second; set by the engine.
 	LimitedBy string                 `json:"limitedBy,omitempty"`
 	LimitedTo int64                  `json:"limitedTo,omitempty"`
+	SlowWhy   string                 `json:"slowWhy,omitempty"` // why it runs well under what its connections manage alone; set by the engine
+	DiskBound bool                   `json:"-"`                 // the connections spend most of their time waiting for the disk, for SlowWhy
 	RangeOK   bool                   `json:"rangeOk"`
 	Probed    bool                   `json:"probed"`
 	SHA256    string                 `json:"sha256,omitempty"`
@@ -170,7 +172,7 @@ func (d *Download) summaryLocked() Summary {
 	s := Summary{
 		ID: d.st.ID, URL: d.st.URL, PageURL: d.st.PageURL, Filename: d.st.Filename, Dir: d.st.Dir,
 		Size: d.st.Size, Done: d.doneLocked(), Status: d.st.Status, Error: d.st.Error,
-		Speed: d.speed, ETA: -1, RangeOK: d.st.RangeOK, Probed: d.st.Probed,
+		Speed: d.speed, DiskBound: d.diskBound, ETA: -1, RangeOK: d.st.RangeOK, Probed: d.st.Probed,
 		SHA256: d.st.SHA256, MD5: d.st.MD5, Links: map[string]LinkSummary{},
 		hashResult: d.st.HashResult, checking: d.checking,
 		serverSHA: d.st.SHA256 == "" && d.st.MD5 == "" && d.st.Version.SHA256 != "",

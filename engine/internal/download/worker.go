@@ -280,7 +280,10 @@ func (w *worker) fetch(ctx context.Context, segp **segment, buf []byte) error {
 			off, allowed := d.plan.take(seg, int64(n))
 			d.mu.Unlock()
 			if allowed > 0 {
-				if _, err := d.file.WriteAt(buf[:allowed], off); err != nil {
+				t0 := time.Now()
+				_, err := d.file.WriteAt(buf[:allowed], off)
+				d.writeNs.Add(int64(time.Since(t0)))
+				if err != nil {
 					return &fetchError{kind: kindDisk, msg: diskMsg(err), err: err}
 				}
 				d.mu.Lock()

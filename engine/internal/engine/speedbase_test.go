@@ -61,6 +61,45 @@ func TestOnlyUnheldSamplesCountIntoAnInterfacesAverage(t *testing.T) {
 	}
 }
 
+func TestSlowStateHasNoFlicker(t *testing.T) {
+	links := func(speed float64) []linkNow { return []linkNow{{"a", speed, 10}} }
+	s := slowState(0, links(4), 10) // under half: counts
+	s = slowState(s, links(6), 5)   // between half and 0.7: kept
+	if s != 10 {
+		t.Fatalf("%v, want 10", s)
+	}
+	if slowState(s, links(7), 1) != 0 {
+		t.Fatal("back over 0.7 of the average resets")
+	}
+	if slowState(5, nil, 1) != 0 {
+		t.Fatal("no known average: never slow")
+	}
+}
+
+func TestSlowReasons(t *testing.T) {
+	name := func(id string) string { return "N" + id }
+	both := []linkNow{{"a", 1, 8}, {"b", 1, 8}}
+	one := []linkNow{{"a", 1, 8}, {"b", 7, 8}}
+	for _, c := range []struct {
+		links           []linkNow
+		throttled, disk bool
+		shared          []string
+		want            string
+		weak            int
+	}{
+		{both, true, false, nil, "Slower than usual: the server limits how many requests it takes at once", 2},
+		{both, false, true, nil, "Slower than usual: the disk can't keep up", 2},
+		{both, false, false, []string{"Wi-Fi", "Ethernet"}, "Slower than usual: Wi-Fi and Ethernet share one line", 2},
+		{both, false, false, nil, "Slower than usual: the server sends no faster", 2},
+		{one, false, false, nil, "Slower than usual: one connection is slow: Na", 1},
+		{one[:1], false, false, nil, "Slower than usual: the server or this connection is slow", 1},
+	} {
+		if why, weak := slowReason(c.links, c.throttled, c.disk, c.shared, name); why != c.want || len(weak) != c.weak {
+			t.Errorf("%q (%d weak), want %q (%d)", why, len(weak), c.want, c.weak)
+		}
+	}
+}
+
 func TestAllSlowTogetherIsTheServer(t *testing.T) {
 	if !allWeak([]linkNow{{"a", 1, 8}, {"b", 2, 5}}) {
 		t.Fatal("two slow together: the server")
