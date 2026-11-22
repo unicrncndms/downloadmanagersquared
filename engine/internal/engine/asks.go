@@ -58,6 +58,11 @@ func plainLink(r AddRequest) bool {
 // reason) when the settings say not to add it.
 func (e *Engine) addAsking(r AddRequest) (any, error) {
 	r.URL = strings.TrimSpace(r.URL)
+	if r.CheckDup && r.Ask && r.File == "" && r.FilePath == "" && r.Answered != "again" {
+		if id := e.findDup(r); id != "" {
+			return e.hold(r, e.dupText(id), id, []AskChoice{{"again", "Add anyway"}, {"show", "Open it"}, {"cancel", "Cancel"}}), nil
+		}
+	}
 	if plainLink(r) && r.Answered != "rename" && r.Answered != "replace" {
 		e.mu.Lock()
 		name := nameOf(r)
@@ -78,6 +83,19 @@ func (e *Engine) addAsking(r AddRequest) (any, error) {
 	}
 	id, err := e.Add(r)
 	return map[string]string{"id": id}, err
+}
+
+// dupText says that r is already in the list as download id, and how it is doing.
+func (e *Engine) dupText(id string) string {
+	what, how := "This link", ""
+	if d, err := e.queue.Get(id); err == nil {
+		s := d.Summary()
+		how = " (" + s.Label + ")"
+		if s.Filename != "" {
+			what = `"` + s.Filename + `"`
+		}
+	}
+	return what + " is already in the list" + how + "."
 }
 
 // hold keeps r back until its question is answered.

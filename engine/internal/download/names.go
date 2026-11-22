@@ -36,6 +36,18 @@ func uniqueName(dir, name string, suffixes ...string) string {
 	return cand
 }
 
+// Landing is the landing page the download was added with and the file name it
+// has or will most likely get, for telling a repeat of it (ticket 07).
+func (d *Download) Landing() (page, name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	name = d.st.Filename
+	if u, err := url.Parse(d.st.URL); name == "" && err == nil {
+		name = SanitizeFilename(filepath.Base(u.Path))
+	}
+	return d.st.PageURL, name
+}
+
 // finalName is the name a finished file gets in dir: name itself over a file
 // already there only when replace is that very path, which the user was
 // warned about and chose to replace; else the first name that is free.

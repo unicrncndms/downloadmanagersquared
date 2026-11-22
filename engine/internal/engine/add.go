@@ -50,6 +50,7 @@ type AddRequest struct {
 	KeyFile   string `json:"keyFile"`  // SFTP: a private key file to log in with, in place of a password in the link
 	KeyPass   string `json:"keyPass"`  // its passphrase: never logged
 	CheckDup  bool   `json:"checkDup"` // asks before adding a link already in the list (the Add box); the list's id comes back instead
+	Ask       bool   `json:"ask"`      // with CheckDup: a link already in the list is held for the user's answer (asks.go) instead of answered with duplicate
 	Answered  string `json:"answered"` // set by the engine when a held question is answered: "rename" or "replace" (the file is already there), "again"
 	// CookieStore is the browser's cookie store (container) the download came from.
 	CookieStore string `json:"cookieStore"`
@@ -219,7 +220,7 @@ func (e *Engine) addLocalFile(r AddRequest) (string, error) {
 // links the user did not look at one by one (the tray's clipboard) uses it.
 func (e *Engine) AddUnlessKnown(r AddRequest) (id string, known bool, err error) {
 	if r.File == "" {
-		if id := e.findURL(r.URL); id != "" {
+		if id := e.findDup(r); id != "" {
 			return id, true, nil
 		}
 	}
@@ -227,23 +228,46 @@ func (e *Engine) AddUnlessKnown(r AddRequest) (id string, known bool, err error)
 	return id, false, err
 }
 
-// findURL is the id of the download added from link url, or "" when none.
-func (e *Engine) findURL(url string) string {
-	url = strings.TrimSpace(url)
+// findURL is the id of the download added from link, or "" when none. Query
+// parameters that look like tokens don't count (linkKey).
+func (e *Engine) findURL(link string) string {
+	link = strings.TrimSpace(link)
 	// Saved links have no login in them, so a link that has one is compared without it.
-	if download.IsFTP(url) {
-		if c, _, err := download.SplitLogin(url); err == nil {
-			url = c
+	if download.IsFTP(link) {
+		if c, _, err := download.SplitLogin(link); err == nil {
+			link = c
 		}
-	} else if download.IsSFTP(url) {
-		if c, _, _, _, err := download.SplitSFTP(url, "", ""); err == nil {
-			url = c
+	} else if download.IsSFTP(link) {
+		if c, _, _, _, err := download.SplitSFTP(link, "", ""); err == nil {
+			link = c
 		}
 	}
+	key := linkKey(link)
 	for _, d := range e.queue.List() {
 		// Not Summary: it builds the whole row for every download.
-		if s, ok := d.(interface{ SourceURL() string }); ok && s.SourceURL() == url {
+		if s, ok := d.(interface{ SourceURL() string }); ok && linkKey(s.SourceURL()) == key {
 			return d.ID()
+		}
+	}
+	return ""
+}
+
+// findDup is the id of a download in the list, running or done, that adding r
+// would only repeat: the same link, or, for a host that gives a new link every
+// time, the same landing page and file name. "" when none.
+func (e *Engine) findDup(r AddRequest) string {
+	if id := e.findURL(r.URL); id != "" {
+		return id
+	}
+	page, name := strings.TrimSpace(r.PageURL), nameOf(r)
+	if page == "" || name == "" {
+		return ""
+	}
+	for _, d := range e.queue.List() {
+		if s, ok := d.(interface{ Landing() (string, string) }); ok {
+			if p, n := s.Landing(); p != "" && linkKey(p) == linkKey(page) && strings.EqualFold(n, name) {
+				return d.ID()
+			}
 		}
 	}
 	return ""

@@ -346,7 +346,6 @@ $("addUrl").addEventListener("input", () => {
   $("addVpn").options[0].textContent = `As in settings (${VPN_TEXT[latest.settings.vpnHttp] || "Off"})`;
   $("addGo").textContent = v.label;
   $("addOptions").hidden = !(single || v.page || v.vpn);
-  $("addDup").hidden = true;
   $("addUrl").rows = Math.min(5, Math.max(2, $("addUrl").value.split(/\n/).length)); // grows with the links, to five lines
   $("addHint").textContent = plainFtpNote(single ? withLogin(link, "", $("addPass").value) : $("addUrl").value) || (v.bad ? `${plural(v.bad, "line")} that isn't a link will stay in the box.` : v.count ? "" : "Paste links here, or anywhere on the list with Ctrl+V.");
   const c = addFolderChoice("", latest.settings);
@@ -358,20 +357,16 @@ $("addUrl").addEventListener("input", () => {
 $("addPass").addEventListener("input", () => $("addUrl").dispatchEvent(new Event("input"))); // the ftp:// warning
 // Several links, one per line: each is added as if alone. Lines that fail
 // stay in the box, so they can be fixed and added again.
-// A link already in the list is not added: the box asks (Show it, Add again).
-let addAgain = false; // set by "Add again": the links go in even if the list has them
+// A link already in the list, or whose file is already in the folder, is held
+// by the engine and asked about above the list (asks.js).
 $("addBox").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const again = addAgain;
-  addAgain = false;
-  $("addDup").hidden = true;
   const { urls, bad } = addLines($("addUrl").value);
   const many = urls.length + bad.length > 1;
   const failed = bad.map((b) => ({ ...b, error: "not a link" }));
-  const dups = [];
   let asked = 0;
   for (const { line, url } of urls) {
-    const add = { url: many ? url : withLogin(url, $("addUser").value.trim(), $("addPass").value), pageUrl: $("addPage").value, vpn: $("addVpn").value, checkDup: !again };
+    const add = { url: many ? url : withLogin(url, $("addUser").value.trim(), $("addPass").value), pageUrl: $("addPage").value, vpn: $("addVpn").value, checkDup: true, ask: true };
     if (!many && $("addName").value.trim()) add.filename = $("addName").value.trim();
     if (!many && $("addSum").value.trim()) add.checksum = $("addSum").value.trim();
     if (!many && $("addKey").value.trim() && /^sftp:/i.test(url)) { add.keyFile = $("addKey").value.trim(); add.keyPass = $("addKeyPass").value; }
@@ -381,21 +376,17 @@ $("addBox").addEventListener("submit", async (e) => {
     if (folder !== undefined) add.folder = folder;
     try {
       const r = await call("add", add);
-      if (r && r.duplicate) dups.push({ line, url, id: r.id });
-      else if (r && r.skipped) failed.push({ line, url, error: r.skipped }); // stays in the box, with why
-      else if (r && r.ask) asked++; // held until answered above the list (asks.js)
+      if (r && r.skipped) failed.push({ line, url, error: r.skipped }); // stays in the box, with why
+      else if (r && r.ask) asked++; // held until answered above the list
     } catch (err) {
       failed.push({ line, url, error: err.message });
     }
   }
-  const added = urls.length + bad.length - failed.length - dups.length;
-  if (failed.length || dups.length) {
-    $("addUrl").value = [...failed, ...dups].sort((a, b) => a.line - b.line).map((f) => f.url).join("\n");
-    if (failed.length) {
-      const why = failed.map((f) => (many ? `Line ${f.line}: ${f.error}` : f.error)).join(" · ");
-      toast(added ? `${plural(added, "download")} added. ${why}` : why, true);
-    } else if (added) toast(`${plural(added, "download")} added`);
-    if (dups.length) showDup(dups);
+  const added = urls.length + bad.length - failed.length;
+  if (failed.length) {
+    $("addUrl").value = failed.sort((a, b) => a.line - b.line).map((f) => f.url).join("\n");
+    const why = failed.map((f) => (many ? `Line ${f.line}: ${f.error}` : f.error)).join(" · ");
+    toast(added ? `${plural(added, "download")} added. ${why}` : why, true);
     return;
   }
   toast(asked ? `${plural(asked, "download")} waiting for your answer` : added === 1 ? "Added" : `${added} downloads added`);
@@ -405,19 +396,6 @@ $("addBox").addEventListener("submit", async (e) => {
   $("addUrl").dispatchEvent(new Event("input"));
   openAdd(false);
 });
-
-function showDup(dups) {
-  const one = dups.length === 1;
-  $("addDup").replaceChildren(el("span", {}, one ? "Already in the list." : `${dups.length} links are already in the list.`),
-    one ? el("button", { type: "button", class: "small", onclick: () => {
-      openAdd(false);
-      showDetail(dups[0].id);
-      const c = cards.get(dups[0].id);
-      if (c) c.root.scrollIntoView({ block: "nearest" });
-    } }, "Show it") : null,
-    el("button", { type: "button", class: "small", onclick: () => { addAgain = true; $("addBox").requestSubmit(); } }, "Add again"));
-  $("addDup").hidden = false;
-}
 
 // Local .torrent and Metalink files dropped on the list.
 // Their bytes go to the engine as base64.

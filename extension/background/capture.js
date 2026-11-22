@@ -273,12 +273,12 @@ const Capture = {
     const referer = pages[pages.length - 1] || pageUrl;
     if (cookie === undefined) cookie = await cookieHeader(url, cookieStoreId);
     try {
-      const r = await Engine.call("add", { url, pageUrl, filename, cookie, referer, userAgent: navigator.userAgent, torrent: !!torrent, metalink: !!metalink, cookieStore: cookieStoreId || "", ask: true });
+      const r = await Engine.call("add", { url, pageUrl, filename, cookie, referer, userAgent: navigator.userAgent, torrent: !!torrent, metalink: !!metalink, cookieStore: cookieStoreId || "", checkDup: true, ask: true });
       if (r.skipped) {
         notify("DMS² didn't add this download", r.skipped);
       } else if (r.ask) {
         // Held by the engine until the user answers above the downloads list.
-        notify("DMS² has a question", "A file with this name is already there. Answer in the DMS² downloads list.");
+        notify("DMS² has a question", "This download, or its file, is already there. Answer in the DMS² downloads list.");
         Engine.call("openManager", {}).catch(() => {});
       } else if (torrent) {
         this.torrentAdded();

@@ -78,7 +78,7 @@ body:not(.windowed) .strip.many .nm.short { display: inline; }
 #addBox .add-end { display: flex; align-items: center; gap: 10px; }
 #addBox .add-end .muted { flex: 1; min-width: 0; font-size: 12px; }
 /* What a pasted link adds to the form, and a notice over the list, come in the same way. */
-#addBox .add-opts label, #addBox .check, #addBox .add-dup, .version-warn { animation: drop var(--t) var(--ease); }
+#addBox .add-opts label, #addBox .check, .version-warn { animation: drop var(--t) var(--ease); }
 #addBox[hidden] { display: none; }
 #addUrl { resize: vertical; min-height: 2.6em; }
 /* The other way in, under the links box: a link, not a second Add. */
@@ -350,6 +350,5 @@ kbd { font: inherit; font-size: 11px; padding: 0 var(--s1); border: 1px solid va
 #addBox .add-opts { display: grid; gap: var(--s2); margin-top: var(--s1); }
 #addBox .add-opts [hidden] { display: none; }
 #addBox .add-opts label { display: grid; grid-template-columns: 5.5em 1fr; align-items: center; gap: var(--s2); font-size: 12px; }
-#addBox .add-dup { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); font-size: 12px; }
-#addBox .add-dup[hidden], #addBox details[hidden] { display: none; }
+#addBox details[hidden] { display: none; }
 body.dropping #list { outline: 2px dashed var(--accent); outline-offset: -4px; }

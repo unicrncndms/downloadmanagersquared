@@ -248,8 +248,8 @@ var methods = map[string]handler{
 			}
 		}
 		e.mu.Unlock()
-		if p.CheckDup && p.File == "" {
-			if id := e.findURL(p.URL); id != "" {
+		if p.CheckDup && !p.Ask && p.File == "" { // an extension from before the questions
+			if id := e.findDup(p); id != "" {
 				return map[string]any{"id": id, "duplicate": true}, nil
 			}
 		}
