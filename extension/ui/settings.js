@@ -151,7 +151,7 @@ function ifaceRow(i, tun, settings) {
       el("div", { class: "sub" }, i.present ? el("span", { class: "mono" }, i.ip) : "not connected", " · ", i.windowsName && i.windowsName !== i.name ? i.windowsName + " · " : "", i.description,
         i.avgSpeed ? el("span", { title: "Averaged over the time it fetched a download alone and nothing held it back" }, " · usually ", fmtSpeed(i.avgSpeed)) : null),
       badges.length ? el("div", { class: "badges" }, badges) : null,
-      i.vpn && !i.enabled && i.present ? el("div", { class: "sub" }, "Off because this is a VPN running in Windows. Turn it on to download through it as an extra connection.") : null,
+      i.vpn && !i.enabled && i.present ? el("div", { class: "sub" }, "A VPN running in Windows. Tick Use to download through it as an extra connection.") : null,
       colours),
     el("span", { class: "badge st " + tone, "data-state": i.id }, word),
     el("label", { class: "use" }, check(i.enabled, "enabled", "Use"), " Use"),
@@ -540,8 +540,6 @@ function showPage() {
     if (!q && a.hash === "#" + at) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
-  // A folded group opens when the search finds something in it.
-  if (q) for (const d of document.querySelectorAll("details.adv")) d.open = !!d.querySelector(".setting:not(.unfound)");
   $("notFound").hidden = shown > 0;
   $("notFound").textContent = `No setting matches “${$("find").value.trim()}”.`;
   scrollTo(0, 0);

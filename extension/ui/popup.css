@@ -5,9 +5,7 @@ body.windowed { width: auto; max-height: none; }
 body.detailing:not(.windowed) { height: 600px; }
 
 /* Header: the name and the engine, the total; the connections; the tools. */
-/* The header's lower edge is the accent, fading out: where the page's colour starts. */
-header { padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); background: var(--panel);
-  border-image: linear-gradient(90deg, var(--accent), var(--line) 60%) 1; }
+header { padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); background: var(--panel); }
 .head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
 .head .total { margin-left: auto; text-align: right; line-height: 1.25; white-space: nowrap; }
 .head .total b { display: block; font-size: 18px; font-weight: 600; color: var(--accent); }
@@ -61,13 +59,13 @@ body:not(.windowed) .strip.many .nm.short { display: inline; }
 /* Busy: a ring, as a row's busy connection tile. */
 .strip .chip.busy .dot { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
 .strip .chip .busy { color: var(--warn); font-weight: 500; }
-.tools { position: relative; display: flex; align-items: center; gap: var(--s2); margin-top: var(--s3); }
+.tools { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: var(--s3); }
 .tools .spacer { flex: 1; min-width: 0; }
 .tools > button, #search { height: var(--tile); margin: 0; }
 .tools > button { display: inline-flex; align-items: center; padding: 0 var(--s3); }
 #search { border: 1px solid var(--line); background: var(--panel); border-radius: var(--r); padding: 0 var(--s2); }
-/* With several selected, what can be done to them lies over the tools: nothing in the list moves. */
-#selBar { position: absolute; inset: -2px; display: flex; align-items: center; gap: 6px; padding: 0 2px 0 10px; border-radius: var(--r);
+/* With several selected, what can be done to them: a line under the tools, which stay. */
+#selBar { flex: 1 0 100%; min-height: var(--tile); display: flex; align-items: center; gap: 6px; padding: 0 2px 0 10px; border-radius: var(--r);
   background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; white-space: nowrap; animation: pop var(--t) var(--ease); }
 /* A bulk button that can do nothing now gives its room to the search. */
 .tools > button:disabled { display: none; }
@@ -113,8 +111,6 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
    menu inside the row and clip focus rings. */
 .card:not(:focus-within, :has(.menu:not([hidden]))) { content-visibility: auto; contain-intrinsic-size: auto 48px; }
 .card:hover { background: var(--panel); }
-/* A running download's speed is in the accent, like the total it adds to. */
-.card:not(.idle) > .nums b { color: var(--accent); }
 .card.sel, .card.sel:hover { background: var(--accent-soft); border-color: var(--accent); box-shadow: none; }
 .card.sel + .card, .card.detailed + .card { box-shadow: none; }
 .card.detailed { border-color: var(--accent); box-shadow: none; }

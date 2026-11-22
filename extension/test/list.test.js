@@ -213,7 +213,7 @@ test("each connection's badge names its families; IPv6-only adapters left out ge
   assert.equal(familyText({ families: ["IPv6"] }), "IPv6");
   assert.equal(familyText({ families: ["IPv4", "IPv6"] }), "IPv4 + IPv6");
   assert.equal(familyText({}), ""); // an older engine: no badge
-  assert.deepEqual(ipv6Hints({ ipv6Only: ["Phone"] }), ["Phone has only IPv6: turn on Enable IPv6 (experimental) to use it."]);
+  assert.deepEqual(ipv6Hints({ ipv6Only: ["Phone"] }), ["Phone has only IPv6: turn on Use IPv6 (experimental) under Connections to use it."]);
   assert.deepEqual(ipv6Hints({}), []);
 });
 

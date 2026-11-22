@@ -297,7 +297,7 @@ function familyText(i) {
 // One hint per adapter left out because it has only IPv6 while IPv6 is off.
 function ipv6Hints(state) {
   return ((state && state.ipv6Only) || []).map((name) =>
-    `${name} has only IPv6: turn on Enable IPv6 (experimental) to use it.`);
+    `${name} has only IPv6: turn on Use IPv6 (experimental) under Connections to use it.`);
 }
 
 // Check lines' answer: each line's public IP, and a warning per line shared:

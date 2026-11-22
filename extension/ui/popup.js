@@ -179,7 +179,8 @@ function startNext() {
 function renderSelBar() {
   const bar = $("selBar");
   const ds = picked();
-  bar.hidden = !ds.length && !removing;
+  // One selected row has its own buttons; the bar is for several (or a remove to confirm).
+  bar.hidden = ds.length < 2 && !removing;
   if (bar.hidden) return;
   const can = (k) => ds.some((d) => d.actions && d.actions[k]);
   const button = (label, go, cls) => el("button", { class: "small " + (cls || ""), onclick: go }, label);

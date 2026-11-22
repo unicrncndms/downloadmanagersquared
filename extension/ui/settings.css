@@ -4,7 +4,6 @@ header, .engine-window header {
   position: sticky; top: 0; z-index: 30; display: grid; grid-template-columns: auto auto 1fr;
   grid-template-rows: var(--win-row1); gap: 0 16px; padding: 12px 24px 10px; white-space: nowrap;
   background: var(--panel); border-bottom: 1px solid var(--line);
-  border-image: linear-gradient(90deg, var(--accent), var(--line) 60%) 1;
 }
 header > * { align-self: center; justify-self: start; }
 
@@ -40,7 +39,7 @@ main { min-width: 0; padding: 0 0 48px; }
 /* A link's #section is already at the top: the browser's own jump to it must not scroll past its heading. */
 section { scroll-margin-top: 140px; }
 /* A section comes in when picked (and what opens under a setting, when it opens). */
-main > section, .conn-more, .row-actions, .uplink, .setting ~ .warn, details.adv > .fields { animation: rise var(--t) var(--ease); }
+main > section, .conn-more, .row-actions, .uplink, .setting ~ .warn { animation: rise var(--t) var(--ease); }
 /* A section as in the downloads list: its name, then a line to the edge. No boxes. */
 h2 { display: flex; align-items: center; margin: 28px 0 var(--s2); font-size: 15px; font-weight: 600; }
 /* A group of settings: its name, then its rows in one box. */
@@ -84,8 +83,6 @@ h3 { display: flex; align-items: center; margin: 0 0 var(--s2); font-size: 12px;
 .conn-row .use { display: inline-flex; align-items: center; gap: 6px; }
 .setting, .conn-row { transition: background var(--t) var(--ease); }
 .setting:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
-/* A group's name carries the accent's square, as a section's carries four. */
-main h3::before { content: ""; flex: none; width: 4px; height: 4px; margin-right: 6px; border-radius: 1px; background: var(--accent); }
 .conn-row button[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .conn-more { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; padding: 10px 12px;
   border-radius: var(--r); background: var(--bg); }
@@ -138,6 +135,12 @@ main h3::before { content: ""; flex: none; width: 4px; height: 4px; margin-right
 .setting .note { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--muted); }
 .field-error { display: block; margin-top: var(--s1); font-size: 12px; color: var(--bad); }
 .setting .buttons { align-items: center; }
-/* Advanced: a fold that looks like a group's heading. */
-details.adv > summary { cursor: pointer; margin-bottom: var(--s2); font-size: 12px; font-weight: 600; color: var(--muted); }
-details.adv:not([open]) > summary { margin-bottom: 0; }
+/* A group's own short line, after its name. */
+h3 .note { margin-left: var(--s2); font-weight: 400; }
+/* A page's one line before its settings. */
+.lead { margin: 0 0 var(--s2); font-size: 12px; color: var(--muted); }
+/* A setting that depends on the one above it sits under it. */
+.setting.sub { padding-left: calc(var(--s4) + 20px); }
+/* The connections' name with what acts on the whole list beside it. */
+.list-head { display: flex; align-items: center; gap: var(--s2); margin: var(--s4) 0 var(--s2); }
+.list-head h3 { margin: 0 auto 0 0; }

@@ -237,6 +237,5 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 }
 /* Hidden it takes no room, so a narrow page never scrolls sideways; common.js picks the side with room. */
 .info:hover::after, .info:focus::after { display: block; animation: pop .14s var(--ease); transform-origin: 12px 0; }
-.info.terms::after { white-space: pre-line; }
 .info.left::after { left: auto; right: var(--tip-r); }
 .info.up::after { top: auto; bottom: var(--tip-b); transform-origin: 12px 100%; }

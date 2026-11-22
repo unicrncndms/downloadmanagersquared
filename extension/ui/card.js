@@ -362,7 +362,7 @@ function makeCard(id) {
   // would need someone at the browser. Recording now, while someone is here,
   // lets DMS² renew it alone. Only an offer: nothing records without the click.
   const recordSection = el("section", {}, el("h3", { class: "mk" }, "Site"),
-    el("p", { class: "muted" }, "If this link expires, DMS² will need you to click through the site again. Recorded once, your clicks are repeated for you."),
+    el("p", { class: "muted" }, "Record your clicks through the site once, and DMS² renews this link by itself when it expires."),
     el("button", { class: "small", onclick: record }, "Record the site's clicks"));
 
   // The add step: a torrent waits here until its files and folder are chosen.
@@ -382,8 +382,9 @@ function makeCard(id) {
   const limitRow = el("div", { class: "row" }, limitLabel, limitIn, limitUnit);
   // Each connection's share of the speed, as a bar of its colour.
   const share = el("div", { class: "share", "aria-hidden": "true" });
-  const legend = el("p", { class: "muted" });
-  const connSection = section("Connections", share, allConns, legend, limitRow);
+  const legend = el("span", { class: "info", tabindex: "0", "aria-label": "What the tiles show" });
+  const connSection = section("Connections", share, allConns, limitRow);
+  connSection.firstChild.append(" ", legend);
 
   const foldExtracting = el("div", {}, "Extracting as a folder");
   // Extract into, while unfinished: Change… moves what is extracted (the
@@ -595,7 +596,7 @@ function makeCard(id) {
     moveUp.style.visibility = queued() && at === 0 ? "hidden" : "";
     moveDown.style.visibility = queued() && at === queue.len - 1 ? "hidden" : "";
     limitRow.hidden = torrent;
-    legend.textContent = `The number on a connection's tile is how many ${torrent ? "peers" : "requests"} it has open. A ring around it means the server is holding it back.`;
+    legend.dataset.tip = `The number on a connection's tile is how many ${torrent ? "peers" : "requests"} it has open. A ring around it means the server is holding it back.`;
     limitLabel.textContent = `Speed limit (${speedUnitLabel()})`;
     limitUnit.textContent = speedUnitLabel();
     if (document.activeElement !== limitIn) limitIn.value = unitField(d.limit);
