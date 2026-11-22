@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -989,6 +990,36 @@ func TestATorrentsFileIsWhereItsPathSays(t *testing.T) {
 	waitFor(t, "the torrent to complete", 30*time.Second, func() bool { return tor.Status() == download.StatusCompleted })
 	if fi, err := os.Stat(tor.Path()); err != nil || fi.Size() != 300<<10 {
 		t.Fatalf("Path %q: %v", tor.Path(), err)
+	}
+}
+
+// classicio keeps the storage off memory maps: a mapped file can't be deleted
+// on Windows for as long as the engine runs. If an anacrolix update renames
+// the variable it sets, this fails.
+func TestASeedingTorrentsFileCanBeDeleted(t *testing.T) {
+	sw := newSwarm(t, 1, 1<<20)
+	var peers atomic.Int32
+	s, err := NewSession(Config{Ratio: func() float64 { return 1 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetIfaces([]Iface{sw.iface("eth", &peers)})
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	waitFor(t, "the torrent to seed", 30*time.Second, func() bool { return tor.Status() == StatusSeeding })
+	tor.mu.Lock()
+	r := tor.t.NewReader() // as for a peer: the mmap backend maps a file when it is read
+	tor.mu.Unlock()
+	if _, err := io.ReadFull(r, make([]byte, 64<<10)); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	if err := os.Remove(tor.Path()); err != nil {
+		t.Fatalf("a seeding torrent's file is locked: %v", err)
 	}
 }
 
