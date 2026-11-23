@@ -235,6 +235,8 @@ const FIXTURES = {
         connections: 4, socksPort: 50005, speed: 1.3e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" }] } },
   // IPv6 off, with an adapter that has only IPv6: the hint.
   ipv6hint: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", state: { ...STATE, ipv6Only: ["Phone"] } },
+  // Windows set to minimize connections, with Wi-Fi next to a cable: Keep all connected.
+  wifihint: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", state: { ...STATE, dropsWifi: true } },
   // Three queued behind one downloading: the up and down arrows, and dragging.
   queue: { connected: true, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
     state: { ...STATE, downloads: [DOWNLOADS[0], ...["one.iso", "two.iso", "three.iso"].map((n) => ({ ...DOWNLOADS[0], id: n, filename: n, url: "https://example.com/" + n,

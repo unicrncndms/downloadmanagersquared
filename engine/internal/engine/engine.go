@@ -77,6 +77,7 @@ type Engine struct {
 	pageInfos   map[string][]chan pageInfo // download id -> the resolves waiting for its browser's pageInfo
 	started     map[string]time.Time       // browsers started for a resolve, by exe, so not twice at once
 	ipv6Only    []string                   // adapters with only IPv6, left out while IPv6 is off: Settings hints at them
+	dropsWiFi   bool                       // Windows drops Wi-Fi while another line is up: Settings hints at it (dropsWiFi)
 	userAgent   string                     // the browser's, from its latest hello; not saved
 	browser     string                     // the browser's exe, from its latest hello; not saved
 

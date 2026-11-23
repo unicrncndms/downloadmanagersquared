@@ -6,8 +6,9 @@
 // require it.
 
 // Calls the engine answers only once the user is done: Windows' folder dialog
-// (engine BrowseFolder). They wait as long as the user does.
-const WAITS_FOR_USER = new Set(["browseFolder"]);
+// (engine BrowseFolder), the administrator prompt for keepAllConnections. They
+// wait as long as the user does.
+const WAITS_FOR_USER = new Set(["browseFolder", "keepAllConnections"]);
 
 // post(message) sends one request; later(fn, ms) is setTimeout.
 function rpcClient(post, later) {

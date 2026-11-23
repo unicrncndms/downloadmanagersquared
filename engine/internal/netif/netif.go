@@ -123,6 +123,28 @@ func fromAdapters(head *windows.IpAdapterAddresses, ipv6 bool) (list []Interface
 	return list, ipv6Only
 }
 
+const ifTypeIEEE80211 = 71 // Wi-Fi
+
+// WiFi returns the IDs of the Wi-Fi adapters, connected or not: Windows may
+// have dropped one for another connection, and then it is not in List.
+func WiFi() ([]string, error) {
+	head, err := adapterAddresses(windows.AF_UNSPEC)
+	if err != nil {
+		return nil, err
+	}
+	return wifiIDs(head), nil
+}
+
+func wifiIDs(head *windows.IpAdapterAddresses) []string {
+	var ids []string
+	for a := head; a != nil; a = a.Next {
+		if a.IfType == ifTypeIEEE80211 && a.OperStatus != windows.IfOperStatusNotPresent {
+			ids = append(ids, adapterID(a))
+		}
+	}
+	return ids
+}
+
 // markDefault marks the interface with the IPv4 default route, or the one with
 // the IPv6 default route when no interface has IPv4.
 func markDefault(list []Interface, best func(windows.Sockaddr) (uint32, error)) {

@@ -3,6 +3,7 @@ package netif
 import (
 	"net"
 	"reflect"
+	"slices"
 	"syscall"
 	"testing"
 	"unsafe"
@@ -170,5 +171,20 @@ func TestTheIPv6DefaultRouteIsMainOnlyWhenNoInterfaceHasIPv4(t *testing.T) {
 	markDefault(list, best)
 	if !list[0].IsDefault {
 		t.Errorf("with IPv6 only the IPv6 route decides: %+v", list)
+	}
+}
+
+func TestWiFiAdaptersAreFoundEvenWhenWindowsDroppedThem(t *testing.T) {
+	head := adapters(adapter{id: "wifi-down"}, adapter{id: "cable"}, adapter{id: "wifi-up"}, adapter{id: "wifi-gone"})
+	a := head
+	a.IfType, a.OperStatus = ifTypeIEEE80211, windows.IfOperStatusDown
+	a = a.Next
+	a.IfType = 6 // Ethernet
+	a = a.Next
+	a.IfType = ifTypeIEEE80211
+	a = a.Next
+	a.IfType, a.OperStatus = ifTypeIEEE80211, windows.IfOperStatusNotPresent
+	if got := wifiIDs(head); !slices.Equal(got, []string{"wifi-down", "wifi-up"}) {
+		t.Errorf("Wi-Fi adapters: %v, want the one Windows dropped and the one up, not the cable nor a removed one", got)
 	}
 }

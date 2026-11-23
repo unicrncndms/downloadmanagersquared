@@ -18,6 +18,7 @@ import (
 	"downloadmanagersquared/engine/internal/rate"
 	"downloadmanagersquared/engine/internal/socks"
 	"downloadmanagersquared/engine/internal/torrent"
+	"downloadmanagersquared/engine/internal/winutil"
 )
 
 type ifaceEntry struct {
@@ -64,11 +65,21 @@ func (e *Engine) listInterfaces() bool {
 		log.Printf("listing interfaces: %v", err)
 		return false
 	}
+	wifi, _ := netif.WiFi()
+	drops := dropsWiFi(winutil.MinimizesConnections(), wifi, list)
 	e.mu.Lock()
 	e.ipv6Only = ipv6Only
+	e.dropsWiFi = drops
 	e.refreshInterfacesLocked(list)
 	e.mu.Unlock()
 	return true
+}
+
+// dropsWiFi says whether Windows, set to minimize its connections, would drop
+// a Wi-Fi adapter for a line DMS² has: one that is neither Wi-Fi nor a VPN
+// (a cable, a tethered phone).
+func dropsWiFi(minimizes bool, wifi []string, list []netif.Interface) bool {
+	return minimizes && len(wifi) > 0 && slices.ContainsFunc(list, func(i netif.Interface) bool { return !i.VPN && !slices.Contains(wifi, i.ID) })
 }
 
 func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {

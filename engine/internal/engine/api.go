@@ -497,6 +497,14 @@ var methods = map[string]handler{
 		e.refreshInterfaces()
 		return nil, nil
 	}),
+	// Settings' "Keep all connected": Windows asks for administrator rights.
+	"keepAllConnections": bare(func(e *Engine) (any, error) {
+		if err := winutil.KeepAllConnections(); err != nil {
+			return nil, err
+		}
+		e.refreshInterfaces()
+		return nil, nil
+	}),
 	"getAutostart":  bare(func(e *Engine) (any, error) { return winutil.Autostart(), nil }),
 	"version":       bare(func(e *Engine) (any, error) { return Version, nil }),
 	"checkUpdate":   bare(func(e *Engine) (any, error) { return e.checkUpdateNow() }),

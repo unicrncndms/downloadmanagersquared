@@ -19,6 +19,7 @@ windowHeader();
 
 // The engine looks for changes itself every few seconds; this looks now.
 $("refreshIfaces").onclick = () => act("refreshInterfaces", {}, "Connections refreshed");
+$("keepAll").onclick = () => act("keepAllConnections", {}, "Windows keeps every connection now");
 // Only on this click does DMS² contact a STUN server.
 $("checkLines").onclick = async () => {
   const btn = $("checkLines");
@@ -177,6 +178,7 @@ function renderIfaces(state, settings) {
   const hints = ipv6Hints(state);
   $("ipv6Hint").hidden = !hints.length;
   $("ipv6Hint").replaceChildren(...hints.map((t) => el("div", { class: "muted" }, t)));
+  $("wifiHint").hidden = !state.dropsWifi;
   $("uplinkWarn").hidden = !warnings.length;
   $("uplinkWarn").replaceChildren(...warnings.map((t) => el("div", { class: "warn" }, t)));
   showTunnels(ifaces, tunnels, settings);

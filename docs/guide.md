@@ -43,6 +43,18 @@ The extension's toolbar icon shows the list. A left click on the tray icon opens
 - **Test if they are separate lines** checks which connections reach the internet through the same line, by asking each for its public IP address (stun.cloudflare.com). Two that share a line don't add speed.
 - **Enable IPv6 (experimental)** (off) uses IPv6 too; each connection shows a badge with what it has.
 
+### Keep Wi-Fi connected next to a cable
+
+Windows is set by default to *minimize the number of simultaneous connections*: while a cable or a phone tethered over USB is connected, it may drop Wi-Fi, and DMS² loses that connection. When this can happen, Connections shows a note with **Keep all connected**. It asks for administrator rights and sets Windows to keep every connection; your connections drop for a few seconds while Windows applies it.
+
+By hand, in PowerShell as administrator (this works on Windows Home too, which has no Group Policy editor):
+
+```powershell
+New-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WcmSvc\GroupPolicy' -Name fMinimizeConnections -PropertyType DWord -Value 0 -Force; Restart-Service WcmSvc -Force
+```
+
+On Pro, the same setting is in the Group Policy editor: *Computer Configuration → Administrative Templates → Network → Windows Connection Manager → Minimize the number of simultaneous connections to the Internet or a Windows Domain*, set to *Enabled* with *0 = Allow simultaneous connections*. To undo it, delete the `fMinimizeConnections` value (or set the policy back to *Not configured*) and restart Windows.
+
 ## Sites with a link per IP
 
 Some file hosts hand out download links that only work from the IP address that asked for them. For those, DMS² opens the site once per connection, through that connection only, and takes each connection's own link. Your browser's own download keeps its link and goes on the main connection.
@@ -141,5 +153,5 @@ The extension works in Firefox and its relatives (LibreWolf, Waterfox, Floorp), 
 - **A download isn't taken over:** it is smaller than the takeover size, its site is under *Sites never taken over*, or the engine isn't running. Use *Download with DMS²* on its link.
 - **"Needs the page"** on a download: its link stopped working and DMS² doesn't know the page it came from. Click it and paste the page's address.
 - **A site asks you to click through every time:** it only accepts real clicks, or its buttons change from visit to visit. *Forget* it in Sites and logins and record it again, starting on the file's own page.
-- **Only one connection is used:** the server can't split a file (it is downloaded over the main connection), or the other connections are switched off or share one line (*Test if they are separate lines*).
+- **Only one connection is used:** the server can't split a file (it is downloaded over the main connection), or the other connections are switched off or share one line (*Test if they are separate lines*), or Windows dropped Wi-Fi for a cable ([Keep Wi-Fi connected next to a cable](#keep-wi-fi-connected-next-to-a-cable)).
 - **The log:** `%APPDATA%\downloadmanagersquared\engine.log` (it holds no URLs). Attach it to an [issue](https://github.com/unicrncndms/downloadmanagersquared/issues) when reporting a problem.
