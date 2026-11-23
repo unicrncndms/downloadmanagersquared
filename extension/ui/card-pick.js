@@ -44,7 +44,7 @@ function pickStep(id) {
     const row = (i) => el("label", {}, boxes[i], el("span", { class: "path" }, files[i].path), el("span", { class: "muted num" }, fmtBytes(sizes[i])));
     const tick = (idx, on) => idx.forEach((i) => { boxes[i].checked = on; boxes[i].dispatchEvent(new Event("change")); }); // each box tells its folder and the total
     const groups = fileFolders(files.map((f) => f.path));
-    const list = groups.length === 1 ? groups[0].items.map(row) : groups.map((g) => {
+    const list = groups.length === 1 ? groups[0].items.map(row) : groups.flatMap((g) => {
       if (!g.name) return g.items.map(row);
       const all = el("input", { type: "checkbox", checked: g.items.every((i) => boxes[i].checked), "aria-label": "Every file in " + g.name,
         onclick: (e) => { e.stopPropagation(); tick(g.items, e.target.checked); } });
