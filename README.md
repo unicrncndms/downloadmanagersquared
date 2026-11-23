@@ -67,7 +67,7 @@ Open source (MIT) and built by GitHub Actions: every release is [attested](#priv
 
 DMS² then runs in the tray. In Firefox the extension asks to enable containers, which it uses to open sites through one connection at a time; in Chrome and Edge, DMS² opens those sites in its own browser window.
 
-Then download a file of 100 MB or more as usual, or use *Download with DMS²* on a link's menu. Everything else is in the **[guide](docs/guide.md)**: adding downloads, connections, sites with a link per IP, Download as folder, torrents, FTP and SFTP, checksums, settings, VPN, several browsers, upgrade and uninstall, and what to do when something goes wrong.
+Then download a file of 100 MB or more as usual, or use *Download with DMS²* on a link's menu. Everything else, including upgrade, uninstall and troubleshooting, is in the **[guide](docs/guide.md)**.
 
 <p align="center"><img src="docs/img/store/hd/02-toolbar.png" width="800" alt="The DMS² toolbar button opens a panel with every download, its square map and the speed of each connection"></p>
 
@@ -75,8 +75,7 @@ Then download a file of 100 MB or more as usual, or use *Download with DMS²* on
 
 - **Takes over your browser's downloads.** Download as usual: files over 100 MB, magnet links, `.torrent` and Metalink (`.meta4`) files go to DMS² by themselves.
 - **Torrents** over all connections too.
-- **SFTP.** Paste an `sftp://user@host/path` link (with `:password` in it, or a key file in the box's Options): one SSH session per connection, each reading its part, over every connection. The first time a server is met you are asked to trust its key fingerprint, before any login is sent; a changed key fails the link with a warning. Logins are kept encrypted and can be removed in Settings.
-- **FTP and FTPS.** Paste an `ftp://` or `ftps://` link into Add download (or click one on a page): it downloads over every connection like any file, anonymously unless the link carries a login. The password is kept encrypted and never shown. Plain `ftp://` is unencrypted.
+- **SFTP, FTP and FTPS.** Paste an `sftp://`, `ftp://` or `ftps://` link: each connection logs in on its own and fetches its part. Logins are kept encrypted; an SFTP server's key is trusted only after you confirm it. See the [guide](docs/guide.md#ftp-and-ftps).
 - **Mirrors.** A Metalink, or a server that names mirrors with a checksum, lets each connection fetch from its own mirror, so one slow mirror doesn't hold back the rest. A mirror serving another file is dropped.
 - **Checksums.** Paste a SHA-256 or MD5, and the file is checked when it finishes.
 - **A queue you control.** Drag downloads into order or use the arrows. Drop a waiting download on a running one to take its place.
@@ -101,7 +100,7 @@ The programs aren't code-signed, but each release's zip, `dms-engine.exe` and `d
 
 ## Contributing
 
-How the engine and extension fit together, building and tests: [CONTRIBUTING.md](CONTRIBUTING.md). Terms used in the code and docs are in [CONTEXT.md](CONTEXT.md), decisions in [docs/adr/](docs/adr/).
+How the engine and extension fit together, building, tests, terms and decisions: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 
