@@ -87,7 +87,7 @@ function rowNums(d) {
   const pct = d.size > 0 ? `${Math.round(percent(d))}%` : "";
   if (finished(d) || ((d.status === "queued" || (d.status === "running" && !d.speed)) && !d.done)) return { main: d.size > 0 ? fmtBytes(d.size) : "", sub: "" };
   if (d.status === "seeding") return { main: "", sub: "" }; // its line says what it uploads
-  if (d.status === "running") return { main: fmtSpeed(d.speed), sub: [pct, `${fmtETA(d.eta)} left`].filter(Boolean).join(" · ") };
+  if (d.status === "running") return { main: fmtSpeed(d.speed), sub: [pct, d.size > 0 ? progressText(d.done, d.size) : "", `${fmtETA(d.eta)} left`].filter(Boolean).join(" · ") };
   return { main: pct || (d.done > 0 ? fmtBytes(d.done) : ""), sub: d.size > 0 ? progressText(d.done, d.size) : "" };
 }
 
@@ -255,7 +255,8 @@ function seedLine(d, settings) {
   const seeding = d.status === "seeding";
   if (!seeding && !(d.uploaded > 0)) return "";
   const target = seeding && settings && settings.seedRatio > 0 ? ` / ${settings.seedRatio.toFixed(2)}` : "";
-  return `↑ ${fmtSpeed(d.upSpeed || 0)} · ratio ${(d.ratio || 0).toFixed(2)}${target}`;
+  const r = d.ratio || 0;
+  return `↑ ${fmtSpeed(d.upSpeed || 0)} · ratio ${r > 0 && r < 0.01 ? "< 0.01" : r.toFixed(2)}${target}`;
 }
 
 // bulkActions: Pause all and Resume all show only while two or more

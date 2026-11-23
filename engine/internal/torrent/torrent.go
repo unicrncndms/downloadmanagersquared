@@ -136,18 +136,20 @@ func (t *Torrent) Summary() download.Summary {
 			s.FilesSize += f.Size
 		}
 	}
-	if t.st.Size > 0 {
-		s.Ratio = float64(t.st.Uploaded) / float64(t.st.Size)
-	}
+	s.Size = t.wantedSizeLocked()
 	switch {
 	case !t.st.Finished.IsZero():
-		s.Done = t.st.Size
+		s.Done = s.Size
 		s.Speed = 0
 	case t.t != nil && t.t.Info() != nil:
 		s.Done = t.wantDone
 		if s.Speed > 0 {
 			s.ETA = float64(s.Size-s.Done) / s.Speed
 		}
+	}
+	// Uploaded over what it has of the chosen files, as other clients count it.
+	if s.Done > 0 {
+		s.Ratio = float64(t.st.Uploaded) / float64(s.Done)
 	}
 	if t.active {
 		s.InSwarm = true
@@ -350,7 +352,8 @@ func (t *Torrent) run(ctx context.Context) {
 	if !t.poll(ctx, at, seedEvery, func() bool {
 		t.mu.Lock()
 		defer t.mu.Unlock()
-		return t.st.Size > 0 && float64(t.st.Uploaded) >= t.s.ratio()*float64(t.st.Size)
+		size := t.wantedSizeLocked()
+		return size > 0 && float64(t.st.Uploaded) >= t.s.ratio()*float64(size)
 	}) {
 		return
 	}
@@ -434,6 +437,15 @@ const (
 	pollEvery = 500 * time.Millisecond
 	seedEvery = 2 * time.Second
 )
+
+// wantedSizeLocked is the size of the files chosen to download, once known;
+// the whole torrent's until then.
+func (t *Torrent) wantedSizeLocked() int64 {
+	if t.wantSize > 0 {
+		return t.wantSize
+	}
+	return t.st.Size
+}
 
 // followMaxPeers sets at's peer limit to the session's, when it changed: the
 // setting, or the interfaces in use.

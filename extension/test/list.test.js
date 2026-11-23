@@ -51,6 +51,8 @@ test("seeding says how far it is to the ratio target", () => {
   // A torrent still downloading: its upload and ratio only.
   assert.equal(seedLine(dl("t", "running", { kind: "torrent", upSpeed: 0, ratio: 0, uploaded: 0 }), {}), "");
   assert.equal(seedLine(dl("t", "running", { kind: "torrent", upSpeed: 2e4, ratio: 0.01, uploaded: 1e6 }), {}), "↑ 20.0 KB/s · ratio 0.01");
+  // A ratio too small for two decimals isn't shown as none.
+  assert.equal(seedLine(dl("t", "running", { kind: "torrent", upSpeed: 2e4, ratio: 0.004, uploaded: 1e6 }), {}), "↑ 20.0 KB/s · ratio < 0.01");
 });
 
 test("Pause all and Resume all show only when two or more downloads can use them", () => {
@@ -292,7 +294,7 @@ test("a click shows at once: what a request will leave of the engine's state", (
 
 test("a row's two numbers", () => {
   const { rowNums } = require("../lib/list.js");
-  assert.deepEqual(rowNums(dl("a", "running", { size: 1000, done: 390, speed: 2e6, eta: 65 })), { main: "2.0 MB/s", sub: "39% · 1m 05s left" });
+  assert.deepEqual(rowNums(dl("a", "running", { size: 1000, done: 390, speed: 2e6, eta: 65 })), { main: "2.0 MB/s", sub: "39% · 390 B / 1.0 KB · 1m 05s left" });
   assert.deepEqual(rowNums(dl("c", "paused", { size: 2e9, done: 1e9 })), { main: "50%", sub: "1.0 GB / 2.0 GB" });
   assert.deepEqual(rowNums(dl("b", "queued", { size: 2e9, done: 0 })), { main: "2.0 GB", sub: "" });
   assert.deepEqual(rowNums(dl("e", "completed", { size: 2e9, done: 2e9 })), { main: "2.0 GB", sub: "" });
