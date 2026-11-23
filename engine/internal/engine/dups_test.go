@@ -33,7 +33,7 @@ func TestARepeatedLinkIsAskedAbout(t *testing.T) {
 	e.mu.Lock()
 	view := e.asksLocked()[0]
 	e.mu.Unlock()
-	if view.Existing != first || len(view.Choices) != 3 {
+	if view.Existing != first || len(view.Choices) != 3 || view.Text != `"f.iso" is already in the list (Queued).` {
 		t.Fatalf("question %+v", view)
 	}
 	if _, err := e.answerAsk(r["ask"], "show"); err != nil || listed() != 1 {

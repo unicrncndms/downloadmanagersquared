@@ -3,7 +3,9 @@ package engine
 import (
 	"cmp"
 	"errors"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -91,11 +93,24 @@ func (e *Engine) dupText(id string) string {
 	if d, err := e.queue.Get(id); err == nil {
 		s := d.Summary()
 		how = " (" + s.Label + ")"
-		if s.Filename != "" {
-			what = `"` + s.Filename + `"`
+		if name := cmp.Or(s.Filename, urlName(s.URL)); name != "" { // not probed yet: the link's own name
+			what = `"` + name + `"`
 		}
 	}
 	return what + " is already in the list" + how + "."
+}
+
+// urlName is the last part of a link's path ("f.iso"), or "" if it has none.
+func urlName(link string) string {
+	u, err := url.Parse(link)
+	if err != nil {
+		return ""
+	}
+	name := path.Base(u.Path)
+	if name == "." || name == "/" {
+		return ""
+	}
+	return name
 }
 
 // hold keeps r back until its question is answered.
