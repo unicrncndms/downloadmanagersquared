@@ -72,11 +72,11 @@ var testAdapters = []adapter{
 	// addresses, a ULA and a global DNS server, each twice, behind the IPv4 one.
 	{id: "dual", name: "WLAN 2", unicast: []unicast{
 		{ip: "fe80::650b:59b1:94ea:c416"},
-		{ip: "2a02:2c60:f110:a80:dc77:7e81:d623:5d50", prefix: ra, suffix: random},
-		{ip: "2a02:2c60:f110:a80:1e29:3239:c102:ce4a", prefix: ra, suffix: link},
+		{ip: "2001:db8:f110:a80:dc77:7e81:d623:5d50", prefix: ra, suffix: random},
+		{ip: "2001:db8:f110:a80:1e29:3239:c102:ce4a", prefix: ra, suffix: link},
 		{ip: "192.168.2.33"},
-	}, gateways: []string{"fe80::5e49:79ff:fedb:777f", "192.168.2.1"},
-		dns: []string{"fd00::1", "2a02:2c60:f110:a80::1", "fd00::1", "192.168.2.1", "2a02:2c60:f110:a80::1"}},
+	}, gateways: []string{"fe80::200:5eff:fe00:5301", "192.168.2.1"},
+		dns: []string{"fd00::1", "2001:db8:f110:a80::1", "fd00::1", "192.168.2.1", "2001:db8:f110:a80::1"}},
 	// IPv6 only: a deprecated address first, then the one to use; Windows'
 	// fec0 placeholders are no DNS servers.
 	{id: "v6", name: "Phone", unicast: []unicast{
@@ -134,10 +134,10 @@ func TestWithIPv6OnAdaptersGetTheirGlobalAddressGatewayAndDNS(t *testing.T) {
 		t.Errorf("v4: %+v", v4)
 	}
 	d := got["dual"]
-	if !d.IPv6.Equal(net.ParseIP("2a02:2c60:f110:a80:1e29:3239:c102:ce4a")) || !d.Gateway6.Equal(net.ParseIP("fe80::5e49:79ff:fedb:777f")) {
+	if !d.IPv6.Equal(net.ParseIP("2001:db8:f110:a80:1e29:3239:c102:ce4a")) || !d.Gateway6.Equal(net.ParseIP("fe80::200:5eff:fe00:5301")) {
 		t.Errorf("dual-stack: address %v gateway %v, want the public (not temporary) one and the router", d.IPv6, d.Gateway6)
 	}
-	if !reflect.DeepEqual(d.DNS, ips("fd00::1", "2a02:2c60:f110:a80::1", "192.168.2.1")) {
+	if !reflect.DeepEqual(d.DNS, ips("fd00::1", "2001:db8:f110:a80::1", "192.168.2.1")) {
 		t.Errorf("dual-stack DNS %v, want Windows' order, each once", d.DNS)
 	}
 	if !reflect.DeepEqual(d.Families(), []string{"IPv4", "IPv6"}) || !d.IP().Equal(d.IPv4) {
