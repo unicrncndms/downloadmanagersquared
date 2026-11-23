@@ -278,7 +278,12 @@ func serveConn(c *Conn, h Handler) {
 					resp = response{ID: req.ID, Error: "internal error"}
 				}
 			}()
+			start := time.Now()
 			res, err := h.Call(c, req.Method, req.Params)
+			if d := time.Since(start); d > slowCall {
+				// The pages give up on a call after a minute ("engine did not answer"): this names it.
+				log.Printf("ipc: %s took %s", req.Method, d.Round(time.Second))
+			}
 			resp.Result = res
 			if err != nil {
 				resp.Error = err.Error()
@@ -291,6 +296,9 @@ func serveConn(c *Conn, h Handler) {
 // requests are a few kilobytes; this only stops a runaway client from growing
 // the engine's memory without bound.
 const MaxMessage = 4 << 20
+
+// slowCall is how long a call may take before the log says so.
+const slowCall = 10 * time.Second
 
 // maxInflight is how many calls one client may have running at once.
 const maxInflight = 64
