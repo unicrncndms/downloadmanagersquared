@@ -22,14 +22,15 @@ function versionsClash(engine, extension) {
   const a = releaseVersion(engine);
   const b = releaseVersion(extension);
   if (!a || !b) return false;
-  return a[0] !== b[0] || (a[0] === 0 && a[1] !== b[1] && !engineBehind(engine, extension));
+  return !engineBehind(engine, extension) && (a[0] !== b[0] || (a[0] === 0 && a[1] !== b[1]));
 }
 
-// True when the extension is exactly one minor newer than the engine, same
-// major: they work together, and the engine's release is out or on its way.
+// True when the extension is one release newer than the engine: one minor
+// newer, same major, or the next major's first minor (1.0 with any 0.x). They
+// work together, and the engine's release is out or on its way.
 function engineBehind(engine, extension) {
   const a = releaseVersion(engine), b = releaseVersion(extension);
-  return !!a && !!b && a[0] === b[0] && b[1] === a[1] + 1;
+  return !!a && !!b && ((a[0] === b[0] && b[1] === a[1] + 1) || (b[0] === a[0] + 1 && b[1] === 0));
 }
 
 // "engine" or "extension": whichever of the two clashing versions is older.

@@ -24,15 +24,17 @@ func majorMinor(v string) (major, minor int, ok bool) {
 
 // Clash is whether two versions differ in what counts: the major version, or
 // before 1.0 the minor one. Patch releases never clash, and a development
-// build on either side skips the check. An extension one minor newer than the
-// engine is no clash: the stores publish the extension before GitHub publishes
-// its engine, and each release keeps working with the engine before it
-// (CONTRIBUTING.md). The other way round stays a clash.
+// build on either side skips the check. An extension one release newer than
+// the engine is no clash: one minor newer, or the next major's first minor
+// (1.0 with any 0.x, 2.0 with any 1.x). The stores publish the extension
+// before GitHub publishes its engine, and each release keeps working with the
+// engine before it (CONTRIBUTING.md). The other way round stays a clash.
 func Clash(engine, extension string) bool {
 	am, an, aok := majorMinor(engine)
 	bm, bn, bok := majorMinor(extension)
 	if !aok || !bok {
 		return false
 	}
-	return am != bm || (am == 0 && an != bn && bn != an+1)
+	nextRelease := bm == am && bn == an+1 || bm == am+1 && bn == 0
+	return !nextRelease && (am != bm || am == 0 && an != bn)
 }

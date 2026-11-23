@@ -370,6 +370,7 @@ $("addBox").addEventListener("submit", async (e) => {
       const r = await call("add", add);
       if (r && r.skipped) failed.push({ line, url, error: r.skipped }); // stays in the box, with why
       else if (r && r.ask) asked++; // held until answered above the list
+      else if (r && r.duplicate) failed.push({ line, url, error: "Already in the list" }); // an engine from before the questions (0.13)
     } catch (err) {
       failed.push({ line, url, error: err.message });
     }
