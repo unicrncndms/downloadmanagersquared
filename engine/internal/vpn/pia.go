@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -202,6 +203,9 @@ func (t *Tunnels) SetPIARegion(region string) {
 		p.acct.region = pia.Region{}
 	}
 	for _, te := range p.oursLocked() {
+		if t.ifaces[te.id].PIARegion != "" {
+			continue // a region of its own: this setting isn't its
+		}
 		if tn := te.stopLocked(); tn != nil {
 			stops = append(stops, tn)
 			te.retryAt = time.Time{}
@@ -218,7 +222,8 @@ func (p *piaProvider) config(ctx context.Context, te *entry, b *netif.Binding) (
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	p.t.mu.Lock()
-	a, regionID := p.acct, p.region
+	a, regionID := p.acct, p.regionForLocked(te.id)
+	te.region = regionID
 	p.t.mu.Unlock()
 	if a == nil {
 		return tunnel.Config{}, nil, errors.New("PIA isn't set up")
@@ -231,7 +236,7 @@ func (p *piaProvider) config(ctx context.Context, te *entry, b *netif.Binding) (
 	if err != nil {
 		return tunnel.Config{}, nil, err
 	}
-	srv, err := p.reserveServer(te, region.WG())
+	srv, err := p.reserveServer(te, region)
 	if err != nil {
 		return tunnel.Config{}, nil, err
 	}
@@ -254,37 +259,50 @@ func (p *piaProvider) config(ctx context.Context, te *entry, b *netif.Binding) (
 	}
 	gws = append(gws, srv)
 	return cfg, func(tn *tunnel.Tunnel) forwarder {
-		return &piaForwarder{p: p, id: te.id, tn: tn, b: b, forwards: region.PortForward, gateways: gws}
+		return &piaForwarder{p: p, id: te.id, tn: tn, b: b, region: regionID, forwards: region.PortForward, gateways: gws}
 	}, nil
 }
 
-// reserveServer picks te's server among a region's, the one fewest other
-// tunnels hold. PIA gives an account one peer IP per server and routes it to
-// the newest key, so two tunnels sharing a server would leave one of them dead.
-// Apart, each also gets its own exit IP.
-func (p *piaProvider) reserveServer(te *entry, servers []pia.Server) (pia.Server, error) {
+// regionForLocked is the PIA region an interface's tunnel uses: its own, else
+// PIA's setting ("" = the lowest latency).
+func (p *piaProvider) regionForLocked(ifaceID string) string {
+	if r := p.t.ifaces[ifaceID].PIARegion; r != "" {
+		return r
+	}
+	return p.region
+}
+
+// reserveServer picks a server of region for te that no other running tunnel
+// holds. PIA gives an account one peer IP per server and routes it to the
+// newest key, so a second tunnel on a server takes it from the first, which
+// then reconnects and takes it back: neither keeps its peers. With every
+// server held, te waits instead, retrying, until one is free or the user picks
+// another region for its interface. Apart, each tunnel gets its own exit IP.
+func (p *piaProvider) reserveServer(te *entry, region pia.Region) (pia.Server, error) {
+	servers := region.WG()
 	if len(servers) == 0 {
 		return pia.Server{}, errors.New("PIA's region has no WireGuard server")
 	}
 	p.t.mu.Lock()
 	defer p.t.mu.Unlock()
-	held := map[string]int{}
+	held := map[string]bool{}
 	for _, o := range p.oursLocked() {
-		if s := p.servers[o]; o != te && s != "" {
-			held[s]++
+		if s := p.servers[o]; o != te && s != "" && (o.t != nil || o.starting) {
+			held[s] = true
 		}
 	}
-	best := servers[0]
-	for _, s := range servers[1:] {
-		if held[s.CN] < held[best.CN] {
-			best = s
+	for _, s := range servers {
+		if !held[s.CN] {
+			p.servers[te] = s.CN
+			return s, nil
 		}
 	}
-	if held[best.CN] > 0 {
-		log.Printf("PIA: more tunnels than servers in the region; %s is shared and only one of its tunnels will carry traffic", best.CN)
+	delete(p.servers, te)
+	taken := "PIA's only server in " + region.Name + " carries another connection's tunnel"
+	if len(servers) > 1 {
+		taken = fmt.Sprintf("PIA's %d servers in %s carry other connections' tunnels", len(servers), region.Name)
 	}
-	p.servers[te] = best.CN
-	return best, nil
+	return pia.Server{}, errors.New(taken + ", and a server carries one tunnel at a time. Pick another region for this connection")
 }
 
 const (
@@ -299,6 +317,7 @@ type piaForwarder struct {
 	id       string
 	tn       *tunnel.Tunnel
 	b        *netif.Binding
+	region   string       // the region its tunnel asked for
 	forwards bool         // the region forwards ports
 	gateways []pia.Server // where port forwarding answers inside the tunnel, best first
 	sig      *pia.Signature
@@ -322,7 +341,7 @@ func (f *piaForwarder) forward(now time.Time) {
 		return
 	}
 	f.busy = true
-	a, regionID := f.p.acct, f.p.region
+	a, regionID := f.p.acct, f.region
 	f.p.t.goJob(func() {
 		err := f.bind(now, a, regionID)
 		f.p.t.mu.Lock()
@@ -471,7 +490,10 @@ func (p *piaProvider) session(ctx context.Context, a *account, regionID string, 
 		p.logins.Unlock()
 	}
 	t.mu.Lock()
-	a.token, a.tokenAt, a.regions, a.regionsAt, a.region, a.err = token, tokenAt, regions, regionsAt, region, ""
+	a.token, a.tokenAt, a.regions, a.regionsAt, a.err = token, tokenAt, regions, regionsAt, ""
+	if regionID == p.region { // an interface's own region isn't the one every other uses
+		a.region = region
+	}
 	t.mu.Unlock()
 	return token, region, nil
 }

@@ -43,7 +43,11 @@ func (e *Engine) tickVPN(now time.Time) {
 func (e *Engine) vpnIfacesLocked() []vpn.Iface {
 	var out []vpn.Iface
 	for id, ent := range e.ifaces {
-		out = append(out, vpn.Iface{ID: id, Name: e.nameLocked(id, ent.info.Name), Binding: ent.binding, Usable: ent.present && e.enabledLocked(ent)})
+		var region string
+		if s := e.settings.Interfaces[id]; s != nil {
+			region = s.PIARegion
+		}
+		out = append(out, vpn.Iface{ID: id, Name: e.nameLocked(id, ent.info.Name), Binding: ent.binding, Usable: ent.present && e.enabledLocked(ent), PIARegion: region})
 	}
 	for id, s := range e.settings.Interfaces {
 		if e.ifaces[id] == nil {

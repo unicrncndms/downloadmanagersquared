@@ -39,6 +39,9 @@ type Iface struct {
 	Name    string         // for messages; "" if not known
 	Binding *netif.Binding // nil if it isn't connected
 	Usable  bool           // present and enabled: its tunnel may run
+	// PIARegion is the PIA region of its tunnel, "" for the one PIA's own
+	// setting picks. Interfaces in different regions get different exit IPs.
+	PIARegion string
 }
 
 // Options set up Tunnels.
@@ -114,6 +117,7 @@ type entry struct {
 	retryAt  time.Time
 	fails    int // starts in a row that failed or lost the server
 	err      string
+	region   string // the PIA region its latest start asked for
 }
 
 // stopLocked takes te's tunnel down, returning the device for the caller to
@@ -265,7 +269,11 @@ func (t *Tunnels) sync(now time.Time) {
 				te.fails = 0
 			}
 			lost := !te.up && now.Sub(te.started) > tunnelGrace
-			if !usable || te.on != ifc.Binding || lost {
+			moved := te.prov == provider(t.pia) && te.region != t.pia.regionForLocked(id)
+			if moved {
+				te.retryAt = time.Time{}
+			}
+			if !usable || te.on != ifc.Binding || lost || moved {
 				if lost {
 					te.err, te.retryAt = "the VPN server doesn't answer"+te.prov.lostHint(), now.Add(te.nextRetry())
 				}

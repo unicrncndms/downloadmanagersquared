@@ -170,6 +170,9 @@ func (e *Engine) setInterface(p ifacePatch) Settings {
 		if p.Label != nil {
 			is.Label = cleanLabel(*p.Label)
 		}
+		if p.PIARegion != nil {
+			is.PIARegion = *p.PIARegion
+		}
 		if p.Color != nil && *p.Color >= 0 && *p.Color < colorCount {
 			v := *p.Color
 			is.Color = &v
@@ -219,8 +222,9 @@ type ifacePatch struct {
 	Upload        *bool   `json:"upload"`
 	UploadLimit   *int64  `json:"uploadLimit"`
 	DownloadLimit *int64  `json:"downloadLimit"`
-	Color         *int    `json:"color"` // 0..5; anything else is ignored
-	Label         *string `json:"label"` // "" gives the Windows name back
+	Color         *int    `json:"color"`     // 0..5; anything else is ignored
+	Label         *string `json:"label"`     // "" gives the Windows name back
+	PIARegion     *string `json:"piaRegion"` // "" follows PIA's own region
 }
 
 // cleanLabel is a name the user typed: trimmed, at most 40 characters.

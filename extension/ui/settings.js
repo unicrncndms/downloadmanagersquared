@@ -67,12 +67,21 @@ function tunnelRow(i, tun) {
       act("setForwardedPort", { iface: i.id, port: n }, n ? `Forwarded port ${n} set` : "Forwarded port cleared");
     });
   }
+  // Its own PIA region: tunnels in different regions get different exit IPs, and two can't share a server.
+  let region = null;
+  if (pia && piaRegionList.length) {
+    region = el("select", { "aria-label": `PIA region: ${i.name}` }, regionOptions("Same as PIA's region"));
+    region.value = i.piaRegion || "";
+    region.addEventListener("change", () => act("setInterface", { id: i.id, piaRegion: region.value }, "Region saved"));
+  }
   return el("div", { class: "tunnel-row" },
     el("b", {}, i.name),
     tun ? el("div", { class: "vpn" },
       badge((pia ? "PIA · " : "") + (TUNNEL_TEXT[tun.tunnelState] || tun.tunnelState).replace(/^VPN /, ""), TUNNEL_CLASS[tun.tunnelState], tun.ip),
       tun.tunnelError ? el("span", { class: "muted tunnel-error" }, tun.tunnelError) : null)
       : el("span", { class: "muted" }, "No tunnel"),
+    region && el("label", {}, "Region ", region,
+      el("span", { class: "info", tabindex: "0", "data-tip": "Where this connection's tunnel comes out. Connections in different regions get different IPs, which torrents see as different peers. A PIA server carries one of your tunnels at a time, so in a region with one server only one connection connects." })),
     port && el("label", {}, "Forwarded port ", port,
       el("span", { class: "info", tabindex: "0", "data-tip": "A port your VPN provider forwards to this connection, for torrent peers to connect in (empty: none, or found by NAT-PMP). AirVPN: leave the port's Local field empty, and with several connections give each its own port, linked to that connection's device." })),
     pia ? null : tun
@@ -163,7 +172,7 @@ let tunnelSig = "";
 function showTunnels(ifaces, tunnels, settings) {
   const box = $("tunnelBox");
   box.hidden = !tunnelsShown(settings.vpnProvider, tunnels.size);
-  const sig = JSON.stringify([ifaces.map((i) => { const t = tunnels.get(i.id); return [i.id, i.name, t && [t.provider, t.tunnelState, t.tunnelError, t.ip, t.forwardedPort]]; })]);
+  const sig = JSON.stringify([ifaces.map((i) => { const t = tunnels.get(i.id); return [i.id, i.name, i.piaRegion, t && [t.provider, t.tunnelState, t.tunnelError, t.ip, t.forwardedPort]]; }), piaRegionList.length]);
   if (sig === tunnelSig || $("tunnelList").contains(document.activeElement)) return;
   tunnelSig = sig;
   $("tunnelList").replaceChildren(...ifaces.filter((i) => i.present || tunnels.has(i.id)).map((i) => tunnelRow(i, tunnels.get(i.id))));
@@ -400,6 +409,12 @@ const PIA_STATE = {
   "login-failed": ["Login refused: sign in again", "bad"], error: ["Trouble connecting", "warn"],
 };
 let piaRegionsLoaded = false;
+let piaRegionList = []; // PIA's regions once loaded, for every region picker
+
+function regionOptions(first) {
+  return [el("option", { value: "" }, first),
+    ...piaRegionList.map((r) => el("option", { value: r.id }, r.name + (r.portForward ? "" : " (no port forwarding)")))];
+}
 
 function renderPIA(p, settings) {
   piaSignedIn = !!p.configured;
@@ -413,10 +428,10 @@ function renderPIA(p, settings) {
   if (!piaRegionsLoaded) {
     piaRegionsLoaded = true;
     call("piaRegions", {}).then((regions) => {
-      $("piaRegion").replaceChildren(el("option", { value: "" }, "Lowest latency"),
-        ...regions.sort((a, b) => a.name.localeCompare(b.name))
-          .map((r) => el("option", { value: r.id }, r.name + (r.portForward ? "" : " (no port forwarding)"))));
+      piaRegionList = regions.sort((a, b) => a.name.localeCompare(b.name));
+      $("piaRegion").replaceChildren(...regionOptions("Lowest latency"));
       $("piaRegion").value = settings.piaRegion || "";
+      renderIfaces(latestState, settings); // the tunnels' pickers, without waiting for the next state
     }).catch(() => { piaRegionsLoaded = false; });
   }
 }

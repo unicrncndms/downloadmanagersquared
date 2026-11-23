@@ -22,11 +22,14 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
     return f.settings;
   };
 
-  // setInterface changes one connection's colour, as the engine would, and feeds it.
-  const applyInterface = ({ id, color }) => {
+  // setInterface changes one connection's colour or PIA region, as the engine would, and feeds it.
+  const applyInterface = ({ id, color, piaRegion }) => {
     const f = window.fixture();
     if (Number.isInteger(color) && color >= 0 && color < 6) {
       f.state = { ...f.state, interfaces: f.state.interfaces.map((i) => (i.id === id ? { ...i, color } : i)) };
+    }
+    if (typeof piaRegion === "string") {
+      f.state = { ...f.state, interfaces: f.state.interfaces.map((i) => (i.id === id ? { ...i, piaRegion } : i)) };
     }
     window.feed(f);
   };
@@ -41,6 +44,7 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
         : method === "sftpHostKeys" || method === "sftpLogins" ? (window.fixture()[method] || [])
         : method === "browseFolder" ? { dir: "D:\\Picked" }
         : method === "checkLines" ? window.fixture().lines || []
+        : method === "piaRegions" ? window.fixture().piaRegions || []
         : method === "diagnostics" ? `DMS² 0.3.0 diagnostics (harness)
 Download ${params.id}` : method === "downloadLog" ? (window.fixture().logs || {})[params.id] || [] : undefined),
     subscribe(fn) {

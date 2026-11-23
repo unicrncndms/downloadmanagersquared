@@ -110,6 +110,9 @@ type PIA struct {
 	// Unanswering hands out a server key no server has, so tunnels start but
 	// never get an answer. Set it before the first tunnel starts.
 	Unanswering bool
+	// Germany splits the servers: "nl" keeps the first, a region "de"
+	// (Germany) gets the rest. Set it before the server list is read.
+	Germany bool
 }
 
 // NewPIA is a region "nl" (Netherlands) of n WireGuard servers. If it forwards
@@ -146,7 +149,14 @@ func NewPIA(t testing.TB, forwards bool, n int) *PIA {
 			}
 			fmt.Fprint(w, `{"token":"TOKEN"}`)
 		case "/servers":
-			fmt.Fprintf(w, `{"regions":[{"id":"nl","name":"Netherlands","port_forward":%v,"servers":{"meta":[{"ip":"%s","cn":"nl"}],"wg":[%s]}}]}`+"\nSIG\n", forwards, host, strings.Join(wg, ","))
+			region := func(id, name string, wg []string) string {
+				return fmt.Sprintf(`{"id":"%s","name":"%s","port_forward":%v,"servers":{"meta":[{"ip":"%s","cn":"%s"}],"wg":[%s]}}`, id, name, forwards, host, id, strings.Join(wg, ","))
+			}
+			regions := region("nl", "Netherlands", wg)
+			if f.Germany {
+				regions = region("nl", "Netherlands", wg[:1]) + "," + region("de", "Germany", wg[1:])
+			}
+			fmt.Fprintf(w, `{"regions":[%s]}`+"\nSIG\n", regions)
 		}
 	}))
 	t.Cleanup(web.Close)

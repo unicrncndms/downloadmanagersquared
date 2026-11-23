@@ -309,7 +309,7 @@ func TestEveryNonVPNInterfaceIsOnWithUploadByDefault(t *testing.T) {
 	if u := upload(); !u["eth"] || u["lte"] {
 		t.Fatalf("upload: %v, want on for Ethernet and off for the phone the user switched off", u)
 	}
-	if _, err := e.Call(nil, "setInterface", []byte(`{"id":"lte","upload":true,"downloadLimit":500000,"uploadLimit":100000}`)); err != nil {
+	if _, err := e.Call(nil, "setInterface", []byte(`{"id":"lte","upload":true,"downloadLimit":500000,"uploadLimit":100000,"piaRegion":"de"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if u := upload(); !u["lte"] {
@@ -319,8 +319,16 @@ func TestEveryNonVPNInterfaceIsOnWithUploadByDefault(t *testing.T) {
 		t.Fatalf("phone limits = up %d down %d, want 100000 and 500000", up, down)
 	}
 	v := ifaceView(t, e, "lte")
-	if !v.Upload || v.UploadLimit != 100000 || v.DownloadLimit != 500000 {
+	if !v.Upload || v.UploadLimit != 100000 || v.DownloadLimit != 500000 || v.PIARegion != "de" {
 		t.Fatalf("phone shown as %+v", v)
+	}
+	e.mu.Lock()
+	ifs := e.vpnIfacesLocked()
+	e.mu.Unlock()
+	for _, i := range ifs {
+		if i.ID == "lte" && i.PIARegion != "de" {
+			t.Fatalf("the phone's tunnel was handed region %q, want de", i.PIARegion)
+		}
 	}
 }
 

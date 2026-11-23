@@ -46,6 +46,8 @@ PIA has no such file. Its own scripts ([pia-foss/manual-connections](https://git
 4. The server forgets keys that aren't used for a while, and when it restarts. The config only lives as long as that registration. So DMS² registers a new key every time a tunnel starts rather than keeping a config.
 5. Port forwarding goes through PIA's API too: a signature fetched inside the tunnel, valid for about two months, plus a "bind" every 15 minutes.
 
+PIA gives one account one tunnel per server: a second key registered on a server takes the traffic from the first. So DMS² puts each connection's tunnel on a server of its own, which also gives each its own exit IP. When every server of the region already carries one of your tunnels, the next connection waits and says so, rather than knock the other off. Under **VPN** → **Tunnels**, give each connection a **Region** of its own (by default it follows PIA's region): connections in different regions always get different servers and IPs.
+
 That's why PIA needs your login and every other provider doesn't. DMS² stores the PIA login encrypted for your Windows user (DPAPI, see [ADR 0005](adr/0005-secrets-at-rest-use-dpapi.md)), never shows it again, and only sends it to PIA. Picking **None** as the provider means PIA code never runs and nothing is stored.
 
 ## Port forwarding, by provider type

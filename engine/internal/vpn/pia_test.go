@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,7 +98,7 @@ func TestAnUnreadablePIALoginIsSetAside(t *testing.T) {
 }
 
 func TestInterfacesStartingTogetherShareOneLogin(t *testing.T) {
-	f := vpntest.NewPIA(t, false, 1)
+	f := vpntest.NewPIA(t, false, 3) // a server each
 	r := piaRig(t, f, "lo", "wifi", "eth")
 	r.tick(time.Now())
 	if err := r.SetPIA("p0123456", "right"); err != nil {
@@ -280,7 +281,7 @@ func TestALostPIATunnelSaysNothingAboutExpiredConfigs(t *testing.T) {
 
 // Interfaces that start together measure the regions once.
 func TestPIAStartsTogetherProbeTheRegionsOnce(t *testing.T) {
-	f := vpntest.NewPIA(t, false, 1)
+	f := vpntest.NewPIA(t, false, 2)
 	r := newRig(t, Options{PIA: f.API}, "lo", "lo2")
 	r.tick(time.Now())
 	if err := r.SetPIA("p0123456", "right"); err != nil {
@@ -310,5 +311,74 @@ func TestRetriesStartAtFiveSecondsAndBackOffToThirty(t *testing.T) {
 	jitter = func() float64 { return 1 }
 	if d := (&entry{}).nextRetry(); d != 6*time.Second {
 		t.Fatalf("first retry with the most jitter: %v", d)
+	}
+}
+
+// A region with one server and two interfaces: the second tunnel waits rather
+// than take the server from the first, which would then take it back.
+func TestASecondTunnelWaitsRatherThanShareAServer(t *testing.T) {
+	f := vpntest.NewPIA(t, false, 1)
+	r := piaRig(t, f, "lo", "lo2")
+	r.tick(time.Now())
+	if err := r.SetPIA("p0123456", "right"); err != nil {
+		t.Fatal(err)
+	}
+	var upID, waitID string
+	waitFor(t, "one tunnel to come up", 30*time.Second, func() bool {
+		r.tick(time.Now())
+		for _, id := range []string{"lo", "lo2"} {
+			if _, ok := r.Up(id); ok {
+				upID, waitID = id, map[string]string{"lo": "lo2", "lo2": "lo"}[id]
+				return true
+			}
+		}
+		return false
+	})
+	first, _ := r.Up(upID)
+	for i := range 3 { // retries come and go: the first tunnel keeps its server
+		r.tick(time.Now().Add(time.Duration(i+1) * time.Minute))
+	}
+	if again, ok := r.Up(upID); !ok || again.Gen != first.Gen || f.Keys.Load() != 1 {
+		t.Fatalf("the first tunnel: up %v, generation %d (was %d), %d keys registered", ok, again.Gen, first.Gen, f.Keys.Load())
+	}
+	if s := r.status(t, waitID, time.Now()); s.State != "down" || !strings.Contains(s.Err, "Pick another region") {
+		t.Fatalf("the waiting tunnel shown as %+v", s)
+	}
+}
+
+// An interface with a region of its own connects there, and leaves PIA's own
+// region to the others.
+func TestAnInterfaceWithItsOwnRegionConnectsThere(t *testing.T) {
+	f := vpntest.NewPIA(t, false, 2)
+	f.Germany = true // nl: one server, de: one server
+	r := piaRig(t, f, "lo", "lo2")
+	r.iface("lo2").PIARegion = "de"
+	r.tick(time.Now())
+	if err := r.SetPIA("p0123456", "right"); err != nil {
+		t.Fatal(err)
+	}
+	r.waitUp(t, "lo", "lo2")
+	if v := r.PIA(); v.Region != "Netherlands" {
+		t.Fatalf("PIA's region shown as %q", v.Region)
+	}
+	lo, _ := r.Up("lo")
+	r.SetPIARegion("nl") // PIA's own region reconnects only the tunnels that follow it
+	if again, ok := r.Up("lo2"); !ok || f.Keys.Load() != 2 {
+		t.Fatalf("lo2 after PIA's region changed: up %v, %+v, %d keys", ok, again, f.Keys.Load())
+	}
+	r.waitUp(t, "lo")
+	r.iface("lo2").PIARegion = "" // now both want nl's one server: lo keeps it
+	r.tick(time.Now())
+	if _, ok := r.Up("lo2"); ok {
+		t.Fatal("lo2 stayed up in Germany after its region was cleared")
+	}
+	for i := range 3 {
+		r.tick(time.Now().Add(time.Duration(i+1) * time.Minute))
+	}
+	if again, ok := r.Up("lo"); !ok || again.Gen == lo.Gen {
+		t.Fatalf("lo after PIA's region change and lo2 joining nl: up %v, generation %d (was %d)", ok, again.Gen, lo.Gen)
+	}
+	if s := r.status(t, "lo2", time.Now()); !strings.Contains(s.Err, "Netherlands") {
+		t.Fatalf("lo2 waiting for nl's server shown as %+v", s)
 	}
 }

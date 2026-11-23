@@ -290,6 +290,17 @@ const FIXTURES = {
 
 // The Downloads window with the SFTP states.
 FIXTURES["store-popup"] = { ...FIXTURES.store, host: { version: "0.3.0", userAgent: null } };
+// The Downloads window signed in to PIA: a tunnel per line, one of them waiting for a server of its region.
+FIXTURES.windowPia = { ...FIXTURES.window,
+  settings: { ...FIXTURES.window.settings, vpnProvider: "pia", piaRegion: "nl" },
+  state: { ...STATE, pia: { configured: true, state: "ok", region: "Netherlands" },
+    interfaces: [...IFACES.filter((i) => !i.tunnel).map((i) => i.id === "wifi" ? { ...i, piaRegion: "de" } : i),
+      { id: "eth~vpn", color: 0, name: "VPN via Ethernet", ip: "10.9.0.2", present: true, enabled: true, tunnel: true, of: "eth", provider: "pia",
+        tunnelState: "up", connections: 4, socksPort: 50004, speed: 2.1e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "reachable" },
+      { id: "wifi~vpn", color: 1, name: "VPN via Wi-Fi", ip: "", present: true, enabled: true, tunnel: true, of: "wifi", provider: "pia",
+        tunnelState: "down", tunnelError: "PIA's only server in Germany carries another connection's tunnel, and a server carries one tunnel at a time. Pick another region for this connection",
+        connections: 4, socksPort: 50005, speed: 0, upload: true, uploadLimit: 0, downloadLimit: 0 }] },
+  piaRegions: [{ id: "nl", name: "Netherlands", portForward: true }, { id: "de", name: "Germany", portForward: true }, { id: "us_east", name: "US East", portForward: false }] };
 FIXTURES.windowSftp = { ...FIXTURES.sftp, recipes: null, host: { version: "0.3.0", userAgent: null, openDownloads: true } };
 
 // What the real engine adds to every download and to each group of them (Present

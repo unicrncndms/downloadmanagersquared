@@ -32,9 +32,10 @@ type IfaceView struct {
 	AvgSpeed    float64  `json:"avgSpeed,omitempty"` // bytes per second it manages alone, averaged over time nothing held it back; 0 until known
 
 	Upload        bool   `json:"upload"`
-	UploadLimit   int64  `json:"uploadLimit"`   // bytes per second, 0 = none
-	DownloadLimit int64  `json:"downloadLimit"` // bytes per second, 0 = none
-	Incoming      string `json:"incoming"`      // torrent peers can connect in: "reachable", "forwarded" (a port the user typed in, unchecked), "outgoing" (only), "" (not known yet)
+	UploadLimit   int64  `json:"uploadLimit"`         // bytes per second, 0 = none
+	DownloadLimit int64  `json:"downloadLimit"`       // bytes per second, 0 = none
+	Incoming      string `json:"incoming"`            // torrent peers can connect in: "reachable", "forwarded" (a port the user typed in, unchecked), "outgoing" (only), "" (not known yet)
+	PIARegion     string `json:"piaRegion,omitempty"` // its PIA tunnel's region; "": PIA's own setting
 
 	// Tunnels are paths of their own, listed after the interfaces.
 	Tunnel        bool   `json:"tunnel,omitempty"`
@@ -163,6 +164,10 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		}
 		sort.Strings(same)
 		up, down := ent.shaper.Limits()
+		var region string
+		if s := e.settings.Interfaces[id]; s != nil {
+			region = s.PIARegion
+		}
 		views = append(views, IfaceView{
 			ID: id, Name: e.nameLocked(id, ent.info.Name), WindowsName: ent.info.Name, Description: ent.info.Description, IP: ipText(ent.info.IP()), IP6: ipText(ent.info.IPv6),
 			Families: ent.info.Families(),
@@ -170,7 +175,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
 			SocksPort: ent.socks.Port(), Speed: speeds[id], AvgSpeed: e.bases.avg(id),
 			Upload: e.uploadLocked(id), UploadLimit: up, DownloadLimit: down,
-			Incoming: incomingText(ent.incoming), HasTunnel: hasTunnel[id], SameRouter: same,
+			Incoming: incomingText(ent.incoming), HasTunnel: hasTunnel[id], SameRouter: same, PIARegion: region,
 		})
 	}
 	sort.Slice(views, func(i, j int) bool {
