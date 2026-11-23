@@ -6,9 +6,14 @@ Results are in [results.csv](results.csv), one row per download. [bench.ps1](ben
 
 **Speed.** The same file from the same server, one after the other:
 
-- each connection alone, one request (`curl --interface`);
-- a conventional download manager over the Windows default connection: aria2 with 16 requests, IDM and JDownloader, each one that is installed, with its own settings;
-- DMS² over every connection it is set to use. Its time runs from adding the link to the finished file, so it includes finding out what the server allows.
+- on each connection alone: one request (`curl --interface`), and a conventional download manager: aria2, IDM and JDownloader, each one that is installed;
+- DMS² over every connection it is set to use, and (`-Unattended`) on each connection alone, the others switched off in its settings for the run.
+
+aria2 is bound to the line's address. IDM and JDownloader can't be bound, so the script makes the line the Windows default for their runs (the lowest interface metric) and puts every metric back afterwards. That needs an elevated shell; without one they run only on the current default line, and the script says so.
+
+Every tool makes 8 requests per line (`-Requests`), except curl's one: aria2 `-x8`, or `-x16` over two lines; DMS² with *Requests per connection* at 8 for the run (any line's own setting too, all put back afterwards); Plexo with 8 streams per network, so it doesn't add more; IDM and JDownloader with their own setting, which must be 8. Every row's note says the count, so runs at another count stay apart in `-Summary`.
+
+Every tool is timed the same way: from the first MB in, by the lines' byte counters (sampled every 250 ms), until the tool is done: the whole file under its name with nothing still writing it (a virus scan reading it doesn't hold the time up), aria2 or curl exiting, DMS² or Plexo saying it finished. A tool's start-up and how it picks up the link (JDownloader's Folder Watch) don't count. What it does after the last byte, joining parts or moving the file, does. The console prints that time next to the time from handing over the link. Nothing else may use the lines meanwhile, as other traffic counts too. A run whose counters show nothing falls back to its wall time. Rows before 2026-11-24 used wall time, which favoured aria2.
 
 Speed is the file's size over that time. The default file is the Arch Linux ISO (1.3 GB) from kernel.org's mirror, a distribution server built for large downloads; the speed-test servers we tried first (OVH, Hetzner) cut off our lines; a server slower than your lines together measures the server, not DMS².
 
@@ -27,15 +32,16 @@ It measures each connection alone, then the other download managers, then asks y
 
 - A tool you timed by hand: `-Tool "Free Download Manager" -Seconds 84`
 - Skip the other download managers: `-NoOthers`
+- Redo one step whose run went wrong (a line dropped mid-run): `-Only lines|aria2|IDM|JDownloader|Plexo|DMS` (`DMS` needs `-Unattended`). Delete the bad row from the CSV first.
 - What the lines are: `-Note "250 Mbit cable + 5G hotspot"`
 
 ## The other download managers
 
-Each runs without anyone watching, into its own folder under `%TEMP%`, and its time runs from handing it the link to the whole file on disk. A tool that is not installed is skipped with a line saying why.
+Each runs without anyone watching. Every tool, DMS² included, writes into its own subfolder of one folder, so all of them join and write on the same drive: `dms-bench` in DMS²'s download folder, or `-Dir <folder>` (`%TEMP%\dms-bench` when DMS² isn't running). curl writes nothing: it measures the line. A tool that is not installed is skipped with a line saying why.
 
-- **aria2**: `aria2c` on the PATH. `-x16 -s16 -k1M`.
-- **IDM**: found through its registry entry, or `-IDM <path to IDMan.exe>`. Started as `IDMan.exe /d <link> /p <folder> /f <name> /n`; IDM moves the file into the folder only once it is whole. Turn off IDM's "download complete" window (Options, Downloads) so runs don't wait on it. IDM must not be catching the browser's downloads while DMS² runs.
-- **JDownloader**: needs JDownloader running with *Folder Watch* on (Settings, Extensions, Folder Watch). The script drops a `.crawljob` into JDownloader's `folderwatch` folder (found in its install folder, or `-JDownloader <folder>`); JDownloader adds and starts it, writes `name.part` and renames it when done. Its *max. chunks per download* setting is what it uses: set it to 8 or more, as JDownloader's default of 1 measures a single request. The run stays in JDownloader's list; remove it there.
+- **aria2**: `aria2c` on the PATH. `-x8 -s8 -k1M`.
+- **IDM**: found through its registry entry, or `-IDM <path to IDMan.exe>`. Started as `IDMan.exe /d <link> /p <folder> /f <name> /n`; IDM moves the file into the folder only once it is whole. From a shell IDM won't take a link from (a sandboxed app, such as Claude's desktop app), add `-IDMViaTask`: the link goes to IDM through a one-off scheduled task. Set IDM's *Default max. conn. number* to 8 (Options, Connection) and its *Temporary directory* to the same drive as the bench folder (Options, Save to), as IDM joins its parts from there; the script can read neither. Turn off IDM's "download complete" window (Options, Downloads) so runs don't wait on it. IDM must not be catching the browser's downloads while DMS² runs.
+- **JDownloader**: needs JDownloader running with *Folder Watch* on (Settings, Extensions, Folder Watch). The script drops a `.crawljob` into JDownloader's `folderwatch` folder (found in its install folder, or `-JDownloader <folder>`); JDownloader adds and starts it, writes `name.part` and renames it when done. Its *max. chunks per download* setting is what it uses: set it to 8 (JDownloader's default is 1); the script skips JDownloader with a line saying so when it isn't. The run stays in JDownloader's list; remove it there.
 
 The rows keep each tool's name. What the README and any summary show is *a conventional download manager*: the average of the tools' own averages (ADR 0012), so a tool run more often doesn't count more:
 
@@ -43,14 +49,15 @@ The rows keep each tool's name. What the README and any summary show is *a conve
 powershell -ExecutionPolicy Bypass -File bench.ps1 -Summary
 ```
 
-It prints, per set of lines (`note`) and link, each line alone, a conventional download manager (and how many tools went into it), and DMS².
+It prints, per set of lines (`note`) and link: each line alone; a conventional download manager on each line (and how many tools went into it; `Windows default` for rows from before every line was run); DMS² over every line; DMS² on each line alone.
 
 ## Your own comparison
 
-`-Personal` adds tools that also use every connection, for your own comparison only. Their rows go to `results-personal.csv`, which git ignores, and `-Summary` shows them by name from that file.
+`-Personal` adds tools that also use every connection, for your own comparison only. Their rows go to `results-personal.csv`, which git ignores, and `-Summary` shows them by name and lines from that file.
 
 - **aria2 over every line**: `--multiple-interface` with each line's IPv4 address, needs two lines up.
-- A tool with no command line, such as Plexo: time it by hand with `-Tool Plexo -Seconds 84 -Personal`.
+- **Plexo**: over every line, then on each line alone. Plexo has no command line, so the script starts it with Electron's remote debugging (`--remote-debugging-port=9339`) and calls the API of Plexo's own window (`probeUrl`, `startDownload`, `listHistory`), as Plexo's tests do. Quit Plexo first (tray icon, Quit): a Plexo already running can't open the port, and the script stops the one it started when done. Its finished runs stay in Plexo's history.
+- Any other tool with no command line: time it by hand with `-Tool <name> -Seconds 84 -Personal`.
 
 ## Without anyone watching
 
