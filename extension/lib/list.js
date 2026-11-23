@@ -82,10 +82,10 @@ function tileOf(d) {
 
 // rowNums are the two numbers at the end of a download's row: what matters
 // most now, and under it what places it. Running: the speed, then how far and
-// how long. At rest: how far, then the bytes. Not begun or finished: its size.
+// how long. At rest: how far, then the bytes. Not begun (queued, or running with nothing fetched yet) or finished: its size.
 function rowNums(d) {
   const pct = d.size > 0 ? `${Math.round(percent(d))}%` : "";
-  if (finished(d) || (d.status === "queued" && !d.done)) return { main: d.size > 0 ? fmtBytes(d.size) : "", sub: "" };
+  if (finished(d) || ((d.status === "queued" || (d.status === "running" && !d.speed)) && !d.done)) return { main: d.size > 0 ? fmtBytes(d.size) : "", sub: "" };
   if (d.status === "seeding") return { main: "", sub: "" }; // its line says what it uploads
   if (d.status === "running") return { main: fmtSpeed(d.speed), sub: [pct, `${fmtETA(d.eta)} left`].filter(Boolean).join(" · ") };
   return { main: pct || (d.done > 0 ? fmtBytes(d.done) : ""), sub: d.size > 0 ? progressText(d.done, d.size) : "" };

@@ -23,6 +23,7 @@ type LinkSummary struct {
 	Label    string `json:"label"`
 	Tone     string `json:"tone,omitempty"`
 	CanRetry bool   `json:"canRetry,omitempty"`
+	Busy     bool   `json:"busy,omitempty"` // the server pushed back: the connection strip says busy
 
 	// Backoff, only for the label.
 	allowed  int  // connections backoff allows right now

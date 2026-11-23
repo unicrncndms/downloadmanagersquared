@@ -210,7 +210,7 @@ function renderStrip(s) {
   const ifs = (s.interfaces || []).filter((i) => i.present !== false && i.enabled);
   const idle = (i) => !!s.active && !(i.speed > 0);
   // Held back on some download right now: the server busy, or backing off.
-  const busy = new Set((s.downloads || []).flatMap((d) => Object.keys(d.links || {}).filter((id) => d.links[id].tone === "warn")));
+  const busy = new Set((s.downloads || []).flatMap((d) => Object.keys(d.links || {}).filter((id) => d.links[id].busy)));
   const many = ifs.length > 2, wasMany = $("strip").classList.contains("many");
   $("strip").classList.toggle("many", many);
   const changed = fresh($("strip"), ifs.map((i) => [i.id, i.name, idle(i), busy.has(i.id), speedUnitLabel()]), () => ifs.map((i, n) => {

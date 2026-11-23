@@ -173,6 +173,9 @@ func Present(s Summary) Summary {
 		links[id] = presentLink(l, s)
 	}
 	s.Links = links
+	if why, down := everyLinkDown(s); down && !torrent && s.Status == StatusRunning {
+		s.Label, s.Tone, s.Note = "Retrying", toneWarn, why
+	}
 	s.Section = sectionOf(s)
 	// The row's square already says it is downloading, seeding, paused or
 	// queued: a label that says only that is left off. "Moving…" is not.
@@ -214,7 +217,7 @@ func sectionOf(s Summary) string {
 			return SectionNeeds
 		}
 	}
-	retry := false
+	_, retry := everyLinkDown(s) // also while a link checks again after its error: the row stays put
 	for _, l := range s.Links {
 		retry = retry || l.CanRetry
 	}
@@ -236,6 +239,23 @@ func sectionOf(s Summary) string {
 		}
 	}
 	return SectionActive // downloading, verifying, finding files, checking, or a part fetched while its archive extracts
+}
+
+// everyLinkDown: no link of a download is fetching, each is retrying, failed,
+// or checking again after an error, with that error. why is the error when
+// they share it. A link's first check has no error yet: it is not down.
+func everyLinkDown(s Summary) (why string, down bool) {
+	for _, l := range s.Links {
+		if l.Status != LinkRetrying && l.Status != LinkFailed && l.Status != LinkProbing || l.Error == "" {
+			return "", false
+		}
+		if why == "" {
+			why = l.Error
+		} else if why != l.Error {
+			why = "No connection can reach the link yet: see Details"
+		}
+	}
+	return why, why != ""
 }
 
 func joinNote(a, b string) string {
@@ -275,6 +295,7 @@ func presentLink(l LinkSummary, s Summary) LinkSummary {
 		}
 	case l.busy && (l.Status == LinkReady || l.Status == LinkRetrying): // Backoff
 		l.Label, l.Tone = fmt.Sprintf("Server busy · %d of %d requests", l.allowed, l.maxConns), toneWarn
+		l.Busy = true
 	case l.Status == LinkReady && s.Status == StatusRunning && l.Conns > 0:
 		l.Label = "Downloading"
 	}

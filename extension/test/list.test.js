@@ -297,6 +297,8 @@ test("a row's two numbers", () => {
   assert.deepEqual(rowNums(dl("b", "queued", { size: 2e9, done: 0 })), { main: "2.0 GB", sub: "" });
   assert.deepEqual(rowNums(dl("e", "completed", { size: 2e9, done: 2e9 })), { main: "2.0 GB", sub: "" });
   assert.deepEqual(rowNums(dl("u", "paused", { size: -1, done: 5e6 })), { main: "5.0 MB", sub: "" });
+  // Running with nothing fetched yet (checking the link, or retrying it): no "0 B/s", no "~ left".
+  assert.deepEqual(rowNums(dl("r", "running", { size: -1, done: 0, speed: 0, eta: -1 })), { main: "", sub: "" });
 });
 
 test("the arrows go round a menu's items, Home and End to its ends", () => {

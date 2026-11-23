@@ -185,3 +185,42 @@ func TestPresentOffersAgainOnlyOnAFinishedHTTPDownload(t *testing.T) {
 		}
 	}
 }
+
+// A download whose every link is retrying or failed says why on its row, not
+// "Checking the link…"; one link still working keeps the row as it was.
+func TestPresentEveryLinkDown(t *testing.T) {
+	dns := "The server's name x.invalid can't be found: check the link, or this connection's DNS"
+	cases := []struct {
+		name        string
+		links       map[string]LinkSummary
+		label, note string
+	}{
+		{"one error", map[string]LinkSummary{"eth": {Status: LinkRetrying, Error: dns}, "wifi": {Status: LinkFailed, Error: dns}}, "Retrying", dns},
+		{"different errors", map[string]LinkSummary{"eth": {Status: LinkRetrying, Error: dns}, "wifi": {Status: LinkRetrying, Error: "HTTP 500"}},
+			"Retrying", "No connection can reach the link yet: see Details"},
+		{"checking again after the error", map[string]LinkSummary{"eth": {Status: LinkProbing, Error: dns}}, "Retrying", dns},
+		{"one still checking", map[string]LinkSummary{"eth": {Status: LinkRetrying, Error: dns}, "wifi": {Status: LinkProbing}}, "Downloading", "Checking the link…"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := Present(Summary{Status: StatusRunning, Size: -1, Links: c.links})
+			if s.Label != c.label || s.Note != c.note {
+				t.Errorf("got %q / %q, want %q / %q", s.Label, s.Note, c.label, c.note)
+			}
+			if c.label == "Retrying" && (s.Tone != "warn" || s.Plain || s.Section != SectionNeeds) {
+				t.Errorf("tone %q plain %v section %q", s.Tone, s.Plain, s.Section)
+			}
+		})
+	}
+}
+
+// Only a server that pushed back makes a link busy; an error being retried does not.
+func TestPresentBusyOnlyWhenTheServerPushedBack(t *testing.T) {
+	s := Present(Summary{Status: StatusRunning, Links: map[string]LinkSummary{
+		"a": {Status: LinkRetrying, Error: "no such host"},
+		"b": {Status: LinkRetrying, busy: true, maxConns: 4},
+	}})
+	if s.Links["a"].Busy || !s.Links["b"].Busy {
+		t.Errorf("busy a=%v b=%v, want false true", s.Links["a"].Busy, s.Links["b"].Busy)
+	}
+}
