@@ -46,10 +46,16 @@ function pickStep(id) {
     const groups = fileFolders(files.map((f) => f.path));
     const list = groups.length === 1 ? groups[0].items.map(row) : groups.flatMap((g) => {
       if (!g.name) return g.items.map(row);
-      const all = el("input", { type: "checkbox", checked: g.items.every((i) => boxes[i].checked), "aria-label": "Every file in " + g.name,
+      const all = el("input", { type: "checkbox", "aria-label": "Every file in " + g.name,
         onclick: (e) => { e.stopPropagation(); tick(g.items, e.target.checked); } });
-      // The folder's own box follows its files.
-      g.items.forEach((i) => boxes[i].addEventListener("change", () => { all.checked = g.items.every((j) => boxes[j].checked); }));
+      // The folder's own box follows its files: ticked, empty, or a dash for some of them.
+      const follow = () => {
+        const n = g.items.filter((j) => boxes[j].checked).length;
+        all.checked = n === g.items.length;
+        all.indeterminate = n > 0 && n < g.items.length;
+      };
+      follow();
+      g.items.forEach((i) => boxes[i].addEventListener("change", follow));
       return el("details", {}, el("summary", {}, all, el("span", { class: "path" }, g.name + "/"), el("span", { class: "muted num" }, plural(g.items.length, "file"))),
         el("div", {}, g.items.map(row)));
     });

@@ -14,7 +14,10 @@ const detailSection = (title, ...body) => el("section", {}, el("h3", { class: "m
 function torrentFilesPart(id, getD) {
   const tfList = el("div", { class: "files" });
   const tfNote = el("p", { class: "muted", style: "margin: 0 0 var(--s2)" });
-  const section = detailSection("Files", tfNote, tfList);
+  // Folded until opened, so the rest of Details is near; it stays as the user left it.
+  const tfSum = el("span", { class: "muted" });
+  const fold = el("details", { class: "files-fold" }, el("summary", {}, el("h3", { class: "mk" }, "Files"), " ", tfSum), tfNote, tfList);
+  const section = el("section", {}, fold);
   section.hidden = true;
   let tfAt = 0, tfSig = "", tfRows = [];
   async function load() {
@@ -36,6 +39,8 @@ function torrentFilesPart(id, getD) {
       tfRows = files.map((f, i) => el("span", { class: "muted num" }));
       tfList.replaceChildren(...files.map((f, i) => el("label", {}, boxes[i], el("span", { class: "path" }, f.path), tfRows[i])));
     }
+    const ticked = files.filter((f) => f.selected);
+    tfSum.textContent = `${ticked.length} of ${plural(files.length, "file")} · ${fmtBytes(ticked.reduce((n, f) => n + f.size, 0))}`;
     files.forEach((f, i) => { tfRows[i].textContent = `${fmtBytes(f.size)}${f.selected && f.size > 0 ? ` · ${Math.round(((f.done || 0) / f.size) * 100)}%` : ""}`; });
     tfNote.textContent = canEdit ? "Tick a file to download it, untick to stop fetching it." : "";
   }

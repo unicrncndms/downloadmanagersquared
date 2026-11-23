@@ -189,6 +189,17 @@ const FIXTURES = {
   "big-mixed": bigFixture(Array.from({ length: 5000 }, (_, i) => bigItem(i, ["queued", "completed", "completed", "paused", "completed"][i % 5]))),
   choosing: { connected: true, state: { ...STATE, downloads: [CHOOSING], active: 0 }, settings: SETTINGS, autostart: true, recipes: RECIPES,
     engineVersion: "0.3.0", files: { t: [{ path: "datasets/a.csv", size: 1e9, selected: true }, { path: "datasets/b.csv", size: 2e9, selected: false }] } },
+  // A torrent like a game release: files at its root beside two folders, one choosing and one downloading.
+  choosingMixed: (() => {
+    const files = [...["setup.exe", "setup-a.bin", "setup-b.bin", "readme.nfo"].map((p, i) => ({ path: p, size: [4e6, 4.2e9, 4.2e9, 2e3][i], selected: true, done: [4e6, 1e9, 0, 2e3][i] })),
+      ...["data/core.pak", "data/maps.pak", "data/audio.pak"].map((p, i) => ({ path: p, size: 2e9 * (i + 1), selected: i !== 2, done: i === 0 ? 5e8 : 0 })),
+      ...["pack/lang-de.pak", "pack/lang-fr.pak"].map((p) => ({ path: p, size: 3e8, selected: false, done: 0 }))];
+    const running = { ...CHOOSING, id: "tr", filename: "Game.Release-GROUP", status: "running", label: "Downloading", size: 1.4e10, done: 1.5e9, speed: 2.3e6, eta: 5400,
+      fileCount: files.length, uploaded: 2e7, ratio: 0.013, upSpeed: 4e4, peers: 50, seeds: 14, swarm: 380, inSwarm: true, section: "active",
+      actions: { remove: true, pause: true } };
+    return { connected: true, state: { ...STATE, downloads: [{ ...CHOOSING, fileCount: files.length, filesSize: 1.73e10 }, running], active: 1 }, settings: SETTINGS, autostart: true, recipes: RECIPES,
+      engineVersion: "0.3.0", files: { t: files, tr: files } };
+  })(),
   // Downloads held back for a question (state.asks).
   asks: { connected: true, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", settings: SETTINGS, state: { ...STATE, asks: [
     { id: "q1", text: "\"Debian-13.iso\" is already in D:\\ISOs.", choices: [{ key: "rename", label: "Keep both" }, { key: "replace", label: "Replace it" }, { key: "cancel", label: "Skip" }] },
