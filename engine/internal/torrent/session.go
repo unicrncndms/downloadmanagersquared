@@ -205,7 +205,10 @@ func (s *Session) newClient() (*atorrent.Client, storage.ClientImplCloser, error
 	return cl, stor, nil
 }
 
-var errClosed = errors.New("the torrent session is closed")
+var (
+	errClosed   = errors.New("the torrent session is closed")
+	errPeerGone = errors.New("the peer's tunnel closed as it connected")
+)
 
 // acquire is a torrent joining the swarm: it starts the client, on the
 // interfaces SetIfaces gave, if no other torrent has. Every acquire is
@@ -374,8 +377,8 @@ func (s *Session) addIface(ifc Iface) error {
 		}
 		cl.AddDhtServer(atorrent.AnacrolixDhtServerWrapper{Server: f.dht})
 		if f.port != 0 {
-			cl.AddListener(&peerListener{s: s, is: is, l: f.tcp, done: s.clDone})
-			cl.AddListener(&peerListener{s: s, is: is, l: f.utp, done: s.clDone})
+			cl.AddListener(&peerListener{s: s, is: is, l: f.tcp, addr: addrOr(f.tcp.Addr(), "tcp", ""), done: s.clDone})
+			cl.AddListener(&peerListener{s: s, is: is, l: f.utp, addr: addrOr(f.utp.Addr(), "udp", ""), done: s.clDone})
 		}
 	}
 	return nil
@@ -471,9 +474,26 @@ type peerListener struct {
 		Accept() (net.Conn, error)
 		Addr() net.Addr
 	}
+	addr net.Addr // as opened: see addrOr
 }
 
-func (l *peerListener) Addr() net.Addr { return l.l.Addr() }
+func (l *peerListener) Addr() net.Addr { return l.addr }
+
+// addrOr is a, or a stand-in when a is nil. A tunnel's listeners and
+// connections answer nil for their addresses once its stack is closed, and the
+// torrent client calls Network and String on them without checking (a panic
+// that took the engine down when a tunnel restarted as a peer connected in).
+func addrOr(a net.Addr, network, s string) net.Addr {
+	if a != nil {
+		return a
+	}
+	return stubAddr{network, s}
+}
+
+type stubAddr struct{ network, s string }
+
+func (a stubAddr) Network() string { return a.network }
+func (a stubAddr) String() string  { return a.s }
 
 func (l *peerListener) Accept() (net.Conn, error) {
 	c, err := l.l.Accept()
@@ -487,10 +507,15 @@ func (l *peerListener) Accept() (net.Conn, error) {
 		}
 		return nil, err
 	}
+	remote := c.RemoteAddr()
+	if remote == nil { // its tunnel closed as it came in
+		c.Close()
+		return nil, errPeerGone
+	}
 	l.s.mu.Lock()
 	defer l.s.mu.Unlock()
 	l.is.peers++
-	return l.s.trackLocked(c.RemoteAddr().String(), l.is, c), nil
+	return l.s.trackLocked(remote.String(), l.is, c), nil
 }
 
 func (s *Session) bootstrap() []string {
@@ -645,7 +670,8 @@ func (s *Session) dialed(addr string, is *ifaceSockets, c net.Conn) net.Conn {
 func (s *Session) trackLocked(addr string, is *ifaceSockets, c net.Conn) *trackedPeer {
 	s.peerAt[addr] = append(s.peerAt[addr], is)
 	g := newUploadGate(c, is.Upload)
-	p := &trackedPeer{Conn: g, gate: g, s: s, addr: addr, is: is}
+	p := &trackedPeer{Conn: g, gate: g, s: s, addr: addr, is: is,
+		local: addrOr(c.LocalAddr(), "tcp", ""), remote: addrOr(c.RemoteAddr(), "tcp", addr)}
 	is.open[p] = true
 	return p
 }
@@ -709,7 +735,12 @@ type trackedPeer struct {
 	addr string        // as dialed, which is how the client names the peer
 	is   *ifaceSockets // Upload read under s.mu
 	once sync.Once
+
+	local, remote net.Addr // as connected: see addrOr
 }
+
+func (p *trackedPeer) LocalAddr() net.Addr  { return p.local }
+func (p *trackedPeer) RemoteAddr() net.Addr { return p.remote }
 
 func (p *trackedPeer) Close() error {
 	p.once.Do(func() { p.s.peerClosed(p) })
