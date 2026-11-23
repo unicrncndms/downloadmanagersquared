@@ -5,18 +5,24 @@
 // no browser.*: pages and the background load it as a script, the Node tests
 // require it.
 
+// Calls the engine answers only once the user is done: Windows' folder dialog
+// (engine BrowseFolder). They wait as long as the user does.
+const WAITS_FOR_USER = new Set(["browseFolder"]);
+
 // post(message) sends one request; later(fn, ms) is setTimeout.
 function rpcClient(post, later) {
   let nextId = 1;
   const pending = new Map();
   return {
     pending,
-    // call's promise settles with the engine's answer, or fails after a minute without one.
+    // call's promise settles with the engine's answer, or fails after a minute
+    // without one (but for WAITS_FOR_USER).
     call(method, params) {
       const id = nextId++;
       return new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });
         post({ id, method, params: params || {} });
+        if (WAITS_FOR_USER.has(method)) return;
         later(() => {
           if (pending.delete(id)) reject(new Error("engine did not answer"));
         }, 60000);

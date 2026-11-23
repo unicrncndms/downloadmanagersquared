@@ -35,3 +35,11 @@ test("a call fails after a minute without an answer, and drop fails the rest", a
   timers[1].fn(); // its timer fires late: nothing left to fail
   assert.equal(c.pending.size, 0);
 });
+
+test("a call that waits for the user's folder dialog has no time limit", async () => {
+  const { c, timers } = client();
+  const picked = c.call("browseFolder", { start: "" });
+  assert.equal(timers.length, 0); // two minutes in the dialog is no "engine did not answer"
+  c.answer({ id: 1, result: { dir: "D:/x" } });
+  assert.deepEqual(await picked, { dir: "D:/x" });
+});
