@@ -134,3 +134,41 @@ func TestLabelReplacesTheWindowsNameAndForgetDropsAnAbsentInterface(t *testing.T
 		t.Fatal("still remembered")
 	}
 }
+
+func TestAnAdapterMadeAnewPerConnectLeavesNoEntries(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	const pia = "PIA OpenVPN WinTUN Adapter"
+	e.mu.Lock()
+	e.refreshInterfacesLocked([]netif.Interface{ifaceAt("eth", "Ethernet"), ifaceAt("pia1", pia)})
+	e.settings.Interfaces["eth"].Label = "Cable"
+	e.mu.Unlock()
+	first := colorOf(t, e, "pia1")
+	// The PIA app reconnects: its adapter comes back with a new id.
+	e.mu.Lock()
+	e.refreshInterfacesLocked([]netif.Interface{ifaceAt("eth", "Ethernet"), ifaceAt("pia2", pia)})
+	e.mu.Unlock()
+	e.mu.Lock()
+	_, old := e.settings.Interfaces["pia1"]
+	_, oldEnt := e.ifaces["pia1"]
+	n := len(e.settings.Interfaces)
+	e.mu.Unlock()
+	if old || oldEnt || n != 2 {
+		t.Fatalf("pia1 kept: settings %v, entry %v, %d interfaces saved", old, oldEnt, n)
+	}
+	if c := colorOf(t, e, "pia2"); c != first {
+		t.Fatalf("pia2 colour = %d, want pia1's %d", c, first)
+	}
+	// One the user changed stays, even when another of its name turns up.
+	e.mu.Lock()
+	e.settings.Interfaces["pia2"].Label = "VPN"
+	e.refreshInterfacesLocked([]netif.Interface{ifaceAt("eth", "Ethernet"), ifaceAt("pia3", pia)})
+	_, kept := e.settings.Interfaces["pia2"]
+	e.mu.Unlock()
+	if !kept {
+		t.Fatal("pia2, labelled by the user, was forgotten")
+	}
+}

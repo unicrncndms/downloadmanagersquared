@@ -30,6 +30,12 @@ type IfaceSettings struct {
 	Color         *int   `json:"color,omitempty"`         // palette index 0..colorCount-1 the pages show it in; nil: not given yet
 }
 
+// untouched says the user changed nothing on an interface: all it has is the
+// name Windows gave it and the colour DMS² did.
+func (is *IfaceSettings) untouched() bool {
+	return is.Label == "" && is.Enabled == nil && is.Connections == 0 && is.Upload == nil && is.UploadLimit == 0 && is.DownloadLimit == 0
+}
+
 // colorCount is how many colours the pages' palette has (ui.css --c0 …).
 const colorCount = 6
 

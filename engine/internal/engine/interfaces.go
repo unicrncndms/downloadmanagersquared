@@ -84,7 +84,7 @@ func dropsWiFi(minimizes bool, wifi []string, list []netif.Interface) bool {
 
 func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 	seen := map[string]bool{}
-	nameChanged := false
+	changed := false
 	var ids []string
 	for _, i := range list {
 		seen[i.ID] = true
@@ -117,7 +117,7 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 			ids = append(ids, i.ID)
 		}
 		if s.Name != i.Name {
-			s.Name, nameChanged = i.Name, true
+			s.Name, changed = i.Name, true
 		}
 	}
 	for id, ent := range e.ifaces {
@@ -125,11 +125,37 @@ func (e *Engine) refreshInterfacesLocked(list []netif.Interface) {
 			ent.present = false
 		}
 	}
+	// An adapter made anew on every connect (the PIA app's WinTUN) comes back
+	// under the same name with a new id. Forget the absent ones of that name the
+	// user never changed, and give the new one their colour, so the settings
+	// don't grow with every connect.
+	byName := map[string]string{}
+	for _, i := range list {
+		byName[i.Name] = i.ID
+	}
+	for id, s := range e.settings.Interfaces {
+		now, ok := byName[s.Name]
+		if seen[id] || !ok || s.Name == "" || !s.untouched() || id == e.settings.MainInterface {
+			continue
+		}
+		if n := e.settings.Interfaces[now]; n.Color == nil {
+			n.Color = s.Color
+		}
+		if ent := e.ifaces[id]; ent != nil {
+			ent.socks.Close()
+			if ent.binding != nil {
+				ent.binding.Close()
+			}
+			delete(e.ifaces, id)
+		}
+		delete(e.settings.Interfaces, id)
+		changed = true
+	}
 	// Interfaces without a colour (new ones, or every one for a user from before
 	// colours) get theirs in the order the pages list them, by name, so an
 	// existing user's colours stay as they were.
 	sort.Slice(ids, func(a, b int) bool { return e.settings.Interfaces[ids[a]].Name < e.settings.Interfaces[ids[b]].Name })
-	if e.settings.assignColors(ids) || nameChanged {
+	if e.settings.assignColors(ids) || changed {
 		e.saveSettingsLocked()
 	}
 	e.applyLimitsLocked()
