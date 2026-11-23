@@ -75,7 +75,12 @@ func hashText(s Summary) string {
 func join(parts ...string) string {
 	var out []string
 	for _, p := range parts {
-		if p != "" && !strings.Contains(strings.Join(out, " "), p) {
+		cur := strings.Join(out, ": ")
+		switch {
+		case p == "" || strings.Contains(strings.Join(out, " "), p):
+		case cur != "" && strings.HasPrefix(p, cur+":"): // an error that starts with the label ("Paused: ...") says it once
+			out = []string{p}
+		default:
 			out = append(out, p)
 		}
 	}

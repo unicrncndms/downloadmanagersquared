@@ -94,3 +94,16 @@ func TestActivityLogScrubsLinks(t *testing.T) {
 		t.Errorf("the link itself stays: %s", all)
 	}
 }
+
+// A pause error that starts with the label is not prefixed with it again.
+func TestJoinSaysTheLabelOnce(t *testing.T) {
+	for _, c := range [][3]string{
+		{"Paused", "Paused: no connection can reach the file", "Paused: no connection can reach the file"},
+		{"Failed", "HTTP 404", "Failed: HTTP 404"},
+		{"Paused", "", "Paused"},
+	} {
+		if got := join(c[0], c[1]); got != c[2] {
+			t.Errorf("join(%q, %q) = %q, want %q", c[0], c[1], got, c[2])
+		}
+	}
+}
