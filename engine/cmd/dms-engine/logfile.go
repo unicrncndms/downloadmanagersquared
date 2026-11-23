@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 )
@@ -16,6 +17,14 @@ func setupLog(dir string) {
 	}
 	log.SetOutput(l)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	// A panic's trace goes to stderr, which a GUI exe has nowhere: keep it in crash.log.
+	if f, err := os.OpenFile(filepath.Join(dir, "crash.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+		fmt.Fprintf(f, "\n=== engine started %s\n", time.Now().Format(time.RFC3339))
+		if err := debug.SetCrashOutput(f, debug.CrashOptions{}); err != nil {
+			log.Printf("crash.log: %v", err)
+		}
+		f.Close() // SetCrashOutput keeps its own handle
+	}
 }
 
 // logFile is the engine's log: past max bytes it becomes <path>.old (replacing
