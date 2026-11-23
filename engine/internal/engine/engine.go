@@ -249,6 +249,11 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 				defer e.mu.Unlock()
 				return e.settings.SeedRatio
 			},
+			PeersPerLine: func() int {
+				e.mu.Lock()
+				defer e.mu.Unlock()
+				return e.settings.PeersPerLine
+			},
 			Port:       ports[m],
 			Completion: e.pieces,
 			Unclean:    e.unclean,

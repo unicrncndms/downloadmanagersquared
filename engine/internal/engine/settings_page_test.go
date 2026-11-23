@@ -53,3 +53,14 @@ func TestRestoredKeepsConnections(t *testing.T) {
 		t.Fatalf("not reset: %+v", r)
 	}
 }
+
+func TestPeersPerLineDefaultsAndStaysInRange(t *testing.T) {
+	for in, want := range map[int]int{0: 100, -5: 100, 3: 10, 250: 250, 9000: 500} {
+		s := defaultSettings()
+		s.PeersPerLine = in
+		s.normalize()
+		if s.PeersPerLine != want {
+			t.Fatalf("peersPerLine %d became %d, want %d", in, s.PeersPerLine, want)
+		}
+	}
+}

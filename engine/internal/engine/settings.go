@@ -86,6 +86,7 @@ type Settings struct {
 	ETAWindowSec       int                       `json:"etaWindowSec"`
 	DefaultConnections int                       `json:"defaultConnections"`
 	SeedRatio          float64                   `json:"seedRatio"`     // seed a torrent until uploaded/size reaches this; 0 = don't seed
+	PeersPerLine       int                       `json:"peersPerLine"`  // connected peers a torrent may have per line it uses
 	TorrentPort        int                       `json:"torrentPort"`   // where peers connect in, on every interface; picked once
 	VPNHTTP            paths.Mode                `json:"vpnHttp"`       // VPN mode an HTTP download gets unless chosen when added
 	VPNTorrent         paths.Mode                `json:"vpnTorrent"`    // the same for a torrent
@@ -210,6 +211,7 @@ func defaultSettings() Settings {
 		PartsParallel:      true,
 		ArchiveKeeping:     download.KeepAuto,
 		SeedRatio:          1,
+		PeersPerLine:       100,
 		NotifyDone:         true,
 		KeepAwake:          true,
 		SpeedUnit:          SpeedBytes,
@@ -240,6 +242,10 @@ func (s *Settings) normalize() {
 	}
 	s.DefaultConnections = min(s.DefaultConnections, 32)
 	s.SeedRatio = min(max(s.SeedRatio, 0), 100)
+	if s.PeersPerLine < 1 {
+		s.PeersPerLine = d.PeersPerLine
+	}
+	s.PeersPerLine = min(max(s.PeersPerLine, 10), 500)
 	if !download.KeepChoice(s.ArchiveKeeping) {
 		s.ArchiveKeeping = d.ArchiveKeeping
 	}

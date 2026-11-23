@@ -215,6 +215,9 @@
         <div class="setting"><label for="sTorrentPort">Port for incoming peers
           <span class="info" tabindex="0" data-tip="Where peers connect in, on every connection: the port you forward on your router. Running torrents switch at once."></span></label>
           <input type="number" id="sTorrentPort" min="1024" max="65535" required data-setting></div>
+        <div class="setting"><label for="sPeers">Peers per torrent, per connection
+          <span class="info" tabindex="0" data-tip="How many peers a torrent may be connected to through each connection it uses: two connections allow twice as many. More can help in a large swarm; each takes a little memory and upload. Running torrents follow at once."></span></label>
+          <input type="number" id="sPeers" min="10" max="500" required data-setting></div>
       </div>
     </section>
 

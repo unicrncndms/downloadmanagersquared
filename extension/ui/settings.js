@@ -248,6 +248,7 @@ const FIELDS = {
   sTorrentPort: ["torrentPort", (s) => s.torrentPort, Number],
   sTheme: ["theme", (s) => s.theme || "", String],
   sRatio: ["seedRatio", (s) => s.seedRatio, dec],
+  sPeers: ["peersPerLine", (s) => s.peersPerLine, Number],
   sVpnHttp: ["vpnHttp", (s) => s.vpnHttp, String],
   sVpnTorrent: ["vpnTorrent", (s) => s.vpnTorrent, String],
   sKeep: ["archiveKeeping", (s) => s.archiveKeeping || "auto", String],

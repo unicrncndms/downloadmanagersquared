@@ -124,7 +124,7 @@ The sections are in the side bar; *Find a setting* searches all of them.
 - **Archives:** Download as folder for new archives (off), keep the archive (Automatic), a split archive's parts at once (off).
 - **Browser downloads:** takeover size (100 MB), sites never or always taken over.
 - **Queue and speed:** downloads at once (1); the queue window: optionally, per weekday, the hours the queue runs (an end before the start runs past midnight). Outside it nothing starts, running downloads pause and seeding torrents stop; they resume when it begins. A download you start or resume yourself still runs. No day set: no limit. Then a download and an upload limit for all connections together (none; each connection can have its own in its Options), the unit speeds are shown in (sizes and speeds use base 1000: 1 MB = 1,000,000 bytes), and the time-left averaging.
-- **Torrents:** seed ratio (1), port for incoming peers.
+- **Torrents:** seed ratio (1), port for incoming peers, peers per torrent for each connection (100).
 - **Sites and logins:** the learned sites, one list for every browser, with where each was learned (*Forget* makes DMS² ask again), and the SFTP logins and trusted server keys, removable.
 - **General:** start with Windows, notifications, keep the PC awake; theme, accent colour, and a background tinted with the accent (off).
 - **Keyboard:** the shortcuts of the downloads list.

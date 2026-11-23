@@ -76,7 +76,9 @@ type Torrent struct {
 	// What the swarm looks like, as of the last poll.
 	paths               map[string]*pathRate
 	peers, seeds, swarm int
-	wantDone, wantSize  int64 // of the files to download, as of the last poll
+
+	maxConns           int   // the peer limit at gave last: only run's goroutine reads or writes it
+	wantDone, wantSize int64 // of the files to download, as of the last poll
 }
 
 // pathRate is a torrent's traffic on one interface.
@@ -256,6 +258,8 @@ func (t *Torrent) join(ctx context.Context) (*atorrent.Torrent, error) {
 		return nil, err
 	}
 	t.t, t.upBase = at, t.st.Uploaded
+	t.maxConns = 0
+	t.followMaxPeers(at)
 	if len(missed) > 0 {
 		go resolveLater(ctx, missed, t.s.lookupFirst, at.AddTrackers)
 	}
@@ -431,12 +435,22 @@ const (
 	seedEvery = 2 * time.Second
 )
 
+// followMaxPeers sets at's peer limit to the session's, when it changed: the
+// setting, or the interfaces in use.
+func (t *Torrent) followMaxPeers(at *atorrent.Torrent) {
+	if m := t.s.maxPeers(); m != t.maxConns {
+		at.SetMaxEstablishedConns(m)
+		t.maxConns = m
+	}
+}
+
 // poll keeps the speeds and upload count current until done reports true, and
 // reports false if the torrent left the swarm first.
 func (t *Torrent) poll(ctx context.Context, at *atorrent.Torrent, every time.Duration, done func() bool) bool {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
 	for {
+		t.followMaxPeers(at)
 		stats := at.Stats()
 		completed, uploaded := at.BytesCompleted(), stats.BytesWrittenData.Int64()
 		byPath := t.s.peersByIface(at)
@@ -672,6 +686,21 @@ func checking(at *atorrent.Torrent) bool {
 		}
 	}
 	return false
+}
+
+// maxPeers is how many peers a torrent may have connected: the setting for
+// each interface, as peers spread over them and using several lines at once is
+// the point. Torrents follow it as it changes (Torrent.followMaxPeers).
+func (s *Session) maxPeers() int {
+	n := 50 // the client's own default
+	if s.cfg.PeersPerLine != nil {
+		if v := s.cfg.PeersPerLine(); v > 0 {
+			n = v
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return n * max(1, len(s.ifs))
 }
 
 func (s *Session) ratio() float64 {

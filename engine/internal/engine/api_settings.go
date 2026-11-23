@@ -40,6 +40,9 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		if p.SeedRatio != nil {
 			s.SeedRatio = *p.SeedRatio
 		}
+		if p.PeersPerLine != nil {
+			s.PeersPerLine = *p.PeersPerLine
+		}
 		if p.VPNHTTP != nil {
 			s.VPNHTTP = paths.ParseMode(*p.VPNHTTP, s.VPNHTTP)
 		}
@@ -190,6 +193,7 @@ type settingsPatch struct {
 	ETAWindowSec       *int          `json:"etaWindowSec"`
 	DefaultConnections *int          `json:"defaultConnections"`
 	SeedRatio          *float64      `json:"seedRatio"`
+	PeersPerLine       *int          `json:"peersPerLine"`
 	VPNHTTP            *string       `json:"vpnHttp"`
 	VPNTorrent         *string       `json:"vpnTorrent"`
 	VPNProvider        *string       `json:"vpnProvider"`
