@@ -46,6 +46,7 @@ type Config struct {
 	Finished     func(*Torrent) // optional: the torrent's download completed
 	Ratio        func() float64 // optional: seed until uploaded/size reaches this; nil or 0 = don't seed
 	PeersPerLine func() int     // optional: connected peers a torrent may have per interface; nil or 0 = the client's 50
+	Version      string         // optional: the version peers and trackers are told, as "DMS² <version>"; "" = the torrent library's own name
 	DHTBootstrap []string       // optional: host:port of the DHT's first nodes; nil = the usual public ones
 	Port         int            // optional: where peers connect in, TCP and uTP, on each interface that listens
 
@@ -149,6 +150,11 @@ func (s *Session) newClient() (*atorrent.Client, storage.ClientImplCloser, error
 	c.NoDefaultPortForwarding = true
 	c.DisableWebtorrent = true // WebRTC opens its own UDP sockets
 	c.ListenPort = 0
+	if v := s.cfg.Version; v != "" {
+		// Not the library's default, which names the Go module path and "(devel)".
+		c.ExtendedHandshakeClientVersion = "DMS² " + v
+		c.HTTPUserAgent = "DMS2/" + v // header values stay ASCII
+	}
 	c.PieceHashersPerTorrent = 4 // the default 2 caps verifying a finished torrent on a fast disk
 	c.Seed = true                // without it, peers are dropped on completion; Torrent decides how long to seed
 	c.TrackerDialContext = s.dialFirst

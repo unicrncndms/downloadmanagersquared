@@ -1043,3 +1043,30 @@ func TestFilesThatCleanToOnePathAreFound(t *testing.T) {
 		t.Fatalf("samePath = %q, want none", got)
 	}
 }
+
+// Peers see DMS² and its version, not the library's module path and "(devel)".
+func TestPeersSeeDMSAndItsVersion(t *testing.T) {
+	sw := newSwarm(t, 1, 1<<20)
+	var n atomic.Int32
+	s, err := NewSession(Config{Version: "9.9.9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetIfaces([]Iface{sw.iface("lo", &n)})
+	tor, err := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tor.Start()
+	waitFor(t, "the seeder to see DMS² by name", 30*time.Second, func() bool {
+		for _, at := range sw.clients[0].Torrents() {
+			for _, pc := range at.PeerConns() {
+				if v, _ := pc.PeerClientName.Load().(string); v == "DMS² 9.9.9" {
+					return true
+				}
+			}
+		}
+		return false
+	})
+}

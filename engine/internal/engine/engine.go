@@ -255,6 +255,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 				return e.settings.PeersPerLine
 			},
 			Port:       ports[m],
+			Version:    Version,
 			Completion: e.pieces,
 			Unclean:    e.unclean,
 		})
