@@ -62,6 +62,10 @@ func Hidden(cmd *exec.Cmd) *exec.Cmd {
 // background process opens behind it: the engine takes the foreground for a
 // moment (frontOwner) and hands it on to Explorer.
 func ShowInFolder(path string) error {
+	cmdLine, err := showCmdLine(path)
+	if err != nil {
+		return err
+	}
 	errc := make(chan error, 1)
 	go func() {
 		runtime.LockOSThread() // the owner window belongs to this thread until done
@@ -70,11 +74,25 @@ func ShowInFolder(path string) error {
 		defer done()
 		AllowForeground()
 		cmd := exec.Command("explorer.exe")
-		cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `explorer.exe /select,"` + path + `"`}
+		cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: cmdLine}
 		errc <- cmd.Start()
 		time.Sleep(3 * time.Second) // Explorer takes a moment to show its window; the foreground is ours to give until then
 	}()
 	return <-errc
+}
+
+// showCmdLine is Explorer's command line for ShowInFolder. A file that is
+// gone (moved or deleted outside DMS²) opens its folder: /select of a missing
+// path opens the Desktop instead.
+func showCmdLine(path string) (string, error) {
+	if _, err := os.Stat(path); err == nil {
+		return `explorer.exe /select,"` + path + `"`, nil
+	}
+	dir := filepath.Dir(path)
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("the folder %s is not there any more", dir)
+	}
+	return `explorer.exe "` + dir + `"`, nil
 }
 
 func Autostart() bool {
@@ -153,7 +171,9 @@ func CurrentUserSID() (string, error) {
 
 // OpenFile opens path with its default app, as a double click in Explorer does.
 func OpenFile(path string) error {
-	if _, err := os.Stat(path); err != nil {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%s is not there any more: it was moved or deleted outside DMS²", filepath.Base(path))
+	} else if err != nil {
 		return err
 	}
 	return windows.ShellExecute(0, windows.StringToUTF16Ptr("open"), windows.StringToUTF16Ptr(path), nil, nil, windows.SW_SHOWNORMAL)
