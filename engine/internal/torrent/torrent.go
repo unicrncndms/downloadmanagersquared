@@ -231,7 +231,8 @@ func (t *Torrent) join(ctx context.Context) (*atorrent.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
-	spec.Trackers = resolveUDPTrackers(ctx, spec.Trackers, t.s.lookupFirst)
+	var missed []string
+	spec.Trackers, missed = resolveUDPTrackers(ctx, spec.Trackers, t.s.lookupFirst)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if ctx.Err() != nil {
@@ -255,6 +256,9 @@ func (t *Torrent) join(ctx context.Context) (*atorrent.Torrent, error) {
 		return nil, err
 	}
 	t.t, t.upBase = at, t.st.Uploaded
+	if len(missed) > 0 {
+		go resolveLater(ctx, missed, t.s.lookupFirst, at.AddTrackers)
+	}
 	return at, nil
 }
 
@@ -354,6 +358,7 @@ func (t *Torrent) run(ctx context.Context) {
 
 const (
 	dhtEvery   = 10 * time.Minute
+	dhtSoon    = 30 * time.Second // when it announced nowhere: no interface yet, or every DHT refused
 	dhtTimeout = 2 * time.Minute
 )
 
@@ -362,6 +367,7 @@ const (
 // torrent counts as public until its info says otherwise).
 func (t *Torrent) announceDHT(ctx context.Context, at *atorrent.Torrent) {
 	for {
+		next := dhtSoon
 		for _, ds := range t.s.dhtServers() {
 			if private(at) || ctx.Err() != nil {
 				break
@@ -370,6 +376,7 @@ func (t *Torrent) announceDHT(ctx context.Context, at *atorrent.Torrent) {
 			if err != nil {
 				continue
 			}
+			next = dhtEvery
 			select {
 			case <-done:
 			case <-time.After(dhtTimeout):
@@ -380,7 +387,7 @@ func (t *Torrent) announceDHT(ctx context.Context, at *atorrent.Torrent) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(dhtEvery):
+		case <-time.After(next):
 		}
 	}
 }
