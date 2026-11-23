@@ -13,7 +13,7 @@ Two audiences of similar weight, confirmed by the user:
 - **Speed seekers with more than one connection.** A home line plus a phone hotspot or a second line, who want one file to use both at once.
 - **Power downloaders on hard hosts.** People who fetch from file hosts that tie each link to an IP address, and who need the engine to open the site once per connection and repeat the clicks.
 
-Both use Windows 10/11 with Firefox, LibreWolf, Waterfox or Floorp. They are comfortable with a download manager and expect it to stay out of the way.
+Both use Windows 10/11 with a Firefox-based browser, Chrome or Edge. They are comfortable with a download manager and expect it to stay out of the way.
 
 ## Product Purpose
 
@@ -37,7 +37,7 @@ It is free and open source (MIT), with no account, no server and no telemetry. T
 ## Capabilities and Constraints
 
 - Platform: Windows 10/11 only. Browsers: Firefox, LibreWolf, Waterfox, Floorp, Chrome, Edge, Brave and other Chromium browsers.
-- Pages run in two hosts: the Firefox extension popup and the engine's WebView2 Downloads window (`extension/ui/host.js`). One set of pages covers both.
+- Pages run in two hosts: the browser extension's popup and the engine's WebView2 Downloads window (`extension/ui/host.js`). One set of pages covers both.
 - Core features that the UI must show: parallel connections per interface, backoff ("Server busy"), mirrors, checksums, a drag-and-arrow queue, *Download as folder* for `.zip`, `.7z`, `.rar` and split archives, the password for archives, IPv4 and experimental IPv6, VPN tunnels per connection, port forwarding, torrents.
 - Shared vocabulary lives in `CONTEXT.md`: use its terms (interface, connection, chunk, link, probe, mirror, backoff, landing page, failed link) in UI wording. Avoid its listed alternatives in user-facing text.
 - A download cannot go faster than the server sends, and Wi-Fi and Ethernet to one router share one line. The UI must not promise speed the product cannot deliver.
@@ -53,8 +53,8 @@ It is free and open source (MIT), with no account, no server and no telemetry. T
 ## Evidence on Hand
 
 - README.md, PRIVACY.md, SECURITY.md and CONTEXT.md describe the behavior and the vocabulary.
-- `.scratch/design-overhaul/spec.md` records the decisions so far: the web pages only are in scope for the visual overhaul; the accent follows Firefox's theme by default, with presets and a custom picker; the tray menu and setup window stay native.
-- Screenshots of the UI harness are in `docs/img/`; measured benchmarks, once run, in `docs/benchmarks/results.csv`. No customer quotes, reviews, press or case studies are on file. Do not fabricate any of them. Speed claims must match the README wording ("close to the sum" only when the connections are truly separate lines).
+- Design decisions so far: only the web pages are in scope for the visual overhaul; the accent follows Firefox's theme by default, with presets and a custom picker; the tray menu and setup window stay native.
+- Screenshots of the UI harness are in `docs/img/`; measured benchmarks in `docs/benchmarks/results.csv`. No customer quotes, reviews, press or case studies are on file. Do not fabricate any of them. Speed claims must match the README wording ("close to the sum" only when the connections are truly separate lines).
 
 ## Product Principles
 

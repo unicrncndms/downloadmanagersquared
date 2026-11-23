@@ -17,7 +17,7 @@ DMS² splits each download across every internet connection your PC has (Etherne
 
 ## Adding downloads
 
-- **As usual.** Download a file in the browser: files of 100 MB or more (*Takeover size* in the settings) go to DMS² by themselves, and so do magnet links, `.torrent` and Metalink (`.meta4`) files. Smaller files stay in the browser. Sites under *Sites never taken over* always stay in the browser.
+- **As usual.** Download a file in the browser: files of 100 MB or more (Settings → Browser downloads) go to DMS² by themselves, and so do magnet links, `.torrent` and Metalink (`.meta4`) files. Smaller files stay in the browser. Sites under *Never take over downloads from* always stay in the browser, and downloads from sites under *Always take over downloads from* go to DMS² whatever their size.
 - **The right-click menu.** *Download with DMS²* on a link sends it whatever its size. *Download this page's file with DMS²* on a page sends the page's own address, for a page that is the download.
 - **Paste.** Copy one or more links (http, https, ftp, ftps, sftp, magnet) and press **Ctrl+V** anywhere in the list, or use *Add link from clipboard* in the tray icon's menu. Links already in the list are skipped.
 - **The Add box.** **+ Add** in the list takes links, a save folder, *Download as folder* for archives, and Options (a checksum, an SFTP key file). *Or add a .torrent or Metalink file from this PC…* there opens Windows' file picker.
@@ -118,10 +118,12 @@ A download's **Details → Checks → Edit** takes a SHA-256 or MD5. DMS² check
 
 The sections are in the side bar; *Find a setting* searches all of them.
 
-- **Connections:** see [Connections](#connections). VPN adapters start off.
+- **Connections:** see [Connections](#connections): the main connection, default requests per connection, and IPv6 (experimental, off). VPN adapters start off.
 - **VPN:** see below.
-- **Downloads:** save folder, Download as folder for new archives (off), keep the archive (Automatic), takeover size (100 MB), sites never taken over. Under *Advanced*: default requests per connection, a split archive's parts at once (off).
-- **Queue and speed:** downloads at once (1); the queue window: optionally, per weekday, the hours the queue runs (an end before the start runs past midnight). Outside it nothing starts, running downloads pause and seeding torrents stop; they resume when it begins. A download you start or resume yourself still runs. No day set: no limit. Then a download and an upload limit for all connections together (none), the unit speeds are shown in (sizes and speeds use base 1000: 1 MB = 1,000,000 bytes), and the time-left averaging.
+- **Downloads:** save folder, folders by file type or site, and what to do if the file already exists.
+- **Archives:** Download as folder for new archives (off), keep the archive (Automatic), a split archive's parts at once (off).
+- **Browser downloads:** takeover size (100 MB), sites never or always taken over.
+- **Queue and speed:** downloads at once (1); the queue window: optionally, per weekday, the hours the queue runs (an end before the start runs past midnight). Outside it nothing starts, running downloads pause and seeding torrents stop; they resume when it begins. A download you start or resume yourself still runs. No day set: no limit. Then a download and an upload limit for all connections together (none; each connection can have its own in its Options), the unit speeds are shown in (sizes and speeds use base 1000: 1 MB = 1,000,000 bytes), and the time-left averaging.
 - **Torrents:** seed ratio (1), port for incoming peers.
 - **Sites and logins:** the learned sites, one list for every browser, with where each was learned (*Forget* makes DMS² ask again), and the SFTP logins and trusted server keys, removable.
 - **General:** start with Windows, notifications, keep the PC awake; theme, accent colour, and a background tinted with the accent (off).
@@ -150,7 +152,7 @@ The extension works in Firefox and its relatives (LibreWolf, Waterfox, Floorp), 
 ## When something goes wrong
 
 - **"Engine offline" or "Engine not installed"** in the popup: start DMS² from the Start menu (the popup's *Start DMS²* tries it), or install it from the [latest release](https://github.com/unicrncndms/downloadmanagersquared/releases/latest).
-- **A download isn't taken over:** it is smaller than the takeover size, its site is under *Sites never taken over*, or the engine isn't running. Use *Download with DMS²* on its link.
+- **A download isn't taken over:** it is smaller than the takeover size, its site is under *Never take over downloads from*, or the engine isn't running. Use *Download with DMS²* on its link.
 - **"Needs the page"** on a download: its link stopped working and DMS² doesn't know the page it came from. Click it and paste the page's address.
 - **A site asks you to click through every time:** it only accepts real clicks, or its buttons change from visit to visit. *Forget* it in Sites and logins and record it again, starting on the file's own page.
 - **Only one connection is used:** the server can't split a file (it is downloaded over the main connection), or the other connections are switched off or share one line (*Test if they are separate lines*), or Windows dropped Wi-Fi for a cable ([Keep Wi-Fi connected next to a cable](#keep-wi-fi-connected-next-to-a-cable)).
