@@ -3,6 +3,7 @@ package download
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestGroupsSummarizeAndOrder(t *testing.T) {
@@ -96,4 +97,32 @@ func TestGroupsSummarizeAndOrder(t *testing.T) {
 			t.Errorf("size %d, want -1", g.Size)
 		}
 	})
+}
+
+// A second download of a part already in the group has the same name until it
+// picks its own (x.part2 (1).rar, when its file is laid out): it is a copy,
+// not a part, so it is a plain row from the start. The one added first stays.
+func TestACopyOfAPartIsNotInTheGroup(t *testing.T) {
+	at := time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)
+	part := func(id, name string, added time.Time) Summary {
+		return Summary{ID: id, Filename: name, Status: StatusQueued, Group: "parts:x", GroupName: "x.rar", Added: added}
+	}
+	sums := []Summary{
+		part("copy", "X.part2.rar", at.Add(time.Minute)), // moved up the queue: first in the list
+		part("p1", "x.part1.rar", at),
+		part("p2", "x.part2.rar", at),
+	}
+	gs := Groups(sums)
+	if len(gs) != 1 || !reflect.DeepEqual(gs[0].Order, []string{"p1", "p2"}) {
+		t.Fatalf("groups %+v", gs)
+	}
+	if sums[0].Group != "" || sums[0].GroupName != "" || sums[2].Group != "parts:x" {
+		t.Errorf("the copy keeps group %q, the part has %q", sums[0].Group, sums[2].Group)
+	}
+
+	// Two copies of one plain x.zip are no group at all.
+	pair := []Summary{part("a", "x.zip", at), part("b", "x.zip", at.Add(time.Second))}
+	if gs := Groups(pair); len(gs) != 0 || pair[1].Group != "" {
+		t.Errorf("a file and its copy: %+v, copy's group %q", gs, pair[1].Group)
+	}
 }

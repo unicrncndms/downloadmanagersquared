@@ -43,7 +43,27 @@ type GroupSummary struct {
 
 // Groups summarizes the downloads that share a Group, for each Group with at
 // least two of them (one alone is drawn as a plain row). In first-seen order.
+//
+// A split archive's part whose name another part of the group already has is
+// a copy (a second download of the file, before it picks its own name when
+// its file is laid out), not a part: Groups takes it out of the group in sums
+// too, so the pages draw it as a plain row. The one added first stays.
 func Groups(sums []Summary) []GroupSummary {
+	first := map[string]int{} // group and part name: the index of the one added first
+	for i, s := range sums {
+		if !strings.HasPrefix(s.Group, "parts:") {
+			continue
+		}
+		k := s.Group + "|" + strings.ToLower(s.Filename)
+		if j, ok := first[k]; !ok || s.Added.Before(sums[j].Added) {
+			first[k] = i
+		}
+	}
+	for i, s := range sums {
+		if j, ok := first[s.Group+"|"+strings.ToLower(s.Filename)]; ok && j != i {
+			sums[i].Group, sums[i].GroupName = "", ""
+		}
+	}
 	var ids []string
 	by := map[string][]Summary{}
 	for _, s := range sums {
