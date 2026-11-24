@@ -81,8 +81,10 @@ type Torrent struct {
 	paths               map[string]*pathRate
 	peers, seeds, swarm int
 
-	maxConns           int   // the peer limit at gave last: only run's goroutine reads or writes it
-	wantDone, wantSize int64 // of the files to download, as of the last poll
+	maxConns           int        // the peer limit at gave last: only run's goroutine reads or writes it
+	wantDone, wantSize int64      // of the files to download, as of the last poll
+	meter              rate.Meter // done bytes over the ETA window: the speed the time left is reckoned at
+	eta                rate.ETA
 
 	owner []*lineTor // under balMu: the line each piece was given to, nil for none
 	tick  int        // only run's goroutine
@@ -151,7 +153,7 @@ func (t *Torrent) Summary() download.Summary {
 	case t.active && t.st.Info != nil:
 		s.Done = t.wantDone
 		if s.Speed > 0 {
-			s.ETA = float64(s.Size-s.Done) / s.Speed
+			s.ETA = t.eta.Seconds()
 		}
 	}
 	// Uploaded over what it has of the chosen files, as other clients count it.
@@ -512,11 +514,17 @@ func (t *Torrent) poll(ctx context.Context, every time.Duration, fetch bool, don
 			completed = max(completed, lt.at.BytesCompleted())
 			byPath[lt.is.ID] = lt.peers()
 		}
+		window := t.s.etaWindow() // read outside t.mu: it asks the engine
+		now := time.Now()
 		if !t.update(ctx, func() {
 			if len(lts) > 0 && lts[0].at.Info() != nil { // the one walk of the files: Summary and the finish check read it
 				t.wantDone, t.wantSize = wanted(lts[0].at, t.st.Skip)
 			}
 			t.speed.Update(completed, every)
+			// The time left uses the long window, as an HTTP download's does.
+			t.meter.Window = window
+			t.meter.Add(now, completed)
+			t.eta.Update(now, t.wantSize-t.wantDone, t.meter.Rate())
 			t.upSpeed.Update(uploaded, every)
 			t.st.Uploaded = t.upBase + uploaded
 			t.peers, t.seeds, t.swarm = peers, seeds, swarm
@@ -765,6 +773,16 @@ func (s *Session) maxPeers() int {
 	return n
 }
 
+// etaWindow is how long the speed behind a torrent's time left is averaged over.
+func (s *Session) etaWindow() time.Duration {
+	if s.cfg.ETAWindow != nil {
+		if w := s.cfg.ETAWindow(); w > 0 {
+			return w
+		}
+	}
+	return time.Minute
+}
+
 func (s *Session) ratio() float64 {
 	if s.cfg.Ratio == nil {
 		return 0
@@ -960,6 +978,7 @@ func (t *Torrent) dropLocked() {
 	t.balMu.Unlock()
 	t.lts, t.stor, t.shared, t.active, t.slot = nil, nil, nil, false, false
 	t.speed, t.upSpeed = rate.EWMA{}, rate.EWMA{}
+	t.meter, t.eta = rate.Meter{}, rate.ETA{}
 	t.paths, t.peers, t.seeds, t.swarm = nil, 0, 0, 0
 	if t.held {
 		t.held = false

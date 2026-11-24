@@ -254,6 +254,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 				defer e.mu.Unlock()
 				return e.settings.PeersPerLine
 			},
+			ETAWindow:  e.ETAWindow,
 			Port:       ports[m],
 			Version:    Version,
 			Completion: e.pieces,

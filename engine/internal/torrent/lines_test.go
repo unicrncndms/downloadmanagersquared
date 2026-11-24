@@ -366,3 +366,24 @@ func TestAssignPiecesMovesOnlyToALineThatRanOut(t *testing.T) {
 		}
 	}
 }
+
+// A torrent's time left is reckoned at its speed over the ETA window, as an HTTP
+// download's is, not at the speed of the last half second.
+func TestTimeLeftUsesTheETAWindow(t *testing.T) {
+	sw := newSwarm(t, 1, 4<<20)
+	var asked atomic.Bool
+	s, err := NewSession(Config{ETAWindow: func() time.Duration { asked.Store(true); return time.Minute }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var n atomic.Int32
+	s.SetIfaces([]Iface{slowed(sw.iface("wlan", &n), 512<<10)})
+	tor, _ := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir()})
+	tor.Start()
+	defer tor.Stop(download.StatusPaused)
+	waitFor(t, "a time left", 20*time.Second, func() bool { return tor.Summary().ETA > 0 })
+	if eta := tor.Summary().ETA; eta > 30 || !asked.Load() {
+		t.Fatalf("time left %v s for 4 MiB at about 512 KiB/s, window asked %v", eta, asked.Load())
+	}
+}

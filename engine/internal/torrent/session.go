@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anacrolix/dht/v2"
 	atorrent "github.com/anacrolix/torrent"
@@ -45,13 +46,14 @@ type Iface struct {
 }
 
 type Config struct {
-	Changed      func(*Torrent) // optional: progress or state changed
-	Finished     func(*Torrent) // optional: the torrent's download completed
-	Ratio        func() float64 // optional: seed until uploaded/size reaches this; nil or 0 = don't seed
-	PeersPerLine func() int     // optional: connected peers a torrent may have per interface; nil or 0 = the client's 50
-	Version      string         // optional: the version peers and trackers are told, as "DMS² <version>"; "" = the torrent library's own name
-	DHTBootstrap []string       // optional: host:port of the DHT's first nodes; nil = the usual public ones
-	Port         int            // optional: where peers connect in, TCP and uTP, on each interface that listens
+	Changed      func(*Torrent)       // optional: progress or state changed
+	Finished     func(*Torrent)       // optional: the torrent's download completed
+	Ratio        func() float64       // optional: seed until uploaded/size reaches this; nil or 0 = don't seed
+	PeersPerLine func() int           // optional: connected peers a torrent may have per interface; nil or 0 = the client's 50
+	ETAWindow    func() time.Duration // optional: how long the speed behind the time left is averaged over; nil = a minute, as HTTP downloads
+	Version      string               // optional: the version peers and trackers are told, as "DMS² <version>"; "" = the torrent library's own name
+	DHTBootstrap []string             // optional: host:port of the DHT's first nodes; nil = the usual public ones
+	Port         int                  // optional: where peers connect in, TCP and uTP, on each interface that listens
 
 	// Completion, if set, keeps which pieces are complete between runs, for
 	// every torrent of the session; the caller closes it after the session.
