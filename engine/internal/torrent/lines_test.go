@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -93,9 +94,9 @@ func TestTwoLinesAreTwoPeersOfOneRemoteAndBothGetPieces(t *testing.T) {
 	}
 }
 
-// Outside the endgame no piece is fetched by two lines: what the remote sent in
-// all is the torrent, plus at most the last few pieces once.
-func TestNoPieceIsDownloadedTwiceOutsideTheEndgame(t *testing.T) {
+// No piece is fetched by two lines: what the remote sent in all is the torrent,
+// not a byte more.
+func TestNoPieceIsDownloadedTwice(t *testing.T) {
 	sw := newSwarm(t, 1, 8<<20)
 	s, _, _, _ := linesSession(t, sw, Config{Ratio: func() float64 { return 100 }})
 	tor, _ := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: t.TempDir()})
@@ -104,9 +105,8 @@ func TestNoPieceIsDownloadedTwiceOutsideTheEndgame(t *testing.T) {
 	waitFor(t, "the torrent to seed", 40*time.Second, func() bool { return tor.Status() == StatusSeeding })
 	seederStats := sw.clients[0].Torrents()[0].Stats()
 	sent := seederStats.BytesWrittenData.Int64()
-	extra := sent - int64(len(sw.data))
-	if limit := int64(endgamePieces) * sw.info.PieceLength; extra > limit {
-		t.Fatalf("the remote sent %d bytes for a %d byte torrent: %d too many, the endgame allows %d", sent, len(sw.data), extra, limit)
+	if extra := sent - int64(len(sw.data)); extra > 0 {
+		t.Fatalf("the remote sent %d bytes for a %d byte torrent: %d too many", sent, len(sw.data), extra)
 	}
 }
 
@@ -325,5 +325,44 @@ func TestAssignPiecesSplitsAsTheRatesSayAndKeepsWhatIsStarted(t *testing.T) {
 	in.avail[0][3], in.avail[1][3] = false, false
 	if out := assignPieces(in); out[3] < 0 {
 		t.Error("a piece no peer has was left with no line")
+	}
+}
+
+// A settled split stays put when the speeds change, as a piece moved after its
+// line asked for it is fetched twice; only a line with nothing left takes pieces,
+// from the end of the slowest line's share, and not one that is started.
+func TestAssignPiecesMovesOnlyToALineThatRanOut(t *testing.T) {
+	n := 100
+	in := shareIn{owner: make([]int, n), todo: make([]bool, n), keep: make([]bool, n),
+		avail: [][]bool{make([]bool, n), make([]bool, n)}, alive: []bool{true, true}, rate: []float64{1, 1}}
+	for i := range n {
+		in.owner[i], in.todo[i] = i%2, true
+		in.avail[0][i], in.avail[1][i] = true, true
+	}
+	in.rate = []float64{10, 1} // line 0 is ten times as fast now, but still has pieces
+	if out := assignPieces(in); !slices.Equal(out, in.owner) {
+		t.Fatal("pieces moved between two lines that both still have some")
+	}
+	for i := range n { // line 0 finished its share
+		in.todo[i] = i%2 == 1
+	}
+	in.keep[99] = true // started on line 1
+	out := assignPieces(in)
+	var took []int
+	for i, l := range out {
+		if in.todo[i] && l == 0 {
+			took = append(took, i)
+		}
+	}
+	if len(took) < 40 || len(took) > 46 {
+		t.Fatalf("the idle line took %d of 50 pieces at ten times the speed, want about 45", len(took))
+	}
+	if out[99] != 1 {
+		t.Fatal("a started piece moved")
+	}
+	for i := slices.Min(took); i < 99; i += 2 { // the slow line's pieces from there on, but the started one
+		if out[i] != 0 {
+			t.Fatalf("piece %d stayed on the slow line though the idle line took %d below it: not from the end", i, slices.Min(took))
+		}
 	}
 }

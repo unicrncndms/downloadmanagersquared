@@ -84,10 +84,8 @@ type Torrent struct {
 	maxConns           int   // the peer limit at gave last: only run's goroutine reads or writes it
 	wantDone, wantSize int64 // of the files to download, as of the last poll
 
-	// Only run's goroutine: the coordinator's.
-	owner     []*lineTor // the line each piece was given to, nil for none
-	tick      int
-	strayLeft int // seeding polls left that remove a stray .part
+	owner []*lineTor // under balMu: the line each piece was given to, nil for none
+	tick  int        // only run's goroutine
 }
 
 // pathRate is a torrent's traffic on one interface.
@@ -370,7 +368,6 @@ func (t *Torrent) run(ctx context.Context) {
 	}) {
 		return
 	}
-	t.strayLeft = 15 // polls: pieces fetched twice at the end may still arrive
 	if f := t.s.cfg.Finished; notify && f != nil {
 		f(t)
 	}
@@ -509,12 +506,6 @@ func (t *Torrent) poll(ctx context.Context, every time.Duration, fetch bool, don
 		}
 		t.tick++
 		t.balance(lts, fetch, t.tick) // before reading what is done: it makes the lines agree
-		if t.strayLeft > 0 && !fetch {
-			t.strayLeft--
-			if len(lts) > 1 {
-				t.removeStrayParts()
-			}
-		}
 		var completed int64
 		byPath := map[string]ifacePeers{}
 		for _, lt := range lts {
@@ -840,27 +831,6 @@ func (t *Torrent) Discard(deleteFiles bool) {
 	}
 }
 
-// removeStrayParts removes the .part file a finished file left behind. Lines
-// that fetched the last pieces both write the second copy of one, and the storage
-// creates a .part file for it though the file has been promoted by then.
-func (t *Torrent) removeStrayParts() {
-	t.mu.Lock()
-	info, err := t.infoLocked()
-	dir, skip := filepath.Clean(t.st.Dir), t.st.Skip
-	t.mu.Unlock()
-	if err != nil {
-		return
-	}
-	for i, p := range diskPaths(dir, info) {
-		if p == "" || slices.Contains(skip, i) {
-			continue
-		}
-		if _, err := os.Stat(p); err == nil {
-			os.Remove(p + ".part")
-		}
-	}
-}
-
 // diskPaths are where the file storage keeps the torrent's files under dir,
 // in the torrent's order: dir/name for one file, dir/name/path for several.
 // A path that would leave dir (peers choose them) is "": the storage refuses
@@ -985,7 +955,10 @@ func (t *Torrent) dropLocked() {
 	if t.stor != nil {
 		t.stor.Close()
 	}
-	t.lts, t.stor, t.shared, t.owner, t.active, t.slot = nil, nil, nil, nil, false, false
+	t.balMu.Lock()
+	t.owner = nil
+	t.balMu.Unlock()
+	t.lts, t.stor, t.shared, t.active, t.slot = nil, nil, nil, false, false
 	t.speed, t.upSpeed = rate.EWMA{}, rate.EWMA{}
 	t.paths, t.peers, t.seeds, t.swarm = nil, 0, 0, 0
 	if t.held {

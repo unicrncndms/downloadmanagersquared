@@ -185,11 +185,9 @@ func (t *Torrent) addLine(ctx context.Context, is *ifaceSockets, main bool) (*li
 }
 
 const (
-	endgamePieces = 4                // with this many pieces or fewer to go, every line fetches them all
-	aliveGrace    = 15 * time.Second // a line without peers yet still counts as alive this long
-	rampUp        = 20 * time.Second // a line that has fetched nothing yet is given the best line's share this long
-	availEvery    = 4                // ticks between reading which pieces a line's peers have
-	keepFactor    = 1.5              // a piece stays with its line unless another would finish it this much sooner
+	aliveGrace = 15 * time.Second // a line without peers yet still counts as alive this long
+	rampUp     = 20 * time.Second // a line that has fetched nothing yet is given the best line's share this long
+	availEvery = 4                // ticks between reading which pieces a line's peers have
 )
 
 // balance is run each poll: it makes finished pieces known to every line and,
@@ -223,7 +221,10 @@ func (t *Torrent) single(lt *lineTor, skip []int, fetch bool) {
 	if lt.at.Info() == nil {
 		return
 	}
-	if lt.multi { // the other lines left: back to the files' priorities
+	if lt.multi { // the other lines left: back to the files' priorities, set before the pieces' go
+		if fetch {
+			applySkip(lt.at, skip)
+		}
 		for i, on := range lt.prio {
 			if on {
 				lt.at.Piece(i).SetPriority(atorrent.PiecePriorityNone)
@@ -274,6 +275,31 @@ func (t *Torrent) balanceMany(lts []*lineTor, skip []int, fetch bool, tick int) 
 			return // priorities wait until the start-up check has settled
 		}
 	}
+	if len(t.owner) != n {
+		t.owner = make([]*lineTor, n)
+	}
+	for li, lt := range lts {
+		if lt.multi {
+			continue
+		}
+		// The files' priorities give way to the pieces'. A line that was fetching
+		// alone keeps what it fetches, its pieces asked for before its files let go:
+		// cancelled requests would come again, fetched twice. A line joining starts
+		// with nothing and takes from the end of the others' shares.
+		fetching := lt.set
+		lt.multi, lt.prio, lt.set = true, make([]bool, n), false
+		if fetching {
+			for i, w := range wantedPieces(lt.at, lt.skip) {
+				if w && !views[li].complete[i] && t.owner[i] == nil {
+					t.owner[i] = lt
+					lt.setPrio(i, true)
+				}
+			}
+		}
+		for _, f := range lt.at.Files() {
+			f.SetPriority(atorrent.PiecePriorityNone)
+		}
+	}
 	// A piece one line finished is finished for every line: each line reads it
 	// from the shared storage, offers it to its peers and can upload it.
 	done := make([]bool, n)
@@ -282,22 +308,11 @@ func (t *Torrent) balanceMany(lts []*lineTor, skip []int, fetch bool, tick int) 
 			done[i] = done[i] || c
 		}
 	}
-	for _, lt := range lts {
-		lt.catchUp(done, views[slices.Index(lts, lt)].complete)
+	for li, lt := range lts {
+		lt.catchUp(done, views[li].complete)
 	}
 	if !fetch {
 		return
-	}
-	for _, lt := range lts {
-		if !lt.multi { // the files' priorities give way to the pieces'
-			for _, f := range lt.at.Files() {
-				f.SetPriority(atorrent.PiecePriorityNone)
-			}
-			lt.multi, lt.prio, lt.set = true, make([]bool, n), false
-		}
-	}
-	if len(t.owner) != n {
-		t.owner = make([]*lineTor, n)
 	}
 	wanted := wantedPieces(main, skip)
 	todo := make([]bool, n)
@@ -308,59 +323,69 @@ func (t *Torrent) balanceMany(lts []*lineTor, skip []int, fetch bool, tick int) 
 		}
 	}
 
-	next := make([]int, n) // the line of each piece still to come
-	if left > endgamePieces {
-		in := shareIn{owner: make([]int, n), todo: todo, keep: make([]bool, n),
-			avail: make([][]bool, len(lts)), alive: make([]bool, len(lts)), rate: make([]float64, len(lts))}
-		top := 0.0
-		for _, lt := range lts {
-			top = max(top, lt.rate.Value())
+	if left == 0 {
+		return
+	}
+	in := shareIn{owner: make([]int, n), todo: todo, keep: make([]bool, n),
+		avail: make([][]bool, len(lts)), alive: make([]bool, len(lts)), rate: make([]float64, len(lts))}
+	top := 0.0
+	for _, lt := range lts {
+		top = max(top, lt.rate.Value())
+	}
+	for li, lt := range lts {
+		if tick%availEvery == 0 || lt.avail == nil {
+			lt.avail = availability(lt.at, n)
 		}
+		in.avail[li] = lt.avail
+		in.alive[li] = len(lt.at.PeerConns()) > 0 || time.Since(lt.added) < aliveGrace
+		in.rate[li] = max(lt.rate.Value(), top/20, 1) // a slow line keeps a small share, so it can recover
+		if lt.rate.Value() == 0 && time.Since(lt.added) < rampUp {
+			in.rate[li] = max(top, 1) // not measured yet: the same share as the best
+		}
+	}
+	for i := range n {
+		in.owner[i] = -1
+		if o := t.owner[i]; o != nil {
+			in.owner[i] = slices.Index(lts, o)
+		}
+		if in.owner[i] < 0 { // a line fetched it before the coordinator had a say (it ran alone): that line's
+			in.owner[i] = slices.IndexFunc(views, func(v pieceView) bool { return v.partial[i] })
+		}
+		// A piece started on a living line stays there; what is half fetched is lost by moving it.
+		if o := in.owner[i]; o >= 0 && views[o].partial[i] && in.alive[o] {
+			in.keep[i] = true
+		}
+	}
+	next := assignPieces(in) // the line of each piece still to come, -1 for none
+	for i, li := range next {
+		t.owner[i] = nil
+		if li >= 0 {
+			t.owner[i] = lts[li]
+		}
+	}
+	// No piece is fetched twice: one line at a time wants a piece, and a piece
+	// moving to another line is let go of everywhere before that line asks for it.
+	for _, want := range []bool{false, true} {
 		for li, lt := range lts {
-			if tick%availEvery == 0 || lt.avail == nil {
-				lt.avail = availability(lt.at, n)
+			if !lt.open() {
+				return
 			}
-			in.avail[li] = lt.avail
-			in.alive[li] = len(lt.at.PeerConns()) > 0 || time.Since(lt.added) < aliveGrace
-			in.rate[li] = max(lt.rate.Value(), top/20, 1) // a slow line keeps a small share, so it can recover
-			if lt.rate.Value() == 0 && time.Since(lt.added) < rampUp {
-				in.rate[li] = max(top, 1) // not measured yet: the same share as the best
-			}
-		}
-		for i := range n {
-			in.owner[i] = -1
-			if o := t.owner[i]; o != nil {
-				in.owner[i] = slices.Index(lts, o)
-			}
-			// A piece started on a living line stays there; what is half fetched is lost by moving it.
-			if o := in.owner[i]; o >= 0 && views[o].partial[i] && in.alive[o] {
-				in.keep[i] = true
-			}
-		}
-		for i, li := range assignPieces(in) {
-			next[i] = li
-			t.owner[i] = nil
-			if li >= 0 {
-				t.owner[i] = lts[li]
+			for i := range n {
+				if w := todo[i] && next[i] == li; w == want && lt.prio[i] != w {
+					lt.setPrio(i, w)
+				}
 			}
 		}
 	}
-	for li, lt := range lts {
-		for i := range n {
-			// In the endgame every line asks for every piece left: the first copy wins.
-			want := todo[i] && (left <= endgamePieces || next[i] == li)
-			if lt.prio[i] != want {
-				if !lt.open() {
-					break
-				}
-				lt.prio[i] = want
-				if want {
-					lt.at.Piece(i).SetPriority(atorrent.PiecePriorityNormal)
-				} else {
-					lt.at.Piece(i).SetPriority(atorrent.PiecePriorityNone)
-				}
-			}
-		}
+}
+
+// setPrio tells the line to fetch piece i, or not.
+func (lt *lineTor) setPrio(i int, want bool) {
+	lt.prio[i] = want
+	if want {
+		lt.at.Piece(i).SetPriority(atorrent.PiecePriorityNormal)
+	} else {
+		lt.at.Piece(i).SetPriority(atorrent.PiecePriorityNone)
 	}
 }
 
@@ -378,6 +403,11 @@ func (lt *lineTor) catchUp(done, have []bool) {
 		}
 		if !lt.open() {
 			break
+		}
+		// Not pending first: the library checks pending pieces against its request
+		// order midway through UpdateCompletion, and panics on a piece still wanted.
+		if lt.prio[i] {
+			lt.setPrio(i, false)
 		}
 		p := lt.at.Piece(i)
 		p.UpdateCompletion()
@@ -439,24 +469,37 @@ type shareIn struct {
 }
 
 // assignPieces gives every piece to do a line, so each line finishes its share about
-// when the others do. A piece goes to a line whose peers have it, preferably one
-// that is alive, and stays with its owner unless another line would finish it
-// keepFactor times sooner. Pieces in keep stay as they are and count as load.
+// when the others do, and moves as few as it can: a piece moved after its line
+// asked for it is fetched twice, the chunks already on their way. A piece stays
+// with its living owner unless only another line's peers have it. A piece
+// without a line goes to one whose peers have it, preferably alive, the one
+// that would finish soonest. A living line with nothing left to fetch takes
+// pieces from the end of the share of the line that would finish last (that
+// line asks for those last), as many as even them out.
 func assignPieces(in shareIn) []int {
 	k := len(in.rate)
 	out := make([]int, len(in.todo))
 	load := make([]int, k)
+	fetchable := func(l, i int) bool { return in.alive[l] && in.avail[l][i] }
 	for i := range out {
 		out[i] = -1
-		if in.todo[i] && in.keep[i] {
-			out[i] = in.owner[i]
-			load[out[i]]++
+		o := in.owner[i]
+		if !in.todo[i] || o < 0 {
+			continue
+		}
+		other := false // some living line's peers have it
+		for l := range k {
+			other = other || fetchable(l, i)
+		}
+		if in.keep[i] || in.alive[o] && (in.avail[o][i] || !other) {
+			out[i] = o
+			load[o]++
 		}
 	}
 	finish := func(l int) float64 { return float64(load[l]+1) / in.rate[l] }
 	cand := make([]int, 0, k)
 	for i := range out {
-		if !in.todo[i] || in.keep[i] {
+		if !in.todo[i] || out[i] >= 0 {
 			continue
 		}
 		// The lines that can fetch it, best reason first: alive with a peer that has it, alive, any.
@@ -474,12 +517,30 @@ func assignPieces(in shareIn) []int {
 				best = l
 			}
 		}
-		if o := in.owner[i]; o >= 0 && slices.Contains(cand, o) && finish(o) <= finish(best)*keepFactor {
-			best = o
-		}
 		out[i] = best
 		load[best]++
 		cand = cand[:0]
+	}
+	for a := range k {
+		if !in.alive[a] || load[a] > 0 {
+			continue
+		}
+		d := -1 // the line that would finish last
+		for l := range k {
+			if l != a && load[l] > 0 && (d < 0 || float64(load[l])/in.rate[l] > float64(load[d])/in.rate[d]) {
+				d = l
+			}
+		}
+		if d < 0 {
+			continue
+		}
+		for i := len(out) - 1; i >= 0 && float64(load[a]+1)/in.rate[a] < float64(load[d]-1)/in.rate[d]; i-- {
+			if out[i] == d && !in.keep[i] && in.avail[a][i] {
+				out[i] = a
+				load[a]++
+				load[d]--
+			}
+		}
 	}
 	return out
 }
