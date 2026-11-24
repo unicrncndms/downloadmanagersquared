@@ -200,6 +200,13 @@ const FIXTURES = {
     return { connected: true, state: { ...STATE, downloads: [{ ...CHOOSING, fileCount: files.length, filesSize: 1.73e10 }, running], active: 1 }, settings: SETTINGS, autostart: true, recipes: RECIPES,
       engineVersion: "0.3.0", files: { t: files, tr: files } };
   })(),
+  // A torrent over two VPN lines, each its own peer: Details lists both with peers and speeds both ways.
+  torrentLines: { connected: true, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", settings: SETTINGS,
+    state: { ...STATE, downloads: [{ ...DOWNLOADS[4], id: "tl", filename: "Big.Collection.2026", status: "running", label: "Downloading", tone: "ok",
+      size: 2.4e11, done: 6e10, speed: 3.8e6, upSpeed: 3.1e6, eta: 47000, finished: undefined, section: "active", peers: 291, seeds: 40, swarm: 900,
+      fileCount: 108, actions: { remove: true, pause: true },
+      links: { "eth~vpn": { conns: 95, speed: 3.35e5, up: 9.15e5, label: "Downloading", tone: "ok" },
+        wifi: { conns: 196, speed: 3.5e6, up: 2.2e6, label: "Downloading", tone: "ok" } } }], active: 1 } },
   // Downloads held back for a question (state.asks).
   asks: { connected: true, autostart: true, recipes: RECIPES, engineVersion: "0.3.0", settings: SETTINGS, state: { ...STATE, asks: [
     { id: "q1", text: "\"Debian-13.iso\" is already in D:\\ISOs.", choices: [{ key: "rename", label: "Keep both" }, { key: "replace", label: "Replace it" }, { key: "cancel", label: "Skip" }] },
