@@ -104,6 +104,9 @@ A download fetched from a BitTorrent swarm instead of an HTTP server, started fr
 Another BitTorrent client in the swarm that the engine exchanges pieces with. Each peer is reached over one interface or one of its tunnels.
 _Avoid_: Connection (that is an HTTP request)
 
+**Line**:
+An interface (or tunnel) as a torrent uses it: a peer of its own in the swarm, with its own client, peer ID, address and port. A torrent over two lines is two peers to everyone else, and the lines split its pieces so none is fetched twice, apart from the last few. The card shows the lines added up. A private torrent runs on the main line only.
+
 **Seeding**:
 A torrent uploading to peers after its own download is complete. It holds no queue slot, and only interfaces with upload on take part.
 

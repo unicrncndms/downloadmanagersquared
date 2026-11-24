@@ -104,7 +104,7 @@ func TestWithoutIPv6NoIPv6PeerIsTried(t *testing.T) {
 	s.mu.Lock()
 	is := s.ifs[0]
 	s.mu.Unlock()
-	if is.v6 != nil || s.ipv6 {
+	if is.v6 != nil || is.ipv6 {
 		t.Error("IPv6 sockets with IPv6 off")
 	}
 }

@@ -58,13 +58,17 @@ type Torrent struct {
 
 	mu      sync.Mutex
 	st      State
-	t       *atorrent.Torrent // nil unless in the swarm
+	lts     []*lineTor // the lines carrying it, the main one first; empty unless in the swarm; never changed in place
 	stor    storage.ClientImplCloser
+	shared  *sharedStorage // stor as every line's client opens it
 	cancel  context.CancelFunc
-	active  bool  // in the swarm, in any phase
-	held    bool  // holds the session's client (acquire, matched by release)
-	slot    bool  // checking or downloading after the queue started it: holds a queue slot
-	upBase  int64 // st.Uploaded when this run joined the swarm
+	active  bool       // in the swarm, in any phase
+	held    bool       // holds the session's lines (acquire, matched by release)
+	slot    bool       // checking or downloading after the queue started it: holds a queue slot
+	upBase  int64      // st.Uploaded when this run joined the swarm
+	upDone  int64      // what lines that left since then uploaded
+	balMu   sync.Mutex // see balance
+	wake    chan struct{}
 	speed   rate.EWMA
 	upSpeed rate.EWMA
 	info    *metainfo.Info // st.Info parsed, once needed
@@ -79,6 +83,11 @@ type Torrent struct {
 
 	maxConns           int   // the peer limit at gave last: only run's goroutine reads or writes it
 	wantDone, wantSize int64 // of the files to download, as of the last poll
+
+	// Only run's goroutine: the coordinator's.
+	owner     []*lineTor // the line each piece was given to, nil for none
+	tick      int
+	strayLeft int // seeding polls left that remove a stray .part
 }
 
 // pathRate is a torrent's traffic on one interface.
@@ -104,7 +113,7 @@ func (s *Session) Add(st State) (*Torrent, error) {
 	if st.Size == 0 {
 		st.Size = -1 // unknown until the metadata arrives
 	}
-	return &Torrent{s: s, st: st, hash: spec.InfoHash.HexString()}, nil
+	return &Torrent{s: s, st: st, hash: spec.InfoHash.HexString(), wake: make(chan struct{}, 1)}, nil
 }
 
 // Path is the torrent's file, or its folder when it has several; "" while its
@@ -141,7 +150,7 @@ func (t *Torrent) Summary() download.Summary {
 	case !t.st.Finished.IsZero():
 		s.Done = s.Size
 		s.Speed = 0
-	case t.t != nil && t.t.Info() != nil:
+	case t.active && t.st.Info != nil:
 		s.Done = t.wantDone
 		if s.Speed > 0 {
 			s.ETA = float64(s.Size-s.Done) / s.Speed
@@ -225,51 +234,70 @@ func (t *Torrent) Start() {
 	go t.run(ctx)
 }
 
-// join adds the torrent to the client, once its UDP trackers are resolved.
-func (t *Torrent) join(ctx context.Context) (*atorrent.Torrent, error) {
-	spec, err := atorrent.TorrentSpecFromMagnetUri(t.st.Magnet)
-	if err != nil {
-		return nil, err
+// join puts the torrent in the swarm: the session's lines start if no other
+// torrent started them, and the torrent joins each.
+func (t *Torrent) join(ctx context.Context) error {
+	if err := t.s.acquire(t); err != nil { // the lines' sockets open now, if no other torrent opened them
+		return err
 	}
-	cl, err := t.s.acquire() // the session's sockets open now, if no other torrent opened them
-	if err != nil {
-		return nil, err
-	}
-	var missed []string
-	spec.Trackers, missed = resolveUDPTrackers(ctx, spec.Trackers, t.s.lookupFirst)
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	if ctx.Err() != nil {
-		t.s.release()
-		return nil, ctx.Err()
+		t.mu.Unlock()
+		t.s.release(t)
+		return ctx.Err()
 	}
 	t.held = true
-	spec.InfoBytes = t.st.Info
 	t.stor = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: t.st.Dir, PieceCompletion: t.s.completion(),
 		FilePathMaker: func(o storage.FilePathMakerOpts) string { return filepath.Join(diskParts(o.Info, o.File)...) },
 		Logger:        slog.New(slog.DiscardHandler),
 	})
-	spec.Storage = t.stor
-	at, _, err := cl.AddTorrentSpec(spec)
-	if err != nil {
-		t.stor.Close()
-		t.stor = nil
-		t.held = false
-		t.s.release()
-		return nil, err
+	t.shared = &sharedStorage{ClientImpl: t.stor}
+	t.upBase, t.upDone, t.maxConns = t.st.Uploaded, 0, 0
+	t.mu.Unlock()
+	if err := t.syncLines(ctx); err != nil && len(t.lineTors()) == 0 {
+		return err
 	}
-	t.t, t.upBase = at, t.st.Uploaded
-	t.maxConns = 0
-	t.followMaxPeers(at)
-	if len(missed) > 0 {
-		go resolveLater(ctx, missed, t.s.lookupFirst, at.AddTrackers)
+	return nil
+}
+
+// waitMain waits until some line carries the torrent, and returns the torrent
+// on the main one; nil if ctx ends first. Lines change as interfaces come and go.
+func (t *Torrent) waitMain(ctx context.Context) *atorrent.Torrent {
+	for {
+		if at := t.main(); at != nil {
+			return at
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.wake:
+			t.syncLines(ctx)
+		}
 	}
-	return at, nil
+}
+
+// waitInfo waits until the torrent's info is known, from a line's peers (a
+// magnet link) or the start, and returns the torrent that has it; nil if ctx ends first.
+func (t *Torrent) waitInfo(ctx context.Context) *atorrent.Torrent {
+	for {
+		at := t.waitMain(ctx)
+		if at == nil {
+			return nil
+		}
+		select {
+		case <-at.GotInfo():
+			return at
+		case <-ctx.Done():
+			return nil
+		case <-t.wake: // the main line may be another by now
+			t.syncLines(ctx)
+		}
+	}
 }
 
 func (t *Torrent) run(ctx context.Context) {
-	at, err := t.join(ctx)
+	err := t.join(ctx)
 	if err != nil {
 		t.mu.Lock()
 		if ctx.Err() == nil {
@@ -281,13 +309,11 @@ func (t *Torrent) run(ctx context.Context) {
 		return
 	}
 	t.changed()
-	go t.announceDHT(ctx, at)
-	select {
-	case <-at.GotInfo():
-	case <-ctx.Done():
+	at := t.waitInfo(ctx)
+	if at == nil {
 		return
 	}
-	if !t.update(at, func() {
+	if !t.update(ctx, func() {
 		// Peers choose the name; never let it be a path.
 		t.st.Name, t.st.Size = diskName(at.Info()), at.Length()
 		t.st.Info = at.Metainfo().InfoBytes
@@ -306,18 +332,19 @@ func (t *Torrent) run(ctx context.Context) {
 	if s := t.State().Status; s == StatusChoosing || s == download.StatusFailed {
 		return
 	}
+	t.syncLines(ctx) // the other lines get the info from here
 	// The file storage trusts a full-size file and distrusts a .part one without
 	// reading either, so hash whatever is on disk unless the pieces kept as
 	// complete can be trusted.
-	if t.hasData(at) && t.mustVerify(at) {
+	if main := t.waitMain(ctx); main != nil && t.hasData(main) && t.mustVerify(main) {
 		t.verified.Store(true)
-		go at.VerifyDataContext(ctx)
+		go main.VerifyDataContext(ctx)
 		select { // let it queue the first pieces
 		case <-time.After(50 * time.Millisecond):
 		case <-ctx.Done():
 		}
 	}
-	if !t.poll(ctx, at, pollEvery, func() bool { return !checking(at) }) {
+	if !t.poll(ctx, pollEvery, false, func() bool { return !t.checking() }) {
 		return
 	}
 	complete := func() bool { // reads the choice afresh: SetFiles may change it while this runs
@@ -326,18 +353,15 @@ func (t *Torrent) run(ctx context.Context) {
 		return t.wantDone == t.wantSize
 	}
 	if !complete() {
-		if !t.update(at, func() { t.st.Status = download.StatusRunning }) {
+		if !t.update(ctx, func() { t.st.Status = download.StatusRunning }) {
 			return
 		}
-		t.mu.Lock()
-		applySkip(at, t.st.Skip)
-		t.mu.Unlock()
-		if !t.poll(ctx, at, pollEvery, complete) {
+		if !t.poll(ctx, pollEvery, true, complete) {
 			return
 		}
 	}
 	notify := false
-	if !t.update(at, func() {
+	if !t.update(ctx, func() {
 		notify = t.st.Finished.IsZero()
 		if notify {
 			t.st.Finished = time.Now()
@@ -346,10 +370,11 @@ func (t *Torrent) run(ctx context.Context) {
 	}) {
 		return
 	}
+	t.strayLeft = 15 // polls: pieces fetched twice at the end may still arrive
 	if f := t.s.cfg.Finished; notify && f != nil {
 		f(t)
 	}
-	if !t.poll(ctx, at, seedEvery, func() bool {
+	if !t.poll(ctx, seedEvery, false, func() bool {
 		t.mu.Lock()
 		defer t.mu.Unlock()
 		size := t.wantedSizeLocked()
@@ -357,7 +382,7 @@ func (t *Torrent) run(ctx context.Context) {
 	}) {
 		return
 	}
-	t.update(at, func() {
+	t.update(ctx, func() {
 		t.dropLocked()
 		t.st.Status = download.StatusCompleted
 	})
@@ -369,17 +394,18 @@ const (
 	dhtTimeout = 2 * time.Minute
 )
 
-// announceDHT looks the torrent up on every interface's DHT, and announces it
-// there, until ctx ends. Private torrents stay off the DHT (a magnet link's
-// torrent counts as public until its info says otherwise).
-func (t *Torrent) announceDHT(ctx context.Context, at *atorrent.Torrent) {
+// announceDHT looks the torrent up on its line's DHT, and announces it there,
+// until the line leaves the torrent. Private torrents stay off the DHT (a
+// magnet link's torrent counts as public until its info says otherwise).
+func (t *Torrent) announceDHT(lt *lineTor) {
+	ctx := lt.ctx
 	for {
 		next := dhtSoon
-		for _, ds := range t.s.dhtServers() {
-			if private(at) || ctx.Err() != nil {
+		for _, ds := range lt.is.dhtServers() {
+			if private(lt.at) || ctx.Err() != nil {
 				break
 			}
-			done, stop, err := at.AnnounceToDht(ds)
+			done, stop, err := lt.at.AnnounceToDht(ds)
 			if err != nil {
 				continue
 			}
@@ -406,12 +432,12 @@ const upSaveEvery = 30 * time.Second
 var now = time.Now
 
 // update changes the state under the lock, unless the torrent left the swarm
-// (at is no longer its torrent), and reports whether it did. It marks the
+// (ctx, its run's, ended), and reports whether it did. It marks the
 // entry dirty only if a saved field changed; the upload count alone counts at
 // most every upSaveEvery, so an idle seeder does not rewrite its state file.
-func (t *Torrent) update(at *atorrent.Torrent, f func()) bool {
+func (t *Torrent) update(ctx context.Context, f func()) bool {
 	t.mu.Lock()
-	if t.t != at {
+	if ctx.Err() != nil {
 		t.mu.Unlock()
 		return false
 	}
@@ -447,33 +473,62 @@ func (t *Torrent) wantedSizeLocked() int64 {
 	return t.st.Size
 }
 
-// followMaxPeers sets at's peer limit to the session's, when it changed: the
-// setting, or the interfaces in use.
-func (t *Torrent) followMaxPeers(at *atorrent.Torrent) {
+// followMaxPeers sets each line's peer limit to the session's, when it changed:
+// the setting. A line joining sets its own.
+func (t *Torrent) followMaxPeers(lts []*lineTor) {
 	if m := t.s.maxPeers(); m != t.maxConns {
-		at.SetMaxEstablishedConns(m)
+		for _, lt := range lts {
+			lt.at.SetMaxEstablishedConns(m)
+		}
 		t.maxConns = m
 	}
 }
 
-// poll keeps the speeds and upload count current until done reports true, and
-// reports false if the torrent left the swarm first.
-func (t *Torrent) poll(ctx context.Context, at *atorrent.Torrent, every time.Duration, done func() bool) bool {
+// checking is whether any line is hashing pieces or has them queued.
+func (t *Torrent) checking() bool {
+	return slices.ContainsFunc(t.lineTors(), func(lt *lineTor) bool { return checking(lt.at) })
+}
+
+// poll keeps the lines in step and the speeds and upload count current until
+// done reports true, and reports false if the torrent left the swarm first.
+// fetch: the torrent downloads, so the pieces to fetch are set.
+func (t *Torrent) poll(ctx context.Context, every time.Duration, fetch bool, done func() bool) bool {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
 	for {
-		t.followMaxPeers(at)
-		stats := at.Stats()
-		completed, uploaded := at.BytesCompleted(), stats.BytesWrittenData.Int64()
-		byPath := t.s.peersByIface(at)
-		if !t.update(at, func() {
-			if at.Info() != nil { // the one walk of the files: Summary and the finish check read it
-				t.wantDone, t.wantSize = wanted(at, t.st.Skip)
+		t.syncLines(ctx)
+		lts := t.lineTors()
+		t.followMaxPeers(lts)
+		var peers, seeds, swarm int
+		uploaded := t.upDone
+		for _, lt := range lts {
+			st := lt.at.Stats()
+			uploaded += st.BytesWrittenData.Int64()
+			peers, seeds, swarm = peers+st.ActivePeers, seeds+st.ConnectedSeeders, swarm+st.TotalPeers
+			lt.rate.Update(st.BytesReadUsefulData.Int64(), every)
+		}
+		t.tick++
+		t.balance(lts, fetch, t.tick) // before reading what is done: it makes the lines agree
+		if t.strayLeft > 0 && !fetch {
+			t.strayLeft--
+			if len(lts) > 1 {
+				t.removeStrayParts()
+			}
+		}
+		var completed int64
+		byPath := map[string]ifacePeers{}
+		for _, lt := range lts {
+			completed = max(completed, lt.at.BytesCompleted())
+			byPath[lt.is.ID] = lt.peers()
+		}
+		if !t.update(ctx, func() {
+			if len(lts) > 0 && lts[0].at.Info() != nil { // the one walk of the files: Summary and the finish check read it
+				t.wantDone, t.wantSize = wanted(lts[0].at, t.st.Skip)
 			}
 			t.speed.Update(completed, every)
 			t.upSpeed.Update(uploaded, every)
 			t.st.Uploaded = t.upBase + uploaded
-			t.peers, t.seeds, t.swarm = stats.ActivePeers, stats.ConnectedSeeders, stats.TotalPeers
+			t.peers, t.seeds, t.swarm = peers, seeds, swarm
 			t.ratesLocked(byPath, every)
 		}) {
 			return false
@@ -481,10 +536,16 @@ func (t *Torrent) poll(ctx context.Context, at *atorrent.Torrent, every time.Dur
 		if done() {
 			return true
 		}
-		select {
-		case <-ctx.Done():
-			return false
-		case <-tick.C:
+		for waiting := true; waiting; {
+			select {
+			case <-ctx.Done():
+				return false
+			case <-tick.C:
+				waiting = false
+			case <-t.wake: // lines changed, or files were chosen: act at once
+				t.syncLines(ctx)
+				t.balance(t.lineTors(), fetch, t.tick)
+			}
 		}
 	}
 }
@@ -608,10 +669,8 @@ func (t *Torrent) SetFiles(files []bool) error {
 		return err
 	}
 	t.st.Skip, t.st.Size = skip, size
-	// Only while downloading: before that, run applies the choice itself.
-	if t.t != nil && t.t.Info() != nil && t.st.Status == download.StatusRunning {
-		applySkip(t.t, skip)
-	}
+	// Only while downloading does run apply it (balance); before that it applies the choice itself.
+	t.wakeUp()
 	go t.changed()
 	return nil
 }
@@ -651,8 +710,10 @@ func (t *Torrent) filesLocked() []download.FileSummary {
 			p = strings.Join(f.BestPath(), "/")
 		}
 		fs := download.FileSummary{Path: p, Size: f.Length, Selected: !slices.Contains(t.st.Skip, i)}
-		if t.t != nil && t.t.Info() != nil && i < len(t.t.Files()) {
-			fs.Done = t.t.Files()[i].BytesCompleted()
+		if len(t.lts) > 0 {
+			if files := t.lts[0].at.Files(); i < len(files) {
+				fs.Done = files[i].BytesCompleted()
+			}
 		}
 		out = append(out, fs)
 	}
@@ -700,9 +761,9 @@ func checking(at *atorrent.Torrent) bool {
 	return false
 }
 
-// maxPeers is how many peers a torrent may have connected: the setting for
-// each interface, as peers spread over them and using several lines at once is
-// the point. Torrents follow it as it changes (Torrent.followMaxPeers).
+// maxPeers is how many peers a torrent may have connected on each line, which is
+// a peer of its own: the setting. Torrents follow it as it changes
+// (Torrent.followMaxPeers).
 func (s *Session) maxPeers() int {
 	n := 50 // the client's own default
 	if s.cfg.PeersPerLine != nil {
@@ -710,9 +771,7 @@ func (s *Session) maxPeers() int {
 			n = v
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return n * max(1, len(s.ifs))
+	return n
 }
 
 func (s *Session) ratio() float64 {
@@ -777,6 +836,27 @@ func (t *Torrent) Discard(deleteFiles bool) {
 		}
 		// Folders the torrent's files leave empty go too, up to the save folder.
 		for d := filepath.Dir(p); len(d) > len(dir) && os.Remove(d) == nil; d = filepath.Dir(d) {
+		}
+	}
+}
+
+// removeStrayParts removes the .part file a finished file left behind. Lines
+// that fetched the last pieces both write the second copy of one, and the storage
+// creates a .part file for it though the file has been promoted by then.
+func (t *Torrent) removeStrayParts() {
+	t.mu.Lock()
+	info, err := t.infoLocked()
+	dir, skip := filepath.Clean(t.st.Dir), t.st.Skip
+	t.mu.Unlock()
+	if err != nil {
+		return
+	}
+	for i, p := range diskPaths(dir, info) {
+		if p == "" || slices.Contains(skip, i) {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			os.Remove(p + ".part")
 		}
 	}
 }
@@ -899,16 +979,18 @@ func (t *Torrent) WaitingForVPN() bool {
 
 func (t *Torrent) dropLocked() {
 	t.cancel()
-	if t.t != nil {
-		t.t.Drop()
+	for _, lt := range t.lts {
+		t.drop(lt)
+	}
+	if t.stor != nil {
 		t.stor.Close()
 	}
-	t.t, t.stor, t.active, t.slot = nil, nil, false, false
+	t.lts, t.stor, t.shared, t.owner, t.active, t.slot = nil, nil, nil, nil, false, false
 	t.speed, t.upSpeed = rate.EWMA{}, rate.EWMA{}
 	t.paths, t.peers, t.seeds, t.swarm = nil, 0, 0, 0
 	if t.held {
 		t.held = false
-		t.s.release() // the last torrent out closes the session's sockets
+		t.s.release(t) // the last torrent out closes the session's sockets
 	}
 }
 

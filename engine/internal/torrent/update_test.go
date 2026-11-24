@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ func TestUploadedAloneMarksTheEntryDirtyOnlyEvery30Seconds(t *testing.T) {
 	step := func(d time.Duration, f func()) int {
 		clock = clock.Add(d)
 		dirty = 0
-		tr.update(nil, f)
+		tr.update(context.Background(), f)
 		return dirty
 	}
 	up := int64(0)

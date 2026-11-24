@@ -135,7 +135,7 @@ func TestInterfaceListensOnItsOwnForwardedPort(t *testing.T) {
 	if len(listened) != 2 || listened[0] != first || listened[1] != ifc.Port {
 		t.Fatalf("listened on %v, want the forwarded %d and then %d", listened, first, ifc.Port)
 	}
-	if ds := s.dhtServers(); len(ds) != 1 || ds[0].(portedDHT).port != ifc.Port {
+	if ds := s.lines()[0].dhtServers(); len(ds) != 1 || ds[0].(portedDHT).port != ifc.Port {
 		t.Fatalf("DHT announces %+v, want the forwarded port", ds)
 	}
 }

@@ -1018,9 +1018,7 @@ func TestASeedingTorrentsFileCanBeDeleted(t *testing.T) {
 	}
 	tor.Start()
 	waitFor(t, "the torrent to seed", 30*time.Second, func() bool { return tor.Status() == StatusSeeding })
-	tor.mu.Lock()
-	r := tor.t.NewReader() // as for a peer: the mmap backend maps a file when it is read
-	tor.mu.Unlock()
+	r := tor.main().NewReader() // as for a peer: the mmap backend maps a file when it is read
 	if _, err := io.ReadFull(r, make([]byte, 64<<10)); err != nil {
 		t.Fatal(err)
 	}

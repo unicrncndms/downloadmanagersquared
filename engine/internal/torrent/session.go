@@ -1,7 +1,10 @@
-// Package torrent fetches torrents over every usable interface at once. It wraps
-// one anacrolix/torrent client per engine and gives it no socket of its own:
-// every peer, DHT packet and tracker request goes out through a function the
-// engine supplies for one interface.
+// Package torrent fetches torrents over every usable interface at once. Each
+// interface (a line) is a peer of its own in a torrent's swarm: it has its own
+// anacrolix/torrent client, with its own peer ID, address and port, and the
+// client has no socket but that line's. Every peer, DHT packet and tracker
+// request goes out through a function the engine supplies for that interface.
+// A torrent in the swarm is carried by one client per line over one shared
+// storage, and a coordinator splits its pieces between them (lines.go).
 package torrent
 
 import (
@@ -74,13 +77,21 @@ type keptCompletion struct{ storage.PieceCompletion }
 
 func (keptCompletion) Close() error { return nil }
 
-// ifaceSockets is one interface as the session uses it.
+// ifaceSockets is one line: an interface with its own client and sockets.
 type ifaceSockets struct {
 	Iface
+	s      *Session
+	cl     *atorrent.Client // the line's peer: its own peer ID, address and port
+	stor   storage.ClientImplCloser
+	ipv6   bool                  // the client has IPv6: the interface had IPv6 sockets to give when it opened
 	v4, v6 *familySockets        // nil: none of that family (an IPv6-only interface has no v4)
-	peers  int                   // peers open or being dialed
 	open   map[*trackedPeer]bool // peers open
-	gone   chan struct{}         // closed when the interface is no longer used
+	gone   chan struct{}         // closed when the line is no longer used
+	done   chan struct{}         // closed once its client has stopped
+
+	opening6 bool // the DHT server being created is the IPv6 one; addIface only
+
+	offline bool // the stand-in line while no interface is usable: a client with no socket, so a torrent still checks its data
 }
 
 // familySockets are an interface's sockets of one address family.
@@ -99,54 +110,35 @@ func (is *ifaceSockets) family(v6 bool) *familySockets {
 	return is.v4
 }
 
-// dialing is the interface every dial to one peer address goes out on, while any is in flight.
-type dialing struct {
-	is *ifaceSockets
-	n  int
-}
-
-// Session runs the torrents of one VPN mode. Its client, and with it every
-// socket (peers, DHT, listeners), exists only while a torrent is in the swarm,
-// so a session with nothing to do shows nothing on the network.
+// Session runs the torrents of one VPN mode. Its lines, and with them every
+// socket (peers, DHT, listeners) and client, exist only while a torrent is in
+// the swarm, so a session with nothing to do shows nothing on the network.
 type Session struct {
 	cfg Config
 
-	setMu  sync.Mutex // one change of interfaces, or start or stop of the client, at a time
-	want   []Iface    // the interfaces to use whenever the client runs
+	setMu  sync.Mutex // one change of interfaces, or start or stop of the lines, at a time
+	want   []Iface    // the interfaces to use whenever the lines run
 	users  int        // torrents in the swarm
 	closed bool
 
-	mu      sync.Mutex
-	cl      *atorrent.Client // nil while no torrent is in the swarm
-	stor    storage.ClientImplCloser
-	clDone  chan struct{}   // closed once the current client has stopped
-	ifs     []*ifaceSockets // the first carries trackers and web seeds
-	dialing map[string]*dialing
-	peerAt  map[string][]*ifaceSockets // peer address -> interfaces of its open peers
-	setup   *ifaceSockets              // interface whose DHT server is being created
-	setup6  bool                       // and whether that server is its IPv6 one
-
-	// ipv6 is whether the running client has IPv6: some interface had IPv6
-	// sockets to give when it started. Under setMu.
-	// shortcut: an interface gaining IPv6 while the client runs (the setting
-	// switched on) waits until the client restarts, when no torrent is in the
-	// swarm or at the next engine start; restart the client if that matters.
-	ipv6 bool
+	mu    sync.Mutex
+	live  bool              // the lines run: a torrent is in the swarm
+	ifs   []*ifaceSockets   // the lines, the main one first (it carries web seeds and private torrents)
+	watch map[*Torrent]bool // the torrents in the swarm, woken when the lines change
 }
 
 func NewSession(cfg Config) (*Session, error) {
-	return &Session{cfg: cfg, dialing: map[string]*dialing{}, peerAt: map[string][]*ifaceSockets{}}, nil
+	return &Session{cfg: cfg, watch: map[*Torrent]bool{}}, nil
 }
 
-// newClient makes the client, which opens no socket of its own.
-func (s *Session) newClient() (*atorrent.Client, storage.ClientImplCloser, error) {
+// newClient makes a line's client, which opens no socket of its own.
+func (s *Session) newClient(is *ifaceSockets) (*atorrent.Client, storage.ClientImplCloser, error) {
 	c := atorrent.NewDefaultClientConfig()
-	// No built-in sockets: everything below is added per interface.
+	// No built-in sockets: everything below is added for the line.
 	c.DisableTCP = true
 	c.DisableUTP = true
 	c.NoDHT = true
-	ipv6 := s.ipv6
-	c.DisableIPv6 = !ipv6 // with IPv6 off no IPv6 peer is even tried
+	c.DisableIPv6 = !is.ipv6 // with IPv6 off no IPv6 peer is even tried
 	c.NoDefaultPortForwarding = true
 	c.DisableWebtorrent = true // WebRTC opens its own UDP sockets
 	c.ListenPort = 0
@@ -157,20 +149,16 @@ func (s *Session) newClient() (*atorrent.Client, storage.ClientImplCloser, error
 	}
 	c.PieceHashersPerTorrent = 4 // the default 2 caps verifying a finished torrent on a fast disk
 	c.Seed = true                // without it, peers are dropped on completion; Torrent decides how long to seed
-	c.TrackerDialContext = s.dialFirst
-	c.HTTPDialContext = s.dialFirst
+	c.TrackerDialContext = is.Dial
+	c.HTTPDialContext = is.Dial
 	c.TrackerListenPacket = func(network, _ string) (net.PacketConn, error) {
-		is := s.first()
-		if is == nil {
-			return nil, errNoIface
-		}
-		if ipv6 && is.v6 != nil && (network == "udp6" || is.v4 == nil) {
+		if is.ipv6 && is.v6 != nil && (network == "udp6" || is.v4 == nil) {
 			return is.ListenPacket6(0)
 		}
 		return is.ListenPacket(0)
 	}
 	c.ConfigureAnacrolixDhtServer = func(dc *dht.ServerConfig) {
-		is, v6, hosts := s.setup, s.setup6, s.bootstrap()
+		v6, hosts := is.opening6, s.bootstrap()
 		dc.StartingNodes = func() ([]dht.Addr, error) { return is.bootstrapNodes(hosts, v6) }
 	}
 	// Torrents announce themselves (Torrent.announceDHT), so private ones can stay off the DHT.
@@ -199,11 +187,11 @@ func (s *Session) newClient() (*atorrent.Client, storage.ClientImplCloser, error
 		stor.Close()
 		return nil, nil, err
 	}
-	cl.AddDialer(peerDialer{s, "tcp4"})
-	cl.AddDialer(peerDialer{s, "udp4"})
-	if ipv6 {
-		cl.AddDialer(peerDialer{s, "tcp6"})
-		cl.AddDialer(peerDialer{s, "udp6"})
+	cl.AddDialer(peerDialer{is, "tcp4"})
+	cl.AddDialer(peerDialer{is, "udp4"})
+	if is.ipv6 {
+		cl.AddDialer(peerDialer{is, "tcp6"})
+		cl.AddDialer(peerDialer{is, "udp6"})
 	}
 	return cl, stor, nil
 }
@@ -213,50 +201,46 @@ var (
 	errPeerGone = errors.New("the peer's tunnel closed as it connected")
 )
 
-// acquire is a torrent joining the swarm: it starts the client, on the
-// interfaces SetIfaces gave, if no other torrent has. Every acquire is
-// matched by one release.
-func (s *Session) acquire() (*atorrent.Client, error) {
+// acquire is a torrent joining the swarm: it starts the lines, on the
+// interfaces SetIfaces gave, if no other torrent has, and will tell t when they
+// change. Every acquire is matched by one release.
+func (s *Session) acquire(t *Torrent) error {
 	s.setMu.Lock()
 	defer s.setMu.Unlock()
 	if s.closed {
-		return nil, errClosed
+		return errClosed
 	}
-	if s.cl == nil {
-		s.ipv6 = slices.ContainsFunc(s.want, func(i Iface) bool { return i.ListenPacket6 != nil })
-		cl, stor, err := s.newClient()
-		if err != nil {
-			return nil, err
-		}
+	if s.users == 0 {
 		s.mu.Lock()
-		s.cl, s.stor, s.clDone = cl, stor, make(chan struct{})
+		s.live = true
 		s.mu.Unlock()
 		s.applyLocked(s.want)
 	}
 	s.users++
-	return s.cl, nil
+	s.mu.Lock()
+	s.watch[t] = true
+	s.mu.Unlock()
+	return nil
 }
 
-// release is a torrent leaving the swarm; the last one stops the client and
+// release is a torrent leaving the swarm; the last one stops the lines and
 // closes every socket.
-func (s *Session) release() {
+func (s *Session) release(t *Torrent) {
 	s.setMu.Lock()
 	defer s.setMu.Unlock()
-	if s.users--; s.users == 0 && s.cl != nil {
-		s.stopClientLocked()
+	s.mu.Lock()
+	delete(s.watch, t)
+	s.mu.Unlock()
+	if s.users--; s.users == 0 {
+		s.stopLinesLocked()
 	}
 }
 
-func (s *Session) stopClientLocked() {
+func (s *Session) stopLinesLocked() {
 	s.mu.Lock()
-	cl, stor, done, ifs := s.cl, s.stor, s.clDone, s.ifs
-	s.cl, s.stor, s.ifs = nil, nil, nil
-	s.dialing, s.peerAt = map[string]*dialing{}, map[string][]*ifaceSockets{}
+	ifs := s.ifs
+	s.ifs, s.live = nil, false
 	s.mu.Unlock()
-	// The client first: its accept loops end on a closed client, not on closed sockets.
-	cl.Close()
-	stor.Close()
-	close(done)
 	for _, is := range ifs {
 		is.close()
 	}
@@ -266,7 +250,14 @@ func (s *Session) stopClientLocked() {
 func (s *Session) Live() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.cl != nil
+	return s.live
+}
+
+// lines are the lines now, the main one first.
+func (s *Session) lines() []*ifaceSockets {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.ifs)
 }
 
 var (
@@ -275,16 +266,15 @@ var (
 )
 
 // SetIfaces makes ifaces the interfaces torrents use, in that order (the first
-// carries trackers and web seeds). While the client runs they are matched by
-// ID: new ones get their sockets, ones no longer listed close their peers and
-// sockets, and the rest switch upload on their open peers. The client can't
-// forget a DHT server, so a removed interface's closed server stays in its list
-// and fails its announces.
+// is the main line, which carries web seeds and private torrents). While the
+// lines run they are matched by ID: new ones get their client and sockets, ones
+// no longer listed close theirs, and the rest switch upload on their open
+// peers. Torrents in the swarm follow the change within a moment.
 func (s *Session) SetIfaces(ifaces []Iface) {
 	s.setMu.Lock()
 	defer s.setMu.Unlock()
 	s.want = ifaces
-	if s.cl != nil {
+	if s.users > 0 {
 		s.applyLocked(ifaces)
 	}
 }
@@ -297,9 +287,13 @@ func (s *Session) applyLocked(ifaces []Iface) {
 	s.mu.Lock()
 	have := map[string]bool{}
 	var gone []*ifaceSockets
-	var closing, switching []*trackedPeer
+	var switching []*trackedPeer
 	kept := s.ifs[:0]
 	for _, is := range s.ifs {
+		if is.offline { // stays until a real line opens
+			kept = append(kept, is)
+			continue
+		}
 		if w, ok := want[is.ID]; ok && w.Gen == is.Gen && w.Port == is.Iface.Port {
 			kept = append(kept, is)
 			have[is.ID] = true
@@ -311,21 +305,15 @@ func (s *Session) applyLocked(ifaces []Iface) {
 			}
 		} else {
 			gone = append(gone, is)
-			for p := range is.open {
-				closing = append(closing, p)
-			}
 		}
 	}
 	s.ifs = kept
 	s.mu.Unlock()
-	for _, p := range closing {
-		p.Close()
-	}
 	for _, p := range switching {
 		p.gate.SetUpload(p.is.Upload)
 	}
 	for _, is := range gone {
-		is.close()
+		is.close() // its client closes with its peers
 	}
 	pos := map[string]int{}
 	for i, ifc := range ifaces {
@@ -338,26 +326,72 @@ func (s *Session) applyLocked(ifaces []Iface) {
 	}
 	s.mu.Lock()
 	slices.SortFunc(s.ifs, func(a, b *ifaceSockets) int { return pos[a.ID] - pos[b.ID] })
+	idle := slices.IndexFunc(s.ifs, func(is *ifaceSockets) bool { return is.offline })
+	n := len(s.ifs)
+	if idle >= 0 && n > 1 {
+		gone = append(gone[:0], s.ifs[idle])
+		s.ifs = slices.Delete(s.ifs, idle, idle+1)
+	} else {
+		gone = nil
+	}
+	watching := make([]*Torrent, 0, len(s.watch))
+	for t := range s.watch {
+		watching = append(watching, t)
+	}
+	s.mu.Unlock()
+	for _, is := range gone {
+		is.close()
+	}
+	if n == 0 {
+		s.addOffline()
+	}
+	for _, t := range watching {
+		t.wakeUp()
+	}
+}
+
+// addOffline adds the stand-in line, when no interface is usable.
+func (s *Session) addOffline() {
+	is := &ifaceSockets{s: s, offline: true, open: map[*trackedPeer]bool{}, gone: make(chan struct{}), done: make(chan struct{})}
+	is.Iface = Iface{
+		Dial:         func(context.Context, string, string) (net.Conn, error) { return nil, errNoIface },
+		LookupIP:     func(context.Context, string) ([]net.IP, error) { return nil, errNoIface },
+		ListenPacket: func(int) (net.PacketConn, error) { return nil, errNoIface },
+	}
+	cl, stor, err := s.newClient(is)
+	if err != nil {
+		log.Printf("torrent client with no interface: %v", err)
+		return
+	}
+	is.cl, is.stor = cl, stor
+	s.mu.Lock()
+	s.ifs = append(s.ifs, is)
 	s.mu.Unlock()
 }
 
+// addIface opens a line: its client and sockets.
 func (s *Session) addIface(ifc Iface) error {
 	want := s.cfg.Port
 	if ifc.Port != 0 {
 		want = ifc.Port
 	}
-	is := &ifaceSockets{Iface: ifc, open: map[*trackedPeer]bool{}, gone: make(chan struct{})}
-	cl := s.cl // set while setMu is held
+	is := &ifaceSockets{Iface: ifc, s: s, ipv6: ifc.ListenPacket6 != nil,
+		open: map[*trackedPeer]bool{}, gone: make(chan struct{}), done: make(chan struct{})}
+	cl, stor, err := s.newClient(is)
+	if err != nil {
+		return err
+	}
+	is.cl, is.stor = cl, stor
 	var errs []error
 	for _, v6 := range []bool{false, true} {
 		listenPacket, listen := ifc.ListenPacket, ifc.Listen
 		if v6 {
-			if !s.ipv6 || ifc.ListenPacket6 == nil {
+			if !is.ipv6 {
 				continue
 			}
 			listenPacket, listen = ifc.ListenPacket6, ifc.Listen6
 		}
-		f, err := s.openFamily(cl, is, v6, listenPacket, listen, want)
+		f, err := s.openFamily(is, v6, listenPacket, listen, want)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -369,27 +403,29 @@ func (s *Session) addIface(ifc Iface) error {
 		}
 	}
 	if is.v4 == nil && is.v6 == nil {
+		cl.Close()
+		stor.Close()
 		return errors.Join(errs...)
 	}
-	s.mu.Lock()
-	s.ifs = append(s.ifs, is)
-	s.mu.Unlock()
 	for _, f := range []*familySockets{is.v4, is.v6} {
 		if f == nil {
 			continue
 		}
 		cl.AddDhtServer(atorrent.AnacrolixDhtServerWrapper{Server: f.dht})
 		if f.port != 0 {
-			cl.AddListener(&peerListener{s: s, is: is, l: f.tcp, addr: addrOr(f.tcp.Addr(), "tcp", ""), done: s.clDone})
-			cl.AddListener(&peerListener{s: s, is: is, l: f.utp, addr: addrOr(f.utp.Addr(), "udp", ""), done: s.clDone})
+			cl.AddListener(&peerListener{s: s, is: is, l: f.tcp, addr: addrOr(f.tcp.Addr(), "tcp", ""), done: is.done})
+			cl.AddListener(&peerListener{s: s, is: is, l: f.utp, addr: addrOr(f.utp.Addr(), "udp", ""), done: is.done})
 		}
 	}
+	s.mu.Lock()
+	s.ifs = append(s.ifs, is)
+	s.mu.Unlock()
 	return nil
 }
 
 // openFamily opens is's uTP socket and DHT server of one family, and its TCP
 // listener on port want when peers may connect in (listen set, want not 0).
-func (s *Session) openFamily(cl *atorrent.Client, is *ifaceSockets, v6 bool, listenPacket func(int) (net.PacketConn, error), listen func(int) (net.Listener, error), want int) (*familySockets, error) {
+func (s *Session) openFamily(is *ifaceSockets, v6 bool, listenPacket func(int) (net.PacketConn, error), listen func(int) (net.Listener, error), want int) (*familySockets, error) {
 	incoming := listen != nil && want != 0
 	port := 0
 	if incoming {
@@ -416,11 +452,8 @@ func (s *Session) openFamily(cl *atorrent.Client, is *ifaceSockets, v6 bool, lis
 			incoming = false
 		}
 	}
-	s.mu.Lock()
-	s.setup, s.setup6 = is, v6
-	f.dht, err = cl.NewAnacrolixDhtServer(us)
-	s.setup = nil
-	s.mu.Unlock()
+	is.opening6 = v6
+	f.dht, err = is.cl.NewAnacrolixDhtServer(us)
 	if err != nil {
 		f.close()
 		return nil, err
@@ -446,7 +479,12 @@ func (d portedDHT) Announce(hash [20]byte, port int, impliedPort bool) (atorrent
 	return d.DhtServer.Announce(hash, port, impliedPort)
 }
 
+// close stops the line's client, which closes its torrents and peers, then its sockets.
 func (is *ifaceSockets) close() {
+	// The client first: its accept loops end on a closed client, not on closed sockets.
+	is.cl.Close()
+	is.stor.Close()
+	close(is.done)
 	close(is.gone)
 	for _, f := range []*familySockets{is.v4, is.v6} {
 		if f != nil {
@@ -517,7 +555,6 @@ func (l *peerListener) Accept() (net.Conn, error) {
 	}
 	l.s.mu.Lock()
 	defer l.s.mu.Unlock()
-	l.is.peers++
 	return l.s.trackLocked(remote.String(), l.is, c), nil
 }
 
@@ -550,16 +587,12 @@ func withoutPEX(m *atorrent.LocalLtepProtocolMap) *atorrent.LocalLtepProtocolMap
 	return out
 }
 
-// dhtServers are the DHT servers of the interfaces in use.
-func (s *Session) dhtServers() []atorrent.DhtServer {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// dhtServers are the DHT servers of the line.
+func (is *ifaceSockets) dhtServers() []atorrent.DhtServer {
 	var out []atorrent.DhtServer
-	for _, is := range s.ifs {
-		for _, f := range []*familySockets{is.v4, is.v6} {
-			if f != nil {
-				out = append(out, portedDHT{atorrent.AnacrolixDhtServerWrapper{Server: f.dht}, f.port})
-			}
+	for _, f := range []*familySockets{is.v4, is.v6} {
+		if f != nil {
+			out = append(out, portedDHT{atorrent.AnacrolixDhtServerWrapper{Server: f.dht}, f.port})
 		}
 	}
 	return out
@@ -597,83 +630,10 @@ func (is *ifaceSockets) bootstrapNodes(hosts []string, v6 bool) ([]dht.Addr, err
 	return addrs, nil
 }
 
-// first is the interface for trackers and web seeds, which need one
-// connection, not a spread.
-func (s *Session) first() *ifaceSockets {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.ifs) == 0 {
-		return nil
-	}
-	return s.ifs[0]
-}
-
-func (s *Session) dialFirst(ctx context.Context, network, addr string) (net.Conn, error) {
-	is := s.first()
-	if is == nil {
-		return nil, errNoIface
-	}
-	return is.Dial(ctx, network, addr)
-}
-
-// lookupFirst resolves a tracker's hostname through the interface trackers use.
-func (s *Session) lookupFirst(ctx context.Context, host string) ([]net.IP, error) {
-	is := s.first()
-	if is == nil {
-		return nil, errNoIface
-	}
-	return is.LookupIP(ctx, host)
-}
-
-// pick chooses the interface for a new peer: the one carrying the fewest peers
-// among those with sockets of the peer's family. Dials to the same address
-// (TCP and uTP race each other) share an interface.
-func (s *Session) pick(addr string, v6 bool) *ifaceSockets {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	d := s.dialing[addr]
-	if d == nil {
-		var best *ifaceSockets
-		for _, is := range s.ifs {
-			if is.family(v6) == nil {
-				continue
-			}
-			if best == nil || is.peers < best.peers {
-				best = is
-			}
-		}
-		if best == nil {
-			return nil
-		}
-		d = &dialing{is: best}
-		s.dialing[addr] = d
-	}
-	d.n++
-	d.is.peers++
-	return d.is
-}
-
-// dialed records how a dial chosen by pick ended; c is nil if it failed.
-func (s *Session) dialed(addr string, is *ifaceSockets, c net.Conn) net.Conn {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if d := s.dialing[addr]; d != nil {
-		if d.n--; d.n == 0 {
-			delete(s.dialing, addr)
-		}
-	}
-	if c == nil {
-		is.peers--
-		return nil
-	}
-	return s.trackLocked(addr, is, c)
-}
-
-// trackLocked counts an open peer against its interface until it closes.
+// trackLocked counts an open peer against its line until it closes.
 func (s *Session) trackLocked(addr string, is *ifaceSockets, c net.Conn) *trackedPeer {
-	s.peerAt[addr] = append(s.peerAt[addr], is)
 	g := newUploadGate(c, is.Upload)
-	p := &trackedPeer{Conn: g, gate: g, s: s, addr: addr, is: is,
+	p := &trackedPeer{Conn: g, gate: g, s: s, is: is,
 		local: addrOr(c.LocalAddr(), "tcp", ""), remote: addrOr(c.RemoteAddr(), "tcp", addr)}
 	is.open[p] = true
 	return p
@@ -682,24 +642,12 @@ func (s *Session) trackLocked(addr string, is *ifaceSockets, c net.Conn) *tracke
 func (s *Session) peerClosed(p *trackedPeer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	addr, is := p.addr, p.is
-	delete(is.open, p)
-	is.peers--
-	at := s.peerAt[addr]
-	if i := slices.Index(at, is); i >= 0 {
-		at = slices.Delete(at, i, i+1)
-	}
-	if len(at) == 0 {
-		delete(s.peerAt, addr)
-	} else {
-		s.peerAt[addr] = at
-	}
+	delete(p.is.open, p)
 }
 
-// peerDialer is the client's only dialer for one network. The client dials every
-// peer on all its dialers at once, so choosing the interface happens here.
+// peerDialer is a line client's only dialer for one network.
 type peerDialer struct {
-	s       *Session
+	is      *ifaceSockets
 	network string
 }
 
@@ -711,31 +659,30 @@ func (d peerDialer) Dial(ctx context.Context, addr string) (net.Conn, error) {
 	if ip := net.ParseIP(host); err != nil || ip == nil || (ip.To4() == nil) != v6 {
 		return nil, errOtherFamily // the dialer of the other family takes it
 	}
-	is := d.s.pick(addr, v6)
-	if is == nil {
+	f := d.is.family(v6)
+	if f == nil {
 		return nil, errNoIface
 	}
 	var c net.Conn
 	if strings.HasPrefix(d.network, "udp") {
-		c, err = is.family(v6).utp.DialContext(ctx, d.network, addr)
+		c, err = f.utp.DialContext(ctx, d.network, addr)
 	} else {
-		c, err = is.Dial(ctx, d.network, addr)
+		c, err = d.is.Dial(ctx, d.network, addr)
 	}
 	if err != nil {
-		c = nil
+		return nil, err
 	}
-	if p := d.s.dialed(addr, is, c); p != nil {
-		return p, nil
-	}
-	return nil, err
+	s := d.is.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.trackLocked(addr, d.is, c), nil
 }
 
-// trackedPeer is a peer's socket, counted against its interface until closed.
+// trackedPeer is a peer's socket, counted against its line until closed.
 type trackedPeer struct {
 	net.Conn
 	gate *uploadGate
 	s    *Session
-	addr string        // as dialed, which is how the client names the peer
 	is   *ifaceSockets // Upload read under s.mu
 	once sync.Once
 
@@ -750,49 +697,32 @@ func (p *trackedPeer) Close() error {
 	return p.Conn.Close()
 }
 
-// peersByIface counts a torrent's connected peers on each interface. A peer
-// address open on several interfaces (two torrents sharing a peer) counts once,
-// on the first.
-// ifacePeers are a torrent's connected peers on one interface, and the piece
-// data they have moved since they connected.
+// ifacePeers are a torrent's connected peers on one line, and the piece data
+// they have moved since they connected.
 type ifacePeers struct {
 	n             int
 	read, written int64
 }
 
-// peersByIface counts a torrent's connected peers on each interface. A peer
-// address open on several interfaces (two torrents sharing a peer) counts once,
-// on the first.
-func (s *Session) peersByIface(at *atorrent.Torrent) map[string]ifacePeers {
-	type peer struct {
-		addr          string
-		read, written int64
-	}
-	var peers []peer
-	for _, pc := range at.PeerConns() {
+// peers counts the line's connected peers of the torrent.
+func (lt *lineTor) peers() ifacePeers {
+	var out ifacePeers
+	for _, pc := range lt.at.PeerConns() {
 		st := pc.Stats()
-		peers = append(peers, peer{pc.RemoteAddr.String(), st.BytesReadData.Int64(), st.BytesWrittenData.Int64()})
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := map[string]ifacePeers{}
-	for _, p := range peers {
-		if at := s.peerAt[p.addr]; len(at) > 0 {
-			ip := out[at[0].ID]
-			ip.n, ip.read, ip.written = ip.n+1, ip.read+p.read, ip.written+p.written
-			out[at[0].ID] = ip
-		}
+		out.n++
+		out.read += st.BytesReadData.Int64()
+		out.written += st.BytesWrittenData.Int64()
 	}
 	return out
 }
 
-// Close closes the client and every socket. It does not stop torrents: the
+// Close closes every line and its sockets. It does not stop torrents: the
 // caller stops them first (the engine's queue does), as each one's run ends with its context.
 func (s *Session) Close() {
 	s.setMu.Lock()
 	defer s.setMu.Unlock()
 	s.closed = true
-	if s.cl != nil {
-		s.stopClientLocked()
+	if s.users > 0 || s.live {
+		s.stopLinesLocked()
 	}
 }
