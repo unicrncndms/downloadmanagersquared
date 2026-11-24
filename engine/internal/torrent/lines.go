@@ -157,6 +157,13 @@ func (t *Torrent) retire(lt *lineTor) {
 	t.upDone += up
 	t.downDone += down
 	t.mu.Unlock()
+	t.dupMu.Lock()
+	for i, f := range t.firstLine { // the line's first-receiver marks go with it
+		if f == lt {
+			t.firstLine[i] = nil
+		}
+	}
+	t.dupMu.Unlock()
 	t.drop(lt)
 }
 
@@ -396,6 +403,9 @@ func (lt *lineTor) setPrio(i int, want bool) {
 	}
 }
 
+// verifySem bounds the pieces hashed from disk at once by catchUp.
+var verifySem = make(chan struct{}, 8)
+
 // catchUp makes the pieces done on other lines (done) known to this line, which
 // has them as have. It reads them from the shared storage. If that still says
 // not complete a tick later, it hashes the piece on disk: the storage's record can
@@ -424,7 +434,14 @@ func (lt *lineTor) catchUp(done, have []bool) {
 		n := lt.lag[i] + 1
 		next[i] = n
 		if n == 2 || n%20 == 0 {
-			go p.VerifyData()
+			select {
+			case verifySem <- struct{}{}: // full: the next 20th tick tries again
+				go func() {
+					defer func() { <-verifySem }()
+					p.VerifyData()
+				}()
+			default:
+			}
 		}
 	}
 	lt.lag = next
@@ -433,8 +450,12 @@ func (lt *lineTor) catchUp(done, have []bool) {
 // wantedPieces marks the pieces holding any byte of a file not skipped.
 func wantedPieces(at *atorrent.Torrent, skip []int) []bool {
 	out := make([]bool, at.NumPieces())
+	skipped := make(map[int]struct{}, len(skip))
+	for _, i := range skip {
+		skipped[i] = struct{}{}
+	}
 	for i, f := range at.Files() {
-		if slices.Contains(skip, i) {
+		if _, ok := skipped[i]; ok {
 			continue
 		}
 		for p := f.BeginPieceIndex(); p < f.EndPieceIndex() && p < len(out); p++ {
