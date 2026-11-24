@@ -32,6 +32,7 @@ func TestUserTextWordsCommonErrors(t *testing.T) {
 		{dial(errTimedOut), "The server didn't answer in time"},
 		{dial(errConnReset), "The server or the network cut the connection"},
 		{dial(errNetUnreach), "No route to the server over this connection"},
+		{dial(errAddrNotAvail), "Windows refused to connect from this connection's address. If it stays so, another program reroutes DMS²'s connections, often a VPN app's split tunnel: take dms-engine.exe out of it"},
 		{&url.Error{Op: "Get", URL: "u", Err: &net.DNSError{Name: "x.example", Err: "no such host", IsNotFound: true}}, "The server's name x.example can't be found: check the link, or this connection's DNS"},
 		{&url.Error{Op: "Get", URL: "u", Err: x509.UnknownAuthorityError{}}, "The server's certificate isn't trusted, so nothing was sent to it"},
 		{fmt.Errorf("read: %w", io.ErrUnexpectedEOF), "The server closed the connection early"},

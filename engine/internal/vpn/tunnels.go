@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/netif"
 	"downloadmanagersquared/engine/internal/pia"
 	"downloadmanagersquared/engine/internal/socks"
@@ -319,7 +320,7 @@ func (t *Tunnels) startTunnel(te *entry, b *netif.Binding) {
 	}
 	if err != nil {
 		log.Printf("tunnel for %s: %v", te.id, err)
-		te.err, te.retryAt = err.Error(), time.Now().Add(te.nextRetry())
+		te.err, te.retryAt = download.UserText(err), time.Now().Add(te.nextRetry())
 		return
 	}
 	te.cfg = cfg

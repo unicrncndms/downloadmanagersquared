@@ -31,6 +31,7 @@ const (
 	errConnAborted   = syscall.Errno(10053)
 	errTimedOut      = syscall.Errno(10060)
 	errConnRefused   = syscall.Errno(10061)
+	errAddrNotAvail  = syscall.Errno(10049) // WSAEADDRNOTAVAIL: "not valid in its context"
 	errNetUnreach    = syscall.Errno(10051)
 	errHostUnreach   = syscall.Errno(10065)
 )
@@ -105,6 +106,10 @@ func netText(err error) string {
 		return "The server didn't answer as a secure (HTTPS) server"
 	case errors.Is(err, errConnRefused):
 		return "The server refused the connection"
+	case errors.Is(err, errAddrNotAvail):
+		// Seen with a VPN app's split tunnel excluding dms-engine.exe: it reroutes the
+		// app's sockets, and one bound to another interface's address is refused.
+		return "Windows refused to connect from this connection's address. If it stays so, another program reroutes DMS²'s connections, often a VPN app's split tunnel: take dms-engine.exe out of it"
 	case errors.Is(err, errNetUnreach) || errors.Is(err, errHostUnreach):
 		return "No route to the server over this connection"
 	case errors.Is(err, errConnReset) || errors.Is(err, errConnAborted):
