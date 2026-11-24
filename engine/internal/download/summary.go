@@ -19,7 +19,8 @@ type LinkSummary struct {
 	Up       float64    `json:"up,omitempty"`     // torrents: upload speed to the peers on this path
 	Bytes    int64      `json:"bytes,omitempty"`  // HTTP: what this interface fetched of the file, for each one's share on a finished download
 	Read     int64      `json:"read,omitempty"`   // torrents: what this line's peers sent since it joined, used or not
-	Wasted   int64      `json:"wasted,omitempty"` // torrents: of Read, what wasn't used (cancelled, or another peer's copy came first)
+	Wasted   int64      `json:"wasted,omitempty"` // torrents: of Read, what the line threw away (a block another of its peers sent first)
+	Twice    int64      `json:"twice,omitempty"`  // torrents: of Read, blocks of pieces another line fetched too: used, but fetched twice
 
 	// Filled in by present.
 	Label    string `json:"label"`

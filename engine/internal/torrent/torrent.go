@@ -88,7 +88,10 @@ type Torrent struct {
 	eta                rate.ETA
 
 	owner []*lineTor // under balMu: the line each piece was given to, nil for none
-	tick  int        // only run's goroutine
+
+	dupMu     sync.Mutex
+	firstLine []*lineTor // under dupMu: the first line that received blocks of each piece
+	tick      int        // only run's goroutine
 }
 
 // pathRate is a torrent's traffic on one interface.
@@ -97,6 +100,7 @@ type pathRate struct {
 	read, written    int64 // as the connected peers last counted them
 	down, up         int64 // only growing: a peer leaving takes its count with it
 	sent, wasted     int64 // the line's whole: what its peers sent since it joined, and what wasn't used
+	twice            int64 // of what was used, blocks of pieces another line fetched too
 	downRate, upRate rate.EWMA
 }
 
@@ -169,7 +173,7 @@ func (t *Torrent) Summary() download.Summary {
 		for id, p := range t.paths {
 			if p.peers > 0 {
 				s.Links[id] = download.LinkSummary{Status: download.LinkReady, Conns: p.peers,
-					Speed: p.downRate.Value(), Up: p.upRate.Value(), Read: p.sent, Wasted: p.wasted}
+					Speed: p.downRate.Value(), Up: p.upRate.Value(), Read: p.sent, Wasted: p.wasted, Twice: p.twice}
 			}
 		}
 	}
@@ -572,7 +576,7 @@ func (t *Torrent) ratesLocked(byPath map[string]ifacePeers, every time.Duration)
 		p.down += max(now.read-p.read, 0)
 		p.up += max(now.written-p.written, 0)
 		p.peers, p.read, p.written = now.n, now.read, now.written
-		p.sent, p.wasted = now.sent, now.wasted
+		p.sent, p.wasted, p.twice = now.sent, now.wasted, now.twice
 		p.downRate.Update(p.down, every)
 		p.upRate.Update(p.up, every)
 	}
@@ -981,6 +985,9 @@ func (t *Torrent) dropLocked() {
 	t.balMu.Lock()
 	t.owner = nil
 	t.balMu.Unlock()
+	t.dupMu.Lock()
+	t.firstLine = nil
+	t.dupMu.Unlock()
 	t.lts, t.stor, t.shared, t.active, t.slot = nil, nil, nil, false, false
 	t.speed, t.upSpeed = rate.EWMA{}, rate.EWMA{}
 	t.meter, t.eta = rate.Meter{}, rate.ETA{}

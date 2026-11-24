@@ -108,6 +108,17 @@ func TestNoPieceIsDownloadedTwice(t *testing.T) {
 	if extra := sent - int64(len(sw.data)); extra > 0 {
 		t.Fatalf("the remote sent %d bytes for a %d byte torrent: %d too many", sent, len(sw.data), extra)
 	}
+	tor.dupMu.Lock() // the hook saw every piece arrive
+	seen := slices.IndexFunc(tor.firstLine, func(lt *lineTor) bool { return lt == nil }) < 0 && len(tor.firstLine) == sw.info.NumPieces()
+	tor.dupMu.Unlock()
+	if !seen {
+		t.Fatal("the received-data hook didn't record every piece")
+	}
+	for id, l := range tor.Summary().Links { // and each line says so
+		if l.Twice != 0 {
+			t.Fatalf("line %s counts %d bytes fetched twice", id, l.Twice)
+		}
+	}
 }
 
 // A line that goes away mid-download hands what it had not finished to the other.
@@ -416,5 +427,23 @@ func TestTimeLeftIgnoresTheDataTheCheckFinds(t *testing.T) {
 	sum := tor.Summary()
 	if floor := float64(sum.Size-sum.Done) / (1 << 20); sum.ETA < floor { // 1 MiB/s is four times the line's speed
 		t.Fatalf("time left %.1f s for %d bytes at about 256 KiB/s, want at least %.1f", sum.ETA, sum.Size-sum.Done, floor)
+	}
+}
+
+// A block of a piece another line received blocks of first counts as fetched
+// twice on the later line; the first line's own blocks never do.
+func TestBlocksOfAPieceTwoLinesFetchCountAsTwice(t *testing.T) {
+	tor := &Torrent{}
+	a, b := &lineTor{t: tor}, &lineTor{t: tor}
+	a.received(3, 16<<10)
+	a.received(3, 16<<10)
+	b.received(5, 16<<10)
+	if a.twice.Load() != 0 || b.twice.Load() != 0 {
+		t.Fatalf("pieces fetched once: twice a %d, b %d", a.twice.Load(), b.twice.Load())
+	}
+	b.received(3, 16<<10)
+	a.received(5, 8<<10)
+	if a.twice.Load() != 8<<10 || b.twice.Load() != 16<<10 {
+		t.Fatalf("twice a %d, b %d; want 8 KiB and 16 KiB", a.twice.Load(), b.twice.Load())
 	}
 }

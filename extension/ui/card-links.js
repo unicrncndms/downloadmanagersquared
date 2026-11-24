@@ -31,10 +31,8 @@ function renderLinks(id, d, grid, rows, ids) {
       l.resolved ? el("span", { class: "muted", title: "This connection got its own link from the site" }, " own link") : null,
       l.family ? el("span", { class: "muted", title: "The address family this connection fetches the file over" }, " " + l.family) : null,
     ].filter(Boolean));
-    r.info.textContent = !l.conns ? "" : torrent ? plural(l.conns, "peer") + wastedText(l) : plural(l.conns, "request");
-    r.info.title = torrent && l.wasted > 0 && l.read > 0
-      ? `${fmtBytes(l.wasted)} of the ${fmtBytes(l.read)} this line's peers sent wasn't used: a piece another peer or line delivered first, or chunks that arrived after they were cancelled`
-      : "";
+    r.info.textContent = !l.conns ? "" : torrent ? [plural(l.conns, "peer"), ...lossLines(l)].join("\n") : plural(l.conns, "request");
+    r.info.title = torrent ? lossTitle(l) : "";
     r.speed.textContent = torrent
       ? [l.speed > 0 ? "↓ " + fmtSpeed(l.speed) : "", l.up > 0 ? "↑ " + fmtSpeed(l.up) : ""].filter(Boolean).join("\n")
       : l.speed > 0 ? fmtSpeed(l.speed) : "";
@@ -46,10 +44,24 @@ function renderLinks(id, d, grid, rows, ids) {
   for (const ifc of rows.keys()) if (!ids.includes(ifc)) rows.delete(ifc);
 }
 
-// "3% wasted" on a line under the peers: the share of what a torrent line's peers
-// sent that wasn't used (the bytes are in the title), "" when nothing.
-function wastedText(l) {
-  if (!(l.wasted > 0) || !(l.read > 0)) return "";
-  const pct = Math.round((l.wasted / l.read) * 100);
-  return `\n${pct < 1 ? "<1" : pct}% wasted`; // a line of its own: the row stays narrow
+// What a torrent line's peers sent for nothing, as shares of all they sent, a
+// line each under its peers so the row stays narrow: "3% wasted", thrown away
+// inside the line, and "2% twice", pieces another line fetched too.
+function lossLines(l) {
+  if (!(l.read > 0)) return [];
+  const pct = (n) => {
+    const p = Math.round((n / l.read) * 100);
+    return p < 1 ? "<1" : String(p);
+  };
+  return [l.wasted > 0 ? pct(l.wasted) + "% wasted" : "", l.twice > 0 ? pct(l.twice) + "% twice" : ""].filter(Boolean);
+}
+
+// The bytes behind lossLines, and what each means.
+function lossTitle(l) {
+  if (!(l.read > 0) || !(l.wasted > 0 || l.twice > 0)) return "";
+  return [
+    `This line's peers sent ${fmtBytes(l.read)}.`,
+    l.wasted > 0 ? `${fmtBytes(l.wasted)} wasted: blocks the line threw away, as another of its peers had sent them first (a request moved to a faster peer).` : "",
+    l.twice > 0 ? `${fmtBytes(l.twice)} twice: blocks of pieces another line fetched as well, used but downloaded twice.` : "",
+  ].filter(Boolean).join("\n");
 }

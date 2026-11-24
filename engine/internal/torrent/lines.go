@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	atorrent "github.com/anacrolix/torrent"
@@ -14,6 +15,7 @@ import (
 // lineTor is a torrent as one line carries it: the line's client holds it, as
 // a peer of its own in the swarm.
 type lineTor struct {
+	t      *Torrent
 	is     *ifaceSockets
 	at     *atorrent.Torrent
 	ctx    context.Context // ends when the line leaves the torrent
@@ -29,6 +31,8 @@ type lineTor struct {
 	rate  rate.EWMA
 	avail []bool      // the pieces some peer of the line has; refreshed now and then
 	lag   map[int]int // pieces done on another line that this one still lacks, and for how many ticks
+
+	twice atomic.Int64 // useful bytes of pieces another line had received blocks of first
 }
 
 // open is whether the line's torrent is still in its client.
@@ -44,6 +48,7 @@ func (lt *lineTor) open() bool {
 // drop takes the torrent out of the line's client, once balance is not touching it.
 func (t *Torrent) drop(lt *lineTor) {
 	lt.cancel()
+	t.s.lineOf.Delete(lt.at)
 	t.balMu.Lock()
 	lt.at.Drop()
 	t.balMu.Unlock()
@@ -176,7 +181,8 @@ func (t *Torrent) addLine(ctx context.Context, is *ifaceSockets, main bool) (*li
 		return nil, err
 	}
 	lctx, cancel := context.WithCancel(ctx)
-	lt := &lineTor{is: is, at: at, ctx: lctx, cancel: cancel, added: time.Now()}
+	lt := &lineTor{t: t, is: is, at: at, ctx: lctx, cancel: cancel, added: time.Now()}
+	t.s.lineOf.Store(at, lt)
 	at.SetMaxEstablishedConns(t.s.maxPeers())
 	if len(missed) > 0 {
 		go resolveLater(lctx, missed, is.LookupIP, at.AddTrackers)
@@ -544,4 +550,23 @@ func assignPieces(in shareIn) []int {
 		}
 	}
 	return out
+}
+
+// received counts a useful block of piece i (n bytes) on the line. The library
+// calls it with its locks held: it touches only the torrent's own record. A
+// piece another line has received blocks of is fetched twice: the lines don't
+// share which blocks each wrote, so the second line fetches them all again.
+func (lt *lineTor) received(i, n int) {
+	t := lt.t
+	t.dupMu.Lock()
+	defer t.dupMu.Unlock()
+	if i >= len(t.firstLine) {
+		t.firstLine = append(t.firstLine, make([]*lineTor, i+1-len(t.firstLine))...)
+	}
+	switch first := t.firstLine[i]; {
+	case first == nil:
+		t.firstLine[i] = lt
+	case first != lt:
+		lt.twice.Add(int64(n))
+	}
 }

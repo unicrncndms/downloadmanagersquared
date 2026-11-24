@@ -127,6 +127,8 @@ type Session struct {
 	live  bool              // the lines run: a torrent is in the swarm
 	ifs   []*ifaceSockets   // the lines, the main one first (it carries web seeds and private torrents)
 	watch map[*Torrent]bool // the torrents in the swarm, woken when the lines change
+
+	lineOf sync.Map // *atorrent.Torrent to its *lineTor, for the received-data hook
 }
 
 func NewSession(cfg Config) (*Session, error) {
@@ -149,6 +151,12 @@ func (s *Session) newClient(is *ifaceSockets) (*atorrent.Client, storage.ClientI
 		c.ExtendedHandshakeClientVersion = "DMS² " + v
 		c.HTTPUserAgent = "DMS2/" + v // header values stay ASCII
 	}
+	// Blocks fetched by two lines count as useful on both: the library can't tell.
+	c.Callbacks.ReceivedUsefulData = append(c.Callbacks.ReceivedUsefulData, func(e atorrent.ReceivedUsefulDataEvent) {
+		if v, ok := s.lineOf.Load(e.Peer.Torrent()); ok {
+			v.(*lineTor).received(int(e.Message.Index), len(e.Message.Piece))
+		}
+	})
 	c.PieceHashersPerTorrent = 4 // the default 2 caps verifying a finished torrent on a fast disk
 	// A request moves to a better-looking peer only once it is this old. The library's
 	// default moves it at once: over a tunnel or 5G the block is mostly on the wire
@@ -709,6 +717,7 @@ type ifacePeers struct {
 	n             int
 	read, written int64
 	sent, wasted  int64 // since the line joined: what its peers sent, and what of it wasn't used
+	twice         int64 // of what was used, the blocks of pieces another line fetched too
 }
 
 // peers counts the line's connected peers of the torrent.
@@ -723,6 +732,7 @@ func (lt *lineTor) peers() ifacePeers {
 	st := lt.at.Stats() // the torrent's: peers that left count too
 	out.sent = st.BytesReadData.Int64()
 	out.wasted = max(out.sent-st.BytesReadUsefulData.Int64(), 0)
+	out.twice = lt.twice.Load()
 	return out
 }
 
