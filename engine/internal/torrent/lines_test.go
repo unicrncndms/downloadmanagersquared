@@ -216,6 +216,10 @@ func TestSummaryAddsUpTheLines(t *testing.T) {
 	if sum.Seeds != sum.Peers {
 		t.Fatalf("seeds %d of %d peers, all are seeders", sum.Seeds, sum.Peers)
 	}
+	// Each line says what its peers sent and what of it wasn't used.
+	if w.Read <= 0 || e.Read <= 0 || w.Wasted < 0 || w.Wasted > w.Read || e.Wasted > e.Read {
+		t.Fatalf("read and wasted: wlan %d/%d, eth %d/%d", w.Read, w.Wasted, e.Read, e.Wasted)
+	}
 	if sum.Speed <= 0 || sum.Done <= 0 || sum.Done > sum.Size {
 		t.Fatalf("speed %v, done %d of %d", sum.Speed, sum.Done, sum.Size)
 	}

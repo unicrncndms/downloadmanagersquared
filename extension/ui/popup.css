@@ -240,7 +240,8 @@ details.files-fold > summary h3, #detail details.files-fold > summary h3 { displ
 .conns { margin-top: var(--s1); display: grid; grid-template-columns: minmax(70px, auto) 1fr auto auto; gap: 2px var(--s2); align-items: center; font-size: 12px; }
 .conns > span { white-space: nowrap; }
 .conns > span:nth-child(5n+2) { white-space: normal; }
-.conns > .who { white-space: normal; min-width: 0; } /* a long name wraps by words, not into the state beside it */
+.conns > .who { white-space: normal; min-width: 0; }
+.conns > .peers, .conns > .rate { white-space: pre; } /* a torrent line's wasted bytes under its peers, its upload under its download */
 .conns .why { grid-column: 1 / -1; margin-top: -2px; color: var(--muted); font-size: 11px; }
 .switch { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: 12px; }
 .switch .badge { cursor: help; }

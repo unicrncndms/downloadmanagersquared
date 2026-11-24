@@ -704,6 +704,7 @@ func (p *trackedPeer) Close() error {
 type ifacePeers struct {
 	n             int
 	read, written int64
+	sent, wasted  int64 // since the line joined: what its peers sent, and what of it wasn't used
 }
 
 // peers counts the line's connected peers of the torrent.
@@ -715,6 +716,9 @@ func (lt *lineTor) peers() ifacePeers {
 		out.read += st.BytesReadData.Int64()
 		out.written += st.BytesWrittenData.Int64()
 	}
+	st := lt.at.Stats() // the torrent's: peers that left count too
+	out.sent = st.BytesReadData.Int64()
+	out.wasted = max(out.sent-st.BytesReadUsefulData.Int64(), 0)
 	return out
 }
 

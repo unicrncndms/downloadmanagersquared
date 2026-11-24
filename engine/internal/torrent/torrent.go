@@ -96,6 +96,7 @@ type pathRate struct {
 	peers            int
 	read, written    int64 // as the connected peers last counted them
 	down, up         int64 // only growing: a peer leaving takes its count with it
+	sent, wasted     int64 // the line's whole: what its peers sent since it joined, and what wasn't used
 	downRate, upRate rate.EWMA
 }
 
@@ -168,7 +169,7 @@ func (t *Torrent) Summary() download.Summary {
 		for id, p := range t.paths {
 			if p.peers > 0 {
 				s.Links[id] = download.LinkSummary{Status: download.LinkReady, Conns: p.peers,
-					Speed: p.downRate.Value(), Up: p.upRate.Value()}
+					Speed: p.downRate.Value(), Up: p.upRate.Value(), Read: p.sent, Wasted: p.wasted}
 			}
 		}
 	}
@@ -571,6 +572,7 @@ func (t *Torrent) ratesLocked(byPath map[string]ifacePeers, every time.Duration)
 		p.down += max(now.read-p.read, 0)
 		p.up += max(now.written-p.written, 0)
 		p.peers, p.read, p.written = now.n, now.read, now.written
+		p.sent, p.wasted = now.sent, now.wasted
 		p.downRate.Update(p.down, every)
 		p.upRate.Update(p.up, every)
 	}

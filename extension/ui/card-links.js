@@ -13,7 +13,7 @@ function renderLinks(id, d, grid, rows, ids) {
     let r = rows.get(ifc);
     if (!r) {
       r = {
-        name: el("span", { class: "who" }), state: el("span"), info: el("span", { class: "muted" }), speed: el("span"),
+        name: el("span", { class: "who" }), state: el("span"), info: el("span", { class: "muted peers" }), speed: el("span", { class: "rate" }),
         whyText: el("span"),
         retry: el("button", { class: "small", onclick: () => act("retryLink", { id, iface: ifc }) }, "Retry"),
       };
@@ -31,9 +31,12 @@ function renderLinks(id, d, grid, rows, ids) {
       l.resolved ? el("span", { class: "muted", title: "This connection got its own link from the site" }, " own link") : null,
       l.family ? el("span", { class: "muted", title: "The address family this connection fetches the file over" }, " " + l.family) : null,
     ].filter(Boolean));
-    r.info.textContent = !l.conns ? "" : torrent ? plural(l.conns, "peer") : plural(l.conns, "request");
+    r.info.textContent = !l.conns ? "" : torrent ? plural(l.conns, "peer") + wastedText(l) : plural(l.conns, "request");
+    r.info.title = torrent && l.wasted > 0 && l.read > 0
+      ? `${fmtBytes(l.wasted)} of the ${fmtBytes(l.read)} this line's peers sent wasn't used: a piece another peer or line delivered first, or chunks that arrived after they were cancelled`
+      : "";
     r.speed.textContent = torrent
-      ? [l.speed > 0 ? "↓ " + fmtSpeed(l.speed) : "", l.up > 0 ? "↑ " + fmtSpeed(l.up) : ""].filter(Boolean).join(" ")
+      ? [l.speed > 0 ? "↓ " + fmtSpeed(l.speed) : "", l.up > 0 ? "↑ " + fmtSpeed(l.up) : ""].filter(Boolean).join("\n")
       : l.speed > 0 ? fmtSpeed(l.speed) : "";
     r.why.hidden = !l.error && !l.canRetry;
     r.whyText.textContent = l.error || "";
@@ -41,4 +44,12 @@ function renderLinks(id, d, grid, rows, ids) {
   }
   while (grid.children.length > k) grid.lastChild.remove();
   for (const ifc of rows.keys()) if (!ids.includes(ifc)) rows.delete(ifc);
+}
+
+// "3% wasted" on a line under the peers: the share of what a torrent line's peers
+// sent that wasn't used (the bytes are in the title), "" when nothing.
+function wastedText(l) {
+  if (!(l.wasted > 0) || !(l.read > 0)) return "";
+  const pct = Math.round((l.wasted / l.read) * 100);
+  return `\n${pct < 1 ? "<1" : pct}% wasted`; // a line of its own: the row stays narrow
 }
