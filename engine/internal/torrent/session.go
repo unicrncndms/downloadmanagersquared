@@ -163,8 +163,9 @@ func (s *Session) newClient(is *ifaceSockets) (*atorrent.Client, storage.ClientI
 	// already, arrives anyway and is thrown away (about 10% of a line's data, seen live).
 	c.StealRequestGrace = 2 * time.Second
 	c.Seed = true // without it, peers are dropped on completion; Torrent decides how long to seed
-	c.TrackerDialContext = is.Dial
-	c.HTTPDialContext = is.Dial
+	// Trackers and web seeds are named by the torrent: keep them off our own network.
+	c.TrackerDialContext = publicOnly(is.LookupIP, is.Dial)
+	c.HTTPDialContext = c.TrackerDialContext
 	c.TrackerListenPacket = func(network, _ string) (net.PacketConn, error) {
 		if is.ipv6 && is.v6 != nil && (network == "udp6" || is.v4 == nil) {
 			return is.ListenPacket6(0)
@@ -665,6 +666,38 @@ type peerDialer struct {
 	network string
 }
 
+var errSelf = errors.New("an address of another line of this client")
+
+// isOtherLine is whether addr is the listening address of another line of the
+// session: its lines are peers of one swarm, and trackers or PEX can hand one
+// line another's address. shortcut: only a line's local address is known, not
+// its NAT-mapped one; upgrade if self-connections over a NAT show up.
+func (s *Session) isOtherLine(me *ifaceSockets, v6 bool, addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, o := range s.ifs {
+		f := o.family(v6)
+		if o == me || f == nil {
+			continue
+		}
+		if f.utp != nil {
+			if h, p, err := net.SplitHostPort(f.utp.Addr().String()); err == nil && h == host && p == port {
+				return true
+			}
+		}
+		if f.tcp != nil {
+			if h, p, err := net.SplitHostPort(f.tcp.Addr().String()); err == nil && h == host && p == port {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (d peerDialer) DialerNetwork() string { return d.network }
 
 func (d peerDialer) Dial(ctx context.Context, addr string) (net.Conn, error) {
@@ -676,6 +709,9 @@ func (d peerDialer) Dial(ctx context.Context, addr string) (net.Conn, error) {
 	f := d.is.family(v6)
 	if f == nil {
 		return nil, errNoIface
+	}
+	if d.is.s.isOtherLine(d.is, v6, addr) {
+		return nil, errSelf
 	}
 	var c net.Conn
 	if strings.HasPrefix(d.network, "udp") {
