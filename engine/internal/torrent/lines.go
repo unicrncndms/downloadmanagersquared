@@ -146,10 +146,11 @@ func (t *Torrent) syncLines(ctx context.Context) error {
 // retire lets go of a line that left the torrent, keeping what it uploaded.
 func (t *Torrent) retire(lt *lineTor) {
 	st := lt.at.Stats()
-	up := st.BytesWrittenData.Int64()
+	up, down := st.BytesWrittenData.Int64(), st.BytesReadUsefulData.Int64()
 	t.mu.Lock()
 	t.lts = slices.DeleteFunc(slices.Clone(t.lts), func(o *lineTor) bool { return o == lt })
 	t.upDone += up
+	t.downDone += down
 	t.mu.Unlock()
 	t.drop(lt)
 }

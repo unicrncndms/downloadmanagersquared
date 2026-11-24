@@ -56,24 +56,25 @@ type State struct {
 type Torrent struct {
 	s *Session
 
-	mu      sync.Mutex
-	st      State
-	lts     []*lineTor // the lines carrying it, the main one first; empty unless in the swarm; never changed in place
-	stor    storage.ClientImplCloser
-	shared  *sharedStorage // stor as every line's client opens it
-	cancel  context.CancelFunc
-	active  bool       // in the swarm, in any phase
-	held    bool       // holds the session's lines (acquire, matched by release)
-	slot    bool       // checking or downloading after the queue started it: holds a queue slot
-	upBase  int64      // st.Uploaded when this run joined the swarm
-	upDone  int64      // what lines that left since then uploaded
-	balMu   sync.Mutex // see balance
-	wake    chan struct{}
-	speed   rate.EWMA
-	upSpeed rate.EWMA
-	info    *metainfo.Info // st.Info parsed, once needed
-	hash    string
-	upSaved time.Time // when a changed upload count last marked the entry dirty
+	mu       sync.Mutex
+	st       State
+	lts      []*lineTor // the lines carrying it, the main one first; empty unless in the swarm; never changed in place
+	stor     storage.ClientImplCloser
+	shared   *sharedStorage // stor as every line's client opens it
+	cancel   context.CancelFunc
+	active   bool       // in the swarm, in any phase
+	held     bool       // holds the session's lines (acquire, matched by release)
+	slot     bool       // checking or downloading after the queue started it: holds a queue slot
+	upBase   int64      // st.Uploaded when this run joined the swarm
+	upDone   int64      // what lines that left since then uploaded
+	downDone int64      // what lines that left since then downloaded
+	balMu    sync.Mutex // see balance
+	wake     chan struct{}
+	speed    rate.EWMA
+	upSpeed  rate.EWMA
+	info     *metainfo.Info // st.Info parsed, once needed
+	hash     string
+	upSaved  time.Time // when a changed upload count last marked the entry dirty
 
 	verified atomic.Bool // its data was hashed since the engine started
 
@@ -253,7 +254,7 @@ func (t *Torrent) join(ctx context.Context) error {
 		Logger:        slog.New(slog.DiscardHandler),
 	})
 	t.shared = &sharedStorage{ClientImpl: t.stor}
-	t.upBase, t.upDone, t.maxConns = t.st.Uploaded, 0, 0
+	t.upBase, t.upDone, t.downDone, t.maxConns = t.st.Uploaded, 0, 0, 0
 	t.mu.Unlock()
 	if err := t.syncLines(ctx); err != nil && len(t.lineTors()) == 0 {
 		return err
@@ -500,18 +501,20 @@ func (t *Torrent) poll(ctx context.Context, every time.Duration, fetch bool, don
 		t.followMaxPeers(lts)
 		var peers, seeds, swarm int
 		uploaded := t.upDone
+		// Fetched from peers since the start: the speed and the time left are reckoned
+		// from it, not from what is done, which counts the data on disk at the start too.
+		fetched := t.downDone
 		for _, lt := range lts {
 			st := lt.at.Stats()
 			uploaded += st.BytesWrittenData.Int64()
+			fetched += st.BytesReadUsefulData.Int64()
 			peers, seeds, swarm = peers+st.ActivePeers, seeds+st.ConnectedSeeders, swarm+st.TotalPeers
 			lt.rate.Update(st.BytesReadUsefulData.Int64(), every)
 		}
 		t.tick++
 		t.balance(lts, fetch, t.tick) // before reading what is done: it makes the lines agree
-		var completed int64
 		byPath := map[string]ifacePeers{}
 		for _, lt := range lts {
-			completed = max(completed, lt.at.BytesCompleted())
 			byPath[lt.is.ID] = lt.peers()
 		}
 		window := t.s.etaWindow() // read outside t.mu: it asks the engine
@@ -520,10 +523,10 @@ func (t *Torrent) poll(ctx context.Context, every time.Duration, fetch bool, don
 			if len(lts) > 0 && lts[0].at.Info() != nil { // the one walk of the files: Summary and the finish check read it
 				t.wantDone, t.wantSize = wanted(lts[0].at, t.st.Skip)
 			}
-			t.speed.Update(completed, every)
+			t.speed.Update(fetched, every)
 			// The time left uses the long window, as an HTTP download's does.
 			t.meter.Window = window
-			t.meter.Add(now, completed)
+			t.meter.Add(now, fetched)
 			t.eta.Update(now, t.wantSize-t.wantDone, t.meter.Rate())
 			t.upSpeed.Update(uploaded, every)
 			t.st.Uploaded = t.upBase + uploaded

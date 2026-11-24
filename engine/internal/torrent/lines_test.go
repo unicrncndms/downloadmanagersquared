@@ -387,3 +387,30 @@ func TestTimeLeftUsesTheETAWindow(t *testing.T) {
 		t.Fatalf("time left %v s for 4 MiB at about 512 KiB/s, window asked %v", eta, asked.Load())
 	}
 }
+
+// Data already on disk is not speed: while the start-up check hashes it, what is
+// done grows at the disk's pace, and the time left must not take that for peers'.
+func TestTimeLeftIgnoresTheDataTheCheckFinds(t *testing.T) {
+	sw := newSwarm(t, 1, 16<<20)
+	dir := t.TempDir()
+	half := make([]byte, len(sw.data)) // the first half fetched before, the rest not yet
+	copy(half, sw.data[:len(sw.data)/2])
+	if err := os.WriteFile(filepath.Join(dir, sw.info.Name+".part"), half, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewSession(Config{ETAWindow: func() time.Duration { return time.Minute }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var n atomic.Int32
+	s.SetIfaces([]Iface{slowed(sw.iface("wlan", &n), 256<<10)})
+	tor, _ := s.Add(State{ID: "t1", Magnet: sw.magnet(), Dir: dir, Info: sw.infoBytes(t)})
+	tor.Start()
+	defer tor.Stop(download.StatusPaused)
+	waitFor(t, "a time left", 30*time.Second, func() bool { return tor.Summary().ETA > 0 })
+	sum := tor.Summary()
+	if floor := float64(sum.Size-sum.Done) / (1 << 20); sum.ETA < floor { // 1 MiB/s is four times the line's speed
+		t.Fatalf("time left %.1f s for %d bytes at about 256 KiB/s, want at least %.1f", sum.ETA, sum.Size-sum.Done, floor)
+	}
+}
