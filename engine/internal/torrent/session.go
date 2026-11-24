@@ -150,7 +150,11 @@ func (s *Session) newClient(is *ifaceSockets) (*atorrent.Client, storage.ClientI
 		c.HTTPUserAgent = "DMS2/" + v // header values stay ASCII
 	}
 	c.PieceHashersPerTorrent = 4 // the default 2 caps verifying a finished torrent on a fast disk
-	c.Seed = true                // without it, peers are dropped on completion; Torrent decides how long to seed
+	// A request moves to a better-looking peer only once it is this old. The library's
+	// default moves it at once: over a tunnel or 5G the block is mostly on the wire
+	// already, arrives anyway and is thrown away (about 10% of a line's data, seen live).
+	c.StealRequestGrace = 2 * time.Second
+	c.Seed = true // without it, peers are dropped on completion; Torrent decides how long to seed
 	c.TrackerDialContext = is.Dial
 	c.HTTPDialContext = is.Dial
 	c.TrackerListenPacket = func(network, _ string) (net.PacketConn, error) {
