@@ -432,6 +432,9 @@ function makeCard(id) {
   const tfiles = torrentFilesPart(id, () => d);
   const summaryLine = el("p", { class: "muted num", style: "margin: 0 0 var(--s2)" });
   const fileSection = section("File", summaryLine, nameRow, dirMove, fileFacts);
+  // A torrent's swarm: who it meets, what it has sent, through what.
+  const swarmFacts = el("dl", { class: "facts" });
+  const swarmSection = section("Swarm", swarmFacts);
   // Mirrors: each source of the file, who uses it, and why one was dropped.
   const mirrorList = el("div", { class: "conns mirrors num" });
   const mirrorSection = section("Mirrors", mirrorList);
@@ -446,7 +449,7 @@ function makeCard(id) {
   const bigLeft = el("span", { class: "muted" });
   const bigNums = el("div", { class: "read num" }, bigSpeed, bigLeft);
   const details = el("details", { ontoggle: () => { activity.reset(); if (d) update(d); } },
-    el("summary", {}, "Details"), bigGrid.root, bigNums, connSection, recordSection, mirrorSection, foldSection, tfiles.section, fileSection, srcSum.sourceSection, srcSum.checkSection, activity.section);
+    el("summary", {}, "Details"), bigGrid.root, bigNums, connSection, swarmSection, recordSection, mirrorSection, foldSection, tfiles.section, fileSection, srcSum.sourceSection, srcSum.checkSection, activity.section);
   function syncDetail() {
     const on = detail.id === id;
     if (on && details.parentNode !== detail.body) {
@@ -668,12 +671,22 @@ function makeCard(id) {
     dirMove.hidden = !movable;
     dirPath.textContent = d.dir || "";
     dirPath.title = d.dir || "";
+    // A torrent: its swarm in a section of its own, then what identifies it under Torrent.
+    connSection.firstChild.firstChild.textContent = torrent ? "Peers" : "Connections";
+    fileSection.firstChild.textContent = torrent ? "Torrent" : "File";
+    swarmSection.hidden = !torrent;
+    if (torrent) {
+      const r = d.ratio || 0;
+      const swarm = [
+        ["Peers", d.inSwarm ? `${plural(d.peers || 0, "peer")} · ${plural(d.seeds || 0, "seed")}${d.swarm > (d.peers || 0) ? ` · ${d.swarm} known` : ""}` : "Not in the swarm"],
+        ["Sent", d.uploaded > 0 ? `${fmtBytes(d.uploaded)} · ratio ${r > 0 && r < 0.01 ? "< 0.01" : r.toFixed(2)}` : "Nothing yet"],
+        ["VPN", VPN_TEXT[d.vpn] || "Off"],
+      ];
+      fresh(swarmFacts, swarm, () => swarm.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+    }
     const facts = torrent ? [
       ["Save folder", d.dir],
-      ["Peers", d.inSwarm ? `${plural(d.peers || 0, "peer")} · ${plural(d.seeds || 0, "seed")}${d.swarm > (d.peers || 0) ? ` · ${d.swarm} known` : ""}` : ""],
-      ["Sent", d.uploaded > 0 ? fmtBytes(d.uploaded) : ""],
       ["Info hash", d.infoHash],
-      ["VPN", VPN_TEXT[d.vpn] || "Off"],
       ["Magnet link", d.url],
     ] : [
       ["Save folder", movable || d.folder && d.folder.on ? "" : d.dir], // a folder's place is under Folder; a movable one has Change…
@@ -704,8 +717,7 @@ function makeCard(id) {
     ].filter(Boolean)));
 
     if (torrent) {
-      // Torrents keep no log: say so instead of showing nothing.
-      activity.say("A torrent keeps no activity log. Its peers and what it has sent are under File.");
+      activity.section.hidden = true; // a torrent keeps no log
       if (details.open && !choosing) tfiles.load();
       else if (choosing) tfiles.section.hidden = true;
     } else activity.load();

@@ -26,9 +26,9 @@ function fileRow(box, path, end, under = "") {
 function torrentFilesPart(id, getD) {
   const tfList = el("div", { class: "files" });
   const tfNote = el("p", { class: "muted", style: "margin: 0 0 var(--s2)" });
-  // Folded until opened, so the rest of Details is near; it stays as the user left it.
+  // Open at first; it stays as the user left it.
   const tfSum = el("span", { class: "muted" });
-  const fold = el("details", { class: "files-fold" }, el("summary", {}, el("h3", { class: "mk" }, "Files"), " ", tfSum), tfNote, tfList);
+  const fold = el("details", { class: "files-fold", open: true }, el("summary", {}, el("h3", { class: "mk" }, "Files"), " ", tfSum), tfNote, tfList);
   const section = el("section", {}, fold);
   section.hidden = true;
   let tfAt = 0, tfSig = "", tfRows = [];
