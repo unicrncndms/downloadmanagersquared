@@ -172,3 +172,59 @@ func TestAnAdapterMadeAnewPerConnectLeavesNoEntries(t *testing.T) {
 		t.Fatal("pia2, labelled by the user, was forgotten")
 	}
 }
+
+func TestTunnelKeepsItsColourWhenConnectionsComeAndGo(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	e.mu.Lock()
+	e.refreshInterfacesLocked([]netif.Interface{ifaceAt("eth", "Ethernet"), ifaceAt("wifi", "Wi-Fi")})
+	e.settings.assignTunnelColors([]string{"wifi"})
+	c := *e.settings.Interfaces["wifi"].TunnelColor
+	e.mu.Unlock()
+	if c == 0 || c == 1 {
+		t.Fatalf("tunnel colour = %d, want one no connection uses", c)
+	}
+	// A new connection and a second tunnel: the first tunnel's colour stays, the new ones take others.
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.refreshInterfacesLocked([]netif.Interface{ifaceAt("a", "Alpha"), ifaceAt("eth", "Ethernet"), ifaceAt("wifi", "Wi-Fi")})
+	e.settings.assignTunnelColors([]string{"eth", "wifi"})
+	if got := *e.settings.Interfaces["wifi"].TunnelColor; got != c {
+		t.Fatalf("tunnel colour moved from %d to %d", c, got)
+	}
+	seen := map[int]string{}
+	for _, id := range []string{"a", "eth", "wifi"} {
+		is := e.settings.Interfaces[id]
+		for k, p := range map[string]*int{id: is.Color, id + "~vpn": is.TunnelColor} {
+			if p == nil {
+				continue
+			}
+			if other, ok := seen[*p]; ok {
+				t.Fatalf("%s and %s share colour %d with colours still free", k, other, *p)
+			}
+			seen[*p] = k
+		}
+	}
+}
+
+func TestHiddenConnectionIsNotUsed(t *testing.T) {
+	e, err := open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Shutdown()
+	e.mu.Lock()
+	e.refreshInterfacesLocked([]netif.Interface{ifaceAt("eth", "Ethernet")})
+	e.settings.Interfaces["eth"].Hidden = true
+	used := e.enabledLocked(e.ifaces["eth"])
+	e.mu.Unlock()
+	if used {
+		t.Fatal("a hidden connection is used")
+	}
+	if v := ifaceView(t, e, "eth"); !v.Hidden || v.Enabled {
+		t.Fatalf("view = hidden %v enabled %v, want hidden and off", v.Hidden, v.Enabled)
+	}
+}

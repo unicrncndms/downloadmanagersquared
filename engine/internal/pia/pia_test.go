@@ -248,3 +248,28 @@ func TestFailedRequestsDontRevealTheToken(t *testing.T) {
 		}
 	}
 }
+
+func TestSpreadGivesEachTunnelItsOwnNearbyRegion(t *testing.T) {
+	regions := []Region{{ID: "us", PortForward: false}, {ID: "de", PortForward: true}, {ID: "nl", PortForward: true}, {ID: "far", PortForward: true}}
+	lat := map[string]time.Duration{"us": 5 * time.Millisecond, "de": 20 * time.Millisecond, "nl": 30 * time.Millisecond}
+	for _, c := range []struct {
+		taken []string
+		want  string
+	}{
+		{nil, "de"},                  // port forwarding first, then nearest; "far" didn't answer
+		{[]string{"de"}, "nl"},       // the next one
+		{[]string{"de", "nl"}, "us"}, // then those without port forwarding
+		{[]string{"de", "nl", "us"}, "de"},
+	} {
+		taken := map[string]bool{}
+		for _, id := range c.taken {
+			taken[id] = true
+		}
+		if r, ok := Spread(regions, lat, taken); !ok || r.ID != c.want {
+			t.Errorf("taken %v: got %q %v, want %q", c.taken, r.ID, ok, c.want)
+		}
+	}
+	if _, ok := Spread(regions, nil, nil); ok {
+		t.Error("no region answered, yet one was given")
+	}
+}

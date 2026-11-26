@@ -177,6 +177,14 @@ func (e *Engine) colorLocked(id string) int {
 	return 0
 }
 
+// tunnelColorLocked is the palette index an interface's tunnel is shown in.
+func (e *Engine) tunnelColorLocked(id string) int {
+	if s := e.settings.Interfaces[id]; s != nil && s.TunnelColor != nil {
+		return *s.TunnelColor
+	}
+	return e.colorLocked(id)
+}
+
 // addrs are an interface's addresses, IPv4 first.
 func addrs(i netif.Interface) []string {
 	var out []string

@@ -10,7 +10,7 @@ const IFACES = [
     connections: 4, socksPort: 50002, speed: 4.4e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "outgoing" },
   { id: "corp", color: 2, name: "Corporate VPN", description: "WireGuard Tunnel", ip: "10.8.0.2", present: true, enabled: false, vpn: true,
     connections: 4, socksPort: 50003, speed: 0, upload: true, uploadLimit: 0, downloadLimit: 0 },
-  { id: "eth~vpn", color: 0, name: "VPN via Ethernet", ip: "10.2.0.2/32", present: true, enabled: true, tunnel: true, of: "eth", provider: "conf",
+  { id: "eth~vpn", color: 3, name: "VPN via Ethernet", ip: "10.2.0.2/32", present: true, enabled: true, tunnel: true, of: "eth", provider: "conf",
     tunnelState: "up", connections: 4, socksPort: 50004, speed: 2.1e6, upload: true, uploadLimit: 0, downloadLimit: 0,
     incoming: "forwarded", forwardedPort: 41000 },
 ];
@@ -312,13 +312,15 @@ FIXTURES["store-popup"] = { ...FIXTURES.store, host: { version: "0.3.0", userAge
 FIXTURES.windowPia = { ...FIXTURES.window,
   settings: { ...FIXTURES.window.settings, vpnProvider: "pia", piaRegion: "nl" },
   state: { ...STATE, pia: { configured: true, state: "ok", region: "Netherlands" },
-    interfaces: [...IFACES.filter((i) => !i.tunnel).map((i) => i.id === "wifi" ? { ...i, piaRegion: "de" } : i),
-      { id: "eth~vpn", color: 0, name: "VPN via Ethernet", ip: "10.9.0.2", present: true, enabled: true, tunnel: true, of: "eth", provider: "pia",
+    interfaces: [...IFACES.filter((i) => !i.tunnel).map((i) => i.id === "wifi" ? { ...i, piaRegion: "de" } : i.id === "eth" ? { ...i, piaRegion: "auto" } : i),
+      { id: "vhv", color: 5, name: "vEthernet (Default Switch)", description: "Hyper-V Virtual Ethernet Adapter", ip: "172.20.0.1", present: true, enabled: false, hidden: true, connections: 4, socksPort: 0, speed: 0 },
+      { id: "eth~vpn", color: 3, name: "VPN via Ethernet", ip: "10.9.0.2", present: true, enabled: true, tunnel: true, of: "eth", provider: "pia", region: "Netherlands",
         tunnelState: "up", connections: 4, socksPort: 50004, speed: 2.1e6, upload: true, uploadLimit: 0, downloadLimit: 0, incoming: "reachable" },
-      { id: "wifi~vpn", color: 1, name: "VPN via Wi-Fi", ip: "", present: true, enabled: true, tunnel: true, of: "wifi", provider: "pia",
+      { id: "wifi~vpn", color: 4, name: "VPN via Wi-Fi", ip: "", present: true, enabled: true, tunnel: true, of: "wifi", provider: "pia",
         tunnelState: "down", tunnelError: "PIA's only server in Germany carries another connection's tunnel, and a server carries one tunnel at a time. Pick another region for this connection",
         connections: 4, socksPort: 50005, speed: 0, upload: true, uploadLimit: 0, downloadLimit: 0 }] },
-  piaRegions: [{ id: "nl", name: "Netherlands", portForward: true }, { id: "de", name: "Germany", portForward: true }, { id: "us_east", name: "US East", portForward: false }] };
+  piaRegions: [{ id: "nl", name: "Netherlands", country: "NL", ms: 21, portForward: true }, { id: "de", name: "DE Frankfurt", country: "DE", ms: 18, portForward: true },
+    { id: "de_b", name: "DE Berlin", country: "DE", ms: 24, portForward: true }, { id: "us_east", name: "US East", country: "US", ms: 96, portForward: false }, { id: "jp", name: "Japan", country: "JP", portForward: true }] };
 FIXTURES.windowSftp = { ...FIXTURES.sftp, recipes: null, host: { version: "0.3.0", userAgent: null, openDownloads: true } };
 
 // What the real engine adds to every download and to each group of them (Present

@@ -11,15 +11,16 @@ test("a connection is shown in the colour the engine kept for it", () => {
   assert.equal(ifaceHue("eth", state), "var(--c0)");
 });
 
-test("a tunnel gets a colour no interface uses, one each", () => {
-  // free: 1, 2, 4, 5; wifi is the first interface, eth the second
-  assert.equal(ifaceHue("wifi~vpn", state), "var(--c1)");
-  assert.equal(ifaceHue("eth~vpn", state), "var(--c2)");
+test("a tunnel is shown in its own kept colour, whatever the connections around it", () => {
+  const two = { interfaces: [{ id: "wifi", color: 3 }, { id: "eth", color: 0 }, { id: "eth~vpn", tunnel: true, of: "eth", color: 4 }] };
+  assert.equal(ifaceHue("eth~vpn", two), "var(--c4)");
+  // a connection added before it in the list changes nothing
+  two.interfaces.unshift({ id: "a", color: 1 });
+  assert.equal(ifaceHue("eth~vpn", two), "var(--c4)");
 });
 
-test("a tunnel shares its interface's colour when every colour is taken", () => {
-  const full = { interfaces: [0, 1, 2, 3, 4, 5].map((c) => ({ id: "i" + c, color: c })) };
-  assert.equal(ifaceHue("i2~vpn", full), "var(--c2)");
+test("a tunnel no longer listed takes its interface's colour", () => {
+  assert.equal(ifaceHue("wifi~vpn", state), "var(--c3)");
 });
 
 test("without a colour it is the place in the list, as before", () => {

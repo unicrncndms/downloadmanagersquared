@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -46,8 +45,14 @@ type account struct {
 	tokenAt   time.Time
 	regions   []pia.Region
 	regionsAt time.Time
-	region    pia.Region // the one in use
+	region    pia.Region               // the one in use
+	latency   map[string]time.Duration // each region's, for spreading tunnels (AutoRegion)
+	latencyAt time.Time
 }
+
+// AutoRegion is an interface's PIA region when its tunnel takes the nearest
+// one no other tunnel is in (pia.Spread), so each gets its own exit IP.
+const AutoRegion = "auto"
 
 // piaLogin is what pia.dat holds, encrypted with DPAPI.
 type piaLogin struct {
@@ -228,9 +233,16 @@ func (p *piaProvider) config(ctx context.Context, te *entry, b *netif.Binding) (
 	if a == nil {
 		return tunnel.Config{}, nil, errors.New("PIA isn't set up")
 	}
-	token, region, err := p.session(ctx, a, regionID, b)
+	token, region, err := p.session(ctx, a, regionID, b, te)
 	if err != nil {
 		return tunnel.Config{}, nil, err
+	}
+	p.t.mu.Lock()
+	te.regionName = region.Name
+	p.t.mu.Unlock()
+	fwRegion := regionID
+	if regionID == AutoRegion { // port forwarding asks in the region it was given, not for another spread
+		fwRegion = region.ID
 	}
 	priv, pub, err := tunnel.GenerateKey()
 	if err != nil {
@@ -259,7 +271,7 @@ func (p *piaProvider) config(ctx context.Context, te *entry, b *netif.Binding) (
 	}
 	gws = append(gws, srv)
 	return cfg, func(tn *tunnel.Tunnel) forwarder {
-		return &piaForwarder{p: p, id: te.id, tn: tn, b: b, region: regionID, forwards: region.PortForward, gateways: gws}
+		return &piaForwarder{p: p, id: te.id, tn: tn, b: b, region: fwRegion, forwards: region.PortForward, gateways: gws}
 	}, nil
 }
 
@@ -381,7 +393,7 @@ func (f *piaForwarder) bind(now time.Time, a *account, regionID string) error {
 	var lastErr error
 	for _, gw := range gws {
 		if sig == nil || now.After(sig.Expires.Add(-24*time.Hour)) {
-			token, _, err := f.p.session(ctx, a, regionID, f.b)
+			token, _, err := f.p.session(ctx, a, regionID, f.b, nil)
 			if err != nil {
 				return err
 			}
@@ -434,8 +446,9 @@ func (p *piaProvider) login(ctx context.Context, a *account, b *netif.Binding, l
 }
 
 // session is a valid token and the region to use, logging in and reading
-// the server list when needed.
-func (p *piaProvider) session(ctx context.Context, a *account, regionID string, b *netif.Binding) (string, pia.Region, error) {
+// the server list when needed. te is the tunnel it is for, which AutoRegion
+// keeps apart from the others (nil: none, for a token only).
+func (p *piaProvider) session(ctx context.Context, a *account, regionID string, b *netif.Binding, te *entry) (string, pia.Region, error) {
 	t := p.t
 	t.mu.Lock()
 	token, tokenAt := a.token, a.tokenAt
@@ -465,6 +478,13 @@ func (p *piaProvider) session(ctx context.Context, a *account, regionID string, 
 		return
 	}
 	region := find(regionID)
+	if regionID == AutoRegion {
+		r, err := p.spread(ctx, a, regions, b, te)
+		if err != nil {
+			return "", pia.Region{}, err
+		}
+		region = r
+	}
 	if region.ID == "" && regionID == "" {
 		// Every interface uses the region the first one measured fastest.
 		region = find(picked)
@@ -498,17 +518,56 @@ func (p *piaProvider) session(ctx context.Context, a *account, regionID string, 
 	return token, region, nil
 }
 
-// PIARegions lists PIA's regions for the settings page, through client.
-func (t *Tunnels) PIARegions(client *http.Client) ([]map[string]any, error) {
+// spread is the region for te under AutoRegion: the nearest (port forwarding
+// first) that no other running PIA tunnel is in. Latencies are measured once
+// per server list, under the logins lock so tunnels starting together probe once.
+func (p *piaProvider) spread(ctx context.Context, a *account, regions []pia.Region, b *netif.Binding, te *entry) (pia.Region, error) {
+	p.logins.Lock()
+	defer p.logins.Unlock()
+	p.t.mu.Lock()
+	lat, at := a.latency, a.latencyAt
+	p.t.mu.Unlock()
+	if lat == nil || time.Since(at) > piaRegionsLife {
+		lat = p.api.Latencies(ctx, regions, b.DialContext)
+		p.t.mu.Lock()
+		a.latency, a.latencyAt = lat, time.Now()
+		p.t.mu.Unlock()
+	}
+	p.t.mu.Lock()
+	defer p.t.mu.Unlock()
+	taken := map[string]bool{}
+	for _, o := range p.oursLocked() {
+		if o != te && o.got != "" && (o.t != nil || o.starting) {
+			taken[o.got] = true
+		}
+	}
+	r, ok := pia.Spread(regions, lat, taken)
+	if !ok {
+		return pia.Region{}, errors.New("no PIA region answered")
+	}
+	if te != nil {
+		te.got = r.ID // held while it starts, so the next tunnel takes another
+	}
+	return r, nil
+}
+
+// PIARegions lists PIA's regions for the settings page, through b, with how
+// quickly each answers ("ms", left out where it didn't) and where it is.
+func (t *Tunnels) PIARegions(b *netif.Binding) ([]map[string]any, error) {
 	ctx, cancel := context.WithTimeout(t.ctx, 20*time.Second)
 	defer cancel()
-	regions, err := t.pia.api.Regions(ctx, client)
+	regions, err := t.pia.api.Regions(ctx, b.HTTPClient())
 	if err != nil {
 		return nil, err
 	}
+	lat := t.pia.api.Latencies(ctx, regions, b.DialContext)
 	out := []map[string]any{}
 	for _, r := range regions {
-		out = append(out, map[string]any{"id": r.ID, "name": r.Name, "portForward": r.PortForward})
+		m := map[string]any{"id": r.ID, "name": r.Name, "portForward": r.PortForward, "country": r.Country}
+		if ms, ok := lat[r.ID]; ok {
+			m["ms"] = ms.Milliseconds()
+		}
+		out = append(out, m)
 	}
 	return out, nil
 }

@@ -74,6 +74,13 @@ func (e *Engine) tunnelStatus(ifaceID string) (vpn.Status, bool) {
 }
 
 func (e *Engine) tunnelViewsLocked(tunnels []vpn.Status, speeds map[string]float64) []IfaceView {
+	var ids []string
+	for _, st := range tunnels {
+		ids = append(ids, st.Iface)
+	}
+	if e.settings.assignTunnelColors(ids) {
+		e.saveSettingsLocked()
+	}
 	var out []IfaceView
 	for _, st := range tunnels {
 		id := st.Iface
@@ -86,9 +93,9 @@ func (e *Engine) tunnelViewsLocked(tunnels []vpn.Status, speeds map[string]float
 		}
 		v := IfaceView{
 			ID: paths.Tunnel(id), Name: "VPN via " + name, Tunnel: true, Of: id, IP: st.Address,
-			Present: st.State == "up", Color: e.colorLocked(id), Enabled: true, Connections: e.connsLocked(id),
+			Present: st.State == "up", Color: e.tunnelColorLocked(id), Enabled: true, Connections: e.connsLocked(id),
 			SocksPort: st.SocksPort, Speed: speeds[paths.Tunnel(id)], Incoming: st.Incoming,
-			TunnelState: st.State, TunnelError: st.Err, Provider: st.Provider, ForwardedPort: st.ForwardedPort,
+			TunnelState: st.State, TunnelError: st.Err, Provider: st.Provider, ForwardedPort: st.ForwardedPort, Region: st.Region,
 		}
 		if ent != nil {
 			// A tunnel follows its interface's upload switch and shares its limits.
@@ -108,7 +115,7 @@ func (e *Engine) piaRegions() ([]map[string]any, error) {
 	if ent == nil {
 		return nil, errors.New("no connection")
 	}
-	return e.vpn.PIARegions(ent.binding.HTTPClient())
+	return e.vpn.PIARegions(ent.binding)
 }
 
 // removeTunnel takes an interface's tunnel down and forgets it, with the port

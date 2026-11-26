@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -110,6 +111,7 @@ type Servers struct {
 type Region struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
+	Country     string  `json:"country"` // two letters, "DE"
 	PortForward bool    `json:"port_forward"`
 	Geo         bool    `json:"geo"`
 	Servers     Servers `json:"servers"`
@@ -158,6 +160,22 @@ func (a API) Regions(ctx context.Context, c *http.Client) ([]Region, error) {
 // Fastest is the region whose meta server accepts a connection quickest, as
 // PIA's scripts measure it; regions that don't answer within a second are out.
 func (a API) Fastest(ctx context.Context, regions []Region, dial Dial) (Region, error) {
+	lat := a.Latencies(ctx, regions, dial)
+	best := -1
+	for i, r := range regions {
+		if ms, ok := lat[r.ID]; ok && (best < 0 || ms < lat[regions[best].ID]) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return Region{}, errors.New("no PIA region answered")
+	}
+	return regions[best], nil
+}
+
+// Latencies is how quickly each region's meta server accepts a connection, by
+// region ID; a region that doesn't answer within a second is left out.
+func (a API) Latencies(ctx context.Context, regions []Region, dial Dial) map[string]time.Duration {
 	type result struct {
 		r  Region
 		ms time.Duration
@@ -181,16 +199,41 @@ func (a API) Fastest(ctx context.Context, regions []Region, dial Dial) (Region, 
 			ch <- result{r, time.Since(start)}
 		}()
 	}
-	best := result{ms: -1}
+	out := map[string]time.Duration{}
 	for range regions {
-		if res := <-ch; res.ms >= 0 && (best.ms < 0 || res.ms < best.ms) {
-			best = res
+		if res := <-ch; res.ms >= 0 {
+			out[res.r.ID] = res.ms
 		}
 	}
-	if best.ms < 0 {
-		return Region{}, errors.New("no PIA region answered")
+	return out
+}
+
+// Spread is the region for one more tunnel beside those in taken (region IDs):
+// of the regions that answered (lat), those with port forwarding first, each
+// group nearest first, the first one no other tunnel is in. With every one
+// taken it is the first anyway; false when none answered.
+func Spread(regions []Region, lat map[string]time.Duration, taken map[string]bool) (Region, bool) {
+	var ok []Region
+	for _, r := range regions {
+		if _, in := lat[r.ID]; in {
+			ok = append(ok, r)
+		}
 	}
-	return best.r, nil
+	if len(ok) == 0 {
+		return Region{}, false
+	}
+	sort.SliceStable(ok, func(i, j int) bool {
+		if ok[i].PortForward != ok[j].PortForward {
+			return ok[i].PortForward
+		}
+		return lat[ok[i].ID] < lat[ok[j].ID]
+	})
+	for _, r := range ok {
+		if !taken[r.ID] {
+			return r, true
+		}
+	}
+	return ok[0], true
 }
 
 // Key is a server's answer to addKey.

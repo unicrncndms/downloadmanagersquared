@@ -47,12 +47,7 @@ const colorCount = 6
 // whether it gave any. Colours are kept so one never changes when another
 // interface turns up; with every colour taken, the least used one is shared.
 func (s *Settings) assignColors(ids []string) bool {
-	var used [colorCount]int
-	for _, is := range s.Interfaces {
-		if is.Color != nil {
-			used[*is.Color]++
-		}
-	}
+	used := s.usedColors()
 	changed := false
 	for _, id := range ids {
 		is := s.Interfaces[id]
@@ -67,6 +62,46 @@ func (s *Settings) assignColors(ids []string) bool {
 		}
 		used[c]++
 		is.Color, changed = &c, true
+	}
+	return changed
+}
+
+// usedColors counts how many interfaces and tunnels are shown in each colour.
+func (s *Settings) usedColors() (used [colorCount]int) {
+	for _, is := range s.Interfaces {
+		for _, c := range []*int{is.Color, is.TunnelColor} {
+			if c != nil {
+				used[*c]++
+			}
+		}
+	}
+	return used
+}
+
+// assignTunnelColors gives each interface of ifaces whose tunnel has no colour
+// yet the least used one, so a tunnel looks unlike every connection while a
+// colour is free, and keeps it: adding or removing a connection never moves it.
+// It says whether it gave any.
+func (s *Settings) assignTunnelColors(ifaces []string) bool {
+	used := s.usedColors()
+	changed := false
+	for _, id := range ifaces {
+		is := s.Interfaces[id]
+		if is == nil {
+			is = &IfaceSettings{}
+			s.Interfaces[id] = is
+		}
+		if is.TunnelColor != nil {
+			continue
+		}
+		c := 0
+		for i, n := range used {
+			if n < used[c] {
+				c = i
+			}
+		}
+		used[c]++
+		is.TunnelColor, changed = &c, true
 	}
 	return changed
 }
@@ -291,6 +326,9 @@ func (s *Settings) normalize() {
 		}
 		if is.Color != nil && (*is.Color < 0 || *is.Color >= colorCount) {
 			is.Color = nil // assigned again when the interface is next seen
+		}
+		if is.TunnelColor != nil && (*is.TunnelColor < 0 || *is.TunnelColor >= colorCount) {
+			is.TunnelColor = nil
 		}
 		is.UploadLimit, is.DownloadLimit = max(is.UploadLimit, 0), max(is.DownloadLimit, 0)
 	}

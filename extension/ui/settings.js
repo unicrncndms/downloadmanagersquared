@@ -56,7 +56,7 @@ function badge(text, cls, title) {
 }
 
 // One line of the VPN section: a connection with its tunnel, or the way to import one.
-function tunnelRow(i, tun) {
+function tunnelRow(i, tun, usedBy) {
   const pia = tun && tun.provider === "pia";
   // The port the VPN provider forwards to this tunnel, where it can't tell DMS² itself.
   let port = null;
@@ -70,23 +70,38 @@ function tunnelRow(i, tun) {
   // Its own PIA region: tunnels in different regions get different exit IPs, and two can't share a server.
   let region = null;
   if (pia && piaRegionList.length) {
-    region = el("select", { "aria-label": `PIA region: ${i.name}` }, regionOptions("Same as PIA's region"));
+    const others = new Map([...usedBy].filter(([, who]) => who !== i.name));
+    region = el("select", { "aria-label": `PIA region: ${i.name}` }, regionOptions("Same as PIA's region", true, others));
     region.value = i.piaRegion || "";
     region.addEventListener("change", () => act("setInterface", { id: i.id, piaRegion: region.value }, "Region saved"));
   }
+  // Its own colour, kept by the engine: click the tile to pick another.
+  let tile = null, colours = null;
+  if (tun) {
+    const shown = Number.isInteger(tun.color) ? tun.color : 0;
+    colours = el("div", { class: "swatches", role: "radiogroup", "aria-label": `Colour: ${tun.name}`, hidden: true },
+      IFACE_COLORS.map((name, n) => el("button", { role: "radio", "aria-checked": String(n === shown), title: name, "aria-label": name, style: `background:var(--c${n})`,
+        onclick: () => act("setInterface", { id: i.id, tunnelColor: n }, `${tun.name} is now ${name}`) })));
+    tile = el("span", { class: "tile", role: "button", tabindex: "0", "aria-label": `Colour: ${tun.name}. Pick another`,
+      onclick: () => { colours.hidden = !colours.hidden; },
+      onkeydown: (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); tile.click(); } } });
+    tile.style.color = ifaceHue(tun.id, latestState);
+  }
   return el("div", { class: "tunnel-row" },
+    tile || el("span", { class: "tile none" }),
     el("b", {}, i.name),
     tun ? el("div", { class: "vpn" },
       badge((pia ? "PIA · " : "") + (TUNNEL_TEXT[tun.tunnelState] || tun.tunnelState).replace(/^VPN /, ""), TUNNEL_CLASS[tun.tunnelState], tun.ip),
       tun.tunnelError ? el("span", { class: "muted tunnel-error" }, tun.tunnelError) : null)
       : el("span", { class: "muted" }, "No tunnel"),
-    region && el("label", {}, "Region ", region,
-      el("span", { class: "info", tabindex: "0", "data-tip": "Where this connection's tunnel comes out. Connections in different regions get different IPs, which torrents see as different peers. A PIA server carries one of your tunnels at a time, so in a region with one server only one connection connects." })),
+    region && el("label", {}, "Region ", region, tun && tun.region ? el("span", { class: "muted" }, "in " + tun.region) : null,
+      el("span", { class: "info", tabindex: "0", "data-tip": "Where this connection's tunnel comes out. Connections in different regions get different IPs, which torrents see as different peers. Spread automatically gives each tunnel the nearest region no other one is in, those with port forwarding first. A PIA server carries one of your tunnels at a time, so in a region with one server only one connection connects." })),
     port && el("label", {}, "Forwarded port ", port,
       el("span", { class: "info", tabindex: "0", "data-tip": "A port your VPN provider forwards to this connection, for torrent peers to connect in (empty: none, or found by NAT-PMP). AirVPN: leave the port's Local field empty, and with several connections give each its own port, linked to that connection's device." })),
     pia ? null : tun
       ? el("button", { class: "small", onclick: () => act("removeTunnel", { iface: i.id }, "VPN tunnel removed") }, "Remove")
-      : el("button", { class: "small", onclick: () => { confFor = i.id; $("confFile").click(); } }, "Import .conf"));
+      : el("button", { class: "small", onclick: () => { confFor = i.id; $("confFile").click(); } }, "Import .conf"),
+    colours);
 }
 
 // A connection's state now, in a word: what the row leads with.
@@ -179,10 +194,12 @@ let tunnelSig = "";
 function showTunnels(ifaces, tunnels, settings) {
   const box = $("tunnelBox");
   box.hidden = !tunnelsShown(settings.vpnProvider, tunnels.size);
-  const sig = JSON.stringify([ifaces.map((i) => { const t = tunnels.get(i.id); return [i.id, i.name, i.piaRegion, t && [t.provider, t.tunnelState, t.tunnelError, t.ip, t.forwardedPort]]; }), piaRegionList.length]);
+  const sig = JSON.stringify([ifaces.map((i) => { const t = tunnels.get(i.id); return [i.id, i.name, i.piaRegion, i.hidden, t && [t.provider, t.tunnelState, t.tunnelError, t.ip, t.forwardedPort, t.color, t.region]]; }), piaRegionList.length]);
   if (sig === tunnelSig || $("tunnelList").contains(document.activeElement)) return;
   tunnelSig = sig;
-  $("tunnelList").replaceChildren(...ifaces.filter((i) => i.present || tunnels.has(i.id)).map((i) => tunnelRow(i, tunnels.get(i.id))));
+  // Which connection's tunnel is in each region now, for the pickers' marks.
+  const usedBy = new Map(ifaces.filter((i) => tunnels.get(i.id) && tunnels.get(i.id).region).map((i) => [tunnels.get(i.id).region, i.name]));
+  $("tunnelList").replaceChildren(...ifaces.filter((i) => !i.hidden && (i.present || tunnels.has(i.id))).map((i) => tunnelRow(i, tunnels.get(i.id), usedBy)));
 }
 
 function renderIfaces(state, settings) {
@@ -426,9 +443,27 @@ const PIA_STATE = {
 let piaRegionsLoaded = false;
 let piaRegionList = []; // PIA's regions once loaded, for every region picker
 
-function regionOptions(first) {
-  return [el("option", { value: "" }, first),
-    ...piaRegionList.map((r) => el("option", { value: r.id }, r.name + (r.portForward ? "" : " (no port forwarding)")))];
+// The region pickers' options: first (and, for a tunnel, Spread automatically),
+// then PIA's regions by country, each with how quickly it answered and, where
+// another tunnel is in it, which one. usedBy maps a region's name to a connection's.
+function regionOptions(first, auto, usedBy = new Map()) {
+  const countries = new Map();
+  for (const r of piaRegionList) {
+    const c = countryName(r.country);
+    if (!countries.has(c)) countries.set(c, []);
+    countries.get(c).push(r);
+  }
+  const head = [el("option", { value: "" }, first)];
+  if (auto) head.unshift(el("option", { value: "auto" }, "Spread automatically"));
+  return [...head, ...[...countries].sort(([a], [b]) => a.localeCompare(b)).map(([c, list]) => el("optgroup", { label: c },
+    list.map((r) => el("option", { value: r.id }, [r.name, r.ms >= 0 ? `${r.ms} ms` : "", r.portForward ? "" : "no port forwarding", usedBy.has(r.name) ? "used by " + usedBy.get(r.name) : ""].filter(Boolean).join(" · ")))))];
+}
+
+// countryName is a region's country in words, from PIA's two letters.
+const countryNames = typeof Intl.DisplayNames === "function" ? new Intl.DisplayNames(["en"], { type: "region" }) : null;
+function countryName(code) {
+  if (!code) return "Other";
+  try { return (countryNames && countryNames.of(code.toUpperCase())) || code; } catch { return code; }
 }
 
 function renderPIA(p, settings) {

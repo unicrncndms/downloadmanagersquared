@@ -119,6 +119,9 @@ type entry struct {
 	fails    int // starts in a row that failed or lost the server
 	err      string
 	region   string // the PIA region its latest start asked for
+	got      string // under AutoRegion: the region it was given
+	// regionName is the name of the PIA region its latest start is in.
+	regionName string
 }
 
 // stopLocked takes te's tunnel down, returning the device for the caller to
@@ -424,6 +427,7 @@ type Status struct {
 	Incoming      string // "reachable", "forwarded" (typed in, unchecked), "outgoing", "" (not known yet)
 	ForwardedPort int    // typed in by the user
 	SocksPort     int
+	Region        string // PIA: the name of the region its tunnel is in, once known
 }
 
 // Status is every configured tunnel as of now.
@@ -443,7 +447,7 @@ func (t *Tunnels) Status(now time.Time) []Status {
 		}
 		s := Status{
 			Iface: id, State: state, Err: te.err, Provider: te.prov.name(),
-			ForwardedPort: t.typedPortLocked(te), SocksPort: te.socks.Port(),
+			ForwardedPort: t.typedPortLocked(te), SocksPort: te.socks.Port(), Region: te.regionName,
 		}
 		if te.cfg.Address.IsValid() {
 			s.Address = te.cfg.Address.String()
