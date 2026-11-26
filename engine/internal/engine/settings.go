@@ -150,7 +150,10 @@ type Settings struct {
 	// theme's as the extension last saw it, else the pages' own.
 	Accent      string `json:"accent,omitempty"`      // "" = follow Firefox
 	ThemeAccent string `json:"themeAccent,omitempty"` // "" = Firefox's theme has none
-	// The pages' surfaces take a little of the accent; off: neutral grey.
+	// How much of the accent the pages' surfaces take: 0 is neutral grey, 40
+	// the tint the old switch gave, 50 the most.
+	Tint int `json:"tint,omitempty"`
+	// The old on/off switch for the tint, read once into Tint (normalize).
 	TintBackground bool `json:"tintBackground,omitempty"`
 
 	// What the downloads page remembers, shared by the popup and the window.
@@ -248,6 +251,13 @@ func defaultSettings() Settings {
 
 func (s *Settings) normalize() {
 	d := defaultSettings()
+	if s.TintBackground {
+		if s.Tint == 0 {
+			s.Tint = 40
+		}
+		s.TintBackground = false
+	}
+	s.Tint = min(max(s.Tint, 0), 50)
 	if s.Interfaces == nil {
 		s.Interfaces = map[string]*IfaceSettings{}
 	}

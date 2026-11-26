@@ -57,6 +57,9 @@ h3 { display: flex; align-items: center; margin: 0 0 var(--s2); font-size: 12px;
 .setting > label, .setting > span:first-child { display: block; }
 .setting input[type=text], .setting input[type=password], .setting select { width: 100%; height: var(--tile); }
 .setting input.dec, .setting input[type=number] { width: 110px; height: var(--tile); }
+.setting .tint { display: flex; align-items: center; gap: var(--s3); }
+.setting .tint input { flex: 1; max-width: 220px; accent-color: var(--accent); }
+.setting .tint output { min-width: 3em; color: var(--muted); font-variant-numeric: tabular-nums; }
 .setting .pathrow { display: flex; gap: var(--s2); min-width: 0; }
 .setting .pathrow input { flex: 1; min-width: 0; }
 .setting .buttons { display: flex; flex-wrap: wrap; gap: var(--s2); }

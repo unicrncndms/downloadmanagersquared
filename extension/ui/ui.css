@@ -63,16 +63,16 @@
   --on-c: #0b1020;
   color-scheme: dark;
 }
-/* The surfaces are the neutrals (--bg0…). With "Tint the background" on (settings; data-tint,
-   set by common.js) each takes a little of the accent, so the page, its panels and its lines
-   belong to the colour chosen (lib/accent.js reads the accent against the tinted panel:
-   PANEL_TINT there is the 4% here). */
+/* The surfaces are the neutrals (--bg0…). With a background tint (settings; data-tint and
+   --t, set by common.js: the setting over 40) each takes some of the accent, so the page,
+   its panels and its lines belong to the colour chosen (lib/accent.js reads the accent
+   against the tinted panel: PANEL_TINT there is the 4% here at --t 1). */
 :root { --bg: var(--bg0); --panel: var(--panel0); --line: var(--line0); --bar: var(--bar0); }
 :root[data-tint] {
-  --bg: color-mix(in srgb, var(--accent) 7%, var(--bg0));
-  --panel: color-mix(in srgb, var(--accent) 4%, var(--panel0));
-  --line: color-mix(in srgb, var(--accent) 18%, var(--line0));
-  --bar: color-mix(in srgb, var(--accent) 16%, var(--bar0));
+  --bg: color-mix(in srgb, var(--accent) calc(var(--t) * 7%), var(--bg0));
+  --panel: color-mix(in srgb, var(--accent) calc(var(--t) * 4%), var(--panel0));
+  --line: color-mix(in srgb, var(--accent) calc(var(--t) * 18%), var(--line0));
+  --bar: color-mix(in srgb, var(--accent) calc(var(--t) * 16%), var(--bar0));
 }
 * { box-sizing: border-box; }
 /* What the browser draws follows the palette too. */

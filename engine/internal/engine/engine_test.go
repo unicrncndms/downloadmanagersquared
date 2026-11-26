@@ -718,12 +718,15 @@ func TestTheBackgroundTintIsKeptAndRestoredOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := e.Call(nil, "setSettings", []byte(`{"tintBackground":true}`))
+	r, err := e.Call(nil, "setSettings", []byte(`{"tint":30}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.(Settings).TintBackground {
-		t.Fatal("setSettings did not turn the tint on")
+	if r.(Settings).Tint != 30 {
+		t.Fatal("setSettings did not set the tint")
+	}
+	if r, _ := e.Call(nil, "setSettings", []byte(`{"tint":500}`)); r.(Settings).Tint != 50 {
+		t.Fatalf("tint 500 kept as %d, want 50", r.(Settings).Tint)
 	}
 	e.Shutdown()
 	e, err = open(dir, nil)
@@ -735,10 +738,21 @@ func TestTheBackgroundTintIsKeptAndRestoredOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.(Settings).TintBackground {
+	if r.(Settings).Tint != 50 {
 		t.Fatal("the tint was not kept over a restart")
 	}
-	if r.(Settings).restored().TintBackground {
+	if r.(Settings).restored().Tint != 0 {
 		t.Fatal("restore defaults left the tint on")
+	}
+}
+
+// The old switch, on in a settings file from before the slider, is the tint it gave.
+func TestTheOldTintSwitchBecomesItsStrength(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"tintBackground":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := loadSettings(path); s.Tint != 40 || s.TintBackground {
+		t.Fatalf("tint %d, switch %v: want 40 and the switch gone", s.Tint, s.TintBackground)
 	}
 }

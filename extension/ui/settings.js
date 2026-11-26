@@ -321,7 +321,7 @@ function fillWindow(s) {
 }
 
 // The checkboxes: the setting each one holds, and whether it is on when the engine sends none.
-const CHECKS = { sFolder: ["folderDefault", false], sParts: ["partsParallel", true], sNotify: ["notifyDone", true], sAwake: ["keepAwake", true], sTint: ["tintBackground", false] };
+const CHECKS = { sFolder: ["folderDefault", false], sParts: ["partsParallel", true], sNotify: ["notifyDone", true], sAwake: ["keepAwake", true] };
 
 // The download folder is checked by the engine: what it refuses is said at the field.
 function dirError(text) {
@@ -348,6 +348,14 @@ $("sThreshold").addEventListener("input", () => $("sThreshold").setCustomValidit
 $("sVpnHttp").addEventListener("change", () => { $("vpnOnlyWarn").hidden = $("sVpnHttp").value !== "vpn"; });
 $("sAuto").addEventListener("change", () => act("setAutostart", { on: $("sAuto").checked }, "Saved"));
 for (const [id, [key]] of Object.entries(CHECKS)) $(id).addEventListener("change", () => act("setSettings", { [key]: $(id).checked }, "Saved"));
+// The tint shows while the slider moves, and is saved where it is let go.
+const tintLabel = (v) => (v > 0 ? `${v}%` : "Off");
+$("sTint").addEventListener("input", () => {
+  const v = Number($("sTint").value);
+  $("sTintOut").textContent = tintLabel(v);
+  applyTheme({ ...latestSettings, tint: v });
+});
+$("sTint").addEventListener("change", () => act("setSettings", { tint: Number($("sTint").value) }, "Saved"));
 // The engine shows Windows' folder picker and saves the choice; the field follows the settings it sends.
 $("sBrowse").addEventListener("click", () => act("pickSaveFolder", {}));
 $("sIPv6").addEventListener("change", () => act("setSettings", { ipv6: $("sIPv6").checked }, $("sIPv6").checked ? "IPv6 on. Torrents use it after DMS² restarts." : "IPv6 off. Torrents stop using it after DMS² restarts."));
@@ -400,6 +408,8 @@ function fillSettings(s) {
     if (document.activeElement !== $(id)) $(id).value = show(s);
   }
   for (const [id, [key, on]] of Object.entries(CHECKS)) $(id).checked = on ? s[key] !== false : !!s[key];
+  if (document.activeElement !== $("sTint")) $("sTint").value = String(s.tint || 0);
+  $("sTintOut").textContent = tintLabel(Number($("sTint").value));
   $("sIPv6").checked = !!s.ipv6;
   fillWindow(s);
   for (const e of document.querySelectorAll(".speedUnit")) e.textContent = speedUnitLabel();

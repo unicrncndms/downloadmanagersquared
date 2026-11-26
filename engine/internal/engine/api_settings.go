@@ -100,8 +100,8 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		if p.ThemeAccent != nil {
 			s.ThemeAccent = *p.ThemeAccent
 		}
-		if p.TintBackground != nil {
-			s.TintBackground = *p.TintBackground
+		if p.Tint != nil {
+			s.Tint = *p.Tint
 		}
 		if p.DismissedUpdate != nil {
 			s.DismissedUpdate = *p.DismissedUpdate
@@ -220,7 +220,7 @@ type settingsPatch struct {
 	QueueWindow        *queue.Week   `json:"queueWindow"`
 	Accent             *string       `json:"accent"`
 	ThemeAccent        *string       `json:"themeAccent"`
-	TintBackground     *bool         `json:"tintBackground"`
+	Tint               *int          `json:"tint"`
 	DismissedUpdate    *string       `json:"dismissedUpdate"`
 	SeenVersion        *string       `json:"seenVersion"`
 	FoldedSections     *[]string     `json:"foldedSections"`

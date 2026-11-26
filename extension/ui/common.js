@@ -33,18 +33,20 @@ function applyAccent(settings) {
   if (!settings) return;
   let style = document.getElementById("accent");
   if (!style) style = document.head.appendChild(Object.assign(document.createElement("style"), { id: "accent" }));
-  const css = accentCSS(pageAccent(settings));
+  const css = accentCSS(pageAccent(settings), settings.tint);
   if (style.textContent !== css) style.textContent = css;
 }
 
 // The theme choice: light or dark overrides the system's (ui.css, data-theme); "" follows it.
-// And whether the surfaces take a tint of the accent (data-tint).
+// And how much of the accent the surfaces take (data-tint, --t: 1 at 40, the old switch's tint).
 function applyTheme(settings) {
   if (!settings) return;
   const t = settings.theme === "light" || settings.theme === "dark" ? settings.theme : "";
   if (t) document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
-  document.documentElement.toggleAttribute("data-tint", !!settings.tintBackground);
+  const tint = settings.tint > 0 ? settings.tint : 0;
+  document.documentElement.toggleAttribute("data-tint", tint > 0);
+  document.documentElement.style.setProperty("--t", String(tint / 40));
 }
 
 // An (i)'s note (fixed, ui.css) is placed by the (i): to the right, or to the left

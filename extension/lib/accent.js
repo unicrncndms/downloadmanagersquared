@@ -17,7 +17,7 @@ const ACCENT_PRESETS = [
 const LIGHT_PANEL = [255, 255, 255];
 const DARK_PANEL = [29, 32, 38];
 const AA = 4.6; // 4.5, with room for rounding to whole bytes
-const PANEL_TINT = 0.04; // how much of the accent the panel itself takes (ui.css --panel)
+const PANEL_TINT = 0.04; // how much of the accent the panel takes at the least (ui.css --panel)
 
 // parseColor reads "#rgb", "#rrggbb", "rgb(r, g, b)" / "rgba(…)" or [r, g, b]
 // (Firefox theme colors come in all of these), else null.
@@ -50,11 +50,11 @@ function contrast(a, b) {
 
 // tokens for one scheme: the accent, moved toward `to` until it reads as
 // text on the panel and on its own soft tint, and the text on the accent.
-function tokens(c, panel, to, soft) {
+function tokens(c, panel, to, soft, tint) {
   let accent = to, accentSoft = mix(panel, to, soft);
   for (let t = 0; t <= 1; t += 0.02) {
     const a = mix(c, to, t), s = mix(panel, a, soft);
-    if (contrast(a, mix(panel, a, PANEL_TINT)) >= AA && contrast(a, s) >= AA) { accent = a; accentSoft = s; break; }
+    if (contrast(a, mix(panel, a, tint)) >= AA && contrast(a, s) >= AA) { accent = a; accentSoft = s; break; }
   }
   const white = [255, 255, 255], ink = [11, 16, 32];
   const onAccent = contrast(white, accent) >= contrast(ink, accent) ? white : ink;
@@ -62,16 +62,18 @@ function tokens(c, panel, to, soft) {
 }
 
 // accentTokens is { light, dark }, each { accent, accentSoft, onAccent }, or
-// null for a color that can't be read.
-function accentTokens(color) {
+// null for a color that can't be read. tint: the background tint setting
+// (0–50; ui.css's panel takes 4% of the accent at 40).
+function accentTokens(color, tint = 0) {
   const c = parseColor(color);
   if (!c) return null;
-  return { light: tokens(c, LIGHT_PANEL, [0, 0, 0], 0.1), dark: tokens(c, DARK_PANEL, [255, 255, 255], 0.16) };
+  const p = Math.max(PANEL_TINT, (tint || 0) / 1000);
+  return { light: tokens(c, LIGHT_PANEL, [0, 0, 0], 0.1, p), dark: tokens(c, DARK_PANEL, [255, 255, 255], 0.16, p) };
 }
 
 // accentCSS is the stylesheet that sets the tokens, or "" to keep ui.css's.
-function accentCSS(color) {
-  const t = accentTokens(color);
+function accentCSS(color, tint) {
+  const t = accentTokens(color, tint);
   if (!t) return "";
   const vars = (s) => `--accent: ${s.accent}; --accent-soft: ${s.accentSoft}; --on-accent: ${s.onAccent};`;
   // The same selectors as ui.css's dark tokens (data-theme is the settings' theme choice).
