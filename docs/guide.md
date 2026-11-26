@@ -38,7 +38,8 @@ The extension's toolbar icon shows the list. A left click on the tray icon opens
 **Settings → Connections** lists every connection Windows has. Each one you switch on downloads its share: a faster connection takes over more of the work, and nothing is fetched twice.
 
 - **Main connection:** used alone for servers that can't split a file. *Automatic* follows Windows' choice.
-- **Options** per connection: parallel requests (4), a speed limit, its colour, and its VPN tunnel.
+- **Options** per connection: its name, parallel requests (4), a download and an upload limit, and whether it seeds torrents. Click a connection's tile to pick its colour.
+- **Hide** folds a connection you never use away under *Hidden connections*, where *Unhide* brings it back.
 - VPN adapters (a VPN program running in Windows) start off; switch one on to use it as an extra connection.
 - **Test if they are separate lines** checks which connections reach the internet through the same line, by asking each for its public IP address (stun.cloudflare.com). Two that share a line don't add speed.
 - **Enable IPv6 (experimental)** (off) uses IPv6 too; each connection shows a badge with what it has.
@@ -80,10 +81,11 @@ Replayed clicks are synthetic: a site that only accepts real clicks asks every t
 
 Switch it on with the box when adding an archive link, with the switch on a download's card, or for every new archive in the settings.
 
+- It asks where to extract, starting at the save folder; the download waits under *Needs you* until you answer.
 - DMS² fetches the archive's list of files first, then downloads front to back and extracts each file as soon as its bytes are there. A second bar on the card shows the extraction, what it waits for, and the time left.
 - Every file is checked against the archive's own checksum. One that comes out wrong is downloaded again.
 - You can change the folder it extracts into while it runs, on the same drive or another.
-- **Split archives:** add all the parts. They show as one card with one switch, download in the order that keeps the least on disk, and extract as one archive. A part that isn't added stops extraction there: "Part 2 missing". *Download a split archive's parts at once* in the settings trades disk space for speed.
+- **Split archives:** add all the parts. They show as one card with one switch, ask where to extract once, on part 1 (the other parts follow that answer), download in the order that keeps the least on disk, and extract as one archive. A part that isn't added stops extraction there: "Part 2 missing". *Download a split archive's parts at once* in the settings trades disk space for speed.
 - **Passwords:** an encrypted 7z or RAR asks for its password on the card and keeps downloading meanwhile. An encrypted ZIP is downloaded as a normal file.
 - It needs a server that allows split downloads. A ZIP must be compressed with Stored, Deflate, Deflate64 or Zstandard. Anything it can't extract is downloaded as a normal file, with the reason in Details.
 - **Keeping the archive:** by default (*Automatic*) the archive is kept until it is extracted when the drive has room for it, so an update, reboot or crash while extracting downloads nothing again; on a nearly full drive its space is freed as it extracts. Details can set it per download: *Free while extracting*, *Keep until extracted*, or *Keep the archive* to have the archive file too ([ADR 0007](adr/0007-keeping-the-archive-for-interruption-recovery.md)).
@@ -126,7 +128,7 @@ The sections are in the side bar; *Find a setting* searches all of them.
 - **Queue and speed:** downloads at once (1); the queue window: optionally, per weekday, the hours the queue runs (an end before the start runs past midnight). Outside it nothing starts, running downloads pause and seeding torrents stop; they resume when it begins. A download you start or resume yourself still runs. No day set: no limit. Then a download and an upload limit for all connections together (none; each connection can have its own in its Options), the unit speeds are shown in (sizes and speeds use base 1000: 1 MB = 1,000,000 bytes), and the time-left averaging.
 - **Torrents:** seed ratio (1), port for incoming peers, peers per torrent for each connection (100).
 - **Sites and logins:** the learned sites, one list for every browser, with where each was learned (*Forget* makes DMS² ask again), and the SFTP logins and trusted server keys, removable.
-- **General:** start with Windows, notifications, keep the PC awake; theme, accent colour, and a background tinted with the accent (off).
+- **General:** start with Windows, notifications, keep the PC awake; theme, accent colour, and how much the background is tinted with the accent (off).
 - **Keyboard:** the shortcuts of the downloads list.
 - **About:** the versions, *Check for updates*, the release notes, *Log privacy* (see [When something goes wrong](#when-something-goes-wrong)), and restoring the default settings.
 
@@ -134,8 +136,8 @@ The sections are in the side bar; *Find a setting* searches all of them.
 
 Each connection can get its own WireGuard tunnel, for downloads, torrents or both. Choose **Off** (the connections without a tunnel only), **VPN and direct** (the tunnels too) or **VPN only** (the tunnels only). The tunnels run inside DMS²: no driver is installed and your other programs aren't affected.
 
-- **Private Internet Access:** sign in, and every connection without its own `.conf` gets a tunnel.
-- **Other providers:** import a `.conf` per connection (it is kept encrypted with Windows). It must be plain WireGuard with an IPv4 address and an IPv4 DNS server (`DNS =`; IPv6 ones aren't used), one config per connection (a separate device or key at your provider). Obfuscated AmneziaWG configs don't work. If the provider forwards ports by NAT-PMP (Proton VPN on P2P servers, with NAT-PMP on when you make the config), DMS² gets a port for torrents by itself (not yet tested with Proton's servers). For a fixed port from your provider's panel (AirVPN), type it in the **Port** box next to the `.conf`.
+- **Private Internet Access:** sign in, and every connection without its own `.conf` gets a tunnel. Under **Tunnels**, each can have a region of its own, or *Spread automatically*: the nearest region no other tunnel is in, those with port forwarding first. Click a tunnel's tile to pick its colour.
+- **Other providers:** import a `.conf` per connection (it is kept encrypted with Windows). It must be plain WireGuard with an IPv4 address and an IPv4 DNS server (`DNS =`; IPv6 ones aren't used), one config per connection (a separate device or key at your provider). Obfuscated AmneziaWG configs don't work. If the provider forwards ports by NAT-PMP (Proton VPN on P2P servers, with NAT-PMP on when you make the config), DMS² gets a port for torrents by itself (not yet tested with Proton's servers). For a fixed port from your provider's panel (AirVPN), type it in the **Forwarded port** box next to the `.conf`.
 - For sites with a link per IP, use a different server for each connection, or they may share one address.
 - Which providers offer `.conf` files, and why PIA works differently: [vpn-providers.md](vpn-providers.md).
 
