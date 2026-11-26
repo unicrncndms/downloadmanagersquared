@@ -548,7 +548,7 @@ function forgetSite(h) {
 // speedTile shows a connection's speed in its tile: the number, the unit
 // under it; hollow while it fetches nothing.
 function speedTile(tile, speed) {
-  const [n, unit] = speed > 0 ? fmtSpeed(speed).split(" ") : ["–", ""];
+  const [n, unit] = speed > 0 ? fmtSpeed(speed).split("\u00a0") : ["–", ""];
   if (tile.dataset.n === n + unit) return;
   tile.dataset.n = n + unit;
   tile.classList.toggle("idle", !(speed > 0));

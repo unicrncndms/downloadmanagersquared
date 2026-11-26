@@ -24,13 +24,14 @@ function speedUnitLabel(unit = speedUnit) { return unit === "Mbps" ? "Mbit/s" : 
 function speedToUnit(bps, unit = speedUnit) { return bps * (unit === "Mbps" ? 8 : 1) / 1e6; }
 function speedFromUnit(v, unit = speedUnit) { return Math.round(v * 1e6 / (unit === "Mbps" ? 8 : 1)); }
 
+// Number and unit joined by a no-break space: a speed never wraps between them.
 function fmtSpeed(bps, unit = speedUnit) {
-  if (unit !== "Mbps") return bps >= 1 ? fmtBytes(bps) + "/s" : "0 B/s";
-  if (!(bps >= 1)) return "0 bit/s";
+  if (unit !== "Mbps") return bps >= 1 ? fmtBytes(bps).replace(" ", "\u00a0") + "/s" : "0\u00a0B/s";
+  if (!(bps >= 1)) return "0\u00a0bit/s";
   let n = bps * 8, i = 0;
   const u = ["bit", "kbit", "Mbit", "Gbit"];
   while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
-  return `${n.toFixed(i && n < 100 ? 1 : 0)} ${u[i]}/s`;
+  return `${n.toFixed(i && n < 100 ? 1 : 0)}\u00a0${u[i]}/s`;
 }
 
 function fmtETA(sec) {

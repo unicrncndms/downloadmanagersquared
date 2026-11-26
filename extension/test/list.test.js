@@ -13,7 +13,7 @@ test("the status line is short: percent and sizes, with speed and time left whil
   const d = dl("a", "running", { size: 42e9, done: 13e9, speed: 9.2e6, eta: 3150, note: "412 of 1,280 files extracted" });
   const s = statusLine(d);
   assert.equal(s.left, "31% · 13.0 GB / 42.0 GB");
-  assert.equal(s.right, "↓ 9.2 MB/s · 52m 30s left");
+  assert.equal(s.right, "↓ 9.2\u00a0MB/s · 52m 30s left");
   assert.equal(s.sub, "412 of 1,280 files extracted"); // the engine's note
   assert.equal(statusLine(dl("b", "paused", { size: 10e6, done: 5e6 })).right, "");
   // Size not known yet: what has arrived.
@@ -46,13 +46,13 @@ test("only interfaces with a problem show on the card", () => {
 
 test("seeding says how far it is to the ratio target", () => {
   const d = dl("c", "seeding", { kind: "torrent", upSpeed: 3e5, ratio: 0.15 });
-  assert.equal(seedLine(d, { seedRatio: 1 }), "↑ 300 KB/s · ratio 0.15 / 1.00");
-  assert.equal(seedLine(d, { seedRatio: 0 }), "↑ 300 KB/s · ratio 0.15");
+  assert.equal(seedLine(d, { seedRatio: 1 }), "↑ 300\u00a0KB/s · ratio 0.15 / 1.00");
+  assert.equal(seedLine(d, { seedRatio: 0 }), "↑ 300\u00a0KB/s · ratio 0.15");
   // A torrent still downloading: its upload and ratio only.
   assert.equal(seedLine(dl("t", "running", { kind: "torrent", upSpeed: 0, ratio: 0, uploaded: 0 }), {}), "");
-  assert.equal(seedLine(dl("t", "running", { kind: "torrent", upSpeed: 2e4, ratio: 0.01, uploaded: 1e6 }), {}), "↑ 20.0 KB/s · ratio 0.01");
+  assert.equal(seedLine(dl("t", "running", { kind: "torrent", upSpeed: 2e4, ratio: 0.01, uploaded: 1e6 }), {}), "↑ 20.0\u00a0KB/s · ratio 0.01");
   // A ratio too small for two decimals isn't shown as none.
-  assert.equal(seedLine(dl("t", "running", { kind: "torrent", upSpeed: 2e4, ratio: 0.004, uploaded: 1e6 }), {}), "↑ 20.0 KB/s · ratio < 0.01");
+  assert.equal(seedLine(dl("t", "running", { kind: "torrent", upSpeed: 2e4, ratio: 0.004, uploaded: 1e6 }), {}), "↑ 20.0\u00a0KB/s · ratio < 0.01");
 });
 
 test("Pause all and Resume all show only when two or more downloads can use them", () => {
@@ -122,7 +122,7 @@ test("a group card words the engine's summary", () => {
   assert.equal(v.left, "75% · 150 MB / 200 MB · 1 of 2 files done");
   // With the engine's time left for all of it, the line ends with that.
   assert.match(groupView(summary({ got: 150e6, speed: 2e6, eta: 25 })).left, / · .+ left$/);
-  assert.equal(v.right, "↓ 2.0 MB/s");
+  assert.equal(v.right, "↓ 2.0\u00a0MB/s");
   assert.equal(v.label, "Downloading");
   assert.ok(v.pause && !v.resume && v.partialFile && !v.finished);
   const done = groupView(summary({ done: 2, got: 200e6, finished: true, label: "Completed", tone: "ok" }));
@@ -294,14 +294,14 @@ test("a click shows at once: what a request will leave of the engine's state", (
 
 test("a row's two numbers", () => {
   const { rowNums } = require("../lib/list.js");
-  assert.deepEqual(rowNums(dl("a", "running", { size: 1000, done: 390, speed: 2e6, eta: 65 })), { main: "2.0 MB/s", sub: "39% · 390 B / 1.0 KB · 1m 05s left" });
+  assert.deepEqual(rowNums(dl("a", "running", { size: 1000, done: 390, speed: 2e6, eta: 65 })), { main: "2.0\u00a0MB/s", sub: "39% · 390 B / 1.0 KB · 1m 05s left" });
   // No time left known (fetched, waiting to be told where to extract): no "— left".
   assert.equal(rowNums(dl("w", "running", { size: 1000, done: 1000, speed: 0, eta: -1 })).sub, "100% · 1.0 KB / 1.0 KB");
   assert.deepEqual(rowNums(dl("c", "paused", { size: 2e9, done: 1e9 })), { main: "50%", sub: "1.0 GB / 2.0 GB" });
   assert.deepEqual(rowNums(dl("b", "queued", { size: 2e9, done: 0 })), { main: "2.0 GB", sub: "" });
   assert.deepEqual(rowNums(dl("e", "completed", { size: 2e9, done: 2e9 })), { main: "2.0 GB", sub: "" });
   assert.deepEqual(rowNums(dl("u", "paused", { size: -1, done: 5e6 })), { main: "5.0 MB", sub: "" });
-  // Running with nothing fetched yet (checking the link, or retrying it): no "0 B/s", no "~ left".
+  // Running with nothing fetched yet (checking the link, or retrying it): no "0\u00a0B/s", no "~ left".
   assert.deepEqual(rowNums(dl("r", "running", { size: -1, done: 0, speed: 0, eta: -1 })), { main: "", sub: "" });
 });
 
@@ -377,8 +377,8 @@ test("finishedSummary: size, time, speed and each connection's share when severa
   const nameOf = (id) => ({ eth: "Ethernet", wifi: "Wi-Fi" })[id];
   const base = { size: 3e9, added: "2026-11-03T10:00:00Z", finished: "2026-11-03T19:04:10Z", active: 250 }; // queued for hours: only the 250 s it ran count
   assert.equal(finishedSummary({ ...base, links: { eth: { bytes: 1.86e9 }, wifi: { bytes: 1.14e9 } } }, nameOf),
-    "3.0 GB in 4m 10s · 12.0 MB/s · Ethernet 62%, Wi-Fi 38%");
-  assert.equal(finishedSummary({ ...base, links: { eth: { bytes: 3e9 }, wifi: {} } }, nameOf), "3.0 GB in 4m 10s · 12.0 MB/s");
+    "3.0 GB in 4m 10s · 12.0\u00a0MB/s · Ethernet 62%, Wi-Fi 38%");
+  assert.equal(finishedSummary({ ...base, links: { eth: { bytes: 3e9 }, wifi: {} } }, nameOf), "3.0 GB in 4m 10s · 12.0\u00a0MB/s");
   assert.equal(finishedSummary({ size: 5, links: {} }, nameOf), "5 B");
   assert.equal(finishedSummary({ size: 5, added: "2026-11-03T19:00:00Z", finished: "2026-11-03T19:04:10Z", links: {} }, nameOf), "5 B"); // no active time recorded: no time or speed
 });
@@ -407,27 +407,28 @@ test("badgeOf: a failure the list has shown no longer keeps the !, a new one doe
 test("the same speeds and times as the engine's tray.Speed and tray.Duration", () => {
   const { fmtSpeed, fmtETA } = require("../lib/list.js");
   const { speed, eta } = require("../../engine/internal/tray/testdata/format.json");
-  for (const [bps, unit, want] of speed) assert.equal(fmtSpeed(bps, unit), want, `fmtSpeed(${bps}, ${unit})`);
+  // The pages' no-break space between number and unit is the tray's plain one (a tooltip doesn't wrap).
+  for (const [bps, unit, want] of speed) assert.equal(fmtSpeed(bps, unit).replace(/\u00a0/g, " "), want, `fmtSpeed(${bps}, ${unit})`);
   for (const [sec, want] of eta) assert.equal(fmtETA(sec), want, `fmtETA(${sec})`);
 });
 
 test("fmtSpeed, in bytes or bits, and the limit conversions", () => {
   const { fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit } = require("../lib/list.js");
-  assert.equal(fmtSpeed(1.5e6, "MBps"), "1.5 MB/s");
-  assert.equal(fmtSpeed(0, "MBps"), "0 B/s");
-  assert.equal(fmtSpeed(1.5e6, "Mbps"), "12.0 Mbit/s");
-  assert.equal(fmtSpeed(125e6, "Mbps"), "1.0 Gbit/s");
-  assert.equal(fmtSpeed(50, "Mbps"), "400 bit/s");
-  assert.equal(fmtSpeed(0, "Mbps"), "0 bit/s");
+  assert.equal(fmtSpeed(1.5e6, "MBps"), "1.5\u00a0MB/s");
+  assert.equal(fmtSpeed(0, "MBps"), "0\u00a0B/s");
+  assert.equal(fmtSpeed(1.5e6, "Mbps"), "12.0\u00a0Mbit/s");
+  assert.equal(fmtSpeed(125e6, "Mbps"), "1.0\u00a0Gbit/s");
+  assert.equal(fmtSpeed(50, "Mbps"), "400\u00a0bit/s");
+  assert.equal(fmtSpeed(0, "Mbps"), "0\u00a0bit/s");
   assert.equal(speedToUnit(1.25e6, "Mbps"), 10);
   assert.equal(speedToUnit(1.25e6, "MBps"), 1.25);
   assert.equal(speedFromUnit(10, "Mbps"), 1.25e6);
   assert.equal(speedFromUnit(1.25, "MBps"), 1.25e6);
   assert.equal(speedUnitLabel("Mbps"), "Mbit/s");
   setSpeedUnit("Mbps");
-  assert.equal(fmtSpeed(1e6), "8.0 Mbit/s");
+  assert.equal(fmtSpeed(1e6), "8.0\u00a0Mbit/s");
   setSpeedUnit("junk");
-  assert.equal(fmtSpeed(1e6), "1.0 MB/s");
+  assert.equal(fmtSpeed(1e6), "1.0\u00a0MB/s");
 });
 
 test("linesNote: one line hints a second, shared router promises no speed", () => {
