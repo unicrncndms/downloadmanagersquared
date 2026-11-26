@@ -558,6 +558,29 @@ function fileFolders(paths) {
   return named < 2 ? [{ name: "", items: paths.map((_, i) => i) }] : [...by].map(([name, items]) => ({ name, items }));
 }
 
+// What kind of file a torrent's file is, by its extension: the icon its row
+// shows (ui/menu.js ICONS) and the word said for it.
+const FILE_KINDS = {
+  video: ["mkv", "mp4", "avi", "mov", "wmv", "webm", "m4v", "mpg", "mpeg", "ts", "m2ts", "flv", "vob"],
+  audio: ["mp3", "flac", "wav", "aac", "ogg", "opus", "m4a", "wma", "alac", "ape", "dts", "ac3"],
+  image: ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "svg", "heic", "avif", "ico", "psd"],
+  archive: ["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst", "cab", "lz", "lzma"],
+  text: ["txt", "nfo", "md", "pdf", "doc", "docx", "odt", "rtf", "epub", "mobi", "srt", "ass", "ssa", "sub", "vtt", "sfv", "md5", "sha1", "sha256", "log", "cue", "json", "xml", "csv", "htm", "html"],
+  program: ["exe", "msi", "bat", "cmd", "ps1", "com", "scr", "dll", "apk", "appx", "msix", "jar", "sh", "app", "dmg", "deb", "rpm"],
+  disc: ["iso", "img", "bin", "nrg", "mdf", "mds", "vhd", "vhdx", "vmdk", "qcow2", "wim"],
+};
+const KIND_WORDS = { video: "Video", audio: "Audio", image: "Image", archive: "Archive", text: "Text or document", program: "Program", disc: "Disc image", file: "File" };
+const KIND_BY_EXT = new Map(Object.entries(FILE_KINDS).flatMap(([k, exts]) => exts.map((e) => [e, k])));
+// fileKind is a path's kind and its word: { kind: "video", word: "Video" }.
+// A split archive's part (name.r00, name.001, name.7z.002) is an archive.
+function fileKind(path) {
+  const name = String(path).split("/").pop().toLowerCase();
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1) : "";
+  const kind = KIND_BY_EXT.get(ext) || (/^(r\d\d|\d{3}|part\d+)$/.test(ext) ? "archive" : "file");
+  return { kind, word: KIND_WORDS[kind] };
+}
+
 // pickTotal words what is ticked: "3 of 240 files · 1.2 GB".
 function pickTotal(sizes, ticked) {
   let n = 0, bytes = 0;
@@ -566,5 +589,5 @@ function pickTotal(sizes, ticked) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { fileFolders, pickTotal, addSubmits, linesNote, finishedVerdict, finishedSummary, badgeOf, seenAfter, addLines, addView, plainFtpNote, withLogin, stepIndex, addFileCheck, matchesSearch, parseQuery, errorSource, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, progressText, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, seedLine, bulkActions, routerWarnings, routerGroups, lineResults, familyText, ipv6Hints };
+  module.exports = { fileFolders, fileKind, pickTotal, addSubmits, linesNote, finishedVerdict, finishedSummary, badgeOf, seenAfter, addLines, addView, plainFtpNote, withLogin, stepIndex, addFileCheck, matchesSearch, parseQuery, errorSource, logLines, announcements, fmtBytes, fmtSpeed, setSpeedUnit, speedUnitLabel, speedToUnit, speedFromUnit, fmtETA, percent, progressText, finished, groupView, extractView, predict, viaLinks, group, SECTIONS, SECTION_KEYS, tileOf, rowNums, mirrorRows, moveBefore, statusLine, problemLinks, seedLine, bulkActions, routerWarnings, routerGroups, lineResults, familyText, ipv6Hints };
 }

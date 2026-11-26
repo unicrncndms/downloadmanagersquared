@@ -8,6 +8,18 @@
 // A section of Details: its heading, then what it holds.
 const detailSection = (title, ...body) => el("section", {}, el("h3", { class: "mk" }, title), ...body);
 
+// fileRow is one file of a torrent, in the add step and in Details: its box,
+// an icon for its kind, the folders it is in dimmed before its name (less
+// under, those its group already says), and what is said on the right.
+function fileRow(box, path, end, under = "") {
+  const rest = under && path.startsWith(under + "/") ? path.slice(under.length + 1) : path;
+  const cut = rest.lastIndexOf("/");
+  const k = fileKind(path);
+  const kind = el("span", { class: "kind k-" + k.kind, title: k.word }, icon(k.kind));
+  return el("label", { class: "frow" }, box, kind,
+    el("span", { class: "path" }, cut >= 0 ? el("span", { class: "dir" }, rest.slice(0, cut + 1)) : "", rest.slice(cut + 1)), end);
+}
+
 // torrentFilesPart is the files of a torrent: tick or untick what to
 // download, with the progress of each. load() asks for the list; it is called
 // while Details is open, like the activity.
@@ -37,7 +49,7 @@ function torrentFilesPart(id, getD) {
         tfAt = 0;
       }));
       tfRows = files.map((f, i) => el("span", { class: "muted num" }));
-      tfList.replaceChildren(...files.map((f, i) => el("label", {}, boxes[i], el("span", { class: "path" }, f.path), tfRows[i])));
+      tfList.replaceChildren(...files.map((f, i) => fileRow(boxes[i], f.path, tfRows[i])));
     }
     const ticked = files.filter((f) => f.selected);
     tfSum.textContent = `${ticked.length} of ${plural(files.length, "file")} · ${fmtBytes(ticked.reduce((n, f) => n + f.size, 0))}`;

@@ -71,6 +71,15 @@ const ICONS = {
   copy: "M5.5 5.5h7.5v8H5.5zM3 10.5V2.5h7.5",
   open: "M9 3h4v4M13 3L7.5 8.5M11 9.5V13H3V5h3.5",
   grip: "M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01",
+  // A torrent's files, by kind (lib/list.js fileKind).
+  file: "M4 2h5l3 3v9H4zM9 2v3h3",
+  text: "M4 2h5l3 3v9H4zM9 2v3h3M6 8h4M6 10.5h4",
+  video: "M2.5 4h11v8h-11zM6.5 6.3v3.4l3-1.7z",
+  audio: "M6 11.5V3.5l6-1.5v8M6 11.5a1.5 1.5 0 1 1-3 0a1.5 1.5 0 1 1 3 0zM12 10a1.5 1.5 0 1 1-3 0a1.5 1.5 0 1 1 3 0z",
+  image: "M2.5 3.5h11v9h-11zM2.5 10.5l3-3 3 3 2-2 3 3M10.5 6h.01",
+  archive: "M2.5 5L8 2.5 13.5 5v6L8 13.5 2.5 11zM2.5 5L8 7.5 13.5 5M8 7.5v6",
+  program: "M2.5 3.5h11v9h-11zM2.5 6h11M5 8.5l1.5 1.5L5 11.5",
+  disc: "M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11zM8 6.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3z",
   gear: "M8 4a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM8 6.9a1.1 1.1 0 1 0 0 2.2a1.1 1.1 0 1 0 0-2.2zM8 1.7V4M8 12v2.3M1.7 8H4M12 8h2.3M3.5 3.5l1.7 1.7M10.8 10.8l1.7 1.7M3.5 12.5l1.7-1.7M10.8 5.2l1.7-1.7",
 };
 function icon(name) {

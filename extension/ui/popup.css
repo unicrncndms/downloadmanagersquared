@@ -235,6 +235,19 @@ button.icon[aria-expanded] svg { transition: transform var(--t) var(--ease); }
 .files details > div { display: grid; gap: 2px; padding-left: 19px; }
 .pick .bulk { display: flex; gap: 8px; align-items: baseline; }
 .files .path { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* A file a row, shaded every other one, with its kind's icon; its folders dimmed before its name. */
+.files { gap: 0; }
+.files .frow { padding: 4px 6px; border-radius: var(--r); min-height: 26px; }
+.files > .frow:nth-child(even), .files details > div > .frow:nth-child(even) { background: var(--soft, color-mix(in srgb, var(--text) 5%, transparent)); }
+.files .frow:hover { background: var(--accent-soft); }
+.files details { border-top: 1px solid var(--line); }
+.files details:first-child { border-top: 0; }
+.files .kind { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; color: var(--muted); }
+.files .kind svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.files .k-video { color: var(--c0); } .files .k-audio { color: var(--c2); } .files .k-image { color: var(--c1); }
+.files .k-archive { color: var(--c3); } .files .k-program { color: var(--warn, var(--c2)); } .files .k-disc { color: var(--c4); } .files .k-folder { color: var(--accent); }
+.files .dir { color: var(--muted); }
+.files .size { flex: none; text-align: right; }
 details.files-fold > summary, #detail details.files-fold > summary { display: list-item; cursor: pointer; } /* the pane hides its Details' own summary, not this one */
 details.files-fold > summary h3, #detail details.files-fold > summary h3 { display: inline-flex; margin: 0 var(--s1) 0 0; vertical-align: middle; }
 .conns { margin-top: var(--s1); display: grid; grid-template-columns: minmax(70px, auto) 1fr auto auto; gap: 2px var(--s2); align-items: center; font-size: 12px; }

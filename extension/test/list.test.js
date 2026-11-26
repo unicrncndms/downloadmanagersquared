@@ -348,7 +348,10 @@ test("a torrent's file step is a neutral pick tile, not an alert", () => {
 });
 
 test("torrent files group by top folder only when there are several, and the ticked total is worded", () => {
-  const { fileFolders, pickTotal } = require("../lib/list.js");
+  const { fileFolders, pickTotal, fileKind } = require("../lib/list.js");
+  assert.deepEqual(["S1/E01.MKV", "setup.exe", "notes.txt", "a/b/disc.iso", "x.rar", "x.r01", "x.7z.002", "README", "cover.jpg", "song.flac"].map((p) => fileKind(p).kind),
+    ["video", "program", "text", "disc", "archive", "archive", "archive", "file", "image", "audio"]);
+  assert.equal(fileKind("setup.exe").word, "Program");
   assert.deepEqual(fileFolders(["a.txt", "d/b", "d/c"]), [{ name: "", items: [0, 1, 2] }]);
   assert.deepEqual(fileFolders(["a.txt", "d/b", "e/c", "d/f"]), [{ name: "", items: [0] }, { name: "d", items: [1, 3] }, { name: "e", items: [2] }]);
   assert.equal(pickTotal([1024, 2048, 4096], [true, false, true]), "2 of 3 files · 5.1 KB");

@@ -41,7 +41,7 @@ function pickStep(id) {
     const count = () => { total.textContent = pickTotal(sizes, boxes.map((b) => b.checked)); };
     boxes.forEach((b) => b.addEventListener("change", count));
     count();
-    const row = (i) => el("label", {}, boxes[i], el("span", { class: "path" }, files[i].path), el("span", { class: "muted num" }, fmtBytes(sizes[i])));
+    const row = (i, under) => fileRow(boxes[i], files[i].path, el("span", { class: "muted num size" }, fmtBytes(sizes[i])), under);
     const tick = (idx, on) => idx.forEach((i) => { boxes[i].checked = on; boxes[i].dispatchEvent(new Event("change")); }); // each box tells its folder and the total
     const groups = fileFolders(files.map((f) => f.path));
     const list = groups.length === 1 ? groups[0].items.map(row) : groups.flatMap((g) => {
@@ -56,8 +56,10 @@ function pickStep(id) {
       };
       follow();
       g.items.forEach((i) => boxes[i].addEventListener("change", follow));
-      return el("details", {}, el("summary", {}, all, el("span", { class: "path" }, g.name + "/"), el("span", { class: "muted num" }, plural(g.items.length, "file"))),
-        el("div", {}, g.items.map(row)));
+      const bytes = g.items.reduce((n, i) => n + sizes[i], 0);
+      return el("details", {}, el("summary", { class: "frow" }, all, el("span", { class: "kind k-folder", title: "Folder" }, icon("folder")), el("span", { class: "path" }, g.name + "/"),
+        el("span", { class: "muted num size" }, `${plural(g.items.length, "file")} · ${fmtBytes(bytes)}`)),
+        el("div", {}, g.items.map((i) => row(i, g.name))));
     });
     root.replaceChildren(vpnChoice,
       files.length > 1 ? el("div", { class: "bulk" },
