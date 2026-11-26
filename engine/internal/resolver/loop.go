@@ -3,10 +3,26 @@ package resolver
 import (
 	"encoding/json"
 	"log"
+	"regexp"
 	"slices"
 	"sync"
 	"time"
+
+	"downloadmanagersquared/engine/internal/logprivacy"
 )
+
+// stepText is a step's text for engine.log: its words, which say which
+// button it is ("Free Download"), with a file name in it as x and its type
+// (a link named Mafia.part1.rar is x.rar): the file is the user's own. With
+// Log privacy Off, the text as it is.
+func stepText(s string) string {
+	if logprivacy.Get() == logprivacy.Off {
+		return s
+	}
+	return fileNameRE.ReplaceAllString(s, "x.$1")
+}
+
+var fileNameRE = regexp.MustCompile(`(?i)\b[\w-]+(?:\.[\w-]+)*\.([a-z][a-z0-9]{0,4})\b`)
 
 // The resolve loop, ported from extension/background/resolver.js (and
 // resolver-messages.js): open the landing page in the interface's context,
@@ -681,7 +697,7 @@ func (r *Resolver) sendStep(j *job) {
 		r.armBudget(j, len(steps), budget(wait), "The download didn't start")
 		return
 	}
-	log.Printf("resolver: %s via %s: replay step %d of %d (%s %q) in %s", j.host, j.ifaceName, j.step+1, len(steps), steps[j.step].Tag, steps[j.step].Text, j.tab)
+	log.Printf("resolver: %s via %s: replay step %d of %d (%s %q) in %s", j.host, j.ifaceName, j.step+1, len(steps), steps[j.step].Tag, stepText(steps[j.step].Text), j.tab)
 	b := budget(steps[j.step].Wait)
 	r.armBudget(j, j.step, b+time.Second, "The page didn't let DMS² click in time") // the page reports first
 	var next any

@@ -23,6 +23,7 @@ import (
 	"downloadmanagersquared/engine/internal/atomicfile"
 	"downloadmanagersquared/engine/internal/download"
 	"downloadmanagersquared/engine/internal/ipc"
+	"downloadmanagersquared/engine/internal/logprivacy"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/portmap"
 	"downloadmanagersquared/engine/internal/queue"
@@ -192,6 +193,7 @@ func open(dir string, ln net.Listener) (*Engine, error) {
 	atomicfile.RemoveStale(dir)
 	download.SFTP = download.OpenSFTPStore(filepath.Join(dir, "sftp.json"))
 	settings, broken := loadSettings(filepath.Join(dir, "settings.json"))
+	logprivacy.Set(logprivacy.Parse(settings.LogPrivacy))
 	oldPorts := legacyForwardedPorts(filepath.Join(dir, "settings.json")) // gone from the settings at the next save
 	if broken {
 		notify("Settings reset", "Settings couldn't be read and were reset; the old file is settings.json.broken.", nil)
@@ -646,7 +648,7 @@ func markTorrent(id, path string) {
 	filepath.WalkDir(path, func(p string, de fs.DirEntry, err error) error {
 		if err == nil && de.Type().IsRegular() {
 			if err := winutil.MarkFromInternet(p, "", ""); err != nil {
-				log.Printf("torrent %s: marking %s as from the internet: %v", id, filepath.Base(p), err)
+				log.Printf("torrent %s: marking a %s as from the internet: %v", id, filepath.Ext(p), err)
 				return filepath.SkipAll // the volume takes no streams: the rest won't either
 			}
 		}

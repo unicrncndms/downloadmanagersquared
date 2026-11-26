@@ -8,10 +8,12 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
+
+	"downloadmanagersquared/engine/internal/logprivacy"
 )
 
 func setupLog(dir string) {
-	l := &logFile{path: filepath.Join(dir, "engine.log"), max: 5 << 20}
+	l := &logFile{path: filepath.Join(dir, "engine.log"), max: 5 << 20, data: dir, level: logprivacy.Get}
 	if l.open() != nil {
 		return
 	}
@@ -31,10 +33,12 @@ func setupLog(dir string) {
 // the last one) and a new file starts, also while the engine runs, which can
 // be for weeks. The log package writes one line at a time, never two at once.
 type logFile struct {
-	path string
-	max  int64
-	f    *os.File
-	size int64
+	path  string
+	max   int64
+	data  string                  // the engine's data folder, which scrub writes as %DATA%
+	level func() logprivacy.Level // the setting Log privacy; nil: Standard
+	f     *os.File
+	size  int64
 
 	now  func() time.Time // the clock; time.Now unless a test sets it
 	seen map[string]*repeat
@@ -68,12 +72,15 @@ func (l *logFile) open() error {
 	return nil
 }
 
-// Write drops a line identical to one written less than dupWindow ago and
+// Write scrubs each line of what is the user's own (scrub), and drops a line
+// identical to one written less than dupWindow ago and
 // counts it; a "(repeated N times)" line follows with the next line written
 // after the window ends (shortcut: no timer, so the last count of a log that
 // goes quiet waits for its next line).
 func (l *logFile) Write(p []byte) (int, error) {
+	n := len(p) // what the caller gave, whatever scrub made of it
 	if len(p) > stampLen {
+		p = append(p[:stampLen:stampLen], logprivacy.Scrub(string(p[stampLen:]), l.data, l.levelNow())...)
 		now := time.Now()
 		if l.now != nil {
 			now = l.now()
@@ -84,7 +91,7 @@ func (l *logFile) Write(p []byte) (int, error) {
 		msg := string(p[stampLen:])
 		if r := l.seen[msg]; r != nil && now.Sub(r.first) < dupWindow {
 			r.n++
-			return len(p), nil
+			return n, nil
 		}
 		for k, r := range l.seen {
 			if now.Sub(r.first) >= dupWindow {
@@ -96,7 +103,8 @@ func (l *logFile) Write(p []byte) (int, error) {
 		}
 		l.seen[msg] = &repeat{first: now, msg: msg}
 	}
-	return l.write(p)
+	_, err := l.write(p)
+	return n, err
 }
 
 func (l *logFile) write(p []byte) (int, error) {
@@ -109,4 +117,12 @@ func (l *logFile) write(p []byte) (int, error) {
 	n, err := l.f.Write(p)
 	l.size += int64(n)
 	return n, err
+}
+
+// levelNow is the Log privacy level for the next line.
+func (l *logFile) levelNow() logprivacy.Level {
+	if l.level == nil {
+		return logprivacy.Standard
+	}
+	return l.level()
 }

@@ -11,6 +11,7 @@ Supported: the latest release only.
 - The engine (`dms-engine.exe`), the native-messaging relay (`dms-host.exe`) and the browser extension
 - The installer and the release pipeline (what ends up in the zip and the `.xpi` Mozilla signs)
 - How DMS² stores your settings, download list, cookies, WireGuard configs and PIA login
+- What the log and *Copy diagnostics* leave out at each *Log privacy* level: a password, cookie or token that gets through is a vulnerability
 
 Out of scope: the sites you download from, your VPN provider, and the libraries DMS² uses, unless DMS² uses them unsafely (report those upstream too).
 

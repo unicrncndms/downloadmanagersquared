@@ -19,7 +19,7 @@ func (e *Engine) RetryExtraction(id string) error {
 	defer e.setsMu.Unlock()
 	for _, s := range e.sets {
 		if s.Holds(d) {
-			log.Printf("set %s: extraction started over by the user", s.Key)
+			log.Printf("%s: extraction started over by the user", s.LogName())
 			s.Stop()
 			s.Start()
 			return nil

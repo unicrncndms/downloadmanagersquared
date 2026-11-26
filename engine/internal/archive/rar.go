@@ -269,7 +269,7 @@ func (x *Extractor) decodeRar(ctx context.Context, _ int) (bad string, err error
 			continue
 		}
 		if h.Mode()&os.ModeSymlink != 0 || h.LinkType != 0 {
-			log.Printf("archive: skipped the link %s", name)
+			log.Printf("archive: skipped a link")
 			continue
 		}
 		key := strings.ToLower(rel)

@@ -742,7 +742,7 @@ func (d *Download) openFileLocked() error {
 		// Its .part was deleted (the drive is there: MkdirAll worked). Nothing
 		// of it is left to keep, so it starts over instead of failing.
 		if _, err := os.Stat(d.partPath()); errors.Is(err, fs.ErrNotExist) {
-			log.Printf("download %s: its partial file %s is gone: starting over", d.st.ID, d.partPath())
+			log.Printf("download %s: starting over, its partial file is gone: %s", d.st.ID, d.partPath())
 			d.st.Allocated, d.st.Remaining = false, nil
 		}
 	}
@@ -789,7 +789,7 @@ func (d *Download) openFileLocked() error {
 		// Sparse: setting the length is instant and nothing gets zero-filled.
 		if err := winutil.SetSparse(f, true); err != nil {
 			// FAT, exFAT, some shares: the length below may zero-fill, which takes a while.
-			log.Printf("download %s: %s cannot hold a sparse file: %v", d.st.ID, d.st.Dir, err)
+			log.Printf("download %s: no sparse file in %s: %v", d.st.ID, d.st.Dir, err)
 		}
 		if err := f.Truncate(d.st.Size); err != nil {
 			f.Close()

@@ -662,3 +662,16 @@ func TestAFoundButtonGetsTimeToBecomeClickable(t *testing.T) {
 		t.Fatalf("gave up on a button the page was still readying: %v", m)
 	}
 }
+
+// A step's text keeps the words that say which button it is, not a file's name.
+func TestStepTextLeavesOutFileNames(t *testing.T) {
+	for in, want := range map[string]string{
+		"Free Download":                      "Free Download",
+		"Mafia.Definitive.Edition.part1.rar": "x.rar",
+		"Download big file.iso (4.2 GB)":     "Download big x.iso (4.2 GB)",
+	} {
+		if got := stepText(in); got != want {
+			t.Errorf("stepText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

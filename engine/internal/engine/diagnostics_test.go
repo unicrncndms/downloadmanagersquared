@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"downloadmanagersquared/engine/internal/logprivacy"
 )
 
 // The report "Copy diagnostics" makes says what the download is doing and
@@ -28,18 +30,31 @@ func TestDiagnosticsCarryNoSecrets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "engine.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r, err := e.Diagnostics(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, secret := range []string{"hunter2", "abc123", "zzsig", "s3ss", "c00kie", "Bearer-t0ken", "pw9", "not about it"} {
-		if strings.Contains(r, secret) {
-			t.Errorf("the report has %q:\n%s", secret, r)
+	// Log privacy Off: as before the setting, without secrets; Standard: no
+	// links' paths either; Increased: no sites.
+	for level, wants := range map[logprivacy.Level][]string{
+		logprivacy.Off:      {"URL: https://bob@files.example/f.iso?…", "Landing page: https://files.example/page?…", "via eth: GET https://files.example/f.iso?… refused"},
+		logprivacy.Standard: {"URL: https://files.example/…", "Landing page: https://files.example/…", "via eth: GET https://files.example/… refused"},
+		logprivacy.Strict:   {"URL: https://…", "via eth: GET https://… refused"},
+	} {
+		logprivacy.Set(level)
+		r, err := e.Diagnostics(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, secret := range []string{"hunter2", "abc123", "zzsig", "s3ss", "c00kie", "Bearer-t0ken", "pw9", "not about it"} {
+			if strings.Contains(r, secret) {
+				t.Errorf("level %d: the report has %q:\n%s", level, secret, r)
+			}
+		}
+		for _, want := range append(wants, "Connections:", "engine.log (last 2 lines about it):") {
+			if !strings.Contains(r, want) {
+				t.Errorf("level %d: the report lacks %q:\n%s", level, want, r)
+			}
+		}
+		if level == logprivacy.Strict && strings.Contains(r, "files.example") {
+			t.Errorf("Increased: the report names the site:\n%s", r)
 		}
 	}
-	for _, want := range []string{"URL: https://bob@files.example/f.iso?…", "Landing page: https://files.example/page?…", "via eth: GET https://files.example/f.iso?… refused", "Connections:", "engine.log (last 2 lines about it):"} {
-		if !strings.Contains(r, want) {
-			t.Errorf("the report lacks %q:\n%s", want, r)
-		}
-	}
+	logprivacy.Set(logprivacy.Standard)
 }

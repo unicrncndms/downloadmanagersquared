@@ -169,3 +169,7 @@ _Avoid_: Intercept, grab, take over (except in user-facing text)
 **Downloads window**:
 The engine's own window, opened from the tray, with the downloads list and the settings. It works whether or not a browser is running, and closing it leaves the engine running in the tray.
 _Avoid_: GUI, app, manager, popup (the popup is the extension's toolbar panel)
+
+**Log privacy**:
+How much of what is the user's own engine.log and Copy diagnostics leave out. *Off*: nothing. *Standard*, the default: passwords, cookies and tokens, links' paths and queries, file and folder names in paths, public IP addresses; the sites stay. *Increased*: the sites and every file name too. DMS²'s own code (its pages' addresses, Go source files) stays readable at every level ([ADR 0014](docs/adr/0014-log-privacy.md)).
+_Avoid_: Redact, censor, anonymize, scrub (the code's word for what a level leaves out)

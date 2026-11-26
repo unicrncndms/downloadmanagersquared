@@ -128,7 +128,7 @@ The sections are in the side bar; *Find a setting* searches all of them.
 - **Sites and logins:** the learned sites, one list for every browser, with where each was learned (*Forget* makes DMS² ask again), and the SFTP logins and trusted server keys, removable.
 - **General:** start with Windows, notifications, keep the PC awake; theme, accent colour, and a background tinted with the accent (off).
 - **Keyboard:** the shortcuts of the downloads list.
-- **About:** the versions, *Check for updates*, the release notes, and restoring the default settings.
+- **About:** the versions, *Check for updates*, the release notes, *Log privacy* (see [When something goes wrong](#when-something-goes-wrong)), and restoring the default settings.
 
 ### VPN
 
@@ -156,4 +156,4 @@ The extension works in Firefox and its relatives (LibreWolf, Waterfox, Floorp), 
 - **"Needs the page"** on a download: its link stopped working and DMS² doesn't know the page it came from. Click it and paste the page's address.
 - **A site asks you to click through every time:** it only accepts real clicks, or its buttons change from visit to visit. *Forget* it in Sites and logins and record it again, starting on the file's own page.
 - **Only one connection is used:** the server can't split a file (it is downloaded over the main connection), or the other connections are switched off or share one line (*Test if they are separate lines*), or Windows dropped Wi-Fi for a cable ([Keep Wi-Fi connected next to a cable](#keep-wi-fi-connected-next-to-a-cable)).
-- **The log:** `%APPDATA%\downloadmanagersquared\engine.log` (it holds no URLs). Attach it to an [issue](https://github.com/unicrncndms/downloadmanagersquared/issues) when reporting a problem.
+- **The log:** `%APPDATA%\downloadmanagersquared\engine.log` (*Settings → About → Open log*), and *Copy diagnostics* in a download's Details. Attach them to an [issue](https://github.com/unicrncndms/downloadmanagersquared/issues) when reporting a problem. What they leave out is *Log privacy* in About: *Standard* (the default) leaves out passwords, links' paths, file names and your public IP and keeps the sites; *Increased* leaves out the sites too; *Off* writes everything. Lines already written stay as they were.

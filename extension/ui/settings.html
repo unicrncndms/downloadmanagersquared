@@ -296,6 +296,9 @@
         <div class="setting"><span>Help</span>
           <span class="buttons"><button id="openLog">Open log</button><button id="openData">Open data folder</button>
             <a href="#" data-guide="">Guide</a><a href="#" data-releases>Release notes</a></span></div>
+        <div class="setting"><span><label for="sLogPrivacy">Log privacy</label>
+            <span class="info" tabindex="0" data-tip="What the log and Copy diagnostics leave out, so you can send them in for help. Off: everything is written as it is. Standard: passwords, links' paths, file names and your public IP; the sites you download from stay, as they help find a problem with one. Increased: the sites too, to send it to anyone without reading it first. Lines already in the log stay as they are."></span></span>
+          <select id="sLogPrivacy" data-setting></select></div>
         <div class="setting"><span>Default settings</span>
           <span><button id="restoreAsk">Restore defaults…</button></span></div>
       </div>

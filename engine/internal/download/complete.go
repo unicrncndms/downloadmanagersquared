@@ -188,7 +188,7 @@ func (d *Download) markLocked() func(path string) {
 	id, host, ref := d.st.ID, d.st.URL, cmp.Or(d.st.Referer, d.st.PageURL)
 	return func(path string) {
 		if err := winutil.MarkFromInternet(path, host, ref); err != nil {
-			log.Printf("download %s: marking %s as from the internet: %v", id, filepath.Base(path), err)
+			log.Printf("download %s: marking its file as from the internet: %v", id, err)
 		}
 	}
 }

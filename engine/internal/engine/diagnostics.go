@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"downloadmanagersquared/engine/internal/download"
+	"downloadmanagersquared/engine/internal/logprivacy"
 )
 
 // How much of a download's history the report carries.
@@ -26,7 +27,10 @@ const (
 // their states, the last activity-log events and the engine.log lines about
 // it. Nothing leaves the PC unless the user pastes it (PRIVACY.md), and even
 // then it carries no secret: no cookies or referers, URLs without a password
-// or query string, the same for every URL in the log lines.
+// or query string, the same for every URL in the log lines. Beyond that it
+// leaves out what the setting Log privacy says, as engine.log does: at
+// Standard the file's name (its type stays) and the links' paths, at
+// Increased the sites too.
 func (e *Engine) Diagnostics(id string) (string, error) {
 	j, err := e.queue.Get(id)
 	if err != nil {
@@ -44,7 +48,12 @@ func (e *Engine) Diagnostics(id string) (string, error) {
 	line := func(format string, a ...any) { fmt.Fprintf(&b, format+"\n", a...) }
 	line("DMS² %s diagnostics, %s", Version, time.Now().Format("2006-01-02 15:04:05 -0700"))
 	line("")
-	line("Download %s: %s", s.ID, s.Filename)
+	level := logprivacy.Get()
+	name := s.Filename
+	if level != logprivacy.Off && name != "" {
+		name = "x" + logprivacy.FileType(name) // the rest of the report is scrubbed at the end
+	}
+	line("Download %s: %s", s.ID, name)
 	line("URL: %s", redactURL(s.URL))
 	if s.PageURL != "" {
 		line("Landing page: %s", redactURL(s.PageURL))
@@ -100,7 +109,8 @@ func (e *Engine) Diagnostics(id string) (string, error) {
 	for _, l := range logs {
 		line("%s", redactText(l))
 	}
-	return b.String(), nil
+	// As the setting Log privacy says, as engine.log; Off: as before it, without secrets.
+	return logprivacy.Scrub(b.String(), e.dir, level), nil
 }
 
 // logLinesAbout is the last lines of engine.log (and the one before it) that

@@ -269,6 +269,7 @@ for (const id of ["sVpnHttp", "sVpnTorrent"]) {
 $("sSpeedUnit").replaceChildren(el("option", { value: "MBps" }, "MB/s"), el("option", { value: "Mbps" }, "Mbit/s"));
 $("sOnExists").replaceChildren(...[["rename", "Keep both (number the new one)"], ["overwrite", "Replace it, after asking"], ["skip", "Don't add the new one"], ["ask", "Ask me"]].map(([v, text]) => el("option", { value: v }, text)));
 $("sKeep").replaceChildren(...KEEP_CHOICES.map(([v, text]) => el("option", { value: v }, text)));
+$("sLogPrivacy").replaceChildren(...[["off", "Off"], ["", "Standard"], ["strict", "Increased"]].map(([v, text]) => el("option", { value: v }, text)));
 
 const FIELDS = {
   sDir: ["saveDir", (s) => s.saveDir, (v) => v.trim()],
@@ -289,6 +290,7 @@ const FIELDS = {
   sVpnHttp: ["vpnHttp", (s) => s.vpnHttp, String],
   sVpnTorrent: ["vpnTorrent", (s) => s.vpnTorrent, String],
   sKeep: ["archiveKeeping", (s) => s.archiveKeeping || "auto", String],
+  sLogPrivacy: ["logPrivacy", (s) => s.logPrivacy || "", String],
 };
 
 // The queue window: a start and an end per weekday, Monday first; the engine's index is Sunday = 0.

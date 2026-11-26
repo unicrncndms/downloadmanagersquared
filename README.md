@@ -94,7 +94,7 @@ Then download a file of 100 MB or more as usual, or use *Download with DMS²* on
 
 ## Privacy and security
 
-DMS² has no server and collects nothing; see [PRIVACY.md](PRIVACY.md), which also lists what each extension permission is used for. It only accepts requests from your own Windows user, and its proxies only reach the internet, never your local network. It doesn't protect you from programs running as you, or from the PC's administrators. To report a vulnerability, see [SECURITY.md](SECURITY.md).
+DMS² has no server and collects nothing; see [PRIVACY.md](PRIVACY.md), which also lists what each extension permission is used for. Its log stays on your PC and by default leaves out links' paths, file names and your IP address, so you can attach it to an issue. It only accepts requests from your own Windows user, and its proxies only reach the internet, never your local network. It doesn't protect you from programs running as you, or from the PC's administrators. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 The programs aren't code-signed, but each release's zip, `dms-engine.exe` and `dms-host.exe` carry a GitHub attestation of the workflow run and commit that built them. To check a download, run `gh attestation verify <file> --repo unicrncndms/downloadmanagersquared`.
 

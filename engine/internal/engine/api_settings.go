@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"downloadmanagersquared/engine/internal/logprivacy"
 	"downloadmanagersquared/engine/internal/paths"
 	"downloadmanagersquared/engine/internal/queue"
 )
@@ -102,6 +103,9 @@ func (e *Engine) setSettings(p settingsPatch) Settings {
 		}
 		if p.Tint != nil {
 			s.Tint = *p.Tint
+		}
+		if p.LogPrivacy != nil {
+			s.LogPrivacy = *p.LogPrivacy
 		}
 		if p.DismissedUpdate != nil {
 			s.DismissedUpdate = *p.DismissedUpdate
@@ -221,6 +225,7 @@ type settingsPatch struct {
 	Accent             *string       `json:"accent"`
 	ThemeAccent        *string       `json:"themeAccent"`
 	Tint               *int          `json:"tint"`
+	LogPrivacy         *string       `json:"logPrivacy"`
 	DismissedUpdate    *string       `json:"dismissedUpdate"`
 	SeenVersion        *string       `json:"seenVersion"`
 	FoldedSections     *[]string     `json:"foldedSections"`
@@ -280,6 +285,7 @@ func (e *Engine) applySettings(f func(*Settings)) Settings {
 	e.mu.Lock()
 	f(&e.settings)
 	e.settings.normalize()
+	logprivacy.Set(logprivacy.Parse(e.settings.LogPrivacy)) // the log writer can't take e.mu: it may run under it
 	e.keepingNow()
 	e.saveSettingsLocked()
 	e.applyLimitsLocked()

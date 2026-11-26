@@ -1,7 +1,9 @@
 package download
 
 import (
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +75,13 @@ func (d *Download) setDirLocked() string {
 		return filepath.Clean(f.Into)
 	}
 	return filepath.Clean(d.st.Dir)
+}
+
+// LogName is the Set in engine.log: a hash of its archive's name, which is
+// the user's own and stays out of the log (cmd/dms-engine/scrub.go).
+func (s *Set) LogName() string {
+	h := sha256.Sum256([]byte(strings.ToLower(s.set)))
+	return fmt.Sprintf("set %x", h[:4])
 }
 
 func NewSet(key, set string) *Set {

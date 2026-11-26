@@ -52,4 +52,4 @@ Benchmarks: `cd engine && go test ./internal/<pkg>/ -run xxx -bench . -benchmem`
 
 The product mark is drawn in `engine/internal/mark` (the tray and setup icon) and mirrored in `extension/icons/icon.svg`. The exe's icon is the committed `engine/cmd/dms-engine/icon_windows_amd64.syso`; after changing the mark regenerate it with `cd engine/cmd/dms-engine && go run genicon.go`, which also writes `extension/icons/icon-{16,32,48,128}.png` (the Chromium build takes no SVG icons).
 
-Data and log live in `%APPDATA%\downloadmanagersquared\` (`settings.json`, `downloads\`, `torrents\`, `sftp.json` (SFTP logins and trusted server keys), `engine.log`). Unreadable files are renamed to `….broken`, with a notification.
+Data and log live in `%APPDATA%\downloadmanagersquared\` (`settings.json`, `downloads\`, `torrents\`, `sftp.json` (SFTP logins and trusted server keys), `engine.log`). Unreadable files are renamed to `….broken`, with a notification. `engine.log` leaves out links' paths, file names and public IPs by default (`internal/logprivacy`): set *Settings → About → Log privacy* to *Off* when you debug on your own PC.

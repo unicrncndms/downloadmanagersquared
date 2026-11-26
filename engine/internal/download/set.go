@@ -153,7 +153,7 @@ func (s *Set) loop(ctx context.Context) {
 			fails++
 			if err.Error() != logged {
 				logged = err.Error()
-				log.Printf("set %s: %v", s.set, err)
+				log.Printf("%s: %v", s.LogName(), err)
 			}
 			run.note = UserText(err)
 			failing := !errors.As(err, new(*pauseError))
@@ -353,7 +353,7 @@ func (s *Set) step(ctx context.Context, run *setRun) (more bool, err error) {
 		if s.rar {
 			head = archive.HeadLen
 		}
-		run.ex = &Extraction{name: s.set, who: "set " + s.set, file: run.parts, parts: run.parts,
+		run.ex = &Extraction{name: s.set, who: s.LogName(), file: run.parts, parts: run.parts,
 			head: head, volumes: s.rar, mark: p1.d.markFunc(), tail: -1}
 	}
 	n := run.parts.Len()
@@ -714,14 +714,14 @@ func (s *Set) release(run *setRun, members map[int]partInfo) {
 		}
 		if !saved1 {
 			if err := members[1].d.save(); err != nil {
-				log.Printf("set %s: saving part 1: %v", s.set, err)
+				log.Printf("%s: saving part 1: %v", s.LogName(), err)
 				return
 			}
 			saved1 = true
 		}
 		if i > 0 {
 			if err := m.d.save(); err != nil {
-				log.Printf("set %s: saving part %d: %v", s.set, i+1, err)
+				log.Printf("%s: saving part %d: %v", s.LogName(), i+1, err)
 				continue
 			}
 		}
@@ -730,7 +730,7 @@ func (s *Set) release(run *setRun, members map[int]partInfo) {
 		run.parts.Set(i, nil)
 		run.released[i] = true
 		if err := os.Remove(m.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			log.Printf("set %s: removing part %d: %v", s.set, i+1, err)
+			log.Printf("%s: removing part %d: %v", s.LogName(), i+1, err)
 		}
 	}
 }
@@ -762,12 +762,12 @@ func (s *Set) finish(run *setRun, members map[int]partInfo) {
 		d.changed()
 		if !m.completed {
 			if err := d.save(); err != nil {
-				log.Printf("set %s: saving a part: %v", s.set, err)
+				log.Printf("%s: saving a part: %v", s.LogName(), err)
 			}
 		}
 	}
 	s.sweep(out, members)
-	log.Printf("set %s: extracted to %s", s.set, out)
+	log.Printf("%s: extracted to %s", s.LogName(), out)
 }
 
 // sweep deletes the .part of every completed part of a finished Set (or
@@ -789,7 +789,7 @@ func (s *Set) sweep(out string, members map[int]partInfo) {
 		}
 		d.mu.Unlock()
 		if err := d.save(); err != nil {
-			log.Printf("set %s: saving a part: %v", s.set, err)
+			log.Printf("%s: saving a part: %v", s.LogName(), err)
 			continue
 		}
 		d.settlePart(m.path, keep)
@@ -808,7 +808,7 @@ func (s *Set) giveUp(run *setRun, members map[int]partInfo, err error) error {
 	}
 	if s.gaveUp != u.Reason { // parts with bytes freed stay on, so this comes again each tick
 		s.gaveUp = u.Reason
-		log.Printf("set %s: not as a folder: %s", s.set, u.Reason)
+		log.Printf("%s: not as a folder: %s", s.LogName(), u.Reason)
 	}
 	// The run's handles on the .part files block renaming them on Windows.
 	if run.parts != nil {

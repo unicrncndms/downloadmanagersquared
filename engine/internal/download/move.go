@@ -340,7 +340,7 @@ func (m *move) removeOld() {
 
 func removeLogged(path string, remove func(string) error) {
 	if err := remove(path); err != nil {
-		log.Printf("leaving %s after a move: %v", path, err)
+		log.Printf("after a move, leaving %s: %v", path, err)
 	}
 }
 

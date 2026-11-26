@@ -487,7 +487,7 @@ func (e *Extraction) reclaim(parts []archivePart, done []int64) {
 	}
 	for _, en := range e.arc.Entries {
 		if !was[en.Start] && e.refetch(parts, archive.Range{Start: en.Start, End: en.End}, freed) {
-			log.Printf("%s: %s was stopped partway, fetching its freed bytes again", e.who, en.Name)
+			log.Printf("%s: a %s was stopped partway, fetching its freed bytes again", e.who, filepath.Ext(en.Name))
 		}
 	}
 }
@@ -558,7 +558,7 @@ func (e *Extraction) record(parts []archivePart, res archive.Result) {
 
 	// res.Freed is on the parts already: saveFreed recorded it before it was freed.
 	for _, fl := range res.Failed {
-		log.Printf("%s: %s, fetching it again", e.who, fl)
+		log.Printf("%s: a %s failed (%s), fetching it again", e.who, filepath.Ext(fl.Entry.Name), fl.Reason)
 		e.refetch(parts, fl.Range, nil)
 	}
 	for _, fl := range twice {

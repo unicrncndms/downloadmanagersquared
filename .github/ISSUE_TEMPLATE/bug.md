@@ -11,4 +11,4 @@ about: A download that fails, is slow, or behaves wrongly
 
 **Versions:** DMS² … · Windows … · browser …
 
-**The download's Details → log**, and lines from `%APPDATA%\downloadmanagersquared\engine.log` around that time (the log holds no URLs)
+**The download's Details → Copy diagnostics**, or lines from `%APPDATA%\downloadmanagersquared\engine.log` around that time (by default both leave out passwords, links' paths, file names and your public IP; *Settings → About → Log privacy* can leave out the sites too)

@@ -35,3 +35,21 @@ func TestLogDedupe(t *testing.T) {
 		t.Errorf("counts missing:\n%s", got)
 	}
 }
+
+// What reaches engine.log is scrubbed: no URL path, public address or file name.
+func TestLogLinesAreScrubbed(t *testing.T) {
+	dir := t.TempDir()
+	l := &logFile{path: filepath.Join(dir, "engine.log"), max: 1 << 20, data: dir}
+	if err := l.open(); err != nil {
+		t.Fatal(err)
+	}
+	defer l.f.Close()
+	in := "2026/11/11 21:44:58.915655 download ab: Get \"https://cdn.example.com/My.Movie.mkv?t=1\" via 95.90.208.111: rename " + `F:\x\My.Movie.mkv.dms.part F:\x\My.Movie.mkv` + ": denied\n"
+	if n, err := l.Write([]byte(in)); err != nil || n != len(in) {
+		t.Fatalf("wrote %d, %v; want %d", n, err, len(in))
+	}
+	b, _ := os.ReadFile(l.path)
+	if got := string(b); strings.Contains(got, "Movie") || strings.Contains(got, "95.90") || !strings.Contains(got, "cdn.example.com") {
+		t.Fatalf("not scrubbed: %s", got)
+	}
+}

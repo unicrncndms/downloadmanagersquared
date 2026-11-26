@@ -156,6 +156,10 @@ type Settings struct {
 	// The old on/off switch for the tint, read once into Tint (normalize).
 	TintBackground bool `json:"tintBackground,omitempty"`
 
+	// How much engine.log leaves out of what is the user's own (logprivacy):
+	// "" standard, "off" nothing, "strict" the sites and every file name too.
+	LogPrivacy string `json:"logPrivacy,omitempty"`
+
 	// What the downloads page remembers, shared by the popup and the window.
 	DismissedUpdate string   `json:"dismissedUpdate,omitempty"` // the release whose "is available" note was closed
 	SeenVersion     string   `json:"seenVersion,omitempty"`     // the engine version whose "Updated to" note was last closed
@@ -258,6 +262,9 @@ func (s *Settings) normalize() {
 		s.TintBackground = false
 	}
 	s.Tint = min(max(s.Tint, 0), 50)
+	if s.LogPrivacy != "off" && s.LogPrivacy != "strict" {
+		s.LogPrivacy = ""
+	}
 	if s.Interfaces == nil {
 		s.Interfaces = map[string]*IfaceSettings{}
 	}
