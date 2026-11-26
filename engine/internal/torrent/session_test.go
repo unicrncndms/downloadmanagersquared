@@ -33,12 +33,13 @@ import (
 // swarm is a set of local seeders for one file, each standing in for a peer on the
 // internet at a TEST-NET address that nothing can reach directly.
 type swarm struct {
-	info    metainfo.Info
-	hash    metainfo.Hash
-	data    []byte
-	addrs   map[string]string // public (TEST-NET) address -> real loopback address
-	clients []*atorrent.Client
-	pexSeen atomic.Bool // a peer offered PEX in its extended handshake
+	info     metainfo.Info
+	hash     metainfo.Hash
+	data     []byte
+	addrs    map[string]string // public (TEST-NET) address -> real loopback address
+	clients  []*atorrent.Client
+	pexSeen  atomic.Bool  // a peer offered PEX in its extended handshake
+	peerName atomic.Value // the client name ("v") of the last extended handshake
 }
 
 func newSwarm(t *testing.T, seeders int, size int) *swarm {
@@ -124,6 +125,7 @@ func newSwarmOn(t *testing.T, seeders int, src, name string, private, v6 bool) *
 			if _, ok := m.M[pp.ExtensionNamePex]; ok {
 				s.pexSeen.Store(true)
 			}
+			s.peerName.Store(m.V)
 		}
 		stor := storage.NewFileOpts(storage.NewFileClientOpts{
 			ClientBaseDir: src, PieceCompletion: storage.NewMapPieceCompletion(),
@@ -1057,14 +1059,9 @@ func TestPeersSeeDMSAndItsVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	tor.Start()
+	// From the handshake, not the live connection: two seeds drop theirs.
 	waitFor(t, "the seeder to see DMS² by name", 30*time.Second, func() bool {
-		for _, at := range sw.clients[0].Torrents() {
-			for _, pc := range at.PeerConns() {
-				if v, _ := pc.PeerClientName.Load().(string); v == "DMS² 9.9.9" {
-					return true
-				}
-			}
-		}
-		return false
+		v, _ := sw.peerName.Load().(string)
+		return v == "DMS² 9.9.9"
 	})
 }
