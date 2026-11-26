@@ -82,8 +82,10 @@ type Torrent struct {
 	paths               map[string]*pathRate
 	peers, seeds, swarm int
 
-	maxConns           int        // the peer limit at gave last: only run's goroutine reads or writes it
-	wantDone, wantSize int64      // of the files to download, as of the last poll
+	maxConns           int    // the peer limit at gave last: only run's goroutine reads or writes it
+	wantDone, wantSize int64  // of the files to download, as of the last poll
+	pmap, pmapPart     string // the chosen pieces as squares, as of the last poll (pieceMap)
+	pmapBy             []string
 	meter              rate.Meter // done bytes over the ETA window: the speed the time left is reckoned at
 	eta                rate.ETA
 
@@ -156,10 +158,23 @@ func (t *Torrent) Summary() download.Summary {
 	case !t.st.Finished.IsZero():
 		s.Done = s.Size
 		s.Speed = 0
-	case t.active && t.st.Info != nil:
-		s.Done = t.wantDone
-		if s.Speed > 0 {
+	case t.st.Info != nil:
+		// Paused: as of the last poll, as its squares are (files unticked since can make it more).
+		s.Done = min(t.wantDone, s.Size)
+		if t.active && s.Speed > 0 {
 			s.ETA = t.eta.Seconds()
+		}
+	}
+	// Its pieces as squares while unfinished, paused too, as last seen; not while it seeds.
+	if t.st.Finished.IsZero() && t.st.Status != StatusSeeding && t.st.Status != StatusChoosing {
+		s.Map, s.MapBy, s.MapPart = t.pmap, t.pmapBy, t.pmapPart
+		if !t.active { // nothing is being fetched now
+			s.Map = strings.Map(func(r rune) rune {
+				if r >= '0' && r <= '9' {
+					return '.'
+				}
+				return r
+			}, s.Map)
 		}
 	}
 	// Uploaded over what it has of the chosen files, as other clients count it.
@@ -527,6 +542,7 @@ func (t *Torrent) poll(ctx context.Context, every time.Duration, fetch bool, don
 		if !t.update(ctx, func() {
 			if len(lts) > 0 && lts[0].at.Info() != nil { // the one walk of the files: Summary and the finish check read it
 				t.wantDone, t.wantSize = wanted(lts[0].at, t.st.Skip)
+				t.pmap, t.pmapBy, t.pmapPart = t.pieceMapOf(lts[0].at)
 			}
 			t.speed.Update(fetched, every)
 			// The time left uses the long window, as an HTTP download's does.
@@ -594,6 +610,22 @@ func wanted(at *atorrent.Torrent, skip []int) (done, size int64) {
 		}
 	}
 	return done, size
+}
+
+// pieceMapOf is the chosen pieces of at as squares (pieceMap), with the line
+// that first received each in this run.
+func (t *Torrent) pieceMapOf(at *atorrent.Torrent) (string, []string, string) {
+	n := at.NumPieces()
+	v := viewOf(at, n)
+	first := make([]string, n)
+	t.dupMu.Lock()
+	for i, lt := range t.firstLine {
+		if lt != nil && i < n {
+			first[i] = lt.is.ID
+		}
+	}
+	t.dupMu.Unlock()
+	return pieceMap(v.complete, v.partial, wantedPieces(at, t.st.Skip), first)
 }
 
 // Choose sets which files to download (one flag per file, in the torrent's
