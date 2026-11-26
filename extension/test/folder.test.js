@@ -21,11 +21,11 @@ test("a .zip shows the toggle, off and free to switch on", () => {
   assert.equal(v.ask, null);
 });
 
-test("switched on by hand without a folder: the add step, prefilled with the last folder", () => {
+test("on without a folder: the add step, prefilled with the Save folder, not one chosen before", () => {
   assert.deepEqual(folderView(zip({ on: true }), SETTINGS).ask, { prefill: SETTINGS.saveDir });
-  const last = { ...SETTINGS, folderDir: "E:\\Extracted" };
-  assert.deepEqual(folderView(zip({ on: true }), last).ask, { prefill: "E:\\Extracted" });
-  assert.equal(folderView(zip({ on: true, into: "E:\\Extracted" }), last).ask, null);
+  const before = { ...SETTINGS, folderDirs: ["E:\\Extracted"] };
+  assert.deepEqual(folderView(zip({ on: true }), before).ask, { prefill: SETTINGS.saveDir });
+  assert.equal(folderView(zip({ on: true, into: "E:\\Extracted" }), before).ask, null);
 });
 
 test("once locked, the switch goes and it just says it extracts", () => {
@@ -119,6 +119,10 @@ test("a split archive's group card has one switch for its parts, asked of an unf
   // The password is asked on part 1, even once every part is fetched.
   const asks = setFolderView([part(1, { on: true, into: "D:\\x", ask: "wrong" }, "completed"), part(2, { on: true, into: "D:\\x" }, "completed")], SETTINGS);
   assert.deepEqual(asks.password, { wrong: true, id: 1 });
+  // Where to extract is asked once, of part 1 (the engine puts it in "needs"), fetched or not.
+  const where = setFolderView([{ ...part(1, { on: true }, "completed"), section: "needs" }, { ...part(2, { on: true }), section: "active" }], SETTINGS);
+  assert.deepEqual([where.id, where.ask], [1, { prefill: SETTINGS.saveDir }]);
+  assert.equal(folderView({ ...part(2, { on: true }), section: "active" }, SETTINGS).ask, null);
 });
 
 test("archive keeping is a select of its four ways while on and unfinished, fixed once anything is freed", () => {

@@ -138,6 +138,10 @@ func Present(s Summary) Summary {
 		switch {
 		case f.Set != nil && f.Set.Note != "":
 			s.Note = f.Set.Note
+		case asksFolder(s):
+			s.Note = joinNote(s.Note, "choose a folder to extract into")
+		case followsPart1(s):
+			s.Note = joinNote(s.Note, "extracts into the folder chosen for part 1")
 		case s.Status == StatusCompleted && f.Set != nil && !f.Set.Finished:
 			s.Note = "kept until its set is extracted"
 		case s.Status == StatusCompleted && f.Out != "" && f.Keeping == KeepAfter:
@@ -149,8 +153,6 @@ func Present(s Summary) Summary {
 			s.Note = "downloaded, not extracted"
 		case f.Ask != "":
 			s.Note = joinNote(s.Note, "needs the archive's password")
-		case f.Into == "":
-			s.Note = joinNote(s.Note, "choose a folder to extract into")
 		case f.Of > 0 && f.Keeping == KeepUntil || f.Of > 0 && f.Keeping == KeepAfter:
 			s.Note = joinNote(s.Note, fmt.Sprintf("%s of %s files extracted, keeping the archive", thousands(f.Files), thousands(f.Of)))
 		case f.Of > 0:
@@ -206,12 +208,44 @@ func extractedWith(s Summary) bool {
 	return s.Folder == nil || s.Folder.Set == nil || s.Folder.Set.Finished
 }
 
+// asksFolder: a Download as folder waiting to be told where to extract. Of a
+// split archive's parts only part 1 asks, fetched or not: the others take its answer.
+func asksFolder(s Summary) bool {
+	f := s.Folder
+	if f == nil || !f.On || f.Into != "" {
+		return false
+	}
+	if f.Set != nil {
+		return !f.Set.Finished && partNumber(s.Filename) == 1
+	}
+	return s.Status != StatusCompleted
+}
+
+// followsPart1: a later part of a split archive whose part 1 is still asking
+// where to extract.
+func followsPart1(s Summary) bool {
+	f := s.Folder
+	return f != nil && f.On && f.Into == "" && f.Set != nil && !f.Set.Finished && partNumber(s.Filename) != 1
+}
+
+// partNumber is which part of a split archive a file is by its name: a plain
+// x.rar is part 1, a plain x.zip the last.
+func partNumber(name string) int {
+	if _, part, ok := Splittable(name); ok {
+		return part
+	}
+	if strings.EqualFold(filepath.Ext(name), ".rar") {
+		return 1
+	}
+	return 0
+}
+
 // sectionOf says which section of the list a download is in. s has its links
 // presented already (CanRetry).
 func sectionOf(s Summary) string {
 	done := s.Status == StatusCompleted && extractedWith(s)
 	if f := s.Folder; s.Kind != KindTorrent && f != nil && f.On {
-		asking := f.Into == "" && s.Status != StatusCompleted
+		asking := asksFolder(s)
 		stuck := !done && (f.Ask != "" || (f.Set != nil && (len(f.Set.Missing) > 0 || f.Set.Failing)))
 		if asking || stuck {
 			return SectionNeeds

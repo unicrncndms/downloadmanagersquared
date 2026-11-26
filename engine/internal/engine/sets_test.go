@@ -133,13 +133,17 @@ func TestASetFetchesItsPartsInTheOrderThatKeepsTheLeastOnDisk(t *testing.T) {
 		e := loopbackEngine(t)
 		into := t.TempDir()
 		e.applySettings(func(s *Settings) {
-			s.MaxParallel, s.FolderDefault, s.FolderDir = 3, true, into
+			s.MaxParallel, s.FolderDefault = 3, true
 			s.PartsParallel = false // this test is the one-part-at-a-time order; parallel parts are on by default
 		})
 		var ds []*download.Download
 		for _, n := range []string{names[1], names[2], names[0]} { // added in no order
 			id, err := e.Add(AddRequest{URL: srv.URL + "/" + n})
 			if err != nil {
+				t.Fatal(err)
+			}
+			// Each asks where to extract: answered at once.
+			if err := e.SetFolder(id, nil, &into, nil); err != nil {
 				t.Fatal(err)
 			}
 			d, _ := e.get(id)
@@ -377,4 +381,53 @@ func TestRemovingASetsPartsWithFilesLeavesNoPart(t *testing.T) {
 		e.syncSets()
 		return parts() == 0
 	})
+}
+
+// A split archive's parts, added with Download as folder on by default, ask
+// where to extract once: part 1 asks (fetched or not), the others say they
+// take its answer, and once it is given every part extracts there.
+func TestASplitArchiveAsksOnceForItsFolder(t *testing.T) {
+	names := []string{"big.7z.001", "big.7z.002", "big.7z.003"}
+	srv := serveNamed(t, []string{"split-nonsolid.7z.001", "split-nonsolid.7z.002", "split-nonsolid.7z.003"}, names)
+	defer srv.Close()
+	e := loopbackEngine(t)
+	e.applySettings(func(s *Settings) { s.FolderDefault = true })
+	var ids []string
+	for _, n := range names {
+		id, err := e.Add(AddRequest{URL: srv.URL + "/" + n})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	sum := func(i int) download.Summary { d, _ := e.get(ids[i]); return d.Summary() }
+	tick := func() { e.syncSets(); e.schedule() }
+	waitFor(t, "part 1 asking where to extract, the others following it", 30*time.Second, func() bool {
+		tick()
+		for i := range ids {
+			want := map[bool]string{true: "choose a folder", false: "folder chosen for part 1"}[i == 0]
+			if s := sum(i); (s.Section == download.SectionNeeds) != (i == 0) || !strings.Contains(s.Note, want) {
+				return false
+			}
+		}
+		return true
+	})
+	into := t.TempDir()
+	if err := e.SetFolder(ids[0], nil, &into, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the set extracted into the folder chosen for part 1", 60*time.Second, func() bool {
+		tick()
+		f := sum(0).Folder
+		return f != nil && f.Set != nil && f.Set.Finished &&
+			!slices.ContainsFunc(ids, func(id string) bool { d, _ := e.get(id); return d.Status() != download.StatusCompleted })
+	})
+	for i := range ids {
+		if f := sum(i).Folder; f.Into != into {
+			t.Fatalf("part %d extracts into %q, want %q", i+1, f.Into, into)
+		}
+	}
+	if got, _ := os.ReadDir(into); len(got) != 1 {
+		t.Fatalf("left in the folder: %v", got)
+	}
 }

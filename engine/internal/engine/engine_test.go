@@ -547,9 +547,9 @@ func TestVPNProviderIsSetThroughSetSettings(t *testing.T) {
 }
 
 // With Download as folder on by default, a new download gets it, to be settled
-// once its name is known, in the last folder extracted into; setting a
-// download's folder makes that folder the last one.
-func TestDownloadAsFolderDefaultAndLastFolder(t *testing.T) {
+// once its name is known, and asks where to extract: never the folder the last
+// one went to, which only joins the recent folders.
+func TestDownloadAsFolderDefaultAsksWhereToExtract(t *testing.T) {
 	e, err := open(t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -570,8 +570,8 @@ func TestDownloadAsFolderDefaultAndLastFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, _ := e.Add(AddRequest{URL: "https://example.com/b.zip"})
-	if f := folder(first); f == nil || !f.Auto || f.Into != e.settings.SaveDir {
-		t.Fatalf("with the default on: %+v, want auto into %s", f, e.settings.SaveDir)
+	if f := folder(first); f == nil || !f.Auto || f.Into != "" {
+		t.Fatalf("with the default on: %+v, want auto, asking where", f)
 	}
 
 	into := t.TempDir()
@@ -582,8 +582,8 @@ func TestDownloadAsFolderDefaultAndLastFolder(t *testing.T) {
 		t.Fatalf("after setFolder: %+v", f)
 	}
 	second, _ := e.Add(AddRequest{URL: "https://example.com/c.zip"})
-	if f := folder(second); f.Into != into {
-		t.Fatalf("the next one extracts into %s, want the last folder %s", f.Into, into)
+	if f := folder(second); f.Into != "" || e.settings.FolderDirs[0] != into {
+		t.Fatalf("the next one: into %q, recent %v; want it asking and %s recent", f.Into, e.settings.FolderDirs, into)
 	}
 	if _, err := e.Call(nil, "setFolder", []byte(fmt.Sprintf(`{"id":%q,"into":"relative"}`, off))); err == nil {
 		t.Fatal("a relative folder was taken")

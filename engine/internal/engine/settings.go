@@ -141,10 +141,9 @@ type Settings struct {
 	QueueWindow        queue.Week                `json:"queueWindow"`   // per weekday when the queue runs; none set = always
 
 	// Download as folder
-	FolderDefault  bool     `json:"folderDefault"`        // new .zip, .7z and .rar downloads are one
+	FolderDefault  bool     `json:"folderDefault"`        // new .zip, .7z and .rar downloads are one, asking where to extract
 	PartsParallel  bool     `json:"partsParallel"`        // a split archive's parts download at once even where that keeps more on disk
 	ArchiveKeeping string   `json:"archiveKeeping"`       // what one does with its archive unless chosen for it: download.KeepAuto, KeepFree, KeepUntil or KeepAfter (ADR 0007)
-	FolderDir      string   `json:"folderDir,omitempty"`  // the folder last extracted into; "" = SaveDir
 	FolderDirs     []string `json:"folderDirs,omitempty"` // the folders last extracted into, newest first: Change… offers them
 
 	// The pages' accent color, "#rrggbb": the one chosen, else Firefox's
@@ -215,10 +214,9 @@ func bindable(p int) bool {
 // maxRecentFolders is how many folders extracted into are remembered.
 const maxRecentFolders = 5
 
-// useFolder makes dir the last folder extracted into, at the front of the
-// recent ones.
+// useFolder puts dir, a folder just extracted into, at the front of the recent
+// ones. It is not where the next one goes: each asks, starting at the Save folder.
 func (s *Settings) useFolder(dir string) {
-	s.FolderDir = dir
 	recent := []string{dir}
 	for _, d := range s.FolderDirs {
 		if !strings.EqualFold(d, dir) && len(recent) < maxRecentFolders {
@@ -226,15 +224,6 @@ func (s *Settings) useFolder(dir string) {
 		}
 	}
 	s.FolderDirs = recent
-}
-
-// folderDir is where a Download as folder extracts unless told otherwise:
-// the last folder used for one, else the Save folder.
-func (s *Settings) folderDir() string {
-	if s.FolderDir != "" {
-		return s.FolderDir
-	}
-	return s.SaveDir
 }
 
 func defaultSettings() Settings {
@@ -461,6 +450,6 @@ func (s Settings) restored() Settings {
 	d.VPNHTTP, d.VPNTorrent, d.VPNProvider, d.PIARegion = s.VPNHTTP, s.VPNTorrent, s.VPNProvider, s.PIARegion
 	d.IPv6, d.TorrentPort = s.IPv6, s.TorrentPort
 	d.ThemeAccent, d.DismissedUpdate, d.SeenVersion, d.FoldedSections = s.ThemeAccent, s.DismissedUpdate, s.SeenVersion, s.FoldedSections
-	d.FolderDir, d.FolderDirs = s.FolderDir, s.FolderDirs
+	d.FolderDirs = s.FolderDirs
 	return d
 }

@@ -221,7 +221,7 @@ const FIXTURES = {
       { time: "2026-11-03T20:00:04Z", iface: "wifi", text: "Getting its own link" },
       { time: "2026-11-03T20:00:20Z", iface: "wifi", text: "Server busy · 2 of 4 connections" },
     ] } },
-  folder: { connected: true, state: { ...STATE, downloads: FOLDER_DOWNLOADS, active: 3 }, settings: { ...SETTINGS, folderDir: "E:\\Data", folderDirs: ["E:\\Data", "D:\\Games\\Mods", "F:\\Archive"] },
+  folder: { connected: true, state: { ...STATE, downloads: FOLDER_DOWNLOADS, active: 3 }, settings: { ...SETTINGS, folderDirs: ["E:\\Data", "D:\\Games\\Mods", "F:\\Archive"] },
     autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   // The VPN dropped under VPN only: the banner, and a card waiting for it.
   vpnDown: { connected: true, settings: { ...SETTINGS, vpnHttp: "vpn" }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
@@ -229,7 +229,7 @@ const FIXTURES = {
       error: "Waiting for the VPN: nothing is sent outside it. It resumes by itself once the VPN is connected.", waitVpn: true,
       actions: { resume: true, showInFolder: true, remove: true }, links: {} }] } },
   // Extraction failed: a whole archive that arrived, and a split archive whose parts all arrived.
-  extractFailed: { connected: true, settings: { ...SETTINGS, folderDir: "E:\Data" }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
+  extractFailed: { connected: true, settings: { ...SETTINGS }, autostart: true, recipes: RECIPES, engineVersion: "0.3.0",
     state: { ...STATE, active: 0, speed: 0, downloads: [
       zipDownload("x1", "photos.zip", { on: true, into: "E:\Data", out: "E:\Data\photos", files: 212, of: 480, extractFailed: true },
         { status: "failed", section: "needs", label: "Extraction failed", tone: "bad", done: 4.2e10, speed: 0, eta: -1, map: undefined,
@@ -267,6 +267,14 @@ const FIXTURES = {
   split: { connected: true, state: { ...STATE, downloads: SPLIT_DOWNLOADS }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   metalink: { connected: true,
  state: { ...STATE, downloads: METALINK_DOWNLOADS }, settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
+  // A split 7z with Download as folder on by default: part 1 (fetched) asks where to extract, the others take its answer.
+  splitAsk: { connected: true, state: { ...STATE, downloads: [1, 2, 3].map((n) => metaFile("a" + n, `holiday-video.7z.00${n}`, {
+    mirrors: undefined, sha256: "", size: n === 3 ? 3e8 : 1e9, done: n === 1 ? 1e9 : n === 2 ? 4.2e8 : 0, status: ["completed", "running", "queued"][n - 1],
+    speed: n === 2 ? 6.1e6 : 0, eta: n === 2 ? 95 : -1, section: ["needs", "active", "queued"][n - 1],
+    label: ["Completed", "Downloading", "Queued"][n - 1], tone: n === 1 ? "ok" : "", partialFile: n !== 1,
+    note: n === 1 ? "choose a folder to extract into" : "extracts into the folder chosen for part 1", group: "parts:holiday-video.7z", groupName: "holiday-video.7z",
+    folder: { on: true, into: "", files: 0, of: 0, set: { parts: 3, files: 0, of: 0 } } })) },
+    settings: SETTINGS, autostart: true, recipes: RECIPES, engineVersion: "0.3.0" },
   // A split 7z extracting as one folder, part 2 not added.
   splitGap: { connected: true, state: { ...STATE, downloads: [1, 3].map((n) => metaFile("s" + n, `holiday-video.7z.00${n}`, {
     mirrors: undefined, sha256: "", size: n === 3 ? 3e8 : 1e9, done: n === 3 ? 3e8 : 1e9, status: "completed", speed: 0, eta: -1,

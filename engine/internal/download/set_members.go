@@ -62,8 +62,14 @@ func setOf(d *Download) (key, set string, part int, lone bool) {
 // where its .part happens to be: that moves to the folder it extracts into
 // only when the part next runs, and a part already fetched never runs again,
 // so parts given one folder at once would be in two Sets, for good.
+// A Download as folder still asking where to extract has none yet: such
+// parts are one Set by name, part 1's card asks for them all (part 1 has a
+// save folder once it ran, the others none before they start).
 func (d *Download) setDirLocked() string {
-	if f := d.st.Folder; f != nil && (f.On || f.Auto) && f.Into != "" {
+	if f := d.st.Folder; f != nil && (f.On || f.Auto) {
+		if f.Into == "" {
+			return ""
+		}
 		return filepath.Clean(f.Into)
 	}
 	return filepath.Clean(d.st.Dir)

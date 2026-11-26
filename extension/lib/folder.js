@@ -28,7 +28,9 @@ function folderView(d, settings) {
     const reason = f.why || "";
     toggle = { on: !!f.on, disabled: !!reason, reason };
   }
-  const ask = f.on && !f.into && !done ? { prefill: lastFolder(settings) } : null;
+  // A later part of a split archive doesn't ask: part 1 does (the engine puts it in "needs").
+  const follows = d.section !== undefined && d.section !== "needs";
+  const ask = f.on && !f.into && !done && !follows ? { prefill: startFolder(settings) } : null;
   const move = f.on && f.into && !done
     ? { into: f.into, moving: f.moving || "", warning: f.moveWarning || "", error: f.moveError || "" }
     : null;
@@ -74,28 +76,31 @@ function keepView(f, fixed) {
 
 // setFolderView is folderView for a split archive's parts as one, for their
 // group card: the switch and the add step, and id, the part to ask the engine
-// with (it sets every part); password as folderView's, with the id of the
-// part that asks for it (part 1, which may be complete: a part is once it is
-// fetched). null when there is nothing to show; no switch once any part is locked.
+// with (it sets every part): while the folder is asked for, part 1, the one
+// the engine says asks, fetched or not; password as folderView's, with the id
+// of the part that asks for it (part 1 too). null when there is nothing to
+// show; no switch once any part is locked.
 function setFolderView(items, settings) {
   const lead = items.find((d) => d.folder && d.status !== "completed");
   const asks = items.find((d) => d.folder && d.folder.on && d.folder.ask);
-  if (!lead && !asks) return null;
+  const where = items.find((d) => d.folder && d.folder.on && !d.folder.into && d.section === "needs");
+  if (!lead && !asks && !where) return null;
   const v = lead ? folderView(lead, settings) : { toggle: null, ask: null, keep: null };
   const locked = items.some((d) => d.folder && d.folder.locked);
   // Every part takes the Set's choice; it is fixed once any part is freed.
   const fixed = locked || items.some((d) => d.folder && d.folder.keepFixed);
   const keep = v.keep ? keepView(lead.folder, fixed) : null;
   return {
-    id: (lead || asks).id, toggle: locked ? null : v.toggle, ask: v.ask, keep,
+    id: (where || lead || asks).id, toggle: locked ? null : v.toggle,
+    ask: where ? { prefill: startFolder(settings) } : v.ask, keep,
     password: asks ? { wrong: asks.folder.ask === "wrong", id: asks.id } : null,
   };
 }
 
-// lastFolder is where a Download as folder extracts unless told otherwise:
-// the last folder used for one, else the Save folder (as the engine decides).
-function lastFolder(settings) {
-  return (settings && (settings.folderDir || settings.saveDir)) || "";
+// startFolder is where asking where to extract starts: the Save folder, as the
+// engine's picker does. Folders chosen before are offered under Change….
+function startFolder(settings) {
+  return (settings && settings.saveDir) || "";
 }
 
 // folderChoices is what Change… offers inside the page, so the folder picker
@@ -142,11 +147,11 @@ function addFolderChoice(url, settings) {
 }
 
 // addFolderParam is Add's folder switch: sent only when the box was shown and
-// differs from the default, so leaving it alone keeps the default's folder
-// (no question), and ticking it by hand asks where to extract.
+// differs from the default, so leaving it alone keeps the default. Either way a
+// download as folder asks where to extract.
 function addFolderParam(shown, checked, settings) {
   if (!shown || checked === !!(settings && settings.folderDefault)) return undefined;
   return checked;
 }
 
-if (typeof module !== "undefined") module.exports = { folderView, folderSettled, setFolderView, keepView, folderChoices, removeWording, addFolderChoice, addFolderParam, lastFolder };
+if (typeof module !== "undefined") module.exports = { folderView, folderSettled, setFolderView, keepView, folderChoices, removeWording, addFolderChoice, addFolderParam, startFolder };

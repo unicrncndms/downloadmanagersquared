@@ -66,7 +66,7 @@ func TestPickFolderSetsTheFolderToExtractInto(t *testing.T) {
 	yes := true
 	id, _ := e.Add(AddRequest{URL: "https://example.com/big.zip", Folder: &yes})
 	e.mu.Lock()
-	start := e.settings.folderDir() // before: the choice becomes the last folder
+	start := e.settings.SaveDir // each starts there, whatever was chosen before
 	e.mu.Unlock()
 	if _, err := e.Call(nil, "pickFolder", []byte(fmt.Sprintf(`{"id":%q}`, id))); err != nil {
 		t.Fatal(err)
@@ -79,9 +79,9 @@ func TestPickFolderSetsTheFolderToExtractInto(t *testing.T) {
 		d, _ := e.get(id)
 		f := d.State().Folder
 		e.mu.Lock()
-		last := e.settings.FolderDir // set just after the download's folder
+		recent := e.settings.FolderDirs // set just after the download's folder
 		e.mu.Unlock()
-		return f != nil && f.Into == chosen && last == chosen
+		return f != nil && f.Into == chosen && len(recent) > 0 && recent[0] == chosen
 	})
 
 	// Cancelled: nothing changes.
@@ -136,8 +136,8 @@ func TestRecentFoldersKeepTheLastFive(t *testing.T) {
 		s.useFolder(d)
 	}
 	want := []string{`H:\f`, `G:\e`, `F:\d`, `E:\c`, `C:\A`}
-	if fmt.Sprint(s.FolderDirs) != fmt.Sprint(want) || s.FolderDir != `H:\f` {
-		t.Fatalf("recent %v, last %q", s.FolderDirs, s.FolderDir)
+	if fmt.Sprint(s.FolderDirs) != fmt.Sprint(want) {
+		t.Fatalf("recent %v", s.FolderDirs)
 	}
 }
 

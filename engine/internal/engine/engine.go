@@ -791,7 +791,7 @@ func (e *Engine) PickFolder(id string) error {
 		return errors.New("this download isn't being extracted as a folder")
 	}
 	e.mu.Lock()
-	start := e.settings.folderDir()
+	start := e.settings.SaveDir
 	if f.Into != "" {
 		start = f.Into // a move: from where it is
 	}

@@ -170,8 +170,9 @@ func (e *Engine) Add(r AddRequest) (string, error) {
 		// is known: only a .zip, .7z or .rar stays one).
 		st.Folder = &download.Folder{On: true}
 	case r.Folder == nil && e.settings.FolderDefault:
-		// Settled once the name is known: only a .zip, .7z or .rar becomes one.
-		st.Folder = &download.Folder{Auto: true, Into: e.settings.folderDir()}
+		// Settled once the name is known: only a .zip, .7z or .rar becomes one,
+		// and its card then asks where to extract.
+		st.Folder = &download.Folder{Auto: true}
 	}
 	e.mu.Unlock()
 	e.queue.Add(download.New(e, st))
@@ -386,7 +387,7 @@ func (e *Engine) addMetalink(b []byte, r AddRequest, m paths.Mode) (string, erro
 			}
 		}
 		if st.SHA256 == "" && st.MD5 == "" && e.settings.FolderDefault {
-			st.Folder = &download.Folder{Auto: true, Into: e.settings.folderDir()}
+			st.Folder = &download.Folder{Auto: true}
 		}
 		ids = append(ids, st.ID)
 		ds = append(ds, download.New(e, st))
