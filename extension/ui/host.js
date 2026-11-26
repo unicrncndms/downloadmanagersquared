@@ -75,18 +75,22 @@ function windowHost(win, bridge) {
     win.addEventListener("unhandledrejection", (ev) => report(ev.reason));
   }
 
-  // What the page got and drew, at most once a minute: with DevTools off this
-  // is how engine.log tells "the state never arrived" from "it arrived and
-  // drew nothing" (the downloads the state holds against the rows in the list).
-  let lastNote = 0;
+  // What the page got and drew, at most once a minute and only when it changed:
+  // with DevTools off this is how engine.log tells "the state never arrived"
+  // from "it arrived and drew nothing" (the downloads the state holds against
+  // the rows in the list).
+  let lastNote = 0, lastSeen = "";
   const note = (line, state) => {
     const now = Date.now();
     if (!bridge.log || now - lastNote < 60000) return;
-    lastNote = now;
     const doc = win.document;
     const list = doc && doc.getElementById && doc.getElementById("list");
-    bridge.log(`state: ${line.length} bytes, ${((state && state.downloads) || []).length} downloads, ` +
-      `${list ? list.children.length : "?"} nodes in the list, hidden=${doc ? doc.hidden : "?"}`);
+    const seen = `${((state && state.downloads) || []).length} downloads, ` +
+      `${list ? list.children.length : "?"} nodes in the list, hidden=${doc ? doc.hidden : "?"}`;
+    if (seen === lastSeen) return;
+    lastNote = now;
+    lastSeen = seen;
+    bridge.log(`state: ${line.length} bytes, ${seen}`);
   };
 
   bridge.onLine = (line) => {
