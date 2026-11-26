@@ -216,9 +216,12 @@ func (e *Extraction) step(ctx context.Context, parts []archivePart, missing []ar
 
 // goneInside: err is a file or folder inside out not being found. Deleting
 // the folder in Explorer removes what is in it first, so the extraction can
-// miss a subfolder while out itself is still there.
+// miss a subfolder while out itself is still there. A folder Windows is still
+// deleting refuses access to what is in it instead: that counts once the
+// folder it is in is gone, within a second.
 func goneInside(err error, out string) bool {
-	if !errors.Is(err, fs.ErrNotExist) {
+	notFound, refused := errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission)
+	if !notFound && !refused {
 		return false
 	}
 	var p string
@@ -231,7 +234,13 @@ func goneInside(err error, out string) bool {
 		p = pe.Path
 	}
 	rel, rerr := filepath.Rel(out, p)
-	return p != "" && rerr == nil && rel != "." && !strings.HasPrefix(rel, "..")
+	if p == "" || rerr != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	for i := 0; refused && i < 50 && exists(filepath.Dir(p)); i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	return notFound || !exists(filepath.Dir(p))
 }
 
 // mayFree is the one place that says whether the archive's bytes may be
