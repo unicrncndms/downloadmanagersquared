@@ -87,7 +87,7 @@ function tunnelRow(i, tun, usedBy) {
       onkeydown: (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); tile.click(); } } });
     tile.style.color = ifaceHue(tun.id, latestState);
   }
-  return el("div", { class: "tunnel-row" },
+  return el("div", { class: "tunnel-row", "data-iface": i.id },
     tile || el("span", { class: "tile none" }),
     el("b", {}, i.name),
     tun ? el("div", { class: "vpn" },
@@ -195,11 +195,17 @@ function showTunnels(ifaces, tunnels, settings) {
   const box = $("tunnelBox");
   box.hidden = !tunnelsShown(settings.vpnProvider, tunnels.size);
   const sig = JSON.stringify([ifaces.map((i) => { const t = tunnels.get(i.id); return [i.id, i.name, i.piaRegion, i.hidden, t && [t.provider, t.tunnelState, t.tunnelError, t.ip, t.forwardedPort, t.color, t.region]]; }), piaRegionList.length]);
-  if (sig === tunnelSig || $("tunnelList").contains(document.activeElement)) return;
+  // Not under the typing or an open region list; a colour just picked shows at once (as renderIfaces).
+  const at = $("tunnelList").contains(document.activeElement) ? document.activeElement : null;
+  if (sig === tunnelSig || (at && at.matches("input:not([type=checkbox]), select, textarea"))) return;
   tunnelSig = sig;
   // Which connection's tunnel is in each region now, for the pickers' marks.
   const usedBy = new Map(ifaces.filter((i) => tunnels.get(i.id) && tunnels.get(i.id).region).map((i) => [tunnels.get(i.id).region, i.name]));
+  const was = at && at.closest(".tunnel-row") ? at.closest(".tunnel-row").dataset.iface : null;
   $("tunnelList").replaceChildren(...ifaces.filter((i) => !i.hidden && (i.present || tunnels.has(i.id))).map((i) => tunnelRow(i, tunnels.get(i.id), usedBy)));
+  // That connection's tile gets the focus back, as renderIfaces does.
+  const row = was && [...$("tunnelList").children].find((r) => r.dataset.iface === was);
+  if (row && row.querySelector(".tile")) row.querySelector(".tile").focus();
 }
 
 function renderIfaces(state, settings) {
