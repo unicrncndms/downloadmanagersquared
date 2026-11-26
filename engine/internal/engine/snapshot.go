@@ -36,6 +36,8 @@ type IfaceView struct {
 	DownloadLimit int64  `json:"downloadLimit"`       // bytes per second, 0 = none
 	Incoming      string `json:"incoming"`            // torrent peers can connect in: "reachable", "forwarded" (a port the user typed in, unchecked), "outgoing" (only), "" (not known yet)
 	PIARegion     string `json:"piaRegion,omitempty"` // its PIA tunnel's region; "": PIA's own setting
+	Region        string `json:"region,omitempty"`    // a PIA tunnel: the name of the region it is in
+	Hidden        bool   `json:"hidden,omitempty"`    // folded away on the pages, never used
 
 	// Tunnels are paths of their own, listed after the interfaces.
 	Tunnel        bool   `json:"tunnel,omitempty"`
@@ -165,8 +167,9 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 		sort.Strings(same)
 		up, down := ent.shaper.Limits()
 		var region string
+		var hidden bool
 		if s := e.settings.Interfaces[id]; s != nil {
-			region = s.PIARegion
+			region, hidden = s.PIARegion, s.Hidden
 		}
 		views = append(views, IfaceView{
 			ID: id, Name: e.nameLocked(id, ent.info.Name), WindowsName: ent.info.Name, Description: ent.info.Description, IP: ipText(ent.info.IP()), IP6: ipText(ent.info.IPv6),
@@ -175,7 +178,7 @@ func (e *Engine) updateSnapshot(dt time.Duration) {
 			IsDefault: ent.info.IsDefault, IsMain: id == mainID, Connections: e.connsLocked(id),
 			SocksPort: ent.socks.Port(), Speed: speeds[id], AvgSpeed: e.bases.avg(id),
 			Upload: e.uploadLocked(id), UploadLimit: up, DownloadLimit: down,
-			Incoming: incomingText(ent.incoming), HasTunnel: hasTunnel[id], SameRouter: same, PIARegion: region,
+			Incoming: incomingText(ent.incoming), HasTunnel: hasTunnel[id], SameRouter: same, PIARegion: region, Hidden: hidden,
 		})
 	}
 	sort.Slice(views, func(i, j int) bool {

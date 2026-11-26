@@ -135,15 +135,22 @@ function ifaceRow(i, tun, settings) {
   // First what it is and does now; its settings fold under it.
   const [word, tone] = connState(i, tun);
   const open = openConns.has(i.id);
+  // In groups, a row each: what it is called and how much it asks at once, its limits, what torrents do over it.
+  const group = (title, ...items) => el("div", { class: "opt-group" }, el("span", { class: "opt-head muted" }, title), ...items);
   const more = el("div", { class: "conn-more", hidden: !open },
-    el("label", {}, "Requests at once ", conns,
-      el("span", { class: "info", tabindex: "0", "data-tip": "How many parts of a download this connection fetches at the same time." })),
-    el("label", {}, "Name ", label),
-    el("label", {}, check(i.upload, "upload", "Seed torrents over this connection"), " Seed torrents over this connection"),
-    el("label", {}, `Download limit (${speedUnitLabel()}) `, limit(i.downloadLimit, "downloadLimit", "Download limit")),
-    el("label", {}, `Upload limit (${speedUnitLabel()}) `, limit(i.uploadLimit, "uploadLimit", "Upload limit")),
-    el("a", { href: "#vpn" }, tun ? "VPN tunnel: see VPN" : "Import a VPN .conf: see VPN"),
-    i.present ? null : el("button", { class: "small", onclick: () => act("forgetInterface", { id: i.id }, `${i.name} forgotten`) }, "Forget"));
+    group("Connection",
+      el("label", {}, "Name ", label),
+      el("label", {}, "Requests at once ", conns,
+        el("span", { class: "info", tabindex: "0", "data-tip": "How many parts of a download this connection fetches at the same time." }))),
+    group("Limits",
+      el("label", {}, `Download (${speedUnitLabel()}) `, limit(i.downloadLimit, "downloadLimit", "Download limit")),
+      el("label", {}, `Upload (${speedUnitLabel()}) `, limit(i.uploadLimit, "uploadLimit", "Upload limit"))),
+    group("Torrents",
+      el("label", {}, check(i.upload, "upload", "Seed torrents over this connection"), " Seed over this connection"),
+      el("a", { href: "#vpn" }, tun ? "VPN tunnel: see VPN" : "Import a VPN .conf: see VPN")),
+    el("div", { class: "opt-end" },
+      el("button", { class: "small", title: "Never used, and folded away under Hidden connections", onclick: () => set({ hidden: true }, `${i.name} hidden`) }, "Hide"),
+      i.present ? null : el("button", { class: "small", onclick: () => act("forgetInterface", { id: i.id }, `${i.name} forgotten`) }, "Forget")));
   const toggle = el("button", { class: "small", "aria-expanded": String(open), onclick: () => {
     const on = more.hidden;
     more.hidden = !on;
@@ -182,7 +189,7 @@ function renderIfaces(state, settings) {
   const all = state.interfaces || [];
   const ifaces = all.filter((i) => !i.tunnel);
   const tunnels = new Map(all.filter((i) => i.tunnel).map((t) => [t.of, t]));
-  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.color, i.windowsName, i.isMain, i.isDefault, i.name, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort, i.ip6, i.families, i.avgSpeed ? fmtSpeed(i.avgSpeed) : ""]), settings.mainInterface, speedUnitLabel()]);
+  const sig = JSON.stringify([all.map((i) => [i.id, i.present, i.enabled, i.connections, i.color, i.windowsName, i.isMain, i.isDefault, i.name, i.ip, i.upload, i.uploadLimit, i.downloadLimit, i.incoming, i.tunnelState, i.tunnelError, i.forwardedPort, i.ip6, i.families, i.hidden, i.avgSpeed ? fmtSpeed(i.avgSpeed) : ""]), settings.mainInterface, speedUnitLabel()]);
   const warnings = routerWarnings(all);
   const hints = ipv6Hints(state);
   $("ipv6Hint").hidden = !hints.length;
@@ -201,14 +208,21 @@ function renderIfaces(state, settings) {
     ifaceSig = sig;
     const row = at && at.closest(".conn-row");
     const focused = row && row.querySelector("[data-speed]").dataset.speed;
-    body.replaceChildren(...ifaces.map((i) => ifaceRow(i, tunnels.get(i.id), settings)));
+    body.replaceChildren(...ifaces.filter((i) => !i.hidden).map((i) => ifaceRow(i, tunnels.get(i.id), settings)));
+    // Hidden ones fold away at the bottom, each with its way back.
+    const hidden = ifaces.filter((i) => i.hidden);
+    $("hiddenIfaces").hidden = !hidden.length;
+    $("hiddenCount").textContent = `Hidden connections (${hidden.length})`;
+    $("hiddenList").replaceChildren(...hidden.map((i) => el("div", { class: "hidden-row" },
+      el("span", {}, i.name, el("span", { class: "muted" }, i.description ? " · " + i.description : "")),
+      el("button", { class: "small", onclick: () => act("setInterface", { id: i.id, hidden: false }, `${i.name} shown again`) }, "Unhide"))));
     if (focused) for (const t of body.querySelectorAll("[data-speed]")) if (t.dataset.speed === focused) t.focus();
     const dflt = ifaces.find((i) => i.isDefault);
     $("mainSelect").replaceChildren(
       el("option", { value: "" }, dflt ? `Automatic (Windows' choice: ${dflt.name})` : "Automatic (Windows' choice)"),
       // Only a connection that is on and present can be main (the engine ignores any other);
       // the saved choice stays shown, marked, when it is not one.
-      ...ifaces.filter((i) => (i.present && i.enabled) || i.id === settings.mainInterface)
+      ...ifaces.filter((i) => (i.present && i.enabled) || (i.id === settings.mainInterface && !i.hidden))
         .map((i) => el("option", { value: i.id }, i.present && i.enabled ? i.name : `${i.name} (${i.present ? "off" : "not connected"})`)));
     $("mainSelect").value = settings.mainInterface || "";
   }

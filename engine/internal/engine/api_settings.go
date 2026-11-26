@@ -180,6 +180,13 @@ func (e *Engine) setInterface(p ifacePatch) Settings {
 			v := *p.Color
 			is.Color = &v
 		}
+		if p.TunnelColor != nil && *p.TunnelColor >= 0 && *p.TunnelColor < colorCount {
+			v := *p.TunnelColor
+			is.TunnelColor = &v
+		}
+		if p.Hidden != nil {
+			is.Hidden = *p.Hidden
+		}
 	})
 }
 
@@ -226,9 +233,11 @@ type ifacePatch struct {
 	Upload        *bool   `json:"upload"`
 	UploadLimit   *int64  `json:"uploadLimit"`
 	DownloadLimit *int64  `json:"downloadLimit"`
-	Color         *int    `json:"color"`     // 0..5; anything else is ignored
-	Label         *string `json:"label"`     // "" gives the Windows name back
-	PIARegion     *string `json:"piaRegion"` // "" follows PIA's own region
+	Color         *int    `json:"color"`       // 0..5; anything else is ignored
+	Label         *string `json:"label"`       // "" gives the Windows name back
+	PIARegion     *string `json:"piaRegion"`   // "" follows PIA's own region, "auto" takes one no other tunnel uses
+	TunnelColor   *int    `json:"tunnelColor"` // its tunnel's colour, 0..5
+	Hidden        *bool   `json:"hidden"`      // folded away and never used
 }
 
 // cleanLabel is a name the user typed: trimmed, at most 40 characters.

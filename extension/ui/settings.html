@@ -46,6 +46,7 @@
           <span class="info" tabindex="0" data-tip="New and lost connections show up by themselves; Refresh looks now. The test asks a public STUN server (stun.cloudflare.com) through each connection which public IP it comes from: two with the same IP share one line. Only sent when you click."></span></h3>
         <button class="small" id="refreshIfaces">Refresh</button><button class="small" id="checkLines">Test if they are separate lines</button></div>
       <div id="ifaces"></div>
+      <details id="hiddenIfaces" class="hidden-conns" hidden><summary id="hiddenCount"></summary><div id="hiddenList"></div></details>
       <div id="lineResult" class="uplink" hidden></div>
       <div id="uplinkWarn" class="uplink" hidden></div>
       <div id="ipv6Hint" class="uplink" hidden></div>

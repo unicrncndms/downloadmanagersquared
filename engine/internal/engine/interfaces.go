@@ -371,7 +371,9 @@ func (e *Engine) uploadLocked(id string) bool {
 // enabledLocked: every interface is used unless the user switched it off,
 // except VPN adapters, which only the user switches on.
 func (e *Engine) enabledLocked(ent *ifaceEntry) bool {
-	if s := e.settings.Interfaces[ent.info.ID]; s != nil && s.Enabled != nil {
+	if s := e.settings.Interfaces[ent.info.ID]; s != nil && s.Hidden {
+		return false
+	} else if s != nil && s.Enabled != nil {
 		return *s.Enabled
 	}
 	return !ent.info.VPN

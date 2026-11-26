@@ -23,8 +23,10 @@ window.onerror = (msg, src, line) => { window.errs.push(`${msg} @ ${src}:${line}
   };
 
   // setInterface changes one connection's colour or PIA region, as the engine would, and feeds it.
-  const applyInterface = ({ id, color, piaRegion }) => {
+  const applyInterface = ({ id, color, piaRegion, tunnelColor, hidden }) => {
     const f = window.fixture();
+    if (Number.isInteger(tunnelColor)) f.state = { ...f.state, interfaces: f.state.interfaces.map((i) => (i.id === id + "~vpn" ? { ...i, color: tunnelColor } : i)) };
+    if (typeof hidden === "boolean") f.state = { ...f.state, interfaces: f.state.interfaces.map((i) => (i.id === id ? { ...i, hidden, enabled: hidden ? false : i.enabled } : i)) };
     if (Number.isInteger(color) && color >= 0 && color < 6) {
       f.state = { ...f.state, interfaces: f.state.interfaces.map((i) => (i.id === id ? { ...i, color } : i)) };
     }
