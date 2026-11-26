@@ -167,8 +167,9 @@ main { flex: 1; min-width: 0; overflow-y: auto; padding: 0 var(--s2) var(--s3); 
 /* The file as squares, 3 rows filled column by column so it reads left to
    right: on disk in the connection's colour that brought it (the accent from
    before this run, grey while it rests), and each square being fetched
-   pulsing in its connection's colour. Whole pixels: every square one size. */
-.chunks { --sq: 8px; display: grid; grid-template: repeat(var(--rows), var(--sq)) / repeat(var(--cols), var(--sq)); grid-auto-flow: column;
+   pulsing in its connection's colour. Whole pixels: every square one size,
+   narrower only where the row has less room, so it never runs under the numbers. */
+.chunks { --sq: 8px; display: grid; grid-template: repeat(var(--rows), var(--sq)) / repeat(var(--cols), minmax(0, var(--sq))); grid-auto-flow: column;
   gap: 2px; justify-content: start; margin: 2px 0; }
 /* A square's share arrives once a second: registered as numbers, --p and --f glide to the next value over that second instead of stepping. */
 @property --p { syntax: "<number>"; inherits: false; initial-value: 0; }

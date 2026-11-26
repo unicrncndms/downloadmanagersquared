@@ -295,6 +295,8 @@ test("a click shows at once: what a request will leave of the engine's state", (
 test("a row's two numbers", () => {
   const { rowNums } = require("../lib/list.js");
   assert.deepEqual(rowNums(dl("a", "running", { size: 1000, done: 390, speed: 2e6, eta: 65 })), { main: "2.0 MB/s", sub: "39% · 390 B / 1.0 KB · 1m 05s left" });
+  // No time left known (fetched, waiting to be told where to extract): no "— left".
+  assert.equal(rowNums(dl("w", "running", { size: 1000, done: 1000, speed: 0, eta: -1 })).sub, "100% · 1.0 KB / 1.0 KB");
   assert.deepEqual(rowNums(dl("c", "paused", { size: 2e9, done: 1e9 })), { main: "50%", sub: "1.0 GB / 2.0 GB" });
   assert.deepEqual(rowNums(dl("b", "queued", { size: 2e9, done: 0 })), { main: "2.0 GB", sub: "" });
   assert.deepEqual(rowNums(dl("e", "completed", { size: 2e9, done: 2e9 })), { main: "2.0 GB", sub: "" });

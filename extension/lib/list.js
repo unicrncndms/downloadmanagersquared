@@ -87,7 +87,7 @@ function rowNums(d) {
   const pct = d.size > 0 ? `${Math.round(percent(d))}%` : "";
   if (finished(d) || ((d.status === "queued" || (d.status === "running" && !d.speed)) && !d.done)) return { main: d.size > 0 ? fmtBytes(d.size) : "", sub: "" };
   if (d.status === "seeding") return { main: "", sub: "" }; // its line says what it uploads
-  if (d.status === "running") return { main: fmtSpeed(d.speed), sub: [pct, d.size > 0 ? progressText(d.done, d.size) : "", `${fmtETA(d.eta)} left`].filter(Boolean).join(" · ") };
+  if (d.status === "running") return { main: fmtSpeed(d.speed), sub: [pct, d.size > 0 ? progressText(d.done, d.size) : "", d.eta >= 0 ? `${fmtETA(d.eta)} left` : ""].filter(Boolean).join(" · ") };
   return { main: pct || (d.done > 0 ? fmtBytes(d.done) : ""), sub: d.size > 0 ? progressText(d.done, d.size) : "" };
 }
 
